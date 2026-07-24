@@ -21,7 +21,7 @@ DiTing Lite 支持多种部署方式，按需选择。
 
 ```bash
 git clone https://github.com/fengzone85/diting.git
-cd simple-probe
+cd diting
 cp .env.example .env
 # 编辑 .env 设置 SETUP_TOKEN、域名等
 docker compose up -d
@@ -31,7 +31,7 @@ docker compose up -d
 
 ```bash
 git clone https://github.com/fengzone85/diting.git
-cd simple-probe/server
+cd diting/server
 npm install --production
 cp .env.example .env
 # 编辑 .env
@@ -49,14 +49,14 @@ npm start
 安装脚本集成数据库备份/恢复/统计命令，无需手动定位文件或停服：
 
 ```bash
-# 备份数据库（默认存到 /var/backups/simple-probe/）
+# 备份数据库（默认存到 /var/backups/diting/）
 sudo bash install.sh --backup
 
 # 备份到指定路径
 sudo bash install.sh --backup /tmp/my-backup.db
 
 # 从备份恢复（恢复前自动备份当前状态，可回滚）
-sudo bash install.sh --restore /var/backups/simple-probe/monitor_20260723_141022.db
+sudo bash install.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
 # 列出已有备份
 sudo bash install.sh --backup-list
@@ -74,7 +74,7 @@ sudo bash install.sh --db-stats
 
 ```bash
 # 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/simple-probe-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
 ```
 
 ## 数据保留与自动清理

@@ -1,4 +1,4 @@
-# Simple Probe Agent — 极简镜像（仅依赖 Python 标准库，无需 pip 安装）
+# Diting Agent — 极简镜像（仅依赖 Python 标准库，无需 pip 安装）
 FROM python:3.11-slim
 WORKDIR /app
 

@@ -15,7 +15,7 @@ description: 5 分钟部署 DiTing Lite
 
 ```bash
 git clone https://github.com/fengzone85/diting.git
-cd simple-probe
+cd diting
 docker compose up -d
 ```
 
@@ -27,7 +27,7 @@ docker compose up -d
 
 ```bash
 git clone https://github.com/fengzone85/diting.git
-cd simple-probe/server
+cd diting/server
 npm install
 npm start
 ```
@@ -38,7 +38,7 @@ npm start
 
 ```bash
 docker run -d \
-  --name simple-probe-agent \
+  --name diting-agent \
   --restart unless-stopped \
   -e AGENT_TOKEN="<你的Token>" \
   -e SERVER_URL="https://<你的域名>" \
@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/instal
 sudo bash install.sh --backup
 
 # 设置每天凌晨 3 点自动备份（需 root）
-(crontab -l 2>/dev/null; echo "0 3 * * * root bash $(which simple-probe-install.sh || echo /usr/local/bin/simple-probe-install.sh) --backup") | crontab -
+(crontab -l 2>/dev/null; echo "0 3 * * * root bash $(which diting-install.sh || echo /usr/local/bin/diting-install.sh) --backup") | crontab -
 ```
 
 > 数据库包含全部 Agent 记录、历史监控数据、设置项。Docker 重建容器不会丢失数据，但整机迁移或卷删除前需手动备份。

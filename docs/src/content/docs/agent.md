@@ -21,7 +21,7 @@ DiTing Lite 受控端支持两种部署形态，代码完全相同，仅部署�
 
 ```bash
 docker run -d \
-  --name simple-probe-agent \
+  --name diting-agent \
   --restart unless-stopped \
   -e AGENT_TOKEN="<Token>" \
   -e SERVER_URL="https://monitor.example.com" \
@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/instal
 
 脚本会：
 1. 检查 Python 3 环境
-2. 创建 `/opt/simple-probe-agent/` 目录（权限 700）
+2. 创建 `/opt/diting-agent/` 目录（权限 700）
 3. 复制 `agent.py` + `collector.py`
 4. 生成 `agent.env`（权限 600，含 Token 和 Server URL）
 5. 注册 systemd 服务（14 项安全加固）

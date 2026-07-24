@@ -79,7 +79,7 @@ def disk_list(root='/'):
     过滤 tmpfs/proc/sysfs/devtmpfs/cgroup 等伪文件系统。
 
     去重依据为底层文件系统标识 os.stat(mount).st_dev：同一物理盘（含其
-    bind 子挂载，如把宿主 /var/lib/simple-probe 挂进容器、或 LXC 子目录挂载）
+    bind 子挂载，如把宿主 /var/lib/diting 挂进容器、或 LXC 子目录挂载）
     的 st_dev 相同，会被合并为一条（保留最短的挂载点作为盘根）；不同物理盘
     st_dev 不同，各自保留。这样不会出现"同一块盘被算成多块"的假多盘。"""
     if root in ('/', '', None):

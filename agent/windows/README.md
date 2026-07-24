@@ -144,29 +144,29 @@ sudo bash install.sh
 
 ```bash
 # 查看状态
-systemctl status simple-probe-agent
+systemctl status diting-agent
 
 # 查看实时日志
-journalctl -u simple-probe-agent -f
+journalctl -u diting-agent -f
 
 # 重启（如更新配置后）
-systemctl restart simple-probe-agent
+systemctl restart diting-agent
 
 # 停止
-systemctl stop simple-probe-agent
+systemctl stop diting-agent
 
 # 开机禁用
-systemctl disable simple-probe-agent
+systemctl disable diting-agent
 ```
 
 ### 环境变量说明
 
-原生部署通过 `/etc/simple-probe/agent.env` 注入环境变量，无需手动 export：
+原生部署通过 `/etc/diting/agent.env` 注入环境变量，无需手动 export：
 
 | 变量 | 说明 | 原生默认值 |
 |------|------|-----------|
 | `DISK_PATH` | 磁盘统计路径 | `/`（原生直接读本机根） |
-| `STATE_FILE` | 月度流量状态文件 | `/var/lib/simple-probe/state.json` |
+| `STATE_FILE` | 月度流量状态文件 | `/var/lib/diting/state.json` |
 | `SERVER_URL` | 服务端地址 | 来自 agent.env |
 | `AGENT_ID` | 节点 ID | 来自 agent.env |
 | `AGENT_TOKEN` | 认证令牌 | 来自 agent.env |
@@ -193,10 +193,10 @@ sudo bash uninstall.sh
 ### 部署架构
 
 ```
-/opt/simple-probe/          ← 程序目录（agent.py / collector.py）
-/var/lib/simple-probe/      ← 状态目录（state.json，simple-probe 用户可写）
-/etc/simple-probe/          ← 配置目录（agent.env，root 专属）
-/etc/systemd/system/simple-probe-agent.service  ← systemd unit
+/opt/diting/          ← 程序目录（agent.py / collector.py）
+/var/lib/diting/      ← 状态目录（state.json，diting 用户可写）
+/etc/diting/          ← 配置目录（agent.env，root 专属）
+/etc/systemd/system/diting-agent.service  ← systemd unit
 ```
 
 ### 与 Docker 形态的关系

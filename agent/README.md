@@ -56,11 +56,11 @@ sudo bash install.sh
 ### systemd 管理
 
 ```bash
-systemctl status   simple-probe-agent    # 查看状态
-journalctl -u      simple-probe-agent -f # 实时日志
-systemctl restart  simple-probe-agent    # 重启（更新配置后）
-systemctl stop     simple-probe-agent    # 停止
-systemctl disable  simple-probe-agent    # 开机禁用
+systemctl status   diting-agent    # 查看状态
+journalctl -u      diting-agent -f # 实时日志
+systemctl restart  diting-agent    # 重启（更新配置后）
+systemctl stop     diting-agent    # 停止
+systemctl disable  diting-agent    # 开机禁用
 ```
 
 ### 完全卸载
@@ -78,10 +78,10 @@ sudo bash uninstall.sh
 ### 部署架构
 
 ```
-/opt/simple-probe/                       ← 程序目录（agent.py / collector.py）
-/var/lib/simple-probe/                  ← 状态目录（state.json，简单-probe 用户可写）
-/etc/simple-probe/                      ← 配置目录（agent.env，root 专属）
-/etc/systemd/system/simple-probe-agent.service  ← systemd unit
+/opt/diting/                       ← 程序目录（agent.py / collector.py）
+/var/lib/diting/                  ← 状态目录（state.json，简单-probe 用户可写）
+/etc/diting/                      ← 配置目录（agent.env，root 专属）
+/etc/systemd/system/diting-agent.service  ← systemd unit
 ```
 
 ---
@@ -126,7 +126,7 @@ docker compose up -d
 | `AGENT_TOKEN` | 认证令牌 | 必填 | 后台「添加 Agent」获得 |
 | `INTERVAL` | 上报间隔（秒） | `15` | 最小 5 |
 | `DISK_PATH` | 磁盘统计路径 | `/`（原生）`/host`（Docker） | 只读，不写入 |
-| `STATE_FILE` | 月度流量状态文件 | `/var/lib/simple-probe/state.json` | 程序自读写 |
+| `STATE_FILE` | 月度流量状态文件 | `/var/lib/diting/state.json` | 程序自读写 |
 | `PROBE_TARGETS` | 网络质量探测目标 | 默认三家运营商 DNS + 8.8.8.8 | 本地固定，服务端不可下发 |
 
 ## 指标说明
@@ -143,7 +143,7 @@ docker compose up -d
 - **零入站**：Agent 不开放任何端口，不接受任何远程指令
 - **只读采集**：仅读 `/proc` 和 `statvfs`，无任何写操作
 - **最小 Token**：静态 Bearer Token 出站 HTTPS 推送，泄露风险仅限本机物理访问
-- **非 root 运行**：Docker 用 `monitor` 用户，原生用 `simple-probe` 系统用户
+- **非 root 运行**：Docker 用 `monitor` 用户，原生用 `diting` 系统用户
 - **服务端不可下发配置**：网络探测目标固定在本地环境变量，服务端无命令注入面
 
 ## 网络与防火墙

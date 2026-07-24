@@ -33,7 +33,7 @@ curl -fsSL ... | bash -s -- --token "YOUR_TOKEN" --url "https://monitor.example.
 ## 文件布局
 
 ```
-/opt/simple-probe-agent/     (700 root:root)
+/opt/diting-agent/     (700 root:root)
 ├── agent.py
 ├── collector.py
 └── agent.env                (600 root:root)
@@ -51,8 +51,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/simple-probe-agent
-EnvironmentFile=/opt/simple-probe-agent/agent.env
+WorkingDirectory=/opt/diting-agent
+EnvironmentFile=/opt/diting-agent/agent.env
 ExecStart=/usr/bin/python3 agent.py
 Restart=always
 RestartSec=30
@@ -81,16 +81,16 @@ WantedBy=multi-user.target
 
 ```bash
 # 查看状态
-systemctl status simple-probe-agent
+systemctl status diting-agent
 
 # 查看日志
-journalctl -u simple-probe-agent -f
+journalctl -u diting-agent -f
 
 # 重启
-systemctl restart simple-probe-agent
+systemctl restart diting-agent
 
 # 停止
-systemctl stop simple-probe-agent
+systemctl stop diting-agent
 
 # 卸载（幂等）
 curl -fsSL .../uninstall.sh | bash

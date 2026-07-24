@@ -322,7 +322,7 @@ sudo bash install.sh --backup
 sudo bash install.sh --backup /tmp/my-backup.db
 
 # Restore from backup (auto-backs up current state first, rollback-capable)
-sudo bash install.sh --restore /var/backups/simple-probe/monitor_20260723_141022.db
+sudo bash install.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
 # List existing backups
 sudo bash install.sh --backup-list
@@ -335,7 +335,7 @@ sudo bash install.sh --db-stats
 
 ```bash
 # crontab: automatic daily backup at 3:00 AM
-0 3 * * * root bash /usr/local/bin/simple-probe-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
 ```
 
 ### Backup mechanism
