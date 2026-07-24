@@ -1244,7 +1244,7 @@ function start2FASetup() {
     $('tfaEnable').onclick = disable2FA;
   } else {
     $('tfaSecret').textContent = '正在生成密钥…';
-    api('/api/admin/2fa/setup').then(r => {
+    api('/api/admin/2fa/setup', { method: 'POST' }).then(r => {
       $('tfaSecret').textContent = '密钥（手动输入到 Authenticator 应用）：\n' + r.secret + '\n\n' + r.otpauth_uri;
     }).catch(e => {
       // 错误直接显示在面板中，让用户看到具体原因（如 HTTPS 要求）
