@@ -194,6 +194,23 @@ function pubSparkline2(rArr, wArr, rColor, wColor) {
 // 视觉版卡片：与后台仪表盘卡片保持一致（CPU/内存/负载/温度/Swap 曲线 + 网络 + 探测点 + 硬盘条 + 悬停呼吸光晕）
 // 公开页硬盘条渲染：把所有物理盘(disks 数组)汇总成「一个总容量」单条展示，
 // 不再逐盘列出；无 disks 时回退单盘(disk_pct/used/total)。
+function pubMonthlyTrafficHtml(a) {
+  const rx = Number(a.net_rx_month) || 0;
+  const tx = Number(a.net_tx_month) || 0;
+  const used = rx + tx;
+  const quotaGB = Number(a.monthly_quota_gb) || 0;
+  const quotaBytes = quotaGB * 1e9;
+  const pct = quotaBytes > 0 ? Math.min(100, used / quotaBytes * 100) : 0;
+  const cls = pctClass(pct);
+  const usedStr = fmtBytes(used);
+  const quotaStr = quotaGB > 0 ? fmtBytes(quotaBytes) : '∞';
+  const pctStr = quotaGB > 0 ? pct.toFixed(1) + '%' : '';
+  return `<div class="disk-row traffic-row">
+    <span class="m-lbl">月流量</span>
+    <div class="bar"><i class="bar-i ${cls}" style="width:${pct.toFixed(2)}%"></i></div>
+    <span class="m-val ${cls}">${usedStr} / ${quotaStr}${pctStr ? ' · ' + pctStr : ''} · ↓${fmtBytes(rx)} ↑${fmtBytes(tx)}</span>
+  </div>`;
+}
 function pubDiskRowsHtml(a) {
   let used = 0, total = 0;
   const disks = (a && Array.isArray(a.disks) && a.disks.length) ? a.disks : null;
@@ -260,6 +277,7 @@ function pubCardHtml(a) {
           </div>
         </div>
       </div>
+      ${pubMonthlyTrafficHtml(a)}
       ${pubDiskRowsHtml(a)}
       <div class="foot"><span class="uptime">⏱ ${a.online ? fmtUptime(a.uptime) : '—'}</span></div>
     </div>`;
