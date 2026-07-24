@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>谛听轻量探针 · Host Monitor</title>
+  <title>谛听 · Diting · Host Monitor</title>
+  <link rel="icon" type="image/svg+xml" href="logo-icon.svg" />
   <link rel="stylesheet" href="style.css?v=12" />
   <link id="customCssLink" rel="stylesheet" href="/custom.css" />
   <script src="vendor/echarts.min.js"></script>
@@ -13,7 +14,7 @@
   <!-- 独立登录页 -->
   <div id="loginPage" class="login-page">
     <div class="login-card">
-      <div class="login-logo">🛰️</div>
+      <div class="login-logo"><img src="logo-icon.svg" width="48" height="48" alt="Diting"></div>
       <h1 id="loginTitle">谛听轻量探针</h1>
       <p class="login-sub" id="loginSub" data-i18n="login.subtitle">请输入管理员 Token 登录</p>
       <div class="field"><input id="loginToken" type="password" data-i18n-ph="login.token_placeholder" placeholder="管理员 Token" autocomplete="off" /></div>
@@ -26,7 +27,7 @@
   <div id="app" hidden>
     <!-- 左侧栏导航（对标 Komari） -->
     <aside class="sidebar">
-      <div class="side-brand"><span class="sb-logo">🛰️</span><span class="sb-name" id="siteTitleSide">谛听轻量探针</span></div>
+      <div class="side-brand"><img src="logo-icon.svg" width="24" height="24" alt="Diting" style="vertical-align:middle;margin-right:4px"><span class="sb-name" id="siteTitleSide">谛听 · Diting</span></div>
       <nav class="side-nav">
         <button class="nav-item active" data-view="dashboard">📊 <span data-i18n="nav.dashboard">仪表盘</span></button>
         <button class="nav-item" data-view="clients">🖥️ <span data-i18n="nav.clients">客户端</span></button>
@@ -48,7 +49,7 @@
     <div class="main">
       <header class="topbar">
         <div class="tb-left">
-          <h1 id="siteTitle">🛰️ 谛听轻量探针<span class="dot">.</span></h1>
+          <h1 id="siteTitle"><img src="logo-icon.svg" width="22" height="22" alt="" style="vertical-align:middle;margin-right:6px">谛听 · Diting<span class="dot">.</span></h1>
         </div>
         <div class="spacer"></div>
         <a class="icon-btn" id="btnHome" href="/" title="查看公开状态页（首页）">🏠</a>
