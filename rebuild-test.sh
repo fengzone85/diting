@@ -33,7 +33,7 @@ const crypto = require('crypto');
 const db = new Database('/data/monitor.db');
 const t = '$AGENT_TOKEN';
 const h = crypto.createHash('sha256').update(t).digest('hex');
-db.prepare('INSERT OR REPLACE INTO agents (id,name,token_hash,created_at,last_seen) VALUES (?,?,?,?,0)')
+db.prepare('INSERT OR IGNORE INTO agents (id,name,token_hash,created_at,last_seen) VALUES (?,?,?,?,0)')
   .run('$AGENT_ID','test-agent',h,Date.now());
 console.log('    seeded:', JSON.stringify(db.prepare('SELECT id,name FROM agents').all()));
 "
