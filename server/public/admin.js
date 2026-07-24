@@ -390,12 +390,13 @@ function trafficAndDiskHtml(m, a) {
   const tqUsed = rx + tx;
   const quotaGB = Number(a.monthly_quota_gb) || 0;
   const quotaBytes = quotaGB * 1e9;
-  const tqPct = quotaBytes > 0 ? Math.min(100, tqUsed / quotaBytes * 100) : 0;
+  const tqPct = quotaBytes > 0 ? Math.min(100, tqUsed / quotaBytes * 100) : 100;
   const tqCls = pctClass(tqPct);
-  const tqBar = quotaGB > 0 ? `<i class="bar-i ${tqCls}" style="width:${tqPct.toFixed(2)}%"></i>` : `<i class="bar-i" style="width:100%"></i>`;
+  const tqBar = `<i class="bar-i ${tqCls}" style="width:${tqPct.toFixed(2)}%"></i>`;
   const tqStr = quotaGB > 0
     ? `${fmtBytes(tqUsed)} / ${fmtBytes(quotaBytes)}`
-    : `${fmtBytes(tqUsed)}`;
+    : `${fmtBytes(tqUsed)} / ∞`;
+  const tqPctStr = quotaGB > 0 ? tqPct.toFixed(1)+'%' : '—';
 
   // 硬盘
   let dUsed = 0, dTotal = 0;
@@ -408,7 +409,7 @@ function trafficAndDiskHtml(m, a) {
 
   return `<div class="disk-row-2col">
     <div class="disk-col">
-      <span class="dc-top"><span class="m-lbl">月流量</span><span class="dc-pct">${quotaGB > 0 ? tqPct.toFixed(1)+'%' : ''}</span></span>
+      <span class="dc-top"><span class="m-lbl">月流量</span><span class="dc-pct">${tqPctStr}</span></span>
       <span class="dc-val">${tqStr}</span>
       <div class="bar">${tqBar}</div>
     </div>
