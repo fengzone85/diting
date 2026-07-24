@@ -194,37 +194,38 @@ function pubSparkline2(rArr, wArr, rColor, wColor) {
 // 视觉版卡片：与后台仪表盘卡片保持一致（CPU/内存/负载/温度/Swap 曲线 + 网络 + 探测点 + 硬盘条 + 悬停呼吸光晕）
 // 公开页硬盘条渲染：把所有物理盘(disks 数组)汇总成「一个总容量」单条展示，
 // 不再逐盘列出；无 disks 时回退单盘(disk_pct/used/total)。
-function pubMonthlyTrafficHtml(a) {
+function pubTrafficAndDiskHtml(a) {
+  // 月流量
   const rx = Number(a.net_rx_month) || 0;
   const tx = Number(a.net_tx_month) || 0;
-  const used = rx + tx;
+  const tqUsed = rx + tx;
   const quotaGB = Number(a.monthly_quota_gb) || 0;
   const quotaBytes = quotaGB * 1e9;
-  const pct = quotaBytes > 0 ? Math.min(100, used / quotaBytes * 100) : 0;
-  const cls = pctClass(pct);
-  const usedStr = fmtBytes(used);
-  const quotaStr = quotaGB > 0 ? fmtBytes(quotaBytes) : '∞';
-  const pctStr = quotaGB > 0 ? pct.toFixed(1) + '%' : '';
-  return `<div class="disk-row traffic-row">
-    <span class="m-lbl">月流量</span>
-    <div class="bar"><i class="bar-i ${cls}" style="width:${pct.toFixed(2)}%"></i></div>
-    <span class="m-val ${cls}">${usedStr} / ${quotaStr}${pctStr ? ' · ' + pctStr : ''} · ↓${fmtBytes(rx)} ↑${fmtBytes(tx)}</span>
-  </div>`;
-}
-function pubDiskRowsHtml(a) {
-  let used = 0, total = 0;
+  const tqPct = quotaBytes > 0 ? Math.min(100, tqUsed / quotaBytes * 100) : 0;
+  const tqCls = pctClass(tqPct);
+  const tqBar = quotaGB > 0 ? `<i class="bar-i ${tqCls}" style="width:${tqPct.toFixed(2)}%"></i>` : `<i class="bar-i" style="width:100%"></i>`;
+  const tqStr = quotaGB > 0
+    ? `${fmtBytes(tqUsed)} / ${fmtBytes(quotaBytes)} · ${tqPct.toFixed(1)}%`
+    : `${fmtBytes(tqUsed)}`;
+  // 硬盘
+  let dUsed = 0, dTotal = 0;
   const disks = (a && Array.isArray(a.disks) && a.disks.length) ? a.disks : null;
-  if (disks) {
-    for (const d of disks) { used += Number(d.used) || 0; total += Number(d.total) || 0; }
-  } else {
-    used = Number(a.disk_used) || 0; total = Number(a.disk_total) || 0;
-  }
-  const pct = total ? (used / total * 100) : 0;
-  const cls = pctClass(pct);
-  return `<div class="disk-row">
-    <span class="m-lbl">硬盘</span>
-    <div class="bar"><i class="bar-i ${cls}" style="width:${pct.toFixed(2)}%"></i></div>
-    <span class="m-val ${cls}">${fmtPct(pct)} · ${fmtBytes(used)}/${fmtBytes(total)}</span>
+  if (disks) { for (const d of disks) { dUsed += Number(d.used) || 0; dTotal += Number(d.total) || 0; } }
+  else { dUsed = Number(a.disk_used) || 0; dTotal = Number(a.disk_total) || 0; }
+  const dPct = dTotal ? (dUsed / dTotal * 100) : 0;
+  const dCls = pctClass(dPct);
+  const dStr = `${fmtPct(dPct)}  ${fmtBytes(dUsed)} / ${fmtBytes(dTotal)}`;
+  return `<div class="disk-row-2col">
+    <div class="disk-col">
+      <span class="m-lbl">月流量</span>
+      <div class="bar">${tqBar}</div>
+      <span class="m-val ${tqCls}">${tqStr}</span>
+    </div>
+    <div class="disk-col">
+      <span class="m-lbl">硬盘</span>
+      <div class="bar"><i class="bar-i ${dCls}" style="width:${dPct.toFixed(2)}%"></i></div>
+      <span class="m-val ${dCls}">${dStr}</span>
+    </div>
   </div>`;
 }
 function pubCardHtml(a) {
@@ -277,8 +278,7 @@ function pubCardHtml(a) {
           </div>
         </div>
       </div>
-      ${pubMonthlyTrafficHtml(a)}
-      ${pubDiskRowsHtml(a)}
+      ${pubTrafficAndDiskHtml(a)}
       <div class="foot"><span class="uptime">⏱ ${a.online ? fmtUptime(a.uptime) : '—'}</span></div>
     </div>`;
   }
