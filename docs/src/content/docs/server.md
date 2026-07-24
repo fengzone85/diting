@@ -45,7 +45,7 @@ services:
 sudo bash install.sh --backup
 
 # 从备份恢复（自动先备份当前状态，可回滚）
-sudo bash install.sh --restore /var/backups/simple-probe/monitor_20260723.db
+sudo bash install.sh --restore /var/backups/diting/monitor_20260723.db
 
 # 列出备份
 sudo bash install.sh --backup-list
@@ -81,7 +81,7 @@ sudo bash install.sh --restore /path/to/monitor_backup.db
 
 ```bash
 # crontab 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/simple-probe-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
 ```
 
 ## 进程守护
@@ -95,11 +95,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/simple-probe/server
+WorkingDirectory=/opt/diting/server
 ExecStart=/usr/bin/node app.js
 Environment=NODE_ENV=production
 Restart=always
-User=simple-probe
+User=diting
 
 [Install]
 WantedBy=multi-user.target

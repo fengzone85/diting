@@ -1,5 +1,5 @@
 'use strict';
-// 适配版 Komari 皮肤：演示将 Komari 社区皮肤的前端请求层指向 simple-probe。
+// 适配版 Komari 皮肤：演示将 Komari 社区皮肤的前端请求层指向 diting。
 // 数据来源（与 Komari 同源结构）：
 //   - GET  /api/public       站点名/描述
 //   - GET  /api/nodes        节点元数据（名称/分组/地区/配额）

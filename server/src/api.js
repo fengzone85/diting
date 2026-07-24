@@ -155,10 +155,10 @@ function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTar
   const native = `curl -fsSL ${REPO_BASE}/install.sh -o install.sh
 chmod +x install.sh
 sudo ./install.sh --install-agent --repo ${REPO_BASE} --server ${serverUrl} --id ${agentId} --token ${agentToken} --interval ${iv}${ptArg}`;
-  const docker = `docker build -t simple-probe-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name simple-probe-agent --restart unless-stopped \\\n     -e SERVER_URL=${serverUrl} -e AGENT_ID=${agentId} -e AGENT_TOKEN=${agentToken} -e INTERVAL=${iv}${ptEnv} \\\n     -v simple-probe-state:/data \\\n     simple-probe-agent`;
+  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${serverUrl} -e AGENT_ID=${agentId} -e AGENT_TOKEN=${agentToken} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
   // Windows 版：一条 PowerShell 命令。外层用双引号、内部一律单引号，避免引号嵌套。
   // install.ps1 会自举下载 windows_agent.py/win_collector.py/requirements.txt 到
-  // %ProgramData%\simple-probe-agent，并注册登录自启的计划任务。需以管理员身份运行。
+  // %ProgramData%\diting-agent，并注册登录自启的计划任务。需以管理员身份运行。
   const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'sp-agent-install.ps1'; iwr '${REPO_BASE}/agent/windows/install.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RegisterTask -Repo '${REPO_BASE}/agent/windows' -ServerUrl '${serverUrl}' -AgentId '${agentId}' -AgentToken '${agentToken}' -Interval ${iv}${ptWin}"`;
   return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '' };
 }
@@ -167,15 +167,15 @@ sudo ./install.sh --install-agent --repo ${REPO_BASE} --server ${serverUrl} --id
 // Linux 写 systemd drop-in 并重启；Windows 改 run_scheduled.bat 的 PROBE_TARGETS 行后重启计划任务。
 function buildModifyCommands(serverUrl, agentId, probeTargets) {
   const pt = probeTargets || '';
-  const linux = `sudo mkdir -p /etc/systemd/system/simple-probe-agent.service.d
-sudo tee /etc/systemd/system/simple-probe-agent.service.d/probe.conf >/dev/null <<'EOF'
+  const linux = `sudo mkdir -p /etc/systemd/system/diting-agent.service.d
+sudo tee /etc/systemd/system/diting-agent.service.d/probe.conf >/dev/null <<'EOF'
 [Service]
 Environment="PROBE_TARGETS=${pt}"
 EOF
 sudo systemctl daemon-reload
-sudo systemctl restart simple-probe-agent`;
+sudo systemctl restart diting-agent`;
   const win = `$id='${agentId}'; $pt='${pt}'
-$bat=Join-Path $env:ProgramData "simple-probe-agent\\run_scheduled.bat"
+$bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"
 $lines=Get-Content $bat
 if ($lines -match '^set PROBE_TARGETS=') {
   ($lines -replace '^set PROBE_TARGETS=.*', "set PROBE_TARGETS=$pt") | Set-Content $bat

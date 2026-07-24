@@ -10,7 +10,7 @@
 services:
   server:
     build: ./server
-    container_name: simple-probe-server
+    container_name: diting-server
     restart: unless-stopped
     env_file:
       - ./server/.env

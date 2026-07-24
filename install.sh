@@ -52,7 +52,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fengzone85/diting/master}"
 REPO_GIT="${REPO_GIT:-https://github.com/fengzone85/diting.git}"
-SRC_DIR="/opt/simple-probe-src"
+SRC_DIR="/opt/diting-src"
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
@@ -105,7 +105,7 @@ show_usage() {
   --update-agent          更新受控端（systemd，保留原连接配置）
   --status                查看服务端/受控端状态
   --uninstall             卸载服务端与受控端
-  --backup [路径]         备份数据库（不指定路径则存到 /var/backups/simple-probe/）
+  --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
   --restore <路径>        从备份恢复数据库（恢复前自动备份当前状态）
   --backup-list           列出已有备份
   --db-stats              查看数据库统计信息
@@ -219,7 +219,7 @@ install_agent() {
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载受控端载荷…${NC}"
     # L-6：可用 SP_AGENT_SHA256S（按序逗号串）对下载文件做 SHA256 校验
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py simple-probe-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; exit 1
     fi
@@ -427,7 +427,7 @@ update_script() {
     if [[ -f "$0" && -w "$(dirname "$0")" ]]; then
         target="$(realpath "$0")"
     else
-        target="/usr/local/bin/simple-probe-install.sh"
+        target="/usr/local/bin/diting-install.sh"
     fi
     cp "$new" "$target"
     chmod +x "$target"
@@ -511,7 +511,7 @@ update_server() {
 # ── 更新：受控端（保留已注册身份，拉取最新 agent 代码）──────────────────────────
 update_agent() {
     ensure_deps || return 1
-    local envfile="/etc/simple-probe/agent.env"
+    local envfile="/etc/diting/agent.env"
     if [[ ! -f "$envfile" ]]; then
         echo -e "${RED}[错误] 未检测到受控端安装（缺少 $envfile），请先「安装受控端」${NC}" >&2
         return 1
@@ -536,7 +536,7 @@ update_agent() {
     # 强制从 GitHub 拉取最新 agent 载荷（无论本脚本是否本地旧版），保证更新到最新
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载最新受控端载荷…${NC}"
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py simple-probe-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; return 1
     fi
@@ -562,8 +562,8 @@ status_all() {
         echo “$(msg “status.server_not_installed”)”
     fi
     echo “$(msg “status.agent_header”)”
-    if systemctl list-unit-files simple-probe-agent.service >/dev/null 2>&1; then
-        if systemctl is-active --quiet simple-probe-agent; then
+    if systemctl list-unit-files diting-agent.service >/dev/null 2>&1; then
+        if systemctl is-active --quiet diting-agent; then
             echo “$(msg “status.agent_active”)”
         else
             echo “$(msg “status.agent_inactive”)”
@@ -577,7 +577,7 @@ status_all() {
 # 服务端数据库路径：Docker 部署在命名卷 server-data 内（容器内 /data/monitor.db）；
 # 原生/开发态在 $SRC_DIR/server/data/monitor.db。
 # 备份原则：SQLite 单文件即全量，但必须通过 .backup 命令或停服后 cp，避免写坏。
-DB_BACKUP_DIR="/var/backups/simple-probe"
+DB_BACKUP_DIR="/var/backups/diting"
 
 # 定位数据库：返回「容器名:容器内路径」或「宿主机文件路径」；找不到则返回空。
 locate_db() {
@@ -913,7 +913,7 @@ do_reset_admin_token() {
     elif [[ "$loc" == volume:* ]]; then
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         # 用 server 镜像（含 better-sqlite3）写入；sqlite3 CLI 可能不存在，故用 node
-        local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'simple-probe.*server|server' | head -n1)"
+        local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
         if [[ -n "$simg" ]]; then
             docker run --rm -v "$vol":/data "$simg" node -e "const D=require('better-sqlite3'); const db=new D('/data/monitor.db'); db.prepare(\"INSERT OR REPLACE INTO admin_config (key,value) VALUES ('admin_token_raw',?)\").run('$new_token');" && ok=1
         else
@@ -943,8 +943,8 @@ do_reset_admin_token() {
 
 uninstall_all() {
     echo "== 卸载受控端 =="
-    if [[ -f /opt/simple-probe/uninstall.sh ]]; then
-        bash /opt/simple-probe/uninstall.sh || true
+    if [[ -f /opt/diting/uninstall.sh ]]; then
+        bash /opt/diting/uninstall.sh || true
     else
         echo "  受控端未安装"
     fi

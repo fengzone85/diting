@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Simple Probe Agent — native systemd installation script
+# Diting Agent — native systemd installation script
 # =============================================================================
 # Supports interactive and non-interactive (--server --id --token --interval)
 # mode.  Safe to review before running: no network downloads, no external
@@ -63,7 +63,7 @@ usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
-Install Simple Probe Agent as a systemd service.
+Install Diting Agent as a systemd service.
 
 Required (interactive if not given):
   --server SERVER_URL   Monitoring server address  (e.g. https://your-server:8008)
@@ -195,7 +195,7 @@ payload = {"setup_token": token}
 if name:
     payload["name"] = name
 data = json.dumps(payload).encode()
-req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "simple-probe-agent/1.0"}, method="POST")
+req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json", "User-Agent": "diting-agent/1.0"}, method="POST")
 try:
     with urllib.request.urlopen(req, timeout=15) as r:
         body = json.loads(r.read().decode())
@@ -224,7 +224,7 @@ fi
 # ── 4. Interactive config collection ─────────────────────────────────────────
 if [[ -z "${SERVER_URL:-}" ]]; then
     echo ""
-    echo "━━━ Simple Probe Agent 安装配置 ━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "━━━ Diting Agent 安装配置 ━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
     echo -n "服务端地址 (SERVER_URL)  [例如 https://your-server:8008]: "
     read -r SERVER_URL || exit 0
@@ -275,17 +275,17 @@ case "$SERVER_URL" in
 esac
 
 # ── 5. Create system user ─────────────────────────────────────────────────────
-if id simple-probe >/dev/null 2>&1; then
-    echo -e "${GREEN}[OK]   系统用户 simple-probe 已存在${NC}"
+if id diting >/dev/null 2>&1; then
+    echo -e "${GREEN}[OK]   系统用户 diting 已存在${NC}"
 else
-    useradd -r -M -s /usr/sbin/nologin -d /nonexistent -c "Simple Probe Agent" simple-probe
-    echo -e "${GREEN}[OK]   创建系统用户 simple-probe${NC}"
+    useradd -r -M -s /usr/sbin/nologin -d /nonexistent -c "Diting Agent" diting
+    echo -e "${GREEN}[OK]   创建系统用户 diting${NC}"
 fi
 
 # ── 6. Create directories ────────────────────────────────────────────────────
-mkdir -p /opt/simple-probe
-mkdir -p /var/lib/simple-probe
-mkdir -p /etc/simple-probe
+mkdir -p /opt/diting
+mkdir -p /var/lib/diting
+mkdir -p /etc/diting
 
 # ── 6b. 自举：经管道执行时同目录无 agent.py，从仓库下载配套文件 ──────────────
 if [[ ! -f "${SCRIPT_DIR}/agent.py" ]]; then
@@ -298,19 +298,19 @@ if [[ ! -f "${SCRIPT_DIR}/agent.py" ]]; then
 fi
 
 # ── 7. Copy agent files ──────────────────────────────────────────────────────
-cp "${SCRIPT_DIR}/agent.py"     /opt/simple-probe/agent.py
-cp "${SCRIPT_DIR}/collector.py" /opt/simple-probe/collector.py
-chmod 644 /opt/simple-probe/agent.py /opt/simple-probe/collector.py
-echo -e "${GREEN}[OK]   复制 agent.py / collector.py → /opt/simple-probe/${NC}"
+cp "${SCRIPT_DIR}/agent.py"     /opt/diting/agent.py
+cp "${SCRIPT_DIR}/collector.py" /opt/diting/collector.py
+chmod 644 /opt/diting/agent.py /opt/diting/collector.py
+echo -e "${GREEN}[OK]   复制 agent.py / collector.py → /opt/diting/${NC}"
 
 # 同时部署 uninstall.sh，保证用户能按提示路径卸载
-cp "${SCRIPT_DIR}/uninstall.sh" /opt/simple-probe/uninstall.sh
-chmod 644 /opt/simple-probe/uninstall.sh
+cp "${SCRIPT_DIR}/uninstall.sh" /opt/diting/uninstall.sh
+chmod 644 /opt/diting/uninstall.sh
 
 # ── 8. Set directory ownership & permissions ───────────────────────────────────
-chown -R simple-probe:simple-probe /var/lib/simple-probe
-chmod 700 /var/lib/simple-probe
-echo -e "${GREEN}[OK]   /var/lib/simple-probe → simple-probe:simple-probe  (700)${NC}"
+chown -R diting:diting /var/lib/diting
+chmod 700 /var/lib/diting
+echo -e "${GREEN}[OK]   /var/lib/diting → diting:diting  (700)${NC}"
 
 # ── 9. Write env file ─────────────────────────────────────────────────────────
 #   Write to a temp file first, then move + chmod — avoids leaving world-readable
@@ -320,7 +320,7 @@ AGENT_ID=${AGENT_ID}
 AGENT_TOKEN=${AGENT_TOKEN}
 INTERVAL=${INTERVAL}
 DISK_PATH=/
-STATE_FILE=/var/lib/simple-probe/state.json
+STATE_FILE=/var/lib/diting/state.json
 "
 # 探测目标（网络质量自测 DNS）：服务端下发的 label:host 列表；为空则受控端回退内置默认。
 if [[ -n "${PROBE_TARGETS:-}" ]]; then
@@ -332,50 +332,50 @@ TMP_ENV=$(mktemp)
 chmod 600 "$TMP_ENV"
 echo "$ENV_CONTENT" > "$TMP_ENV"
 chown root:root "$TMP_ENV"
-mv "$TMP_ENV" /etc/simple-probe/agent.env
-echo -e "${GREEN}[OK]   写入 /etc/simple-probe/agent.env  (root:0.0.0  600)${NC}"
+mv "$TMP_ENV" /etc/diting/agent.env
+echo -e "${GREEN}[OK]   写入 /etc/diting/agent.env  (root:0.0.0  600)${NC}"
 
 # ── 10. Deploy systemd unit ───────────────────────────────────────────────────
-cp "${SCRIPT_DIR}/simple-probe-agent.service" /etc/systemd/system/
+cp "${SCRIPT_DIR}/diting-agent.service" /etc/systemd/system/
 # 用检测到的 Python 解释器路径回填 ExecStart，避免硬编码 /usr/bin/python3
 # 在部分发行版或自定义安装（/usr/local/bin、pyenv 等）下找不到的问题
-sed -i "s#/usr/bin/python3#${PYTHON}#g" /etc/systemd/system/simple-probe-agent.service
-chmod 644 /etc/systemd/system/simple-probe-agent.service
+sed -i "s#/usr/bin/python3#${PYTHON}#g" /etc/systemd/system/diting-agent.service
+chmod 644 /etc/systemd/system/diting-agent.service
 systemctl daemon-reload
-echo -e "${GREEN}[OK]   部署 simple-probe-agent.service${NC}"
+echo -e "${GREEN}[OK]   部署 diting-agent.service${NC}"
 
 # ── 11. Enable & start ────────────────────────────────────────────────────────
-systemctl enable --now simple-probe-agent
+systemctl enable --now diting-agent
 echo -e "${GREEN}[OK]   启用并启动服务${NC}"
 
 # ── 12. Verify ────────────────────────────────────────────────────────────────
 sleep 2
-if systemctl is-active --quiet simple-probe-agent; then
+if systemctl is-active --quiet diting-agent; then
     echo -e "${GREEN}[OK]   服务运行中 (active)${NC}"
 else
     echo -e "${RED}[错误] 服务启动失败，最后 30 行日志如下，请排查后重试：${NC}" >&2
-    journalctl -u simple-probe-agent -n 30 --no-pager
+    journalctl -u diting-agent -n 30 --no-pager
     exit 1
 fi
 echo ""
 echo "━━━ 安装完成 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo -e "  ${GREEN}✅ Simple Probe Agent 已安装并运行${NC}"
+echo -e "  ${GREEN}✅ Diting Agent 已安装并运行${NC}"
 echo ""
 echo "  验证命令："
-echo "    systemctl status  simple-probe-agent"
-echo "    journalctl -u simple-probe-agent -f   # 实时日志"
+echo "    systemctl status  diting-agent"
+echo "    journalctl -u diting-agent -f   # 实时日志"
 echo ""
 echo "  管理命令："
-echo "    systemctl restart simple-probe-agent  # 重启"
-echo "    systemctl stop    simple-probe-agent  # 停止"
+echo "    systemctl restart diting-agent  # 重启"
+echo "    systemctl stop    diting-agent  # 停止"
 echo ""
 echo "  配置文件："
-echo "    /etc/simple-probe/agent.env"
-echo "    /opt/simple-probe/agent.py"
-echo "    /var/lib/simple-probe/state.json      # 月度流量状态"
+echo "    /etc/diting/agent.env"
+echo "    /opt/diting/agent.py"
+echo "    /var/lib/diting/state.json      # 月度流量状态"
 echo ""
 echo "  卸载命令："
-echo "    bash /opt/simple-probe/uninstall.sh"
+echo "    bash /opt/diting/uninstall.sh"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

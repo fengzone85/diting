@@ -1,6 +1,6 @@
 'use strict';
 // Komari 兼容 API 层（PoC）
-// 让 simple-probe 的公开数据以 Komari 社区皮肤所期望的接口形状暴露，
+// 让 diting 的公开数据以 Komari 社区皮肤所期望的接口形状暴露，
 // 从而使「适配路线」可行：把 Komari 主题的前端请求层指向本服务即可复用。
 // 仅暴露只读、脱敏数据，且同样受 ui_settings.public_enabled 开关约束（与 /api/public/* 一致）。
 const express = require('express');
@@ -20,7 +20,7 @@ function flagEmoji(iso) {
   return String.fromCodePoint(A + cc.charCodeAt(0) - base) + String.fromCodePoint(A + cc.charCodeAt(1) - base);
 }
 
-// simple-probe agent -> Komari node 列表项（/api/nodes）
+// diting agent -> Komari node 列表项（/api/nodes）
 function toNode(a) {
   const m = db.getLatestMetric(a.id) || {};
   return {
@@ -55,7 +55,7 @@ function toNode(a) {
   };
 }
 
-// simple-probe metric -> Komari 实时嵌套结构（/api/recent/{uuid} 与 WS 同构）
+// diting metric -> Komari 实时嵌套结构（/api/recent/{uuid} 与 WS 同构）
 function toRealtime(m) {
   if (!m) return null;
   return {
@@ -116,7 +116,7 @@ router.get('/public', guard, (req, res) => {
       ping_record_preserve_time: 48,
       private_site: false,
       record_enabled: false, record_preserve_time: 720,
-      sitename: ui.site_title || 'simple-probe',
+      sitename: ui.site_title || 'diting',
       theme: ui.public_theme || 'Mochi',
       theme_settings: {}
     }
@@ -125,7 +125,7 @@ router.get('/public', guard, (req, res) => {
 
 // GET /api/version
 router.get('/version', (req, res) => {
-  res.json({ status: 'success', message: '', data: { hash: '-', version: 'simple-probe-compat' } });
+  res.json({ status: 'success', message: '', data: { hash: '-', version: 'diting-compat' } });
 });
 
 // GET /api/nodes —— 节点基础信息列表（不含实时负载）

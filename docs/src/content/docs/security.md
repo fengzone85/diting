@@ -84,10 +84,10 @@ Agent 之间互不通信，互不知道彼此存在。
 sudo bash install.sh --backup
 
 # 定时自动备份（crontab）
-0 3 * * * root bash /usr/local/bin/simple-probe-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
 ```
 
-备份文件默认存到 `/var/backups/simple-probe/`，包含完整数据库快照。恢复前会自动备份当前状态，确保可回滚。
+备份文件默认存到 `/var/backups/diting/`，包含完整数据库快照。恢复前会自动备份当前状态，确保可回滚。
 
 ## TOTP 2FA
 

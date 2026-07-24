@@ -828,16 +828,16 @@ async function openModify() {
   const gen = () => {
     const pt = ta.value.trim();
     const linux =
-      'sudo mkdir -p /etc/systemd/system/simple-probe-agent.service.d\n' +
-      'sudo tee /etc/systemd/system/simple-probe-agent.service.d/probe.conf >/dev/null <<\'EOF\'\n' +
+      'sudo mkdir -p /etc/systemd/system/diting-agent.service.d\n' +
+      'sudo tee /etc/systemd/system/diting-agent.service.d/probe.conf >/dev/null <<\'EOF\'\n' +
       '[Service]\n' +
       'Environment="PROBE_TARGETS=' + pt + '"\n' +
       'EOF\n' +
       'sudo systemctl daemon-reload\n' +
-      'sudo systemctl restart simple-probe-agent';
+      'sudo systemctl restart diting-agent';
     const win =
       "$id='" + detailId + "'; $pt='" + pt + "'\n" +
-      '$bat=Join-Path $env:ProgramData "simple-probe-agent\\run_scheduled.bat"\n' +
+      '$bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"\n' +
       '$lines=Get-Content $bat\n' +
       "if ($lines -match '^set PROBE_TARGETS=') {\n" +
       '  ($lines -replace \'^set PROBE_TARGETS=.*\', "set PROBE_TARGETS=' + pt + '") | Set-Content $bat\n' +

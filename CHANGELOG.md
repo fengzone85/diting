@@ -25,9 +25,9 @@
 
 ## install.sh 数据库管理子命令（未版本化，开发中）
 - `install.sh` 新增数据库备份/恢复/统计管理子命令，集成到统一安装管理脚本：
-  - `--backup [路径]`：热备份数据库，默认存到 `/var/backups/simple-probe/monitor_时间戳.db`。优先通过 `sqlite3 .backup` 命令热备份（不中断服务），无 sqlite3 时回退到 `docker cp` / `cp`
+  - `--backup [路径]`：热备份数据库，默认存到 `/var/backups/diting/monitor_时间戳.db`。优先通过 `sqlite3 .backup` 命令热备份（不中断服务），无 sqlite3 时回退到 `docker cp` / `cp`
   - `--restore <路径>`：从备份恢复数据库。恢复前自动备份当前状态（`pre_restore_*.db`，可回滚），自动校验备份文件完整性（SQLite 魔数 + `PRAGMA integrity_check`），需输入 `yes` 确认
-  - `--backup-list`：列出 `/var/backups/simple-probe/` 下已有备份
+  - `--backup-list`：列出 `/var/backups/diting/` 下已有备份
   - `--db-stats`：查看数据库统计（文件大小、各表记录数、指标时间范围、占用明细）
 - 智能定位数据库：自动检测 Docker 命名卷 `server-data`（容器内拷贝 / 临时容器挂载卷）或宿主机文件路径
 - 交互菜单新增 `8) 数据库管理（备份/恢复/统计）` 子菜单

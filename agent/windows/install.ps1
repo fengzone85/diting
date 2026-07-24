@@ -52,11 +52,11 @@ function Test-FileSha256 {
 }
 
 # 0) 自举：一键命令只单独下载了 install.ps1，同目录没有 agent 载荷。
-#    此时把配套文件下载到持久安装目录（%ProgramData%\simple-probe-agent），
+#    此时把配套文件下载到持久安装目录（%ProgramData%\diting-agent），
 #    后续依赖安装 / 计划任务全部指向该目录（避免指向 TEMP 被清理）。
 $InstallDir = $ScriptDir
 if (-not (Test-Path (Join-Path $ScriptDir 'windows_agent.py'))) {
-    $InstallDir = Join-Path $env:ProgramData 'simple-probe-agent'
+    $InstallDir = Join-Path $env:ProgramData 'diting-agent'
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Write-Host "同目录未找到 windows_agent.py，正从 $Repo 下载配套文件到 $InstallDir ..."
     $files = 'windows_agent.py', 'win_collector.py', 'requirements.txt'

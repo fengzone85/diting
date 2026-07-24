@@ -19,7 +19,7 @@ DiTing Lite 受控端支持 Windows，使用 psutil 采集系统指标。
 ```powershell
 cd C:\
 git clone https://github.com/fengzone85/diting.git
-cd simple-probe\agent\windows
+cd diting\agent\windows
 .\install.ps1
 ```
 
@@ -64,6 +64,6 @@ Get-EventLog -LogName Application -Source SimpleProbeAgent -Newest 50
 以管理员身份运行：
 
 ```powershell
-cd C:\simple-probe\agent\windows
+cd C:\diting\agent\windows
 .\uninstall.ps1
 ```
