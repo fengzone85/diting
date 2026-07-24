@@ -70,12 +70,11 @@ const loginRateLimit = (req, res, next) => {
 
 // ---- helpers ----
 const { num, str, validateReport, sanitizeCss } = require('./validate');
+// Admin Token 唯一来源：环境变量 ADMIN_TOKEN（与 auth.js 保持一致）。
 function getAdminToken() {
-  if (process.env.ADMIN_TOKEN && process.env.ADMIN_TOKEN !== 'change-me-admin-token' && process.env.ADMIN_TOKEN.length >= 16) return process.env.ADMIN_TOKEN;
-  const raw = db.getConfig('admin_token_raw');
-  if (raw) return raw;
-  // 兼容旧版文件 token（迁移到 DB 后可删）
-  try { return fs.readFileSync(path.join(path.dirname(require.resolve('./db')), '..', 'data', 'admin_token.txt'), 'utf-8').trim(); } catch (e) { return ''; }
+  const t = process.env.ADMIN_TOKEN;
+  if (t && t !== 'change-me-admin-token' && t.length >= 16) return t;
+  return '';
 }
 
 // ---- 首次部署初始化向导 ----
@@ -99,25 +98,34 @@ const setupRateLimit = (req, res, next) => {
 // 初始化端点：仅在「无任何有效 Token」时可用。一旦生成本端点永久失效（返回 410 Gone），
 // 后续重置 Token 只能通过 SSH 运行 install.sh --reset-admin-token，彻底杜绝 Web 重置风险。
 router.post('/setup/generate', setupRateLimit, (req, res) => {
-  // 防护①：任何有效 Token 存在（env / DB / 旧文件）一律拒绝，返回 410 Gone
+  // 任何有效 Token 存在一律拒绝，返回 410 Gone
   if (getAdminToken()) {
     return res.status(410).json({
       error: 'already initialized',
       message: '管理员 Token 已存在，本端点已永久禁用。重置 Token 请通过 SSH 运行：sudo bash install.sh --reset-admin-token'
     });
   }
-  // ② 通过 .env 配置有效 ADMIN_TOKEN 后，.env token 优先于 DB → 上面 getAdminToken() 已返回非空，同样 410。
-  // ③ 原子写入：仅当未初始化时落库，并发请求中只有一个成功，其余返回 400，杜绝 Token 抢注竞态。
+  // 生成新 Token 并写入 .env（唯一来源）
   const token = 'adm_' + crypto.randomBytes(16).toString('hex');
-  if (!db.setConfigIfAbsent('admin_token_raw', token)) {
-    // 竞态：另一个请求已写入 → 重新检查，如已有 token 则 410
-    return res.status(410).json({
-      error: 'already initialized',
-      message: '管理员 Token 已由其他请求生成，本端点已永久禁用。'
-    });
+  const envPath = path.join(__dirname, '..', '.env');
+  try {
+    let content = '';
+    try { content = fs.readFileSync(envPath, 'utf-8'); } catch { /* .env 不存在则创建 */ }
+    // 替换已有的 ADMIN_TOKEN 行，或在文件末尾追加
+    if (/^ADMIN_TOKEN=/m.test(content)) {
+      content = content.replace(/^ADMIN_TOKEN=.*/m, `ADMIN_TOKEN=${token}`);
+    } else {
+      content += (content.endsWith('\n') ? '' : '\n') + `ADMIN_TOKEN=${token}\n`;
+    }
+    fs.writeFileSync(envPath, content, 'utf-8');
+    // 同步更新进程环境变量，使本次启动后续请求即可用
+    process.env.ADMIN_TOKEN = token;
+    console.log('[setup] 管理员 Token 已生成并写入 .env，此后 /api/setup/generate 永久禁用');
+    res.json({ token });
+  } catch (e) {
+    console.error('[setup] 写入 .env 失败:', e.message);
+    res.status(500).json({ error: 'write_failed', message: '写入 .env 失败：' + e.message });
   }
-  console.log('[setup] 管理员 Token 已生成并保存到 DB，此后 /api/setup/generate 永久禁用');
-  res.json({ token });
 });
 
 // ---- 一键安装命令生成（Nezha 风格：服务端把地址 + 每客户端令牌预填进命令）----

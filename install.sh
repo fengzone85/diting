@@ -892,43 +892,28 @@ do_reset_admin_token() {
         echo -e "${YELLOW}[信息] 已同步更新 .env 的 ADMIN_TOKEN（env 优先于 DB）${NC}"
     fi
 
-    # ② 写入 DB（覆盖 admin_token_raw），使无 .env 场景也生效
+    # ② 清理 DB 中的残留 admin_token_raw（旧版遗留，统一到 .env 后废弃）
     local loc; loc="$(locate_db)"
-    if [[ -z "$loc" ]]; then
-        echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装${NC}" >&2
-        return 1
+    if [[ -n "$loc" ]]; then
+        if [[ "$loc" == docker:* ]]; then
+            local cid cpath
+            cid="$(echo "$loc" | cut -d: -f2)"
+            cpath="$(echo "$loc" | cut -d: -f4)"
+            docker exec "$cid" node -e "const D=require('better-sqlite3'); const db=new D('$cpath'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
+        elif [[ "$loc" == volume:* ]]; then
+            local vol; vol="$(echo "$loc" | cut -d: -f2)"
+            local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
+            if [[ -n "$simg" ]]; then
+                docker run --rm -v "$vol":/data "$simg" node -e "const D=require('better-sqlite3'); const db=new D('/data/monitor.db'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
+            fi
+        else
+            local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
+            sqlite3 "$fpath" "DELETE FROM admin_config WHERE key='admin_token_raw';" 2>/dev/null || true
+        fi
+        echo -e "${GREEN}[OK]   已清理 DB 中残留的 admin_token_raw${NC}"
     fi
 
-    local ok=0
-    if [[ "$loc" == docker:* ]]; then
-        local cid cpath
-        cid="$(echo "$loc" | cut -d: -f2)"
-        cpath="$(echo "$loc" | cut -d: -f4)"
-        # 优先用容器内 sqlite3；缺失则回退 better-sqlite3 节点脚本（server 容器自带）
-        if docker exec "$cid" sh -c "command -v sqlite3 >/dev/null 2>&1"; then
-            docker exec "$cid" sqlite3 "$cpath" "INSERT OR REPLACE INTO admin_config (key, value) VALUES ('admin_token_raw', '$new_token');" && ok=1
-        else
-            docker exec "$cid" node -e "const D=require('better-sqlite3'); const db=new D('$cpath'); db.prepare(\"INSERT OR REPLACE INTO admin_config (key,value) VALUES ('admin_token_raw',?)\").run('$new_token');" && ok=1
-        fi
-    elif [[ "$loc" == volume:* ]]; then
-        local vol; vol="$(echo "$loc" | cut -d: -f2)"
-        # 用 server 镜像（含 better-sqlite3）写入；sqlite3 CLI 可能不存在，故用 node
-        local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
-        if [[ -n "$simg" ]]; then
-            docker run --rm -v "$vol":/data "$simg" node -e "const D=require('better-sqlite3'); const db=new D('/data/monitor.db'); db.prepare(\"INSERT OR REPLACE INTO admin_config (key,value) VALUES ('admin_token_raw',?)\").run('$new_token');" && ok=1
-        else
-            docker run --rm -v "$vol":/data alpine:3.20 sh -c "sqlite3 /data/monitor.db \"INSERT OR REPLACE INTO admin_config (key,value) VALUES ('admin_token_raw','$new_token');\"" && ok=1
-        fi
-    else
-        local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
-        sqlite3 "$fpath" "INSERT OR REPLACE INTO admin_config (key, value) VALUES ('admin_token_raw', '$new_token');" && ok=1
-    fi
-    if [[ "$ok" != "1" ]]; then
-        echo -e "${RED}[错误] 写入数据库失败，请检查上方错误信息${NC}" >&2
-        return 1
-    fi
-
-    # ③ 重启服务使新 Token 生效（getAdminToken 每次读 DB/env，重启确保干净）
+    # ③ 重启服务使新 Token 生效（getAdminToken 每次读 env，重启确保干净）
     if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
         ( cd "$SRC_DIR/server" && docker compose restart 2>/dev/null ) || true
     fi
