@@ -71,7 +71,19 @@ body {
   width: var(--side-w); flex-shrink: 0; background: var(--bg-soft);
   border-right: 1px solid var(--border); display: flex; flex-direction: column;
   position: sticky; top: 0; height: 100vh; z-index: 30;
+  transition: width .2s ease;
 }
+/* 侧栏收起态：窄条仅显示图标 */
+.sidebar.collapsed { width: 68px; }
+.sidebar.collapsed .sb-name,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .side-foot .btn span { display: none; }
+.sidebar.collapsed .nav-item { justify-content: center; font-size: 18px; padding: 12px 0; }
+.sidebar.collapsed .side-foot .btn { font-size: 16px; }
+.sidebar.collapsed .side-brand { justify-content: center; padding: 22px 0 14px; }
+/* 切换按钮图标旋转 */
+.sidebar-toggle { transition: transform .2s ease; }
+.sidebar.collapsed ~ .main .sidebar-toggle { transform: rotate(90deg); }
 .side-brand { padding: 22px 20px 14px; font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 10px; }
 .sb-logo { font-size: 22px; }
 .sb-name { background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
@@ -145,9 +157,9 @@ body {
 .grid { padding: 14px 26px 0; }
 .card {
   position: relative;
-  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-soft); cursor: pointer;
-  transition: transform .3s ease-out, border-color .3s ease-out, box-shadow .3s ease-out;
+  background: var(--card); border: 1px solid var(--vis-border); border-radius: var(--radius-md);
+  box-shadow: var(--vis-shadow); cursor: pointer;
+  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
   overflow: hidden;
 }
 /* 悬停渐变描边：用伪元素 + mask 裁出 1px 渐变边框 */
@@ -197,7 +209,7 @@ body {
 /* 标签 + 数值移到底部，横向排布，避免与迷你图挤在一起 */
 .m-info { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; }
 .m-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
-.m-val { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.m-val { font-size: 11px; font-weight: 500; color: var(--text); line-height: 1.2; }
 .m-val.bar-warn  { color: var(--yellow); }
 .m-val.bar-danger{ color: var(--red); }
 .disk-row { display: flex; align-items: center; gap: 8px; padding: 6px 15px 0; font-size: 12px; }
@@ -458,14 +470,7 @@ body {
   --vis-border: rgba(255,255,255,.10);
   --vis-shadow: 0 1px 2px rgba(0,0,0,.30), 0 4px 12px rgba(0,0,0,.24), 0 10px 28px rgba(0,0,0,.18);
 }
-.pub-card.tpl-visual {
-  border: 1px solid var(--vis-border);
-  border-radius: 14px;
-  box-shadow: var(--vis-shadow);
-  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
-}
-.pub-card.tpl-visual .m-val { font-size: 11px; font-weight: 500; color: var(--text); }
-.pub-card.tpl-visual .disk-row .m-val { font-size: 11px; font-weight: 500; color: var(--text); }
+/* .pub-card.tpl-visual 无需再覆盖 border/shadow/radius/字号 —— 已统一到 .card */
 .pub-card.tpl-visual .probes { grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .pub-card.tpl-visual .probe {
   border: none; background: none; padding: 0; border-radius: 0;
