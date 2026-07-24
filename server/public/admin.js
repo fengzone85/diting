@@ -119,7 +119,7 @@ function applyCustomCss() {
 function applySiteTitle() {
   const t = appSettings.site_title || '谛听 · Diting';
   document.title = t + ' · Host Monitor';
-  if ($('siteTitle')) $('siteTitle').innerHTML = '🛰️ ' + esc(t) + '<span class="dot">.</span>';
+  if ($('siteTitle')) $('siteTitle').innerHTML = '<img src="logo-icon.svg" width="22" height="22" alt="" style="vertical-align:middle;margin-right:6px">' + esc(t) + '<span class="dot">.</span>';
   if ($('loginTitle')) $('loginTitle').textContent = t;
   if ($('siteTitleSide')) $('siteTitleSide').textContent = t;
 }
@@ -383,6 +383,23 @@ function renderClients() {
 }
 // 硬盘条渲染：把所有物理盘(disks 数组)汇总成「一个总容量」单条展示，
 // 不再逐盘列出；无 disks 时回退单盘(disk_pct/used/total)。
+function monthlyTrafficHtml(m, a) {
+  const rx = Number(m.net_rx_month) || 0;
+  const tx = Number(m.net_tx_month) || 0;
+  const used = rx + tx;
+  const quotaGB = Number(a.monthly_quota_gb) || 0;
+  const quotaBytes = quotaGB * 1e9; // 1 GB = 10^9 bytes（与 komari.js 一致）
+  const pct = quotaBytes > 0 ? Math.min(100, used / quotaBytes * 100) : 0;
+  const cls = pctClass(pct);
+  const usedStr = fmtBytes(used);
+  const quotaStr = quotaGB > 0 ? fmtBytes(quotaBytes) : '∞';
+  const pctStr = quotaGB > 0 ? pct.toFixed(1) + '%' : '';
+  return `<div class="disk-row traffic-row">
+    <span class="m-lbl">月流量</span>
+    <div class="bar"><i class="bar-i ${cls}" style="width:${pct.toFixed(2)}%"></i></div>
+    <span class="m-val ${cls}">${usedStr} / ${quotaStr}${pctStr ? ' · ' + pctStr : ''} · ↓${fmtBytes(rx)} ↑${fmtBytes(tx)}</span>
+  </div>`;
+}
 function diskRowsHtml(m) {
   let used = 0, total = 0;
   const disks = (m && Array.isArray(m.disks) && m.disks.length) ? m.disks : null;
@@ -487,6 +504,7 @@ function cardHtml(a, hist) {
         </div>
       </div>
     </div>
+    ${monthlyTrafficHtml(m, a)}
     ${diskRowsHtml(m)}
     <div class="foot">
       <span class="uptime">⏱ ${m.uptime ? fmtUptime(m.uptime) : '—'}</span>
@@ -1102,6 +1120,14 @@ function bindEvents() {
   $('btnTheme').addEventListener('click', quickToggleTheme);
   $('tfaToggle').addEventListener('click', start2FASetup);
   $('btnNew').addEventListener('click', openCreate);
+  // 侧栏收起/展开：记忆偏好到 localStorage
+  const sidebarState = localStorage.getItem('sidebar_collapsed');
+  if (sidebarState === '1') document.querySelector('.sidebar').classList.add('collapsed');
+  $('btnSidebarToggle').addEventListener('click', () => {
+    const sb = document.querySelector('.sidebar');
+    const collapsed = sb.classList.toggle('collapsed');
+    localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+  });
   $('btnCreateSubmit').addEventListener('click', submitCreate);
   $('btnEditSubmit').addEventListener('click', submitEdit);
   $('btnDelete').addEventListener('click', submitDelete);
