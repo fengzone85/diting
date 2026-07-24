@@ -1,6 +1,6 @@
 <h1 align="center">
-  <img src="server/public/os-debian.svg" width="40" alt="logo">
-  <br>谛听轻量探针 · DiTing Lite
+  <img src="server/public/logo.svg" width="80" alt="Diting Logo">
+  <br>谛听 · Diting
 </h1>
 
 <p align="center">
