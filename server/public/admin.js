@@ -117,7 +117,7 @@ function applyCustomCss() {
   link.href = '/custom.css?t=' + Date.now();
 }
 function applySiteTitle() {
-  const t = appSettings.site_title || '谛听轻量探针';
+  const t = appSettings.site_title || '谛听 · Diting';
   document.title = t + ' · Host Monitor';
   if ($('siteTitle')) $('siteTitle').innerHTML = '🛰️ ' + esc(t) + '<span class="dot">.</span>';
   if ($('loginTitle')) $('loginTitle').textContent = t;
