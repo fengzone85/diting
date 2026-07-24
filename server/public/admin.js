@@ -1245,7 +1245,30 @@ function start2FASetup() {
   } else {
     $('tfaSecret').textContent = '正在生成密钥…';
     api('/api/admin/2fa/setup', { method: 'POST' }).then(r => {
-      $('tfaSecret').textContent = '密钥（手动输入到 Authenticator 应用）：\n' + r.secret + '\n\n' + r.otpauth_uri;
+      // 前端本地生成二维码，无需外部服务，符合 CSP script-src 'self'
+      $('tfaSecret').innerHTML = '';
+      const qrWrap = document.createElement('div');
+      qrWrap.style.display = 'inline-block';
+      qrWrap.style.padding = '12px';
+      qrWrap.style.background = '#fff';
+      qrWrap.style.borderRadius = '8px';
+      // qrcode(typeNumber, errorCorrectionLevel) → addData() → make() → createDataURL()
+      const qr = qrcode(0, 'M');
+      qr.addData(r.otpauth_uri);
+      qr.make();
+      const img = document.createElement('img');
+      img.src = qr.createDataURL(4, 8);
+      img.alt = 'TOTP QR Code';
+      img.style.width = '200px';
+      img.style.height = '200px';
+      qrWrap.appendChild(img);
+      $('tfaSecret').appendChild(qrWrap);
+      const hint = document.createElement('p');
+      hint.className = 'setup-hint';
+      hint.style.marginTop = '12px';
+      hint.innerHTML = '请用 Authenticator 应用（Google/Microsoft Authenticator、Aegis 等）扫描上方二维码。<br>' +
+        '若无法扫描，可手动输入密钥：<code style="word-break:break-all;font-size:12px">' + r.secret + '</code>';
+      $('tfaSecret').appendChild(hint);
     }).catch(e => {
       // 错误直接显示在面板中，让用户看到具体原因（如 HTTPS 要求）
       $('tfaSecret').textContent = '生成失败：' + e.message + '\n\n请确认已通过 HTTPS 访问后台（或设置 ADMIN_ALLOW_HTTP=1），然后重试。';
