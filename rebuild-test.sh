@@ -14,7 +14,7 @@ docker volume create server-data-test >/dev/null
 
 echo "==> [2/5] 启动测试服务端 diting-server-test (diting:latest, 8081)"
 docker rm -f diting-server-test >/dev/null 2>&1 || true
-docker run -d --name diting-server-test -p 8081:8080 \
+docker run -d --name diting-server-test -p 8081:8081 \
   -v server-data-test:/data -e DB_PATH=/data/monitor.db -e ADMIN_ALLOW_HTTP=1 \
   "$NS/diting:latest"
 
