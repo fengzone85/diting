@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="style.css?v=12" />
   <link id="customCssLink" rel="stylesheet" href="/custom.css" />
   <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
   <script src="i18n/i18n.js"></script>
 </head>
 <body>
@@ -181,7 +182,7 @@
               <h4>两步验证 (TOTP / 2FA)</h4>
               <div id="tfaStatus" class="tfa-status">加载中…</div>
               <div id="tfaSetup" style="display:none;margin:8px 0">
-                <p>请使用 Authenticator 应用手动输入下方密钥（本项目不依赖任何外部二维码服务，符合 CSP 安全策略）：</p>
+                <p>请使用 Authenticator 应用扫描下方二维码（前端本地生成，无需外部服务）：</p>
                 <pre id="tfaSecret" class="token-show"></pre>
                 <div class="field" style="max-width:240px"><input id="tfaCode" inputmode="numeric" placeholder="输入 6 位动态码" /></div>
                 <button class="btn sm" id="tfaEnable">确认启用</button>
