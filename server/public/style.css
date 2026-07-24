@@ -216,12 +216,14 @@ body {
 .disk-row .bar { flex: 1; margin: 0; }
 .disk-row .m-lbl { min-width: 28px; }
 .disk-row .m-val { font-size: 12px; font-weight: 600; white-space: nowrap; }
-/* 月流量 + 硬盘 并列两列 */
-.disk-row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 6px 15px 0; }
-.disk-col { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
-.disk-col .bar { flex: 1; margin: 0; min-width: 40px; }
-.disk-col .m-lbl { flex-shrink: 0; }
-.disk-col .m-val { font-size: 11px; font-weight: 600; white-space: nowrap; }
+/* 月流量 + 硬盘 并列两列（三行：标签+百分比 / 容量 / 进度条） */
+.disk-row-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 6px 15px 4px; }
+.disk-col { display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; }
+.dc-top { display: flex; align-items: center; justify-content: space-between; }
+.disk-col .m-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.dc-pct { font-size: 11px; font-weight: 700; }
+.dc-val { font-size: 11px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.disk-col .bar { width: 100%; margin: 0; }
 .card .foot { display: flex; align-items: center; gap: 8px; padding: 9px 15px 12px; }
 .uptime { font-size: 11px; color: var(--muted); flex: 1; }
 
