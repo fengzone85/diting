@@ -5,6 +5,7 @@
 set -euo pipefail
 
 NS=ghcr.io/fengzone85
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_ID=agt_5f4f4bfd979b
 AGENT_TOKEN=862548284f436a1ce28e53b82a1e00348b97089f22091a4e
 PROBE_TARGETS="移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
@@ -16,6 +17,7 @@ echo "==> [2/5] 启动测试服务端 diting-server-test (diting:latest, 8081)"
 docker rm -f diting-server-test >/dev/null 2>&1 || true
 docker run -d --name diting-server-test -p 8081:8081 \
   -v server-data-test:/data -e DB_PATH=/data/monitor.db -e ADMIN_ALLOW_HTTP=1 \
+  -v "$SCRIPT_DIR/server/public:/app/public:ro" \
   "$NS/diting:latest"
 
 echo "==> [3/5] 等待服务端就绪"
