@@ -28,12 +28,13 @@ const app = express();
 // 供应用层限流按客户端区分（而非全部归到 127.0.0.1）。Nginx 已设置 X-Forwarded-For。
 app.set('trust proxy', true);
 
-// 安全响应头：所有资源仅限同源，且禁止任何内联脚本/样式，
-// 从根本上阻断 XSS 窃取 Admin Token 的路径。前端已改为 addEventListener + 事件委托。
+// 安全响应头：所有资源仅限同源，脚本仅限同源，禁止内联脚本。
+// style-src 加 'unsafe-inline'：允许 inline style（进度条宽度/动态颜色等）。
+// script-src 保持 'self'（无 unsafe-inline），阻断 XSS 注入外部脚本的主要路径。
 app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
   );
   // L-1 修复：补充安全响应头，纵深防御 XSS / 点击劫持 / MIME 嗅探
   res.setHeader('X-Content-Type-Options', 'nosniff');
