@@ -392,7 +392,7 @@ function trafficAndDiskHtml(m, a) {
   const quotaBytes = quotaGB * 1e9;
   const tqPct = quotaBytes > 0 ? Math.min(100, tqUsed / quotaBytes * 100) : 100;
   const tqCls = pctClass(tqPct);
-  const tqBar = `<div class="bar"><i class="bar-fill ${tqCls}" style="--pct:${tqPct.toFixed(2)}%"></i></div>`;
+  const tqBar = `<div class="bar"><i class="bar-fill ${tqCls}" style="width:${tqPct.toFixed(2)}%"></i></div>`;
   const tqStr = quotaGB > 0
     ? `${fmtBytes(tqUsed)} / ${fmtBytes(quotaBytes)}`
     : `${fmtBytes(tqUsed)} / ∞`;
@@ -416,7 +416,7 @@ function trafficAndDiskHtml(m, a) {
     <div class="disk-col">
       <span class="dc-top"><span class="m-lbl">硬盘</span><span class="dc-pct">${dPct.toFixed(1)}%</span></span>
       <span class="dc-val">${fmtBytes(dUsed)} / ${fmtBytes(dTotal)}</span>
-      <div class="bar"><i class="bar-fill ${dCls}" style="--pct:${dPct.toFixed(2)}%"></i></div>
+      <div class="bar"><i class="bar-fill ${dCls}" style="width:${dPct.toFixed(2)}%"></i></div>
     </div>
   </div>`;
 }
