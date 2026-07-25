@@ -266,7 +266,7 @@ async function loadOverview() {
       <div class="ov-block-h">📶 流量概览 <small>（本月累计 · 仅在线节点）</small></div>
       <div class="ov-traffic">
         <div class="t-num">↓↑ ${fmtBytes(o.traffic_used_bytes || 0)}</div>
-        <div class="t-bar"><div class="bar"><i class="bar-fill ${pctClass(pct)}" style="width:${pct.toFixed(2)}%"></i></div></div>
+        <div class="t-bar"><div class="bar"><div class="bar-fill ${pctClass(pct)}" style="width:${pct.toFixed(2)}%"></div></div></div>
         <div class="t-quota">${quota > 0 ? ('总配额 ' + quota + ' GB · 已用 ' + pct.toFixed(1) + '%') : '未配置总流量配额'}</div>
       </div>
     </div>
@@ -380,7 +380,7 @@ function trafficAndDiskHtml(m, a) {
   const quotaBytes = quotaGB * 1e9;
   const tqPct = quotaBytes > 0 ? Math.min(100, tqUsed / quotaBytes * 100) : 100;
   const tqCls = pctClass(tqPct);
-  const tqBar = `<div class="bar"><i class="bar-fill ${tqCls}" style="width:${tqPct.toFixed(2)}%"></i></div>`;
+  const tqBar = `<div class="bar"><div class="bar-fill ${tqCls}" style="width:${tqPct.toFixed(2)}%"></div></div>`;
   const tqStr = quotaGB > 0
     ? `${fmtBytes(tqUsed)} / ${fmtBytes(quotaBytes)}`
     : `${fmtBytes(tqUsed)} / ∞`;
@@ -404,7 +404,7 @@ function trafficAndDiskHtml(m, a) {
     <div class="disk-col">
       <span class="dc-top"><span class="m-lbl">硬盘</span><span class="dc-pct">${dPct.toFixed(1)}%</span></span>
       <span class="dc-val">${fmtBytes(dUsed)} / ${fmtBytes(dTotal)}</span>
-      <div class="bar"><i class="bar-fill ${dCls}" style="width:${dPct.toFixed(2)}%"></i></div>
+      <div class="bar"><div class="bar-fill ${dCls}" style="width:${dPct.toFixed(2)}%"></div></div>
     </div>
   </div>`;
 }
