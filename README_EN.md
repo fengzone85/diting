@@ -234,6 +234,18 @@ The agent actively pings / TCP-probes **public infrastructures hardcoded in its 
 
 > Real-time traffic (live up/down rate) is a prime example of such a safe enhancement: the rate is computed locally on the agent from its own two samples (`net_rx_rate`/`net_tx_rate`), shipped through the existing report channel, and displayed by polling the frontend — no command channel added, no fingerprint collected. This project already ships a live rate readout in the agent detail view, refreshing every 3 seconds.
 
+## Remote dynamic config / self-update: why we reject it (vs. command-channel monitors)
+
+Some monitors let the server push config to agents — e.g. an `X-Agent-Config-Md5` response header carrying sampling interval, traffic correction, and probe targets, hot-reloaded without restart — and let agents self-update by fetching an install script from the server and running `bash -s install` as root (as seen in Cloudflare-Worker–based agents). Both are command channels, which is precisely what this project omits.
+
+- **Trust boundary collapses**: a server→agent downlink implicitly trusts the server. Once the server is compromised, the attacker can push instructions to *every* agent, turning the fleet into remotely controllable nodes (or a distributed probe jump host).
+- **Code-execution surface**: auto-update `bash -s install` hands root execution to "remote script + script source". If the worker URL / CDN is MITM'd or supply-chain poisoned, agents run arbitrary scripts as root (RCE / supply-chain attack).
+- **Consistent with no-fingerprint**: server-pushed sampling policy or probe targets are just another variant of "server influences agent behavior" — rejected wholesale.
+
+Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in the agent; network-quality probe targets are hardcoded locally in `PROBE_TARGETS` (default: three carrier DNS + 8.8.8.8) and the server *never* pushes any; updating an agent is a local ops action (`sudo bash install.sh --update-agent`, preserving the registered identity), never a remote self-pull.
+
+> Note: GPU model (from `nvidia-smi` / `lspci`) is a host fingerprint and conflicts with our "no kernel/GPU/public-IP" rule, so we do not implement GPU monitoring either.
+
 ## Third-party dependencies & privacy
 - **Zero external front-end requests**: ECharts is vendored locally at `server/public/vendor/echarts.min.js`; the dashboard loads no CDN scripts. The server sets a strict `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; ...` with **no `unsafe-inline`**; all front-end interactions use `addEventListener` event delegation, which closes the XSS path that could steal the admin token.
 - **Mail dependency**: alerts use `nodemailer` v9 (QQ Mail SMTP). After a major-version upgrade the transport is validated via `transporter.verify()`; just configure a real `SMTP_PASS` at deploy time.
