@@ -266,7 +266,7 @@ async function loadOverview() {
       <div class="ov-block-h">📶 流量概览 <small>（本月累计 · 仅在线节点）</small></div>
       <div class="ov-traffic">
         <div class="t-num">↓↑ ${fmtBytes(o.traffic_used_bytes || 0)}</div>
-        <div class="t-bar"><div class="bar"><i class="${pctClass(pct)}" data-pct="${pct}"></i></div></div>
+        <div class="t-bar"><div class="bar"><i class="bar-fill ${pctClass(pct)}" style="width:${pct.toFixed(2)}%"></i></div></div>
         <div class="t-quota">${quota > 0 ? ('总配额 ' + quota + ' GB · 已用 ' + pct.toFixed(1) + '%') : '未配置总流量配额'}</div>
       </div>
     </div>
@@ -274,12 +274,6 @@ async function loadOverview() {
       <div class="ov-block-h">🗂️ 分组概览</div>
       <div class="grp-list">${grp}</div>
     </div>`;
-  $('ovExtra').querySelectorAll('.bar > i').forEach((el) => {
-    const p = Number(el.dataset.pct || 0);
-    el.style.width = p + '%';
-    const cls = pctClass(p);
-    el.className = cls ? 'bar-i ' + cls : 'bar-i';
-  });
 }
 
 // ---------- grid ----------
@@ -338,12 +332,6 @@ function renderGrid(agents, histMap) {
   }).join('');
   grid.innerHTML = html;
   initDragSort();
-  grid.querySelectorAll('.bar > i').forEach((el) => {
-    const p = Number(el.dataset.pct || 0);
-    el.style.width = p + '%';
-    const cls = pctClass(p);
-    el.className = cls ? 'bar-i ' + cls : 'bar-i';
-  });
   renderClients();
 }
 
