@@ -1,0 +1,15 @@
+/* setup.html 专用样式 —— 独立文件以符合 CSP style-src 'self'（禁用内联） */
+.setup-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+.setup-card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:32px 28px; max-width:480px; width:100%; box-shadow:0 8px 30px rgba(0,0,0,.3); text-align:center; }
+.setup-logo { font-size:36px; margin-bottom:8px; }
+.setup-card h1 { margin:0 0 6px; font-size:20px; }
+.setup-sub { color:var(--muted); margin:0 0 16px; font-size:13px; }
+.setup-hint { color:var(--muted); font-size:12px; margin:12px 0; line-height:1.5; text-align:left; }
+.token-box { background:var(--bg); border:1px solid var(--accent); border-radius:8px; padding:12px; font-family:monospace; font-size:13px; word-break:break-all; margin:12px 0; text-align:left; }
+.setup-card .btn { display:inline-block; padding:10px 20px; border-radius:8px; border:none; cursor:pointer; font-size:14px; font-weight:600; }
+.setup-card .btn-block { display:block; width:100%; }
+.setup-card .btn-primary { background:var(--accent); color:#fff; }
+.setup-card .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+.setup-card .btn-ghost { background:transparent; border:1px solid var(--border); color:var(--fg); margin-top:8px; }
+.setup-card .err { color:var(--red); font-size:12px; margin:8px 0; min-height:18px; }
+.setup-card .locked { color:var(--warn); font-size:13px; margin:12px 0; }
