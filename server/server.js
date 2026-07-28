@@ -6,10 +6,11 @@ const db = require('./src/db');
 const api = require('./src/api');
 const komari = require('./src/komari');
 const alerts = require('./src/alerts');
+const ai = require('./src/ai');
 const { safeEqual, ipWhitelist } = require('./src/auth');
 const { sanitizeCss } = require('./src/validate');
 
-// 读取版本号与构建时间（install.sh 部署时写入 _build_time，版本来自 package.json）
+// 读取版本号与构建时间（diting.sh 部署时写入 _build_time，版本来自 package.json）
 const APP_VERSION = (() => {
   try { return require('./package.json').version || '1.0.0'; } catch (e) { return '1.0.0'; }
 })();
@@ -18,7 +19,7 @@ const APP_BUILD_TIME = (() => {
     const pkg = require('./package.json');
     if (pkg._build_time && pkg._build_time !== 'BUILD_TIME_PLACEHOLDER') return pkg._build_time;
   } catch (e) {}
-  // 回退：读取构建时间文件（install.sh 生成）
+  // 回退：读取构建时间文件（diting.sh 生成）
   try { return fs.readFileSync(path.join(__dirname, 'build_time.txt'), 'utf-8').trim(); } catch (e) {}
   return 'unknown';
 })();
@@ -219,6 +220,10 @@ function runPrune() {
   try {
     const n = db.prune(retentionDays);
     if (n > 0) console.log(`[prune] removed ${n} old metrics (retention ${retentionDays}d)`);
+    // 同步清理 AI 报告（按 ai_config.log_retention_days，独立于 metrics 保留期）
+    const aiRetention = db.getAiConfig().log_retention_days || 30;
+    const na = db.pruneAiReports(aiRetention);
+    if (na > 0) console.log(`[prune] removed ${na} old ai_reports (retention ${aiRetention}d)`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);
@@ -237,6 +242,7 @@ const PORT = Number(process.env.PORT || 8081);
 const server = app.listen(PORT, () => {
   console.log(`[monitor] server listening on :${PORT}`);
   alerts.start();
+  ai.start();
 });
 
 // Komari 兼容 WebSocket：主题通过 ws://host/api/clients 发送 "get" 获取实时快照。

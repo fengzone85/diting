@@ -7,15 +7,15 @@
 #   # 最小化镜像可能未预装 curl，先安装（仅 Debian/Ubuntu 等 apt 系统需要）
 #   apt-get update && apt-get install -y curl
 #   # 下载安装脚本（默认分支 master）
-#   curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/install.sh -o install.sh
-#   chmod +x install.sh
-#   sudo ./install.sh
+#   curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/diting.sh -o diting.sh
+#   chmod +x diting.sh
+#   sudo ./diting.sh
 #
 # 也可作为管理脚本重复运行（查看状态 / 卸载 / 更新）。
 #
 # 安全说明：
 #   - 本脚本只下载本项目自有文件（agent 载荷）或 git clone 本项目源码，
-#     不执行任何第三方二进制；仍建议下载后先 `cat install.sh` 审查。
+#     不执行任何第三方二进制；仍建议下载后先 `cat diting.sh` 审查。
 #   - 受控端注册使用服务端 SETUP_TOKEN，仅用于创建客户端记录，不建立任何
 #     指令通道（agent 注册后依旧只上报指标）。
 #   - 供应链完整性（L-6）：更新本脚本时可用 `SP_INSTALL_SHA256=<已知良好哈希>`
@@ -63,39 +63,39 @@ show_usage() {
 谛听轻量探针 一键部署脚本
 
 用法（交互）：
-  sudo bash install.sh                 # 显示菜单，逐项选择
+  sudo bash diting.sh                 # 显示菜单，逐项选择
 
 用法（非交互 / 一键）：
   # 安装服务端（Docker，自动生成强随机令牌）
-  sudo bash install.sh --install-server
+  sudo bash diting.sh --install-server
 
   # 安装受控端（需先在服务端后台「新建客户端」拿到 ID/Token）
-  sudo bash install.sh --install-agent --server https://your-server:8008 --id NODE1 --token SECRET
+  sudo bash diting.sh --install-agent --server https://your-server:8008 --id NODE1 --token SECRET
 
   # 安装受控端（一键自助注册：只需服务端地址 + SETUP_TOKEN）
-  sudo bash install.sh --install-agent --server https://your-server:8008 --setup-token <SETUP_TOKEN>
+  sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-token <SETUP_TOKEN>
 
   # 更新本安装脚本（覆盖为 GitHub 最新版）
-  sudo bash install.sh --update-script
+  sudo bash diting.sh --update-script
 
   # 更新服务端（拉取最新源码并重建容器）
-  sudo bash install.sh --update-server
+  sudo bash diting.sh --update-server
 
   # 更新受控端（保留已注册身份，拉取最新 agent 代码）
-  sudo bash install.sh --update-agent
+  sudo bash diting.sh --update-agent
 
   # 查看状态 / 卸载
-  sudo bash install.sh --status
-  sudo bash install.sh --uninstall
+  sudo bash diting.sh --status
+  sudo bash diting.sh --uninstall
 
   # 数据库备份 / 恢复 / 管理
-  sudo bash install.sh --backup [输出路径]         # 备份数据库（默认存到 $DB_BACKUP_DIR）
-  sudo bash install.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
-  sudo bash install.sh --backup-list               # 列出已有备份
-  sudo bash install.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
+  sudo bash diting.sh --backup [输出路径]         # 备份数据库（默认存到 $DB_BACKUP_DIR）
+  sudo bash diting.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
+  sudo bash diting.sh --backup-list               # 列出已有备份
+  sudo bash diting.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
 
   # 管理员 Token 重置（丢失 Token 时使用，需 SSH 登录服务器）
-  sudo bash install.sh --reset-admin-token         # 生成新管理员 Token（旧 Token 立即失效）
+  sudo bash diting.sh --reset-admin-token         # 生成新管理员 Token（旧 Token 立即失效）
 
 选项：
   --install-server        安装服务端（Docker）
@@ -183,14 +183,14 @@ version_gt() {
     [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
 }
 
-# 抓取远端 install.sh 的 SCRIPT_VERSION（带短超时，静默失败返回空串，不阻塞菜单）。
+# 抓取远端 diting.sh 的 SCRIPT_VERSION（带短超时，静默失败返回空串，不阻塞菜单）。
 remote_script_version() {
     local v=""
     if command -v curl >/dev/null 2>&1; then
-        v="$(curl -fsSL --max-time 3 "$REPO_RAW/install.sh" 2>/dev/null \
+        v="$(curl -fsSL --max-time 3 "$REPO_RAW/diting.sh" 2>/dev/null \
              | grep -m1 '^SCRIPT_VERSION=' | sed -E 's/^SCRIPT_VERSION="?([^"]*)"?.*/\1/')"
     elif command -v wget >/dev/null 2>&1; then
-        v="$(wget -qO- --timeout=3 "$REPO_RAW/install.sh" 2>/dev/null \
+        v="$(wget -qO- --timeout=3 "$REPO_RAW/diting.sh" 2>/dev/null \
              | grep -m1 '^SCRIPT_VERSION=' | sed -E 's/^SCRIPT_VERSION="?([^"]*)"?.*/\1/')"
     fi
     printf '%s' "$v"
@@ -208,10 +208,10 @@ install_agent() {
     [[ -n "$A_SETUP_NAME" ]] && args+=(--setup-name "$A_SETUP_NAME")
     [[ -n "$A_INTERVAL" ]]   && args+=(--interval "$A_INTERVAL")
 
-    # 仓库内运行：直接复用本地 agent/install.sh（已充分测试）
-    if [[ -f "$SCRIPT_DIR/agent/install.sh" ]]; then
-        echo -e "${GREEN}[OK]   使用本地 agent/install.sh${NC}"
-        bash "$SCRIPT_DIR/agent/install.sh" "${args[@]}"
+    # 仓库内运行：直接复用本地 agent/diting.sh（已充分测试）
+    if [[ -f "$SCRIPT_DIR/agent/diting.sh" ]]; then
+        echo -e "${GREEN}[OK]   使用本地 agent/diting.sh${NC}"
+        bash "$SCRIPT_DIR/agent/diting.sh" "${args[@]}"
         return
     fi
 
@@ -219,12 +219,12 @@ install_agent() {
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载受控端载荷…${NC}"
     # L-6：可用 SP_AGENT_SHA256S（按序逗号串）对下载文件做 SHA256 校验
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "diting.sh unditing.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; exit 1
     fi
-    chmod +x "$tmp/install.sh"
-    bash "$tmp/install.sh" "${args[@]}"
+    chmod +x "$tmp/diting.sh"
+    bash "$tmp/diting.sh" "${args[@]}"
     rm -rf "$tmp"
 }
 
@@ -399,16 +399,16 @@ install_server() {
 # ── 更新：本安装脚本自身 ──────────────────────────────────────────────────────
 update_script() {
     ensure_deps || return 1
-    echo -e "${YELLOW}[信息] 下载最新 install.sh…${NC}"
+    echo -e "${YELLOW}[信息] 下载最新 diting.sh…${NC}"
     local new; new="$(mktemp)"
     # L-6：若设置了 SP_INSTALL_SHA256（已知良好版本的哈希），下载后强制校验，
-    # 防止 GitHub CDN / 中间人投毒。用法：SP_INSTALL_SHA256=xxxx sudo bash install.sh --update-script
-    if ! download "$REPO_RAW/install.sh" "$new" "${SP_INSTALL_SHA256:-}"; then
-        echo -e "${RED}[错误] 下载 install.sh 失败${NC}" >&2; rm -f "$new"; return 1
+    # 防止 GitHub CDN / 中间人投毒。用法：SP_INSTALL_SHA256=xxxx sudo bash diting.sh --update-script
+    if ! download "$REPO_RAW/diting.sh" "$new" "${SP_INSTALL_SHA256:-}"; then
+        echo -e "${RED}[错误] 下载 diting.sh 失败${NC}" >&2; rm -f "$new"; return 1
     fi
     # 安全闸：下载到的脚本若语法校验不通过，绝不覆盖当前可用脚本
     if ! bash -n "$new" >/dev/null 2>&1; then
-        echo -e "${RED}[错误] 下载到的 install.sh 语法校验未通过，已放弃覆盖，当前脚本保持不变${NC}" >&2
+        echo -e "${RED}[错误] 下载到的 diting.sh 语法校验未通过，已放弃覆盖，当前脚本保持不变${NC}" >&2
         rm -f "$new"; return 1
     fi
     # 展示版本变化与新版要点，让用户直观了解本次更新内容
@@ -427,7 +427,7 @@ update_script() {
     if [[ -f "$0" && -w "$(dirname "$0")" ]]; then
         target="$(realpath "$0")"
     else
-        target="/usr/local/bin/diting-install.sh"
+        target="/usr/local/bin/diting-diting.sh"
     fi
     cp "$new" "$target"
     chmod +x "$target"
@@ -484,11 +484,11 @@ update_server() {
     fi
 
     # 关键：源码已同步到最新，但当前进程仍是「旧脚本」的内存逻辑。
-    # 重新执行磁盘上的最新 install.sh，确保后续停旧容器/重建用的是最新代码，
+    # 重新执行磁盘上的最新 diting.sh，确保后续停旧容器/重建用的是最新代码，
     # 避免「拉了新代码却跑着旧脚本」导致端口冲突等问题。用 SP_REEXECED 防自循环。
-    if [[ -z "${SP_REEXECED:-}" && -f "$SRC_DIR/install.sh" ]]; then
-        echo -e "${YELLOW}[信息] 重新加载磁盘上的最新 install.sh 以应用更新…${NC}"
-        SP_REEXECED=1 exec bash "$SRC_DIR/install.sh" --update-server
+    if [[ -z "${SP_REEXECED:-}" && -f "$SRC_DIR/diting.sh" ]]; then
+        echo -e "${YELLOW}[信息] 重新加载磁盘上的最新 diting.sh 以应用更新…${NC}"
+        SP_REEXECED=1 exec bash "$SRC_DIR/diting.sh" --update-server
     fi
 
     cd "$SRC_DIR/server"
@@ -536,13 +536,13 @@ update_agent() {
     # 强制从 GitHub 拉取最新 agent 载荷（无论本脚本是否本地旧版），保证更新到最新
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载最新受控端载荷…${NC}"
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "diting.sh unditing.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; return 1
     fi
-    chmod +x "$tmp/install.sh"
+    chmod +x "$tmp/diting.sh"
     # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务
-    bash "$tmp/install.sh" --server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL"
+    bash "$tmp/diting.sh" --server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL"
     rm -rf "$tmp"
     echo -e "${GREEN}[OK]   受控端已更新并重启${NC}"
 }
@@ -762,7 +762,7 @@ do_backup_list() {
     echo "== 数据库备份列表 =="
     if [[ ! -d "$DB_BACKUP_DIR" ]]; then
         echo "  暂无备份（目录 $DB_BACKUP_DIR 不存在）"
-        echo -e "  ${YELLOW}首次备份: sudo bash install.sh --backup${NC}"
+        echo -e "  ${YELLOW}首次备份: sudo bash diting.sh --backup${NC}"
         return
     fi
     local count=0
@@ -773,10 +773,10 @@ do_backup_list() {
     local total; total="$(ls "$DB_BACKUP_DIR"/*.db 2>/dev/null | wc -l)"
     if [[ $total -eq 0 ]]; then
         echo "  暂无备份文件"
-        echo -e "  ${YELLOW}首次备份: sudo bash install.sh --backup${NC}"
+        echo -e "  ${YELLOW}首次备份: sudo bash diting.sh --backup${NC}"
     else
         echo -e "  共 ${total} 个备份  |  目录: $DB_BACKUP_DIR"
-        echo -e "  ${YELLOW}恢复: sudo bash install.sh --restore $DB_BACKUP_DIR/<文件名>${NC}"
+        echo -e "  ${YELLOW}恢复: sudo bash diting.sh --restore $DB_BACKUP_DIR/<文件名>${NC}"
     fi
 }
 
@@ -928,8 +928,8 @@ do_reset_admin_token() {
 
 uninstall_all() {
     echo "== 卸载受控端 =="
-    if [[ -f /opt/diting/uninstall.sh ]]; then
-        bash /opt/diting/uninstall.sh || true
+    if [[ -f /opt/diting/unditing.sh ]]; then
+        bash /opt/diting/unditing.sh || true
     else
         echo "  受控端未安装"
     fi
@@ -953,7 +953,7 @@ declare -A I18N_ZH=(
     [menu.install_server]="1) 安装服务端 (Docker)"
     [menu.install_agent]="2) 安装受控端 Agent (systemd)"
     [menu.update_agent]="3) 更新受控端 (拉取最新 agent 代码)"
-    [menu.update_script]="4) 更新安装脚本 (install.sh 自身)"
+    [menu.update_script]="4) 更新安装脚本 (diting.sh 自身)"
     [menu.update_server]="5) 更新服务端 (拉取最新 + 重建)"
     [menu.status]="6) 查看状态"
     [menu.uninstall]="7) 卸载"
@@ -994,7 +994,7 @@ declare -A I18N_EN=(
     [menu.install_server]="1) Install Server (Docker)"
     [menu.install_agent]="2) Install Agent (systemd)"
     [menu.update_agent]="3) Update Agent (fetch latest)"
-    [menu.update_script]="4) Update install.sh (self)"
+    [menu.update_script]="4) Update diting.sh (self)"
     [menu.update_server]="5) Update Server (fetch + rebuild)"
     [menu.status]="6) Status"
     [menu.uninstall]="7) Uninstall"
@@ -1095,7 +1095,7 @@ done
 
 # ── 入口 ───────────────────────────────────────────────────────────────────────
 if [[ "$(id -u)" -ne 0 ]]; then
-    echo -e "${RED}[错误] 必须以 root 运行（sudo bash install.sh）${NC}" >&2
+    echo -e "${RED}[错误] 必须以 root 运行（sudo bash diting.sh）${NC}" >&2
     exit 1
 fi
 

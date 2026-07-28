@@ -1,0 +1,1339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>糖果屋 — 个人作品集</title>
+<meta name="description" content="糖果屋 - Neo-Brutalism 风格个人作品集，展示技能、项目与经历。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   糖果屋 — Neo-Brutalism Portfolio
+   ============================================================ */
+
+/* --- Design Tokens --- */
+:root {
+  --pink: #FF1493;
+  --yellow: #FFE135;
+  --sky: #00BFFF;
+  --lime: #A3E635;
+  --orange: #FF8C42;
+  --purple: #A855F7;
+  --text: #0A0A0A;
+  --bg: #F5F5F0;
+  --black: #000000;
+  --white: #FFFFFF;
+
+  --border: 3px solid #000;
+  --border-thick: 4px solid #000;
+  --shadow-sm: 3px 3px 0 0 #000;
+  --shadow-md: 5px 5px 0 0 #000;
+  --shadow-lg: 7px 7px 0 0 #000;
+  --shadow-xl: 9px 9px 0 0 #000;
+  --radius: 0;
+
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* --- Reset --- */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul, ol { list-style: none; }
+
+img, svg { display: block; max-width: 100%; }
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* --- Utility --- */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: inline-block;
+  background: var(--yellow);
+  border: var(--border);
+  padding: 4px 12px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  line-height: 1.1;
+  margin-bottom: 48px;
+}
+
+/* --- Reveal Animation --- */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* --- Focus Styles --- */
+:focus-visible {
+  outline: 3px solid #000;
+  outline-offset: 3px;
+}
+
+/* --- Skip Link --- */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  background: var(--yellow);
+  border: var(--border);
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  z-index: 9999;
+  transition: top 0.2s;
+}
+.skip-link:focus {
+  top: 16px;
+}
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--white);
+  border-bottom: var(--border);
+  box-shadow: 0 3px 0 0 #000;
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+.nav-logo {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-logo svg { width: 28px; height: 28px; }
+.nav-links {
+  display: flex;
+  gap: 8px;
+}
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.nav-links a:hover,
+.nav-links a.active {
+  border-color: #000;
+  background: var(--yellow);
+}
+.nav-hamburger {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border: var(--border);
+  background: var(--white);
+  box-shadow: var(--shadow-sm);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+}
+.nav-hamburger span {
+  display: block;
+  width: 20px;
+  height: 3px;
+  background: #000;
+}
+.nav-hamburger:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+@media (max-width: 768px) {
+  .nav-links {
+    display: none;
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
+    background: var(--white);
+    border-bottom: var(--border);
+    flex-direction: column;
+    padding: 16px;
+    gap: 4px;
+  }
+  .nav-links.open { display: flex; }
+  .nav-hamburger { display: flex; }
+}
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero {
+  position: relative;
+  padding: 100px 0 80px;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px;
+}
+.hero-inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+.hero h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(3rem, 8vw, 5.5rem);
+  line-height: 1;
+  margin-bottom: 24px;
+  position: relative;
+}
+.hero h1 .highlight {
+  background: var(--pink);
+  color: var(--white);
+  padding: 0 12px;
+  border: var(--border);
+  box-shadow: var(--shadow-md);
+  display: inline-block;
+  transform: rotate(-1deg);
+}
+.hero-subtitle {
+  font-size: 1.2rem;
+  max-width: 480px;
+  margin-bottom: 32px;
+  line-height: 1.7;
+}
+.hero-buttons {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 14px 28px;
+  border: var(--border);
+  box-shadow: var(--shadow-md);
+  transition: transform 0.12s, box-shadow 0.12s;
+  background: var(--white);
+}
+.btn:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-lg);
+}
+.btn:active {
+  transform: translate(4px, 4px);
+  box-shadow: none;
+}
+.btn-primary {
+  background: var(--sky);
+  color: var(--white);
+}
+.btn-accent {
+  background: var(--lime);
+}
+.hero-visual {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hero-visual svg {
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+}
+
+@media (max-width: 768px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-visual { order: -1; }
+  .hero { padding: 60px 0 40px; }
+}
+
+/* ============================================================
+   SKILLS
+   ============================================================ */
+.skills {
+  padding: 80px 0;
+}
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+.skill-card {
+  border: var(--border);
+  box-shadow: var(--shadow-md);
+  padding: 28px;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.skill-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: var(--shadow-lg);
+}
+.skill-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.skill-card-head h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.3rem;
+}
+.skill-percent {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.85rem;
+  background: var(--white);
+  border: 2px solid #000;
+  padding: 2px 8px;
+}
+.skill-bar {
+  height: 28px;
+  border: var(--border);
+  background: var(--white);
+  position: relative;
+  overflow: hidden;
+}
+.skill-bar-fill {
+  height: 100%;
+  width: 0;
+  transition: width 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.skill-card[data-color="pink"] .skill-bar-fill { background: var(--pink); }
+.skill-card[data-color="sky"] .skill-bar-fill { background: var(--sky); }
+.skill-card[data-color="lime"] .skill-bar-fill { background: var(--lime); }
+.skill-card[data-color="orange"] .skill-bar-fill { background: var(--orange); }
+.skill-card[data-color="purple"] .skill-bar-fill { background: var(--purple); }
+.skill-card[data-color="yellow"] .skill-bar-fill { background: var(--yellow); }
+
+.skill-card[data-color="pink"] { background: #FFE0F0; }
+.skill-card[data-color="sky"] { background: #D4F4FF; }
+.skill-card[data-color="lime"] { background: #E8FFD4; }
+.skill-card[data-color="orange"] { background: #FFE8D4; }
+.skill-card[data-color="purple"] { background: #EDDFFF; }
+.skill-card[data-color="yellow"] { background: #FFF8CC; }
+
+/* ============================================================
+   PROJECTS (Bento Grid)
+   ============================================================ */
+.projects {
+  padding: 80px 0;
+}
+.bento-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 220px;
+  gap: 20px;
+}
+.bento-card {
+  border: var(--border);
+  box-shadow: var(--shadow-md);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.15s, box-shadow 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+.bento-card:hover {
+  transform: translate(-3px, -3px);
+  box-shadow: var(--shadow-lg);
+}
+.bento-card:active {
+  transform: translate(3px, 3px);
+  box-shadow: var(--shadow-sm);
+}
+.bento-card h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.4rem;
+  margin-bottom: 8px;
+}
+.bento-card p {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+.bento-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.bento-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 2px solid #000;
+  background: var(--white);
+}
+.bento-card .bento-icon {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  opacity: 0.2;
+}
+
+/* Bento sizing */
+.bento-card:nth-child(1) { grid-column: span 2; grid-row: span 2; }
+.bento-card:nth-child(2) { grid-column: span 2; }
+.bento-card:nth-child(3) { grid-column: span 1; }
+.bento-card:nth-child(4) { grid-column: span 1; }
+.bento-card:nth-child(5) { grid-column: span 2; }
+.bento-card:nth-child(6) { grid-column: span 2; }
+
+.bento-card:nth-child(1) { background: #D4F4FF; }
+.bento-card:nth-child(2) { background: #FFE0F0; }
+.bento-card:nth-child(3) { background: #E8FFD4; }
+.bento-card:nth-child(4) { background: #EDDFFF; }
+.bento-card:nth-child(5) { background: #FFE8D4; }
+.bento-card:nth-child(6) { background: #FFF8CC; }
+
+@media (max-width: 768px) {
+  .bento-grid {
+    grid-template-columns: 1fr;
+    grid-auto-rows: auto;
+  }
+  .bento-card,
+  .bento-card:nth-child(1),
+  .bento-card:nth-child(2),
+  .bento-card:nth-child(3),
+  .bento-card:nth-child(4),
+  .bento-card:nth-child(5),
+  .bento-card:nth-child(6) {
+    grid-column: span 1;
+    grid-row: span 1;
+    min-height: 180px;
+  }
+}
+
+/* ============================================================
+   TIMELINE
+   ============================================================ */
+.timeline {
+  padding: 80px 0;
+}
+.timeline-list {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.timeline-list::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #000;
+}
+.timeline-item {
+  position: relative;
+  padding-left: 64px;
+  margin-bottom: 40px;
+}
+.timeline-dot {
+  position: absolute;
+  left: 8px;
+  top: 4px;
+  width: 28px;
+  height: 28px;
+  border: var(--border);
+  border-radius: 50%;
+  z-index: 1;
+}
+.timeline-card {
+  border: var(--border);
+  box-shadow: var(--shadow-md);
+  padding: 24px;
+  background: var(--white);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.timeline-card:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--shadow-lg);
+}
+.timeline-card h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.2rem;
+  margin-bottom: 4px;
+}
+.timeline-card .timeline-role {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--pink);
+  margin-bottom: 8px;
+}
+.timeline-card .timeline-date {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--yellow);
+  border: 2px solid #000;
+  display: inline-block;
+  padding: 2px 8px;
+  margin-bottom: 12px;
+}
+.timeline-card p {
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+/* ============================================================
+   ABOUT
+   ============================================================ */
+.about {
+  padding: 80px 0;
+}
+.about-card {
+  background: #E8FFD4;
+  border: var(--border-thick);
+  box-shadow: var(--shadow-lg);
+  padding: 48px;
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 40px;
+  align-items: center;
+}
+.about-avatar {
+  width: 180px;
+  height: 180px;
+  border: var(--border);
+  background: var(--white);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.about-avatar svg { width: 100%; height: 100%; }
+.about-info h3 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.8rem;
+  margin-bottom: 12px;
+}
+.about-info p {
+  font-size: 1rem;
+  line-height: 1.8;
+  margin-bottom: 16px;
+}
+.about-stats {
+  display: flex;
+  gap: 24px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+.about-stat {
+  text-align: center;
+}
+.about-stat .stat-num {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 2rem;
+  display: block;
+}
+.about-stat .stat-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+@media (max-width: 600px) {
+  .about-card {
+    grid-template-columns: 1fr;
+    text-align: center;
+    padding: 32px 24px;
+  }
+  .about-avatar { margin: 0 auto; }
+  .about-stats { justify-content: center; }
+}
+
+/* ============================================================
+   CONTACT CTA
+   ============================================================ */
+.contact {
+  padding: 80px 0;
+}
+.contact-cta {
+  background: var(--yellow);
+  border: var(--border-thick);
+  box-shadow: var(--shadow-xl);
+  padding: 64px 48px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.contact-cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.08;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpattern id='dots' x='0' y='0' width='20' height='20' patternUnits='userSpaceOnUse'%3E%3Ccircle cx='4' cy='4' r='3' fill='%23000'/%3E%3C/pattern%3E%3Crect width='100%25' height='100%25' fill='url(%23dots)'/%3E%3C/svg%3E");
+}
+.contact-cta h2 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2rem, 5vw, 3rem);
+  margin-bottom: 16px;
+  position: relative;
+}
+.contact-cta p {
+  font-size: 1.1rem;
+  max-width: 520px;
+  margin: 0 auto 32px;
+  position: relative;
+}
+.contact-buttons {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  position: relative;
+}
+.contact-buttons .btn-email {
+  background: var(--pink);
+  color: var(--white);
+}
+.contact-buttons .btn-github {
+  background: var(--text);
+  color: var(--white);
+}
+.contact-buttons .btn-wechat {
+  background: var(--lime);
+}
+
+@media (max-width: 480px) {
+  .contact-cta { padding: 40px 24px; }
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.footer {
+  background: var(--black);
+  color: var(--white);
+  padding: 48px 0 32px;
+  border-top: var(--border-thick);
+}
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.footer-brand {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.2rem;
+}
+.footer-socials {
+  display: flex;
+  gap: 12px;
+}
+.footer-socials a {
+  width: 40px;
+  height: 40px;
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s, background 0.12s;
+}
+.footer-socials a:hover {
+  background: var(--yellow);
+  transform: translate(-2px, -2px);
+}
+.footer-socials a:active {
+  transform: translate(2px, 2px);
+}
+.footer-socials a svg { width: 20px; height: 20px; fill: #fff; }
+.footer-socials a:hover svg { fill: #000; }
+.footer-bottom {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 2px solid #333;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: #999;
+}
+.footer-bottom span { color: var(--pink); }
+
+/* ============================================================
+   DECORATIVE SVG ELEMENTS
+   ============================================================ */
+.deco {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .skill-bar-fill {
+    width: var(--target) !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- Skip Link -->
+<a href="#main" class="skip-link">跳转到主要内容</a>
+
+<!-- ============================================================
+     NAVIGATION
+     ============================================================ -->
+<nav class="nav" role="navigation" aria-label="主导航">
+  <div class="container nav-inner">
+    <a href="#" class="nav-logo" aria-label="糖果屋首页">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="14" fill="#FF1493" stroke="#000" stroke-width="3"/>
+        <path d="M10 18 Q16 8 22 18" stroke="#FFE135" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <circle cx="11" cy="14" r="2" fill="#000"/>
+        <circle cx="21" cy="14" r="2" fill="#000"/>
+      </svg>
+      糖果屋
+    </a>
+    <button class="nav-hamburger" aria-label="打开菜单" aria-expanded="false" id="hamburger">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="navLinks" role="list">
+      <li><a href="#skills">技能</a></li>
+      <li><a href="#projects">项目</a></li>
+      <li><a href="#timeline">经历</a></li>
+      <li><a href="#about">关于</a></li>
+      <li><a href="#contact">联系</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="main">
+
+<!-- ============================================================
+     HERO
+     ============================================================ -->
+<section class="hero" id="hero" aria-label="首页横幅">
+  <div class="container hero-inner">
+    <div>
+      <p class="section-label">欢迎来到</p>
+      <h1>糖果<br><span class="highlight">屋</span></h1>
+      <p class="hero-subtitle">
+        我是糖果屋的主人 — 一名热爱创造的开发者与设计师。
+        这里收藏了我的技能、项目与故事，用糖果色的世界，建造有趣的东西。
+      </p>
+      <div class="hero-buttons">
+        <a href="#projects" class="btn btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M9 11.24V7.5a2.5 2.5 0 015 0v3.74c1.21.92 2 2.36 2 3.97 0 2.76-2.24 5-5 5s-5-2.24-5-5c0-1.61.79-3.05 2-3.97z"/></svg>
+          查看作品
+        </a>
+        <a href="#contact" class="btn btn-accent">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+          联系我
+        </a>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <!-- Inline SVG: Candy House Illustration -->
+      <svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <!-- Background circle -->
+        <circle cx="200" cy="200" r="180" fill="#FFE135" stroke="#000" stroke-width="4"/>
+        <!-- Candy stripes -->
+        <path d="M60 200 Q200 60 340 200" stroke="#FF1493" stroke-width="12" fill="none" stroke-linecap="round"/>
+        <path d="M80 240 Q200 120 320 240" stroke="#00BFFF" stroke-width="10" fill="none" stroke-linecap="round"/>
+        <!-- House shape -->
+        <rect x="120" y="180" width="160" height="140" fill="#fff" stroke="#000" stroke-width="4"/>
+        <polygon points="100,180 200,100 300,180" fill="#FF8C42" stroke="#000" stroke-width="4"/>
+        <!-- Door -->
+        <rect x="170" y="230" width="60" height="90" fill="#A855F7" stroke="#000" stroke-width="3"/>
+        <circle cx="220" cy="280" r="5" fill="#FFE135"/>
+        <!-- Windows -->
+        <rect x="135" y="200" width="35" height="35" fill="#A3E635" stroke="#000" stroke-width="3"/>
+        <rect x="230" y="200" width="35" height="35" fill="#A3E635" stroke="#000" stroke-width="3"/>
+        <!-- Stars -->
+        <polygon points="80,100 85,115 100,115 88,124 92,139 80,130 68,139 72,124 60,115 75,115" fill="#FF1493" stroke="#000" stroke-width="2"/>
+        <polygon points="320,120 324,130 335,130 326,137 330,148 320,141 310,148 314,137 305,130 316,130" fill="#00BFFF" stroke="#000" stroke-width="2"/>
+        <polygon points="340,280 344,290 355,290 346,297 350,308 340,301 330,308 334,297 325,290 336,290" fill="#A855F7" stroke="#000" stroke-width="2"/>
+        <!-- Ground -->
+        <rect x="40" y="320" width="320" height="10" fill="#000"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SKILLS
+     ============================================================ -->
+<section class="skills" id="skills" aria-labelledby="skills-title">
+  <div class="container">
+    <div class="reveal">
+      <span class="section-label">技能</span>
+      <h2 class="section-title" id="skills-title">我的武器库</h2>
+    </div>
+    <div class="skills-grid">
+      <div class="skill-card reveal" data-color="pink" data-target="92">
+        <div class="skill-card-head">
+          <h3>前端开发</h3>
+          <span class="skill-percent">92%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="92" aria-valuemin="0" aria-valuemax="100" aria-label="前端开发 92%">
+          <div class="skill-bar-fill" style="--target: 92%"></div>
+        </div>
+      </div>
+      <div class="skill-card reveal" data-color="sky" data-target="88">
+        <div class="skill-card-head">
+          <h3>UI/UX 设计</h3>
+          <span class="skill-percent">88%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="88" aria-valuemin="0" aria-valuemax="100" aria-label="UI/UX 设计 88%">
+          <div class="skill-bar-fill" style="--target: 88%"></div>
+        </div>
+      </div>
+      <div class="skill-card reveal" data-color="lime" data-target="85">
+        <div class="skill-card-head">
+          <h3>JavaScript</h3>
+          <span class="skill-percent">85%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="85" aria-valuemin="0" aria-valuemax="100" aria-label="JavaScript 85%">
+          <div class="skill-bar-fill" style="--target: 85%"></div>
+        </div>
+      </div>
+      <div class="skill-card reveal" data-color="orange" data-target="78">
+        <div class="skill-card-head">
+          <h3>后端开发</h3>
+          <span class="skill-percent">78%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="78" aria-valuemin="0" aria-valuemax="100" aria-label="后端开发 78%">
+          <div class="skill-bar-fill" style="--target: 78%"></div>
+        </div>
+      </div>
+      <div class="skill-card reveal" data-color="purple" data-target="80">
+        <div class="skill-card-head">
+          <h3>动效与交互</h3>
+          <span class="skill-percent">80%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="80" aria-valuemin="0" aria-valuemax="100" aria-label="动效与交互 80%">
+          <div class="skill-bar-fill" style="--target: 80%"></div>
+        </div>
+      </div>
+      <div class="skill-card reveal" data-color="yellow" data-target="75">
+        <div class="skill-card-head">
+          <h3>DevOps</h3>
+          <span class="skill-percent">75%</span>
+        </div>
+        <div class="skill-bar" role="progressbar" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100" aria-label="DevOps 75%">
+          <div class="skill-bar-fill" style="--target: 75%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PROJECTS (Bento Grid)
+     ============================================================ -->
+<section class="projects" id="projects" aria-labelledby="projects-title">
+  <div class="container">
+    <div class="reveal">
+      <span class="section-label">项目</span>
+      <h2 class="section-title" id="projects-title">糖果收藏柜</h2>
+    </div>
+    <div class="bento-grid">
+      <article class="bento-card reveal">
+        <div>
+          <h3>谛听监控系统</h3>
+          <p>自托管服务器监控平台，支持多节点、实时数据可视化、告警通知。轻量且强大。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">Node.js</span>
+            <span class="bento-tag">Docker</span>
+            <span class="bento-tag">SQLite</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="20" fill="#00BFFF" stroke="#000" stroke-width="3"/>
+            <path d="M16 24l6 6 10-12" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </article>
+      <article class="bento-card reveal">
+        <div>
+          <h3>糖果 UI 组件库</h3>
+          <p>Neo-Brutalism 风格的开源 UI 组件库，零依赖，即拿即用。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">CSS</span>
+            <span class="bento-tag">Design</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="6" y="6" width="36" height="36" fill="#FF1493" stroke="#000" stroke-width="3"/>
+            <rect x="12" y="12" width="10" height="10" fill="#fff"/>
+            <rect x="26" y="12" width="10" height="10" fill="#FFE135"/>
+            <rect x="12" y="26" width="10" height="10" fill="#A3E635"/>
+            <rect x="26" y="26" width="10" height="10" fill="#00BFFF"/>
+          </svg>
+        </div>
+      </article>
+      <article class="bento-card reveal">
+        <div>
+          <h3>像素画板</h3>
+          <p>在线像素艺术创作工具，支持导出 GIF 动画。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">Canvas</span>
+            <span class="bento-tag">JS</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="8" y="8" width="32" height="32" fill="#A3E635" stroke="#000" stroke-width="3"/>
+            <rect x="12" y="12" width="8" height="8" fill="#000"/>
+            <rect x="28" y="12" width="8" height="8" fill="#000"/>
+            <rect x="12" y="28" width="8" height="8" fill="#000"/>
+            <rect x="28" y="28" width="8" height="8" fill="#000"/>
+          </svg>
+        </div>
+      </article>
+      <article class="bento-card reveal">
+        <div>
+          <h3>每日诗词</h3>
+          <p>每日推送一首古诗词的微信小程序，简洁优雅。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">WeChat</span>
+            <span class="bento-tag">API</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="18" fill="#A855F7" stroke="#000" stroke-width="3"/>
+            <text x="24" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#fff">诗</text>
+          </svg>
+        </div>
+      </article>
+      <article class="bento-card reveal">
+        <div>
+          <h3>Markdown 笔记本</h3>
+          <p>支持双向链接的本地优先 Markdown 笔记应用，知识管理利器。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">Electron</span>
+            <span class="bento-tag">MD</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="10" y="6" width="28" height="36" rx="2" fill="#FF8C42" stroke="#000" stroke-width="3"/>
+            <line x1="16" y1="16" x2="32" y2="16" stroke="#000" stroke-width="3"/>
+            <line x1="16" y1="24" x2="32" y2="24" stroke="#000" stroke-width="3"/>
+            <line x1="16" y1="32" x2="26" y2="32" stroke="#000" stroke-width="3"/>
+          </svg>
+        </div>
+      </article>
+      <article class="bento-card reveal">
+        <div>
+          <h3>天气糖果罐</h3>
+          <p>用糖果色可视化天气数据，让天气预报变得甜蜜可爱。</p>
+        </div>
+        <div>
+          <div class="bento-tags">
+            <span class="bento-tag">React</span>
+            <span class="bento-tag">D3</span>
+          </div>
+          <svg class="bento-icon" viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="20" r="12" fill="#FFE135" stroke="#000" stroke-width="3"/>
+            <path d="M14 32 Q24 28 34 32 Q34 40 24 40 Q14 40 14 32Z" fill="#00BFFF" stroke="#000" stroke-width="3"/>
+          </svg>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     TIMELINE
+     ============================================================ -->
+<section class="timeline" id="timeline" aria-labelledby="timeline-title">
+  <div class="container">
+    <div class="reveal">
+      <span class="section-label">经历</span>
+      <h2 class="section-title" id="timeline-title">糖果时间线</h2>
+    </div>
+    <div class="timeline-list">
+      <div class="timeline-item reveal">
+        <div class="timeline-dot" style="background:#FF8C42"></div>
+        <div class="timeline-card">
+          <h3>糖果科技</h3>
+          <p class="timeline-role">高级前端工程师</p>
+          <span class="timeline-date">2023 — 至今</span>
+          <p>负责核心产品的前端架构设计与团队建设，主导从 0 到 1 搭建组件库，性能优化提升 60%。</p>
+        </div>
+      </div>
+      <div class="timeline-item reveal">
+        <div class="timeline-dot" style="background:#A855F7"></div>
+        <div class="timeline-card">
+          <h3>甜蜜工坊</h3>
+          <p class="timeline-role">全栈开发者</p>
+          <span class="timeline-date">2021 — 2023</span>
+          <p>独立负责多个 SaaS 产品的全栈开发，从数据库设计到界面实现，服务超过 10 万用户。</p>
+        </div>
+      </div>
+      <div class="timeline-item reveal">
+        <div class="timeline-dot" style="background:#00BFFF"></div>
+        <div class="timeline-card">
+          <h3>彩虹设计事务所</h3>
+          <p class="timeline-role">UI 设计师</p>
+          <span class="timeline-date">2019 — 2021</span>
+          <p>负责品牌视觉与界面设计，为 30+ 品牌提供设计方案，获得 2 项设计大赛奖项。</p>
+        </div>
+      </div>
+      <div class="timeline-item reveal">
+        <div class="timeline-dot" style="background:#A3E635"></div>
+        <div class="timeline-card">
+          <h3>糖果大学</h3>
+          <p class="timeline-role">计算机科学学士</p>
+          <span class="timeline-date">2015 — 2019</span>
+          <p>主修计算机科学，辅修数字艺术。毕业设计获得优秀毕业论文，GPA 3.8/4.0。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     ABOUT
+     ============================================================ -->
+<section class="about" id="about" aria-labelledby="about-title">
+  <div class="container">
+    <div class="reveal">
+      <span class="section-label">关于</span>
+      <h2 class="section-title" id="about-title">糖果屋的主人</h2>
+    </div>
+    <div class="about-card reveal">
+      <div class="about-avatar">
+        <svg viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <rect width="180" height="180" fill="#FFE135"/>
+          <!-- Face -->
+          <circle cx="90" cy="90" r="70" fill="#FFE0C2" stroke="#000" stroke-width="3"/>
+          <!-- Hair -->
+          <path d="M30 70 Q90 10 150 70" fill="#FF1493" stroke="#000" stroke-width="3"/>
+          <!-- Eyes -->
+          <circle cx="65" cy="90" r="8" fill="#000"/>
+          <circle cx="115" cy="90" r="8" fill="#000"/>
+          <circle cx="67" cy="88" r="3" fill="#fff"/>
+          <circle cx="117" cy="88" r="3" fill="#fff"/>
+          <!-- Smile -->
+          <path d="M70 115 Q90 135 110 115" stroke="#000" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <!-- Blush -->
+          <ellipse cx="55" cy="110" rx="10" ry="6" fill="#FF1493" opacity="0.4"/>
+          <ellipse cx="125" cy="110" rx="10" ry="6" fill="#FF1493" opacity="0.4"/>
+          <!-- Glasses -->
+          <rect x="50" y="78" width="30" height="24" rx="4" fill="none" stroke="#000" stroke-width="2.5"/>
+          <rect x="100" y="78" width="30" height="24" rx="4" fill="none" stroke="#000" stroke-width="2.5"/>
+          <line x1="80" y1="90" x2="100" y2="90" stroke="#000" stroke-width="2.5"/>
+        </svg>
+      </div>
+      <div class="about-info">
+        <h3>你好！我是糖果屋的主人</h3>
+        <p>
+          一名热爱技术与设计的创造者。我相信好的产品应该既实用又有趣，
+          就像糖果一样，让人在使用的过程中感到甜蜜与惊喜。
+        </p>
+        <p>
+          工作之外，我喜欢画画、收集复古键盘、以及在家附近的公园散步。
+          这个网站就是我的糖果屋 — 每一颗糖果都是一个项目、一段经历、一份热爱。
+        </p>
+        <div class="about-stats">
+          <div class="about-stat">
+            <span class="stat-num">50+</span>
+            <span class="stat-label">完成项目</span>
+          </div>
+          <div class="about-stat">
+            <span class="stat-num">8+</span>
+            <span class="stat-label">年经验</span>
+          </div>
+          <div class="about-stat">
+            <span class="stat-num">30+</span>
+            <span class="stat-label">满意客户</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     CONTACT CTA
+     ============================================================ -->
+<section class="contact" id="contact" aria-labelledby="contact-title">
+  <div class="container">
+    <div class="contact-cta reveal">
+      <h2 id="contact-title">让我们一起<br>创造甜蜜的东西</h2>
+      <p>
+        有项目想法？想聊聊设计？或者只是想打个招呼？
+        糖果屋的门永远敞开，期待你的来信。
+      </p>
+      <div class="contact-buttons">
+        <a href="mailto:hello@candyhouse.dev" class="btn btn-email">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+          发邮件
+        </a>
+        <a href="#" class="btn btn-github" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+        <a href="#" class="btn btn-wechat" aria-label="微信">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 01.213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 00.167-.054l1.903-1.114a.864.864 0 01.717-.098 10.16 10.16 0 002.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178A1.17 1.17 0 014.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 01-1.162 1.178 1.17 1.17 0 01-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 01.598.082l1.584.926a.272.272 0 00.14.045c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 01-.023-.156.49.49 0 01.201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-7.062-6.122zm-2.59 2.826c.535 0 .969.44.969.982a.976.976 0 01-.969.983.976.976 0 01-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 01-.969.983.976.976 0 01-.969-.983c0-.542.434-.982.969-.982z"/></svg>
+          微信
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================================================
+     FOOTER
+     ============================================================ -->
+<footer class="footer" role="contentinfo">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">糖果屋</div>
+      <nav class="footer-socials" aria-label="社交链接">
+        <a href="#" aria-label="GitHub">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+        <a href="#" aria-label="Twitter">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+        <a href="#" aria-label="邮箱">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+        </a>
+      </nav>
+    </div>
+    <div class="footer-bottom">
+      <p>用 <span>♥</span> 与糖果建造 © 2026 糖果屋</p>
+    </div>
+  </div>
+</footer>
+
+<!-- ============================================================
+     JAVASCRIPT
+     ============================================================ -->
+<script>
+(function() {
+  'use strict';
+
+  /* --------------------------------------------------------
+     Mobile Menu Toggle
+     -------------------------------------------------------- */
+  const hamburger = document.getElementById('hamburger');
+  const navLinks = document.getElementById('navLinks');
+
+  if (hamburger && navLinks) {
+    hamburger.addEventListener('click', function() {
+      const isOpen = navLinks.classList.toggle('open');
+      hamburger.setAttribute('aria-expanded', isOpen);
+    });
+
+    // Close menu on link click
+    navLinks.querySelectorAll('a').forEach(function(link) {
+      link.addEventListener('click', function() {
+        navLinks.classList.remove('open');
+        hamburger.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
+  /* --------------------------------------------------------
+     IntersectionObserver — Reveal on Scroll
+     -------------------------------------------------------- */
+  const revealElements = document.querySelectorAll('.reveal');
+
+  if ('IntersectionObserver' in window) {
+    const revealObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, {
+      threshold: 0.15,
+      rootMargin: '0px 0px -50px 0px'
+    });
+
+    revealElements.forEach(function(el) {
+      revealObserver.observe(el);
+    });
+  } else {
+    // Fallback: show all
+    revealElements.forEach(function(el) {
+      el.classList.add('visible');
+    });
+  }
+
+  /* --------------------------------------------------------
+     Skill Bar Animation
+     -------------------------------------------------------- */
+  const skillCards = document.querySelectorAll('.skill-card');
+
+  if ('IntersectionObserver' in window) {
+    const skillObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          var card = entry.target;
+          var target = card.getAttribute('data-target');
+          var fill = card.querySelector('.skill-bar-fill');
+          if (fill && target) {
+            fill.style.width = target;
+          }
+          skillObserver.unobserve(card);
+        }
+      });
+    }, {
+      threshold: 0.5
+    });
+
+    skillCards.forEach(function(card) {
+      skillObserver.observe(card);
+    });
+  } else {
+    // Fallback: fill all
+    skillCards.forEach(function(card) {
+      var target = card.getAttribute('data-target');
+      var fill = card.querySelector('.skill-bar-fill');
+      if (fill && target) {
+        fill.style.width = target;
+      }
+    });
+  }
+
+  /* --------------------------------------------------------
+     Active Nav Link Highlight on Scroll
+     -------------------------------------------------------- */
+  var sections = document.querySelectorAll('section[id]');
+  var navAnchors = document.querySelectorAll('.nav-links a');
+
+  if ('IntersectionObserver' in window && sections.length) {
+    var navObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          navAnchors.forEach(function(a) {
+            a.classList.remove('active');
+          });
+          var activeLink = document.querySelector('.nav-links a[href="#' + entry.target.id + '"]');
+          if (activeLink) {
+            activeLink.classList.add('active');
+          }
+        }
+      });
+    }, {
+      threshold: 0.3,
+      rootMargin: '-80px 0px -40% 0px'
+    });
+
+    sections.forEach(function(section) {
+      navObserver.observe(section);
+    });
+  }
+
+})();
+</script>
+
+</body>
+</html>

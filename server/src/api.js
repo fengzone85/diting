@@ -96,13 +96,13 @@ const setupRateLimit = (req, res, next) => {
   next();
 };
 // 初始化端点：仅在「无任何有效 Token」时可用。一旦生成本端点永久失效（返回 410 Gone），
-// 后续重置 Token 只能通过 SSH 运行 install.sh --reset-admin-token，彻底杜绝 Web 重置风险。
+// 后续重置 Token 只能通过 SSH 运行 diting.sh --reset-admin-token，彻底杜绝 Web 重置风险。
 router.post('/setup/generate', setupRateLimit, (req, res) => {
   // 任何有效 Token 存在一律拒绝，返回 410 Gone
   if (getAdminToken()) {
     return res.status(410).json({
       error: 'already initialized',
-      message: '管理员 Token 已存在，本端点已永久禁用。重置 Token 请通过 SSH 运行：sudo bash install.sh --reset-admin-token'
+      message: '管理员 Token 已存在，本端点已永久禁用。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
     });
   }
   // 生成新 Token 并写入 .env（唯一来源）
@@ -129,10 +129,10 @@ router.post('/setup/generate', setupRateLimit, (req, res) => {
 });
 
 // ---- 一键安装命令生成（Nezha 风格：服务端把地址 + 每客户端令牌预填进命令）----
-// 三条接入路径：① 原生版（Linux systemd + Python，install.sh 自举下载配套文件）；
+// 三条接入路径：① 原生版（Linux systemd + Python，diting.sh 自举下载配套文件）；
 // ② Docker 版（现场从源码 git 构建镜像并运行，无需任何仓库账号）；
 // ③ Windows 版（PowerShell 一键：下载 install.ps1 → 自举拉取 agent 载荷 → 注册计划任务）。
-// 仓库 raw 基址（install.sh 位于根，agent 载荷位于 <base>/agent/）；可用 AGENT_RAW_REPO 覆盖。
+// 仓库 raw 基址（diting.sh 位于根，agent 载荷位于 <base>/agent/）；可用 AGENT_RAW_REPO 覆盖。
 const REPO_BASE = (process.env.AGENT_RAW_REPO || 'https://raw.githubusercontent.com/fengzone85/diting/master').replace(/\/+$/, '');
 const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent';
 const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 15);
@@ -150,7 +150,7 @@ function getPublicBaseUrl(req) {
   return `${proto}://${host}`;
 }
 
-// Nezha 风格：一条命令搞定对接。原生版走根 install.sh（自动拉取 agent 载荷并装 systemd）；
+// Nezha 风格：一条命令搞定对接。原生版走根 diting.sh（自动拉取 agent 载荷并装 systemd）；
 // Docker 版现场从源码 git 构建镜像并运行，无需任何仓库账号。
 // probeTargets：网络质量自测目标（格式 label:host[:port] 逗号分隔），服务端可配置；
 // 为空则受控端回退到各自代码里的内置默认。部署时直接写进安装命令，免去手动改环境变量。
@@ -160,9 +160,9 @@ function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTar
   const ptEnv = probeTargets ? ` -e PROBE_TARGETS=${probeTargets}` : '';
   const ptWin = probeTargets ? ` -ProbeTargets '${probeTargets}'` : '';
   // 原生版采用 Komari 风格：先下载成文件、chmod +x、再 sudo 执行（相对 curl|bash 更透明、可审阅）。
-  const native = `curl -fsSL ${REPO_BASE}/install.sh -o install.sh
-chmod +x install.sh
-sudo ./install.sh --install-agent --repo ${REPO_BASE} --server ${serverUrl} --id ${agentId} --token ${agentToken} --interval ${iv}${ptArg}`;
+  const native = `curl -fsSL ${REPO_BASE}/diting.sh -o diting.sh
+chmod +x diting.sh
+sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${serverUrl} --id ${agentId} --token ${agentToken} --interval ${iv}${ptArg}`;
   const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${serverUrl} -e AGENT_ID=${agentId} -e AGENT_TOKEN=${agentToken} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
   // Windows 版：一条 PowerShell 命令。外层用双引号、内部一律单引号，避免引号嵌套。
   // install.ps1 会自举下载 windows_agent.py/win_collector.py/requirements.txt 到
