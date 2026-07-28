@@ -20,7 +20,7 @@ description: 无 Docker 的原生 systemd 部署方式
 ## 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting.sh | bash
 ```
 
 支持交互模式和非交互模式：
@@ -93,7 +93,7 @@ systemctl restart diting-agent
 systemctl stop diting-agent
 
 # 卸载（幂等）
-curl -fsSL .../uninstall.sh | bash
+curl -fsSL .../unditing.sh | bash
 ```
 
 ## 与 Docker 形态共存

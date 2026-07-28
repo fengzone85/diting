@@ -201,7 +201,7 @@
   "setup.locked_subtitle": "管理员 Token 已设置，本页面已锁定。",
   "setup.locked_disabled": "✓ 首次设置向导已禁用",
   "setup.locked_reset_instruction": "✓ 重置 Token 请通过 SSH 登录服务器，运行：",
-  "setup.locked_reset_command": "sudo bash install.sh --reset-admin-token",
+  "setup.locked_reset_command": "sudo bash diting.sh --reset-admin-token",
   "setup.go_to_login": "前往登录页",
   "setup.wizard_title": "首次设置",
   "setup.wizard_subtitle": "生成管理员 Token，请务必保存！",

@@ -14,7 +14,7 @@
         '<div class="locked">' +
         '  ✓ 首次设置向导已禁用<br>' +
         '  ✓ 重置 Token 请通过 SSH 登录服务器，运行：<br>' +
-        '  <code style="display:block;margin:8px 0;padding:8px;background:var(--bg);border-radius:6px;font-size:12px">sudo bash install.sh --reset-admin-token</code>' +
+        '  <code style="display:block;margin:8px 0;padding:8px;background:var(--bg);border-radius:6px;font-size:12px">sudo bash diting.sh --reset-admin-token</code>' +
         '</div>' +
         '<a class="btn btn-primary btn-block" href="/admin.html" style="text-decoration:none;display:inline-block;">前往登录页</a>';
       return;

@@ -242,7 +242,7 @@ Some monitors let the server push config to agents — e.g. an `X-Agent-Config-M
 - **Code-execution surface**: auto-update `bash -s install` hands root execution to "remote script + script source". If the worker URL / CDN is MITM'd or supply-chain poisoned, agents run arbitrary scripts as root (RCE / supply-chain attack).
 - **Consistent with no-fingerprint**: server-pushed sampling policy or probe targets are just another variant of "server influences agent behavior" — rejected wholesale.
 
-Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in the agent; network-quality probe targets are hardcoded locally in `PROBE_TARGETS` (default: three carrier DNS + 8.8.8.8) and the server *never* pushes any; updating an agent is a local ops action (`sudo bash install.sh --update-agent`, preserving the registered identity), never a remote self-pull.
+Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in the agent; network-quality probe targets are hardcoded locally in `PROBE_TARGETS` (default: three carrier DNS + 8.8.8.8) and the server *never* pushes any; updating an agent is a local ops action (`sudo bash diting.sh --update-agent`, preserving the registered identity), never a remote self-pull.
 
 > Note: GPU model (from `nvidia-smi` / `lspci`) is a host fingerprint and conflicts with our "no kernel/GPU/public-IP" rule, so we do not implement GPU monitoring either.
 
@@ -324,30 +324,30 @@ docker compose up -d                 # serves on http://<host>:8081
 
 ## Data management
 
-The database (SQLite single file) stores all agent records, historical metrics, and settings. Manage it via `install.sh` commands — no need to manually locate files or stop services:
+The database (SQLite single file) stores all agent records, historical metrics, and settings. Manage it via `diting.sh` commands — no need to manually locate files or stop services:
 
 ```bash
 # Hot backup (via sqlite3 .backup, non-disruptive)
-sudo bash install.sh --backup
+sudo bash diting.sh --backup
 
 # Backup to a specific path
-sudo bash install.sh --backup /tmp/my-backup.db
+sudo bash diting.sh --backup /tmp/my-backup.db
 
 # Restore from backup (auto-backs up current state first, rollback-capable)
-sudo bash install.sh --restore /var/backups/diting/monitor_20260723_141022.db
+sudo bash diting.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
 # List existing backups
-sudo bash install.sh --backup-list
+sudo bash diting.sh --backup-list
 
 # View database statistics (size / row count / time range)
-sudo bash install.sh --db-stats
+sudo bash diting.sh --db-stats
 ```
 
 ### Scheduled backup
 
 ```bash
 # crontab: automatic daily backup at 3:00 AM
-0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
 ```
 
 ### Backup mechanism

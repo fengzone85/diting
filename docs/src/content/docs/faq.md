@@ -51,7 +51,7 @@ SQLite 单文件。无需额外安装数据库服务。
 
 ### Q: 忘记 2FA 怎么办？
 
-在服务器上运行 `sudo bash install.sh --reset-admin-token` 重置管理员 Token，然后重新绑定 2FA。
+在服务器上运行 `sudo bash diting.sh --reset-admin-token` 重置管理员 Token，然后重新绑定 2FA。
 
 ### Q: 数据库被偷了怎么办？
 
