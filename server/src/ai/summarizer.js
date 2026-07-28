@@ -123,7 +123,7 @@ function summarize(options) {
 
   const ui = db.getUiSettings();
   const alertCfg = (ui && ui.alert) || {};
-  const intervalSec = Number(process.env.AGENT_INTERVAL || 15);
+  const intervalSec = Number(process.env.AGENT_INTERVAL || 20);
   const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
   const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
   const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
