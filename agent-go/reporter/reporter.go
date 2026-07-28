@@ -27,30 +27,33 @@ type Reporter struct {
 	serverURL string
 	agentID   string
 	token     string
+	interval  time.Duration // 上报间隔，用于退避计算
 	client    *http.Client
 }
 
 // NewReporter 创建上报器。
-func NewReporter(serverURL, agentID, token string) *Reporter {
+// interval 是 Agent 的上报间隔，退避时长 = min(30, 2^attempt * interval)。
+func NewReporter(serverURL, agentID, token string, interval time.Duration) *Reporter {
 	return &Reporter{
 		serverURL: serverURL + "/api/report",
 		agentID:   agentID,
 		token:     token,
+		interval:  interval,
 		client:    &http.Client{Timeout: timeout},
 	}
 }
 
 // Report 执行上报。返回 nil 表示成功。
 //
-// 重试策略（对齐 agent.py:46-80）：
+// 重试策略（对齐 agent.py:77-79）：
 //   - 401/403: 长退避 authBackoff 后返回错误（不重试）
-//   - 其他错误: 指数退避重试最多 3 次（1s→2s→4s，封顶 30s）
+//   - 其他错误: 指数退避重试最多 3 次，时长 = min(30s, 2^attempt * interval)
 func (r *Reporter) Report(payload []byte) error {
 	var lastErr error
 	for attempt := 0; attempt <= 3; attempt++ {
 		if attempt > 0 {
-			// 指数退避: 2^attempt * 1s，封顶 30s
-			backoff := time.Duration(1<<attempt) * time.Second
+			// 指数退避: 2^attempt * interval，封顶 30s（对齐 Python）
+			backoff := time.Duration(1<<uint(attempt)) * r.interval
 			if backoff > 30*time.Second {
 				backoff = 30 * time.Second
 			}
