@@ -127,7 +127,7 @@ async function initPublic() {
         }
       });
     }
-    $('pvFooter').innerHTML = '<span style="float:left">Powered by <a href="https://github.com/fengzone85/diting" target="_blank" rel="noopener">DiTing</a> <span id="fvVer" style="color:var(--muted);font-size:11px"></span></span><span style="float:right">' + socialHtml + '</span>';
+    $('pvFooter').innerHTML = 'Powered by <a href="https://github.com/fengzone85/diting" target="_blank" rel="noopener">DiTing</a><span id="fvVer" style="margin-left:6px;color:var(--muted);font-size:11px"></span><span style="float:right">' + socialHtml + '</span>';
   }
   // 异步加载版本信息
   fetch('/api/version').then(r => r.json()).then(function (v) {
