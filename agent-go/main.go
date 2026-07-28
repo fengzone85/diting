@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -17,11 +18,19 @@ import (
 	"github.com/fengzone85/diting/agent-go/state"
 )
 
+// memLimit 是 Agent 的软内存上限（32 MB）。
+// 超过此值 GC 会更积极，防止在低内存设备上 OOM。
+const memLimit = 32 * 1024 * 1024
+
 const version = "1.0.0-go"
 
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
-	log.Printf("[agent] starting: version=%s", version)
+
+	// 内存限制：软上限 32MB，超过后 GC 更积极
+	debug.SetMemoryLimit(memLimit)
+
+	log.Printf("[agent] starting: version=%s mem_limit=%dMB", version, memLimit/1024/1024)
 
 	// 加载配置
 	cfg, err := config.Load()
