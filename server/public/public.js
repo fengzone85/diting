@@ -112,7 +112,22 @@ async function initPublic() {
   }
   document.title = title + ' ' + I18N.t('public.page_title_suffix');
   if ($('pvFooter')) {
-    $('pvFooter').innerHTML = 'Powered by <a href="https://github.com/fengzone85/diting" target="_blank" rel="noopener">DiTing</a><span id="fvVer" style="margin-left:6px;color:var(--muted);font-size:11px"></span>';
+    var socialHtml = '';
+    if (meta) {
+      var socialItems = [
+        { key: 'social_email', icon: '&#9993;', prefix: 'mailto:', label: '邮箱' },
+        { key: 'social_telegram', icon: '&#9992;', prefix: 'https://t.me/', label: 'Telegram' },
+        { key: 'social_qq', icon: '&#9993;', prefix: 'https://wpa.qq.com/msgrd?v=3&uin=', label: 'QQ' },
+        { key: 'social_website', icon: '&#127760;', prefix: '', label: '网站' }
+      ];
+      socialItems.forEach(function(item) {
+        if (meta[item.key]) {
+          var val = encodeURIComponent(meta[item.key].trim());
+          socialHtml += ' <a href="' + item.prefix + val + '" target="_blank" rel="noopener" title="' + item.label + '" style="color:inherit;text-decoration:none;font-size:14px">' + item.icon + '</a>';
+        }
+      });
+    }
+    $('pvFooter').innerHTML = 'Powered by <a href="https://github.com/fengzone85/diting" target="_blank" rel="noopener">DiTing</a>' + socialHtml + '<span id="fvVer" style="margin-left:6px;color:var(--muted);font-size:11px"></span>';
   }
   // 异步加载版本信息
   fetch('/api/version').then(r => r.json()).then(function (v) {
