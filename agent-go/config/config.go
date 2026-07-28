@@ -19,11 +19,15 @@ type Config struct {
 	ServerURL    string
 	AgentID      string
 	AgentToken   string
-	Interval     time.Duration
+	Interval     time.Duration // 固定模式间隔（ADAPTIVE=false 时生效）
 	DiskPath     string
 	StateFile    string
 	ProbeTargets string
 	Debug        bool
+	Gzip         bool
+	Adaptive     bool          // 纯本地自适应（不解析响应）：变化大→快档，平稳→慢档
+	FastInterval time.Duration // 自适应快档间隔
+	SlowInterval time.Duration // 自适应慢档间隔
 }
 
 // Load 从环境变量加载配置。缺失必填项返回错误（与 Python agent.py 一致）。
@@ -36,10 +40,17 @@ func Load() (*Config, error) {
 		AgentToken:   os.Getenv("AGENT_TOKEN"),
 		DiskPath:     getEnvDefault("DISK_PATH", "/"),
 		StateFile:    getEnvDefault("STATE_FILE", "/data/state.json"),
-		ProbeTargets: getEnvDefault("PROBE_TARGETS", "移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"),
 	}
 
-	// 解析 interval（默认 20s，最小 5s）
+	// ProbeTargets：未设用默认三家运营商 DNS + 8.8.8.8；显式设空（PROBE_TARGETS=""）则关闭探测。
+	// 用 LookupEnv 区分"未设"与"空"，避免 getEnvDefault 把空当作未设而回退默认导致无法关探测。
+	if v, ok := os.LookupEnv("PROBE_TARGETS"); ok {
+		cfg.ProbeTargets = v
+	} else {
+		cfg.ProbeTargets = "移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
+	}
+
+	// 解析 interval（默认 20s，最小 5s；ADAPTIVE=false 时的固定间隔）
 	intervalStr := getEnvDefault("INTERVAL", "20")
 	if v, err := strconv.Atoi(intervalStr); err == nil {
 		cfg.Interval = time.Duration(v) * time.Second
@@ -53,6 +64,28 @@ func Load() (*Config, error) {
 	// 解析 debug
 	if v := os.Getenv("DEBUG"); v == "1" || v == "true" || v == "yes" {
 		cfg.Debug = true
+	}
+
+	// 解析 gzip（默认关：服务端 Express 默认 express.json() 不解压 gzip 请求体，
+	// 开启需服务端先配置请求体解压中间件，否则上报会被 400 拒收）
+	if v := os.Getenv("GZIP"); v == "1" || v == "true" || v == "yes" {
+		cfg.Gzip = true
+	}
+
+	// 解析自适应（默认开启：纯本地决策，不解析服务端响应，守单向安全模型）
+	// 慢档需服务端 OFFLINE_THRESHOLD_SEC > SLOW_INTERVAL（建议慢档 60s 配阈值 120s），
+	// 否则平稳期 last_seen 间隔过大被误判离线。
+	cfg.Adaptive = true
+	if v := os.Getenv("ADAPTIVE"); v == "0" || v == "false" || v == "no" {
+		cfg.Adaptive = false
+	}
+	cfg.FastInterval = time.Duration(getEnvInt("FAST_INTERVAL", 10)) * time.Second
+	cfg.SlowInterval = time.Duration(getEnvInt("SLOW_INTERVAL", 60)) * time.Second
+	if cfg.FastInterval < 5*time.Second {
+		cfg.FastInterval = 5 * time.Second
+	}
+	if cfg.SlowInterval < cfg.FastInterval {
+		cfg.SlowInterval = cfg.FastInterval
 	}
 
 	// 必填校验
@@ -73,6 +106,16 @@ func Load() (*Config, error) {
 func getEnvDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+// getEnvInt 读取环境变量为 int，空或非法返回默认值。
+func getEnvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return def
 }

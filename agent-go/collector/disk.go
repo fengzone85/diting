@@ -22,7 +22,7 @@ func diskUsage(path string) (used, total uint64, pct float64) {
 	if err := syscall.Statfs(path, &st); err != nil {
 		return
 	}
-	bsize := uint64(st.Bsize)
+	bsize := uint64(st.Frsize)
 	total = bsize * st.Blocks
 	free := bsize * st.Bfree
 	if total > free {
@@ -104,7 +104,7 @@ func diskList(root string) []DiskInfo {
 		if err := syscall.Statfs(mount, &st); err != nil {
 			continue
 		}
-		bsize := uint64(st.Bsize)
+		bsize := uint64(st.Frsize)
 		total := bsize * st.Blocks
 		free := bsize * st.Bfree
 		var used uint64
@@ -130,8 +130,12 @@ func diskList(root string) []DiskInfo {
 
 	out := make([]DiskInfo, 0, len(best))
 	for _, c := range best {
+		mount := c.mount
+		if len(mount) > 200 {
+			mount = mount[:200]
+		}
 		out = append(out, DiskInfo{
-			Mount: c.mount,
+			Mount: mount,
 			Used:  c.used,
 			Total: c.total,
 			Pct:   round2(c.pct),

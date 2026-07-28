@@ -33,7 +33,7 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 - **No more naked credentials**: dashboard login uses a signed `HttpOnly + Secure + SameSite=Strict` cookie, so the admin token is no longer stored in plaintext on the front end (kills the XSS-theft risk); optional **TOTP two-factor authentication** requires a code on top of the token for all admin writes, so the static token alone cannot perform dangerous actions.
 
 **🌐 Cross-platform, drop-in**
-- **Linux (Docker, stdlib-only) + Windows (native psutil) agents** report identical fields, so the server receives them with **zero changes**; the Windows agent can be registered as a "start on logon, restart on crash" scheduled task in one command.
+- **Linux (Docker / Go binary, stdlib-only) + Windows (native psutil) agents** report identical fields, so the server receives them with **zero changes**; the Windows agent can be registered as a "start on logon, restart on crash" scheduled task in one command. The Go binary is a ~5 MB static build using <10 MB memory — ideal for minimal systems.
 
 **📊 Observability & alerting**
 - Standard **Prometheus `/metrics`** export (Bearer auth) for Grafana; offline / CPU·memory threshold alerts push to **QQ Mail and Telegram** in parallel (one channel failing does not affect the other), with monthly-traffic-quota and expiry-countdown reminders.
@@ -46,7 +46,8 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 ```
 [Monitored VPS-A] docker agent ──HTTPS+Token──┐
 [Monitored VPS-B] docker agent ──HTTPS+Token──┼──> [Dedicated VPS: server + dashboard]
-[Monitored VPS-N] docker agent ──HTTPS+Token──┘      (Node + SQLite + ECharts / Nginx+TLS reverse proxy)
+[Monitored VPS-C] Go binary agent ─HTTPS+Token─┤      (Node + SQLite + ECharts / Nginx+TLS reverse proxy)
+[Monitored VPS-N] docker agent ──HTTPS+Token──┘
 ```
 
 - **Agent is outbound-only**: reads metrics from `/proc` and POSTs them to `/api/report`. No firewall ports need to be opened on the monitored host; NAT / internal networks are unaffected.
@@ -66,6 +67,10 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
     windows_agent.py  periodic reporting + backoff retry
     install.ps1       install deps + register startup scheduled task
     run.bat           convenient launcher
+  agent-go/     # Monitored side (native Go binary, Linux; zero external deps)
+    main.go / collector/ / reporter/  reads /proc, single-way HTTPS report
+    adaptive.go  local change-rate based adaptive interval (fast/slow)
+    go.mod       no require (pure stdlib) — fast cross-compilation
   server/       # Server + dashboard
     server.js / src/{db,auth,api,alerts}.js
     public/     polished dashboard (ECharts)
@@ -86,7 +91,7 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 9. **HTTPS enforcement on admin APIs** — `adminAuth` checks `X-Forwarded-Proto`; any request proxied over a non-HTTPS origin is rejected with `403`, preventing plaintext transmission of the admin token. Note: this is fully effective only when the server port is NOT published to the public internet and only Nginx is exposed.
 10. **Build-context isolation** — `server/.dockerignore` excludes `data/`, `.env`, `node_modules`, etc., so the SQLite database and credentials are never baked into the image.
 11. **Dashboard two-factor authentication (TOTP)** — can be enabled in the "Security" panel. Once enabled, all **admin write operations** (create/edit/delete clients, reset token, test alert) additionally require a TOTP code on top of the static token, so the static admin token alone cannot perform dangerous actions. Dashboard login is maintained by a signed `HttpOnly + Secure + SameSite=Strict` cookie, so the admin token is **no longer stored in plaintext on the front end** (eliminating the XSS-theft risk). Read-only pulls (Grafana, `/metrics`, authenticated with `ADMIN_TOKEN` via Bearer, and HTTPS-enforced except when `ADMIN_ALLOW_HTTP=1`) stay transparent and are not subject to 2FA. See "Two-factor authentication (TOTP)" below.
-12. **Agent report-channel hardening** — both agents (Linux / Windows) enforce HTTPS client-side: a non-localhost `http://` `SERVER_URL` fails at startup, preventing the token from ever being sent in cleartext (defense in depth beyond the server's `X-Forwarded-Proto` whitelist). On `401/403` they enter a **10-minute long backoff with no immediate retry** (the static token cannot self-heal, avoiding log flooding and brute-force against the server); transient errors (5xx, network blips) still use the exponential backoff retry.
+12. **Agent report-channel hardening** — all agents (Linux Docker / Go binary / Windows) enforce HTTPS client-side: a non-localhost `http://` `SERVER_URL` fails at startup, preventing the token from ever being sent in cleartext (defense in depth beyond the server's `X-Forwarded-Proto` whitelist). On `401/403` they enter a **10-minute long backoff with no immediate retry** (the static token cannot self-heal, avoiding log flooding and brute-force against the server); transient errors (5xx, network blips) still use the exponential backoff retry.
 
 ### Two-factor authentication (TOTP)
 
@@ -309,6 +314,27 @@ docker run -d --name monitor-agent --restart unless-stopped \
 
 > The `host-monitor-agent` image must be built on the monitored host first: `cd agent/ && docker build -t host-monitor-agent .`, or push it to a private/public registry and `docker pull`.
 
+**Option B — Go binary (minimal, no Docker)**
+
+If you prefer a tiny static binary over a Docker container, build the Go agent from `agent-go/`:
+
+```bash
+cd agent-go
+CGO_ENABLED=0 go build -ldflags="-s -w" -o diting-agent-go .
+
+SERVER_URL=https://monitor.yourdomain.com \
+AGENT_ID=<the id you got> \
+AGENT_TOKEN=<the token you got> \
+DISK_PATH=/ \
+STATE_FILE=/var/lib/diting-agent-go/state.json \
+./diting-agent-go
+```
+
+- The Go binary reads `/proc` directly and is **identical in data format and security model** to the Python agent (outbound HTTPS only, zero inbound, no command channel). It defaults to `ADAPTIVE=on`, switching between `FAST_INTERVAL` (10s, on significant change) and `SLOW_INTERVAL` (60s, when steady) locally — it never parses any server response.
+- **Server requirement**: with adaptive mode on, set `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) on the server, or steady-state reports will be flagged offline.
+- Do **not** reuse the same `AGENT_ID` across the Python and Go agents (their `last_seen`/metrics would overwrite each other); register a separate client.
+- The official Docker image and one-click script for the Go agent are pending; for now it is distributed as source / binary.
+
 3. The client card appears on the dashboard, live-refreshing CPU/memory/disk/traffic/load, and you can edit **merchant, note, expiry date, monthly traffic quota**.
 
 ## Quick start (one-click)
@@ -361,7 +387,7 @@ sudo bash diting.sh --db-stats
 
 **Server `.env`**: `PORT`, `ADMIN_TOKEN`, `OFFLINE_THRESHOLD_SEC` (default 60), `RETENTION_DAYS` (default 30), `ALERT_CPU_PCT`/`ALERT_MEM_PCT` (default 90), `ALERT_COOLDOWN_SEC`, `SMTP_*` (QQ Mail alerts), `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (optional, Telegram alerts), `READONLY_TOKEN` (optional, read-only account — see below), `SESSION_SECRET`/`SESSION_TTL_MS` (2FA session — see "Two-factor authentication (TOTP)").
 
-**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds, default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8`; empty to disable; format `label:host[:port]`, comma-separated).
+**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds, default 15 for the Python agent, 20 for the Go binary), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8`; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `STATE_FILE` (monthly-traffic state; default `/data/state.json`), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `GZIP` (off by default; needs server-side decompression middleware or reports are rejected with 400), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
 
 ## Dashboard features
 
