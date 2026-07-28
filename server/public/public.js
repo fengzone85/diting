@@ -122,7 +122,8 @@ async function initPublic() {
       ];
       socialItems.forEach(function(item) {
         if (meta[item.key]) {
-          var val = encodeURIComponent(meta[item.key].trim());
+          var raw = meta[item.key].trim();
+          var val = item.key === 'social_website' ? raw : encodeURIComponent(raw);
           socialHtml += ' <a href="' + item.prefix + val + '" target="_blank" rel="noopener" title="' + item.label + '" style="color:inherit;text-decoration:none;font-size:14px">' + item.icon + '</a>';
         }
       });

@@ -421,7 +421,9 @@ function renderSocialLinks(meta) {
   const html = items
     .filter(item => meta && meta[item.key])
     .map(item => {
-      const val = encodeURIComponent(meta[item.key].trim());
+      const raw = meta[item.key].trim();
+      // 网站链接不编码，直接使用
+      const val = item.key === 'social_website' ? raw : encodeURIComponent(raw);
       const href = item.prefix + val;
       return '<a href="' + href + '" target="_blank" rel="noopener" aria-label="' + item.label + '" title="' + item.label + '">' + item.icon + '</a>';
     }).join('');
