@@ -37,7 +37,7 @@ func diskIO() (readBytes, writeBytes uint64) {
 		if strings.HasPrefix(dev, "ram") || strings.HasPrefix(dev, "loop") || strings.HasPrefix(dev, "zram") {
 			continue
 		}
-		if strings.Contains(dev, "dm-") || strings.HasPrefix(dev, "md") {
+		if strings.HasPrefix(dev, "dm-") || strings.HasPrefix(dev, "md") {
 			continue
 		}
 		rSect, err := strconv.ParseUint(fields[5], 10, 64)

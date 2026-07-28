@@ -115,7 +115,7 @@ func ProbeAll(targets []ProbeTarget) map[string]Probe {
 		wg.Add(1)
 		go func(tgt ProbeTarget) {
 			defer wg.Done()
-			ms, ok := probeOne(tgt.Host, tgt.Port, 2500*1000*1000) // 2.5s
+			ms, ok := probeOne(tgt.Host, tgt.Port, 2500*time.Millisecond) // 2.5s
 			mu.Lock()
 			results[tgt.Label] = Probe{Ok: ok, Ms: ms}
 			mu.Unlock()

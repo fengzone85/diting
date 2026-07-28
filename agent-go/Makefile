@@ -1,6 +1,6 @@
 .PHONY: build build-linux build-windows build-darwin tidy vet test clean
 
-VERSION := 1.0.0-go
+VERSION := 1.0.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 ## build 编译当前平台

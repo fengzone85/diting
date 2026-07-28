@@ -16,7 +16,7 @@ type Collector interface {
 // Ms 为指针允许 null（可达但 RTT 解析失败的情况）。
 type Probe struct {
 	Ok bool     `json:"ok"`
-	Ms *float64 `json:"ms,omitempty"`
+	Ms *float64 `json:"ms"`
 }
 
 // DiskInfo 是单块真实磁盘的使用情况（多盘展示用）。

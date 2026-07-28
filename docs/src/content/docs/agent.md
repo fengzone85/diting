@@ -5,17 +5,18 @@ description: Agent 部署指南
 
 # 受控端部署
 
-DiTing Lite 受控端支持两种部署形态，代码完全相同，仅部署方式不同。
+DiTing Lite 受控端支持三种部署形态，数据格式与上报契约完全相同，仅实现语言与部署方式不同。
 
 ## 形态对比
 
-| | Docker | 原生 systemd |
-|---|---|---|
-| 内存占用 | 65-150MB | 12-25MB |
-| 前置依赖 | Docker Engine | Python 3.6+ |
-| 安全隔离 | 容器 + non-root + 只读挂载 | systemd 14 项加固 |
-| 部署复杂度 | 一条命令 | 交互脚本 |
-| 适用场景 | 已有 Docker 环境 | 精简系统 / 小内存 |
+| | Docker (Python) | 原生 systemd (Python) | Go 二进制 |
+|---|---|---|---|
+| 内存占用 | 65-150MB | 12-25MB | <10MB |
+| 前置依赖 | Docker Engine | Python 3.6+ | Go 工具链（仅构建期） |
+| 安全隔离 | 容器 + non-root + 只读挂载 | systemd 14 项加固 | scratch + USER 1000 + cap-drop（规划中） |
+| 部署复杂度 | 一条命令 | 交互脚本 | 编译二进制 / 待发布镜像 |
+| 适用场景 | 已有 Docker 环境 | 精简系统 / 小内存 | 极小体积 / 纯 Go 工具链 |
+| 实现 | `agent.py` + `collector.py` | 同左 | `agent-go/`（直读 /proc，零依赖） |
 
 ## Docker 部署
 
@@ -64,6 +65,64 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting
 | `LockPersonality=yes` | 锁定进程特性 |
 | `SystemCallArchitectures=native` | 限制系统调用架构 |
 | `CapabilityBoundingSet=` | 清空所有 capabilities |
+
+## Go 受控端（二进制）
+
+Go 受控端是 Python 版的**等价原生重写**：数据格式、上报契约、安全模型完全一致（直读 `/proc`、零外部依赖、强制 HTTPS、单向上报、零入站端口、无指令通道），仅实现语言不同。适合需要更小体积（~5MB 静态二进制、内存 <10MB）或纯 Go 工具链的场景。
+
+> 当前以源码 / 二进制方式提供，官方 Docker 镜像与一键脚本待发布（设计上提供 scratch + `USER 1000` + `--cap-drop=ALL`）。以下以从源码构建为例。
+
+### 构建
+
+```bash
+cd agent-go
+CGO_ENABLED=0 go build -ldflags="-s -w" -o diting-agent-go .
+# 版本号注入（可选）：go build -ldflags="-s -w -X main.version=1.0.0" .
+```
+
+### 运行
+
+```bash
+SERVER_URL=https://agent.example.com:4443 \
+AGENT_ID=agt_xxxxxxxxxxxx \
+AGENT_TOKEN=xxxxxxxxxxxx \
+DISK_PATH=/ \
+STATE_FILE=/var/lib/diting-agent-go/state.json \
+./diting-agent-go
+```
+
+> Go 版默认 `DISK_PATH=/`；容器内运行需配合 `-v /:/host:ro`（多盘识别优先读 `/hostproc/mounts`，回退 `/proc/mounts`）。
+
+### 环境变量
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SERVER_URL` | 必填 | 服务端 `/api/report` 地址，强制 HTTPS（`localhost`/`127.0.0.1`/`::1` 允许 http） |
+| `AGENT_ID` | 必填 | 独立 agent 标识 |
+| `AGENT_TOKEN` | 必填 | 上报 token（仅经 HTTPS 头，不落盘） |
+| `DISK_PATH` | `/` | 顶层磁盘聚合根 |
+| `STATE_FILE` | `/data/state.json` | 月累计状态文件路径（建议权限 600） |
+| `INTERVAL` | `20` | 固定模式间隔秒（`ADAPTIVE=false` 时生效，最小 5） |
+| `DEBUG` | `0` | `1`/`true` 打印调试日志（不打印 token） |
+| `PROBE_TARGETS` | 三家运营商 DNS + 8.8.8.8 | 探测目标；**显式设空 `""` 可关闭探测** |
+| `ADAPTIVE` | `1`（开） | `0`/`false` 关闭自适应，改用固定 `INTERVAL` |
+| `FAST_INTERVAL` | `10` | 自适应快档间隔秒（指标显著变化时） |
+| `SLOW_INTERVAL` | `60` | 自适应慢档间隔秒（平稳时） |
+| `GZIP` | `0`（关） | `1`/`true` 开启请求体 gzip（**需服务端先配解压中间件，否则上报被 400 拒收**） |
+
+### 自适应上报（默认开启）
+
+Go 受控端默认根据**本地指标变化率**自动切换快慢档：CPU / 内存 / 网络 / 负载显著变化时用 `FAST_INTERVAL`（默认 10s）实时捕捉，平稳时用 `SLOW_INTERVAL`（默认 60s）省流量。
+
+**安全边界**：该决策**完全在 agent 本地完成，不解析服务端任何响应**——不使用"服务端回传在线人数"之类的下行通道，守住 diting「agent 从不解析 / 执行响应」的核心安全模型（与 Nezha 的 `CommandTask` 指令通道有本质区别）。
+
+**配套服务端配置（必须）**：慢档 60s 会撞服务端默认 `OFFLINE_THRESHOLD_SEC=60`，需将服务端 `.env` 设为 `OFFLINE_THRESHOLD_SEC=120`（或大于慢档），否则平稳期会因 `last_seen` 间隔过大被误判离线。该改动不涉及 agent 侧。
+
+### 与 Python 版的关系
+
+- **不得共用同一 `AGENT_ID`**（否则 `last_seen` / 指标互相覆盖）；注册两个独立 agent 并排对比。
+- 数据格式、服务端契约、安全模型完全一致，已本机实测验证（`mem_total` / `disk_total` / `swap_*` 完全相同）。
+- 现有 Python 版保留，可随时切回。
 
 ## 连接地址（SERVER_URL / Agent 专用连接地址）选型
 
@@ -124,6 +183,8 @@ SERVER_URL=https://1.2.3.4:4443
 | Swap | `/proc/meminfo` | psutil |
 | 开机时长 | `/proc/uptime` | psutil |
 | 网络质量 | ICMP/TCP ping | ICMP/TCP ping |
+
+> Go 受控端当前仅支持 Linux，指标来源与 Python 版 Linux 完全一致（直读 `/proc`），两者上报数据可并排对比。Windows 暂仅由 Python 版支持。
 
 ## 卸载
 
