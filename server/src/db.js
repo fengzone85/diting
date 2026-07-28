@@ -70,6 +70,18 @@ CREATE TABLE IF NOT EXISTS admin_config (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS ai_reports (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  period        TEXT,
+  risk_level    TEXT,
+  summary       TEXT,
+  suggestion    TEXT,
+  report_json   TEXT,
+  prompt_version TEXT,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
 `);
 
 // ---- schema migration: add temp / swap columns if missing (existing DBs) ----
@@ -137,7 +149,15 @@ const stmts = {
   clearAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=? AND type=?'),
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
-  metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC')
+  metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // ---- AI 报告 ----
+  insertAiReport: db.prepare(`INSERT INTO ai_reports
+    (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
+    VALUES (@period, @risk_level, @summary, @suggestion, @report_json, @prompt_version, @created_at)`),
+  getAiReport: db.prepare('SELECT * FROM ai_reports WHERE id = ?'),
+  listAiReports: db.prepare('SELECT id, period, risk_level, summary, suggestion, prompt_version, created_at FROM ai_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'),
+  countAiReports: db.prepare('SELECT COUNT(*) AS n FROM ai_reports'),
+  pruneAiReports: db.prepare('DELETE FROM ai_reports WHERE created_at < ?')
 };
 
 const createAgent = (fields) => {
@@ -227,7 +247,7 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: false, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30 };
+  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: false, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '' };
   try {
     const o = JSON.parse(getConfig(SETTINGS_KEY) || '{}');
     const merged = Object.assign(def, o);
@@ -286,11 +306,82 @@ function getRetentionDays() {
   return 30;
 }
 
+// ---- AI 运维分析（配置持久化到 admin_config，报告持久化到 ai_reports）----
+const AI_CONFIG_KEY = 'ai_config';
+const AI_STATE_KEY = 'ai_state';
+// AI 配置：UI 保存值优先，缺失项回退到硬编码默认（与 notify_config 同款模式）。
+// 注意：api_key 与现有 smtp_pass / telegram_bot_token 同级，均明文存 SQLite（DB 无加密）。
+// getAiConfig() 返回明文 api_key，仅供服务端调用；对外 API 必须脱敏（见 api.js）。
+function getAiConfig() {
+  const def = {
+    enabled: false,
+    provider: 'openai',          // V1 只实现 OpenAI 兼容协议；base_url 可指向 DeepSeek/Ollama 等兼容端点
+    base_url: '',                 // 留空走官方 https://api.openai.com/v1
+    model: 'gpt-4o-mini',
+    api_key: '',
+    schedule_freq: 'daily',       // daily | weekly（友好下拉式，不暴露 cron 语法）
+    schedule_time: '08:00',       // HH:MM，按 tz_offset_hours 解释
+    tz_offset_hours: 8,           // 默认东八区
+    batch_mode: true,             // true=全部服务器一个 prompt（省 token），false=逐台调用
+    locale: 'zh-CN',              // 通知正文语言：zh-CN | en（跟随后台设置，默认中文）
+    log_retention_days: 30        // AI 日报保留天数（与 metrics 保留期独立）
+  };
+  try {
+    const o = JSON.parse(getConfig(AI_CONFIG_KEY) || '{}');
+    return Object.assign(def, o);
+  } catch (e) { return def; }
+}
+function getAiConfigRaw() {
+  try { return JSON.parse(getConfig(AI_CONFIG_KEY) || '{}'); } catch (e) { return {}; }
+}
+function setAiConfig(incoming) {
+  const cur = getAiConfigRaw();
+  const merged = Object.assign({}, cur, incoming || {});
+  // api_key 留空表示「保持不变」，避免保存时空字符串误清空已存密钥（同 setNotifyConfig 模式）
+  if (incoming && incoming.api_key === '' && cur.api_key) merged.api_key = cur.api_key;
+  setConfig(AI_CONFIG_KEY, JSON.stringify(merged));
+}
+// AI 调度状态：last_run_ts 防同日重复、进程重启后从 DB 恢复；last_status/last_error 供前端展示。
+function getAiState() {
+  const def = { last_run_ts: 0, last_status: 'idle', last_error: '' };
+  try {
+    const o = JSON.parse(getConfig(AI_STATE_KEY) || '{}');
+    return Object.assign(def, o);
+  } catch (e) { return def; }
+}
+function setAiState(s) { setConfig(AI_STATE_KEY, JSON.stringify(s)); }
+
+// ---- AI 报告 CRUD ----
+function insertAiReport(r) {
+  const info = stmts.insertAiReport.run({
+    period: r.period || '',
+    risk_level: r.risk_level || '',
+    summary: r.summary || '',
+    suggestion: r.suggestion || '',
+    report_json: r.report_json || '',
+    prompt_version: r.prompt_version || '',
+    created_at: r.created_at || Date.now()
+  });
+  return stmts.getAiReport.get(info.lastInsertRowid);
+}
+function getAiReport(id) { return stmts.getAiReport.get(id); }
+function listAiReports(limit, offset) {
+  return stmts.listAiReports.all(Math.max(1, Number(limit) || 20), Math.max(0, Number(offset) || 0));
+}
+function countAiReports() { return stmts.countAiReports.get().n; }
+// 纳入 prune：按保留天数同步清理历史 AI 报告（与 metrics 清理同周期）。
+function pruneAiReports(retentionDays) {
+  const cutoff = Date.now() - retentionDays * 86400000;
+  return stmts.pruneAiReports.run(cutoff).changes;
+}
+
 module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
-  getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays
+  getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
+  getAiConfig, setAiConfig, getAiState, setAiState,
+  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports
 };

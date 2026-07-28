@@ -413,7 +413,11 @@ router.get('/public/meta', (req, res) => {
     site_url: ui.site_url || '',
     public_enabled: !!ui.public_enabled,
     home_layout: ui.home_layout || 'grid',
-    agent_order: Array.isArray(agentOrder) ? agentOrder : []
+    agent_order: Array.isArray(agentOrder) ? agentOrder : [],
+    social_email: ui.social_email || '',
+    social_telegram: ui.social_telegram || '',
+    social_qq: ui.social_qq || '',
+    social_website: ui.social_website || ''
   });
 });
 
@@ -547,7 +551,77 @@ router.post('/test-alert', adminOnly, async (req, res) => {
   }
 });
 
-// ---- Admin 登录（签发签名 Session Cookie；若启用 2FA 需 TOTP）----
+// ---- Admin: AI 运维分析 ----
+// 配置读写、手动触发、报告列表/详情、运行状态。全部受 admin 鉴权保护。
+// ai 模块默认关闭（getAiConfig().enabled === false），不影响现有功能。
+const ai = require('./ai');
+// GET 配置：api_key 脱敏（留空表示「已配置但本次不回显」，同 smtp_pass 处理，api.js:520）
+router.get('/ai/config', adminOrReadonly, (req, res) => {
+  const c = db.getAiConfig();
+  const safe = Object.assign({}, c);
+  if (safe.api_key) safe.api_key = '';
+  // 补充一个 has_key 标志，让前端知道密钥是否已配置（不泄露密钥本身）
+  safe.has_key = !!c.api_key;
+  res.json({ config: safe });
+});
+// PUT 配置：api_key 留空保持不变（同 setNotifyConfig 模式，db.js setAiConfig 内部处理）
+router.put('/ai/config', adminOnly, (req, res) => {
+  const b = (req.body && req.body.config) || {};
+  const allowed = {};
+  // 白名单字段，避免前端塞入未预期字段
+  if (typeof b.enabled === 'boolean') allowed.enabled = b.enabled;
+  if (typeof b.provider === 'string') allowed.provider = b.provider.slice(0, 40);
+  if (typeof b.base_url === 'string') allowed.base_url = b.base_url.slice(0, 200);
+  if (typeof b.model === 'string') allowed.model = b.model.slice(0, 80);
+  if (typeof b.api_key === 'string') allowed.api_key = b.api_key.slice(0, 200);
+  if (typeof b.schedule_freq === 'string' && ['daily', 'weekly'].includes(b.schedule_freq)) allowed.schedule_freq = b.schedule_freq;
+  if (typeof b.schedule_time === 'string' && /^\d{1,2}:\d{2}$/.test(b.schedule_time)) allowed.schedule_time = b.schedule_time;
+  if (typeof b.tz_offset_hours === 'number' && Number.isFinite(b.tz_offset_hours)) allowed.tz_offset_hours = Math.max(-12, Math.min(14, b.tz_offset_hours));
+  if (typeof b.batch_mode === 'boolean') allowed.batch_mode = b.batch_mode;
+  if (typeof b.locale === 'string' && ['zh-CN', 'en'].includes(b.locale)) allowed.locale = b.locale;
+  if (typeof b.log_retention_days === 'number' && Number.isFinite(b.log_retention_days)) allowed.log_retention_days = Math.max(7, Math.min(3650, Math.floor(b.log_retention_days)));
+  // 启用时校验：必须有 model；api_key 要么本次传入非空，要么之前已配置
+  if (allowed.enabled) {
+    const hasKey = !!allowed.api_key || !!db.getAiConfig().api_key;
+    const hasModel = !!allowed.model || !!db.getAiConfig().model;
+    if (!hasModel) return res.status(400).json({ error: '启用 AI 分析需先配置模型名称（model）' });
+    if (!hasKey) return res.status(400).json({ error: '启用 AI 分析需先配置 API Key' });
+  }
+  db.setAiConfig(allowed);
+  res.json({ ok: true });
+});
+// 手动触发一次日报生成（不等调度时刻）。返回生成结果。
+router.post('/ai/run', adminOnly, async (req, res) => {
+  try {
+    const r = await ai.runNow();
+    res.json(r);
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+// 运行状态（前端展示 last_run / last_status）
+router.get('/ai/status', adminOrReadonly, (req, res) => {
+  res.json(ai.getStatus());
+});
+// 报告列表（分页）
+router.get('/ai/reports', adminOrReadonly, (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  const list = db.listAiReports(limit, offset);
+  res.json({ total: db.countAiReports(), limit, offset, list });
+});
+// 单条报告详情（含 report_json，供前端渲染完整分析）
+router.get('/ai/reports/:id', adminOrReadonly, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid id' });
+  const r = db.getAiReport(id);
+  if (!r) return res.status(404).json({ error: 'not found' });
+  let parsed = null;
+  try { parsed = JSON.parse(r.report_json); } catch (e) {}
+  res.json(Object.assign({}, r, { report_json_parsed: parsed }));
+});
+
+
 // 登录后前端不再持有明文 Admin Token，凭证以 HttpOnly+Secure Cookie 维持，降低 XSS 窃取风险。
 router.post('/login', loginRateLimit, async (req, res) => {
   if (!requireProto(req, res)) return; // F2：与管理端点一致，强制经 HTTPS 反代，杜绝明文 Token

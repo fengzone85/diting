@@ -119,7 +119,7 @@ function applyCustomCss() {
 function applySiteTitle() {
   const t = appSettings.site_title || '谛听 · Diting';
   document.title = t + ' · Host Monitor';
-  if ($('siteTitle')) $('siteTitle').innerHTML = '<img src="logo-icon.svg" width="22" height="22" alt="" style="vertical-align:middle;margin-right:6px">' + esc(t) + '<span class="dot">.</span>';
+  if ($('siteTitle')) $('siteTitle').innerHTML = '<img src="logo-icon.svg" width="22" height="22" alt="" style="vertical-align:middle;margin-right:6px">' + esc(t) ;
   if ($('loginTitle')) $('loginTitle').textContent = t;
   if ($('siteTitleSide')) $('siteTitleSide').textContent = t;
 }
@@ -672,20 +672,6 @@ function setRange(r, el) {
 }
 
 // ---------- test alert ----------
-async function sendTestAlert() {
-  const btn = $('btnTestAlert');
-  const old = btn.textContent;
-  btn.disabled = true; btn.textContent = '发送中…';
-  try {
-    const r = await api('/api/test-alert', { method: 'POST' });
-    toast('已发送：' + (r.message || '请检查邮件 / Telegram'));
-  } catch (e) {
-    toast('发送失败：' + e.message);
-  } finally {
-    btn.disabled = false; btn.textContent = old;
-  }
-}
-
 // ---------- create ----------
 function populateCountrySelect() {
   const opts = '<option value="">不设置</option>' + COUNTRIES.map(c => `<option value="${c.code}">${flagEmoji(c.code)} ${esc(c.name)}</option>`).join('');
@@ -918,6 +904,10 @@ async function openSettings() {
     $('s_site_url').value = appSettings.site_url || '';
     $('s_agent_url').value = appSettings.agent_server_url || '';
     $('s_probe_targets').value = appSettings.probe_targets || '';
+    $('s_social_email').value = appSettings.social_email || '';
+    $('s_social_telegram').value = appSettings.social_telegram || '';
+    $('s_social_qq').value = appSettings.social_qq || '';
+    $('s_social_website').value = appSettings.social_website || '';
     // 前台/后台互跳统一走「项目网址」（套盾公网），避免暴露 Agent 直连地址
     const $home = $('btnHome');
     if ($home) $home.href = (appSettings.site_url || '').trim() || '/';
@@ -953,6 +943,156 @@ async function openSettings() {
     renderGroupOrder();
     await load2FAStatus();
   } catch (e) { toast('加载设置失败：' + e.message); }
+}
+
+// ---------- AI 运维分析（独立视图） ----------
+let aiConfig = null;
+async function loadAiView() {
+  await loadAiConfig();
+  await loadAiReports();
+  await loadAiLogRetention();
+}
+async function loadAiConfig() {
+  try {
+    const r = await api('/api/ai/config');
+    const c = r.config || {};
+    aiConfig = c;
+    $('ai_enabled').checked = !!c.enabled;
+    $('ai_base_url').value = c.base_url || '';
+    $('ai_model').value = c.model || '';
+    $('ai_api_key').value = ''; // 始终不回显密钥
+    $('ai_key_hint').textContent = c.has_key ? '✓ 已配置 API Key（留空保存则保持不变）' : '';
+    $('ai_schedule_freq').value = c.schedule_freq || 'daily';
+    $('ai_schedule_time').value = c.schedule_time || '08:00';
+    $('ai_tz').value = (c.tz_offset_hours != null ? c.tz_offset_hours : 8);
+    $('ai_batch').value = c.batch_mode === false ? 'false' : 'true';
+    if ($('ai_locale')) $('ai_locale').value = c.locale || 'zh-CN';
+    await loadAiStatus();
+  } catch (e) { /* AI 模块可能未启用，静默 */ }
+}
+async function loadAiStatus() {
+  try {
+    const s = await api('/api/ai/status');
+    const st = I18N.t || ((k) => k);
+    // 更新侧栏 AI 菜单旁的状态徽章
+    const badge = $('aiStatusBadge');
+    if (badge) {
+      badge.textContent = s.enabled ? st('ai.enabled_prefix') : st('ai.not_enabled');
+      badge.className = 'ai-status-badge' + (s.enabled ? ' enabled' : '');
+    }
+    let txt = '';
+    if (s.enabled) txt += st('ai.enabled_prefix') + ` · ${s.schedule}`;
+    else txt += st('ai.not_enabled');
+    if (s.last_run_ts) {
+      const statusMap = { ok: 'ok', degraded: 'degraded', error: 'error', skipped: st('ai.skipped'), idle: 'idle' };
+      txt += ` · ${st('ai.last_run')}：${statusMap[s.last_status] || s.last_status || '-'}`;
+    }
+    if (s.last_error && s.last_status === 'error') txt += `（${s.last_error}）`;
+    $('ai_status_hint').textContent = txt;
+  } catch (e) {}
+}
+async function loadAiReports() {
+  const box = $('aiReportList');
+  if (!box) return;
+  try {
+    const r = await api('/api/ai/reports?limit=10');
+    const list = r.list || [];
+    if (!list.length) { box.innerHTML = '<div class="ai-report-empty">（暂无日报，点「立即生成」或等待计划触发）</div>'; return; }
+    box.innerHTML = list.map(rep => {
+      const d = new Date(rep.created_at);
+      const ds = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      const risk = rep.risk_level ? `<span class="ai-risk ai-risk-${rep.risk_level}">${I18N.t('ai.risk_' + rep.risk_level) || rep.risk_level}</span>` : '';
+      const sum = rep.summary ? esc(rep.summary) : '<span class="hint">无摘要</span>';
+      return `<div class="ai-report-item" data-id="${rep.id}">
+        <div class="ai-report-head"><span class="ai-report-date">${ds}</span>${risk}</div>
+        <div class="ai-report-sum">${sum}</div>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.ai-report-item').forEach(el => {
+      el.addEventListener('click', () => showAiReportDetail(el.getAttribute('data-id')));
+    });
+  } catch (e) { box.innerHTML = '<div class="ai-report-empty">加载失败：' + esc(e.message) + '</div>'; }
+}
+// AI 日报日志保留天数
+async function loadAiLogRetention() {
+  try {
+    const c = await api('/api/ai/config');
+    if ($('ai_log_retention')) $('ai_log_retention').value = c.config.log_retention_days || 30;
+  } catch (e) { /* 静默 */ }
+}
+async function saveAiLogRetention() {
+  const days = Math.min(3650, Math.max(7, Math.floor(Number($('ai_log_retention')?.value) || 30)));
+  try {
+    await api('/api/ai/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: { log_retention_days: days } }) });
+    toast(I18N.t('toast.settings_saved'), 'ok');
+    await loadAiLogRetention();
+  } catch (e) { toast('保存失败：' + e.message, 'err'); }
+}
+function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+async function showAiReportDetail(id) {
+  try {
+    const r = await api('/api/ai/reports/' + id);
+    const box = $('aiReportList');
+    const j = r.report_json_parsed || {};
+    const summary = j.summary || {};
+    const agents = (summary.agents || []).slice(0, 12);
+    const st = I18N.t || ((k) => k);
+    const back = `<div style="margin-bottom:8px"><button class="btn ghost sm" id="aiDetailBack">← ${st('ai.back') || '返回列表'}</button></div>`;
+    const meta = `<div class="ai-detail-meta">
+      <span>${st('ai.period') || '周期'}：${summary.period || '-'}</span>
+      <span>${st('ai.agents') || '节点'}：${summary.agent_count || 0}（${st('ai.online') || '在线'} ${summary.online_count || 0}）</span>
+      ${r.risk_level ? `<span class="ai-risk ai-risk-${r.risk_level}">${st('ai.risk') || '风险'}：${st('ai.risk_'+r.risk_level) || r.risk_level}</span>` : ''}
+      ${j.degraded ? `<span class="ai-risk ai-risk-degraded">${st('ai.degraded_flag') || '本次为降级统计版'}</span>` : ''}
+    </div>`;
+    const nodesHtml = agents.length ? `<table class="ai-detail-table"><thead><tr><th>${st('ai.col_node') || '节点'}</th><th>${st('ai.col_cpu') || 'CPU均值'}</th><th>${st('ai.col_mem') || '内存均值'}</th><th>${st('ai.col_disk') || '磁盘'}</th><th>${st('ai.col_disk_full') || '满盘预测'}</th></tr></thead><tbody>` +
+      agents.map(a => `<tr><td>${esc(a.name)}</td><td>${fmtPct(a.cpu&&a.cpu.avg)}</td><td>${fmtPct(a.memory&&a.memory.avg)}</td><td>${fmtPct(a.disk&&a.disk.current_pct)}</td><td>${(a.disk&&a.disk.estimated_full_days!=null)?a.disk.estimated_full_days+' '+(st('ai.days') || '天'):'-'}</td></tr>`).join('') +
+      `</tbody></table>` : `<div class="ai-report-empty">${st('ai.no_node_data') || '无节点数据'}</div>`;
+    const aiText = r.summary ? `<div class="ai-detail-block"><b>${st('ai.summary_label') || 'AI 总结'}：</b>${esc(r.summary)}</div>` : '';
+    const sug = r.suggestion ? `<div class="ai-detail-block"><b>${st('ai.suggestion_label') || '排查方向'}：</b><pre style="white-space:pre-wrap;margin:4px 0">${esc(r.suggestion)}</pre></div>` : '';
+    box.innerHTML = back + meta + aiText + sug + nodesHtml;
+    $('aiDetailBack').addEventListener('click', loadAiReports);
+  } catch (e) { toast('加载详情失败：' + e.message, 'err'); }
+}
+function fmtPct(v) { return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(1) + '%' : '-'; }
+async function saveAiConfig() {
+  const enabling = $('ai_enabled').checked;
+  const model = $('ai_model').value.trim();
+  const key = $('ai_api_key').value;
+  // 前端预校验（后端也会再校一次）：启用时 model 必填
+  if (enabling && !model) {
+    toast(I18N.t('ai.err_no_model') || '请先配置模型名称（model）', 'err');
+    return;
+  }
+  const config = {
+    enabled: enabling,
+    base_url: $('ai_base_url').value.trim(),
+    model,
+    schedule_freq: $('ai_schedule_freq').value,
+    schedule_time: $('ai_schedule_time').value || '08:00',
+    tz_offset_hours: Number($('ai_tz').value) || 8,
+    batch_mode: $('ai_batch').value === 'true',
+    locale: $('ai_locale') ? $('ai_locale').value : 'zh-CN'
+  };
+  if (key) config.api_key = key; // 留空不传，服务端保持不变
+  try {
+    await api('/api/ai/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) });
+    toast(I18N.t('toast.settings_saved'), 'ok');
+    await loadAiConfig();
+  } catch (e) { toast('保存失败：' + e.message, 'err'); }
+}
+async function runAiNow() {
+  const btn = $('btnAiRun'); if (btn) btn.disabled = true;
+  $('ai_status_hint').textContent = '生成中…（调用模型可能需数秒）';
+  try {
+    const r = await api('/api/ai/run', { method: 'POST' });
+    if (r.status === 'ok') toast(I18N.t('ai.run_ok'), 'ok');
+    else if (r.status === 'degraded') toast(I18N.t('ai.run_degraded') + ': ' + (r.message || ''), 'err');
+    else if (r.status === 'disabled') toast(I18N.t('ai.run_disabled'), 'err');
+    else toast(r.message || I18N.t('ai.run_ok'), r.status === 'ok' ? 'ok' : 'err');
+    await loadAiStatus();
+    await loadAiReports();
+  } catch (e) { toast('生成失败：' + e.message, 'err'); }
+  finally { if (btn) btn.disabled = false; }
 }
 function renderGroupOrder() {
   const list = appSettings.group_order || [];
@@ -1006,6 +1146,10 @@ async function saveSettings() {
     site_url: $('s_site_url').value.trim(),
     agent_server_url: $('s_agent_url').value.trim(),
     probe_targets: $('s_probe_targets').value.trim(),
+    social_email: $('s_social_email').value.trim(),
+    social_telegram: $('s_social_telegram').value.trim(),
+    social_qq: $('s_social_qq').value.trim(),
+    social_website: $('s_social_website').value.trim(),
     custom_css: $('s_custom_css').value,
     default_sort: $('s_default_sort').value,
     group_order: appSettings.group_order || [],
@@ -1060,20 +1204,22 @@ function setView(v) {
   document.querySelectorAll('.nav-item[data-view]').forEach(b => b.classList.toggle('active', b.getAttribute('data-view') === v));
   if ($('viewDashboard')) $('viewDashboard').hidden = (v !== 'dashboard');
   if ($('viewClients')) $('viewClients').hidden = (v !== 'clients');
+  if ($('viewAi')) $('viewAi').hidden = (v !== 'ai');
   const isSet = v.indexOf('set-') === 0;
   if ($('viewSettings')) $('viewSettings').hidden = !isSet;
   if (isSet) {
-    activateSettingsPane(v.slice(4)); // basic/theme/notify/alert/security/public/skin
+    activateSettingsPane(v.slice(4)); // settings/security/public
     if (!settingsLoaded) { openSettings(); settingsLoaded = true; }
   }
   if (v === 'clients') renderClients();
+  if (v === 'ai') loadAiView();
   currentView = v;
 }
 // 左侧设置子项 -> 仅显示对应 pane（不重新拉取，避免覆盖未保存的改动）
 function activateSettingsPane(pane) {
   const root = $('viewSettings');
   if (!root) return;
-  const titles = { basic: '站点信息', theme: '主题外观', notify: '通知渠道', alert: '告警规则', security: '账户安全', public: '公开与首页', skin: '皮肤模板' };
+  const titles = { settings: '系统设置', security: '安全中心', public: '公开页' };
   if ($('settingsTitle')) $('settingsTitle').textContent = titles[pane] || '设置';
   root.querySelectorAll('[data-spane]').forEach(p => { p.style.display = (p.getAttribute('data-spane') === pane) ? '' : 'none'; });
 }
@@ -1104,8 +1250,7 @@ function bindEvents() {
   $('loginToken').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('loginTotp').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
   $('btnLogout').addEventListener('click', doLogout);
-  $('btnTestAlert').addEventListener('click', sendTestAlert);
-  $('navSecurity').addEventListener('click', () => openModal('securityModal'));
+  // 测试告警按钮已移入「系统设置 → 通知渠道」面板（#btnTestNotify）
   $('btnSettingsBack').addEventListener('click', () => setView('dashboard'));
   populateCountrySelect();
   $('btnTheme').addEventListener('click', quickToggleTheme);
@@ -1114,10 +1259,19 @@ function bindEvents() {
   // 侧栏收起/展开：记忆偏好到 localStorage
   const sidebarState = localStorage.getItem('sidebar_collapsed');
   if (sidebarState === '1') document.querySelector('.sidebar').classList.add('collapsed');
-  $('btnSidebarToggle').addEventListener('click', () => {
+  $('btnSidebarToggle').addEventListener('click', (e) => {
+    e.stopPropagation(); // 阻止冒泡到 brand，避免被展开逻辑抵消
     const sb = document.querySelector('.sidebar');
     const collapsed = sb.classList.toggle('collapsed');
     localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+  });
+  // 侧栏收起时点击 logo/brand 展开
+  $('sideBrand').addEventListener('click', () => {
+    const sb = document.querySelector('.sidebar');
+    if (sb.classList.contains('collapsed')) {
+      sb.classList.remove('collapsed');
+      localStorage.setItem('sidebar_collapsed', '0');
+    }
   });
   $('btnCreateSubmit').addEventListener('click', submitCreate);
   $('btnEditSubmit').addEventListener('click', submitEdit);
@@ -1125,6 +1279,9 @@ function bindEvents() {
   $('btnResetToken').addEventListener('click', resetToken);
   $('btnSettingsSave').addEventListener('click', saveSettings);
   $('btnTestNotify').addEventListener('click', testNotify);
+  const $aiSave = $('btnAiSave'); if ($aiSave) $aiSave.addEventListener('click', saveAiConfig);
+  const $aiRun = $('btnAiRun'); if ($aiRun) $aiRun.addEventListener('click', runAiNow);
+  const $aiLogSave = $('btnAiLogSave'); if ($aiLogSave) $aiLogSave.addEventListener('click', saveAiLogRetention);
   $('btnAddGroup').addEventListener('click', addGroup);
   $('sortSelect').addEventListener('change', onSortChange);
   // 语言切换：选择后立即保存并刷新
