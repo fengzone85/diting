@@ -44,20 +44,20 @@ platform/            collector 接口 + linux 实现（MVP 仅 Linux；Windows �
 | `net_rx_month` | uint64 | ✅ | 月累计接收 |
 | `net_tx_month` | uint64 | ✅ | 月累计发送 |
 | `uptime` | float64 | ✅ | 运行秒数 |
-| `os` | string | ✅ | 系统发行版 |
-| `hostname` | string | ✅ | 主机名 |
-| `temp` | *float64 | ❌ | 温度（可 null） |
-| `swap_used` | *uint64 | ❌ | Swap 已用 |
-| `swap_total` | *uint64 | ❌ | Swap 总量 |
-| `swap_pct` | *float64 | ❌ | Swap 百分比 |
-| `disk_r_rate` | *float64 | ❌ | 磁盘读速率 |
-| `disk_w_rate` | *float64 | ❌ | 磁盘写速率 |
+| `os` | string | ✅ | 系统发行版（touchAgent 写入） |
+| `hostname` | string | ✅ | 主机名（touchAgent 写入） |
+| `swap_used` | uint64 | ✅ | Swap 已用 |
+| `swap_total` | uint64 | ✅ | Swap 总量 |
+| `swap_pct` | float64 | ✅ | Swap 百分比 |
+| `disk_r_rate` | float64 | ✅ | 磁盘读速率 |
+| `disk_w_rate` | float64 | ✅ | 磁盘写速率 |
+| `temp` | *float64 | ❌ | 温度（无传感器时 null） |
 | `probes` | map | ❌ | 探测结果 |
 | `disks` | []DiskInfo | ❌ | 多盘详情 |
 
 **注意：**
 - 核心标量**禁止 `omitempty`**（缺 `cpu`/`mem_total` 服务端直接 400）
-- `temp` 用 `*float64` 允许 `null`
+- `temp` 用 `*float64` 允许 `null`（唯一可空标量）
 - **不发送 `ts`** — 服务端用 `Date.now()` 自生成
 
 ### 上报 Header
@@ -79,15 +79,17 @@ User-Agent: diting-agent/<version>
 type cpuSample struct{ total, idle uint64 }
 
 func (c *Collector) CPU() (float64, error) {
-    // 读 /proc/stat 第一行
-    // 解析 user+nice+system+idle+iowait+irq+softirq = total
-    // idle = idle + iowait
+    // 读 /proc/stat 第一行: cpu user nice system idle iowait irq softirq steal guest guest_nice
+    // total = sum(全部数值列)  ← 必须包含 steal/guest/guest_nice
+    // idle = col4(idle) + col5(iowait)
     // 与 prev 算差值: 1 - dIdle/dTotal
 }
 ```
 
+**关键：**
 - 构造时 prime 一次（阻塞 ~100ms）
 - 首次上报允许为 0
+- `total` 必须包含所有列，否则 CPU% 偏差
 
 ### 内存
 
@@ -95,30 +97,36 @@ func (c *Collector) CPU() (float64, error) {
 func (c *Collector) Mem() (used, total, pct float64) {
     // 读 /proc/meminfo
     // total = MemTotal
-    // available = MemAvailable
+    // available = MemAvailable（不存在时回退 free+buffers+cached）
     // used = total - available
     // pct = used / total * 100
 }
 ```
 
+**关键：** 老内核无 `MemAvailable` 时需回退 `MemFree + Buffers + Cached`。
+
 ### 磁盘多盘（最难对齐）
 
 复刻 Python `collector.py:75-154`：
+
 1. 读 `/proc/mounts`（容器内优先 `/hostproc/mounts`）
-2. `REAL_FS` 过滤：只保留 `ext4/xfs/btrfs/zfs/tmpfs/ntfs/fat32/apfs`
+2. `REAL_FS` 过滤：`ext2/3/4, xfs, btrfs, f2fs, reiserfs, jfs, nilfs2, vfat, ntfs, exfat, zfs`
+   - **排除 tmpfs**（Python 刻意排除，内存盘不算硬盘）
+   - **用 vfat 非 fat32**
 3. 按 `st_dev` 去重（同盘多挂载合并）
 4. 跳过 `ram/loop/zram/dm-/md` 虚拟设备
 5. `/host` 前缀还原
-6. 顶层 `disk_used/total` 取 `DISK_PATH` 聚合
-7. 同时返回 `[]DiskInfo`
+6. 顶层 `disk_used/total` 取 `DISK_PATH` 聚合（`DISK_PATH` 不存在回退 `/`）
+7. 同时返回 `[]DiskInfo`，约束：≤32 项、pct round 2 位、mount≤200 字符
 
 ### 磁盘 IO
 
 ```go
 func (c *Collector) DiskIO() (readRate, writeRate float64) {
     // 读 /proc/diskstats
-    // 累加真实盘扇区 ×512
-    // 跳过 ram/loop/zram/dm-/md
+    // parts[5] = 读扇区数, parts[9] = 写扇区数
+    // 字节 = 扇区 × 512
+    // 跳过 ram/loop/zram 前缀、含 dm-、md 前缀
     // 与 _prev 算速率差值
 }
 ```
@@ -136,8 +144,17 @@ func (c *Collector) Network() (rxRate, txRate float64, rx, tx uint64) {
 ### 探测（对齐 Python）
 
 ```go
-func (c *Collector) Probe(targets map[string]string) map[string]Probe {
+type ProbeTarget struct {
+    Label string `json:"label"` // ≤24 字符
+    Host  string `json:"host"`  // ≤253 字符
+    Port  int    `json:"port"`  // ∈[1,65535]，默认 53
+}
+
+func (c *Collector) Probes(targets []ProbeTarget) map[string]Probe {
+    // ≤8 个目标
     // 默认 TCP 回退：依次试 443/80/目标端口
+    // 每个目标重试 3 次吸收抖动
+    // goroutine 并发（errgroup）
     // create_connection 成功即可达，返回 RTT
     // ICMP 可选：golang.org/x/net/icmp，需 setcap cap_net_raw
     // 失败静默回退 TCP
@@ -147,8 +164,8 @@ func (c *Collector) Probe(targets map[string]string) map[string]Probe {
 **结果结构：**
 ```go
 type Probe struct {
-    Ok bool `json:"ok"`
-    Ms *int `json:"ms,omitempty"`
+    Ok bool     `json:"ok"`
+    Ms *float64 `json:"ms,omitempty"`  // *float64 保留小数精度
 }
 ```
 
@@ -158,6 +175,7 @@ type Probe struct {
 
 ```go
 type State struct {
+    HasPrev  bool   `json:"has_prev"`  // 首跑守卫，避免流量尖峰
     LastRx   uint64 `json:"last_rx"`   // 上次累计 rx（算差值用）
     LastTx   uint64 `json:"last_tx"`
     MonthKey string `json:"month_key"` // "2026-07"，变更即重置
@@ -175,6 +193,13 @@ func (s *State) Accumulate(rx, tx uint64) {
         s.MonthRx = 0
         s.MonthTx = 0
     }
+    // 首跑只设 LastRx/Tx，不累加（避免巨大尖峰）
+    if !s.HasPrev {
+        s.LastRx = rx
+        s.LastTx = tx
+        s.HasPrev = true
+        return
+    }
     if rx > s.LastRx { s.MonthRx += rx - s.LastRx }
     if tx > s.LastTx { s.MonthTx += tx - s.LastTx }
     s.LastRx = rx
@@ -185,9 +210,17 @@ func (s *State) Accumulate(rx, tx uint64) {
 **原子写入：**
 ```go
 func (s *State) Save(path string) error {
+    if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+        return err
+    }
     tmp := path + ".tmp"
-    data, _ := json.Marshal(s)
-    os.WriteFile(tmp, data, 0o644)
+    data, err := json.Marshal(s)
+    if err != nil {
+        return err
+    }
+    if err := os.WriteFile(tmp, data, 0o600); err != nil {
+        return err
+    }
     return os.Rename(tmp, path)
 }
 ```
@@ -200,9 +233,18 @@ func (s *State) Save(path string) error {
 
 ```go
 func (c *Config) Validate() error {
-    u, _ := url.Parse(c.ServerURL)
-    if u.Scheme == "http" && u.Hostname() != "localhost" {
-        return fmt.Errorf("http:// only allowed for localhost")
+    u, err := url.Parse(c.ServerURL)
+    if err != nil {
+        return fmt.Errorf("invalid server_url: %w", err)
+    }
+    // 仅允许 localhost/127.0.0.1/::1 使用 http
+    allowed := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+    if u.Scheme == "http" && !allowed {
+        return fmt.Errorf("http:// only allowed for localhost/127.0.0.1/::1; use https:// for %s", u.Hostname())
+    }
+    // 非 http/https 直接拒
+    if u.Scheme != "http" && u.Scheme != "https" {
+        return fmt.Errorf("invalid scheme %q, expected http or https", u.Scheme)
     }
     return nil
 }
@@ -213,54 +255,40 @@ func (c *Config) Validate() error {
 | 场景 | 退避 |
 |------|------|
 | 401/403 | 10 分钟（token 静态不可自愈） |
-| 网络错误 | 指数退避 1s→2s→4s→8s→16s→30s（封顶） |
+| 网络错误 | `2^attempt * INTERVAL`，封顶 30s，最多 3 次 |
 | 成功 | 立即重置 |
 
----
-
-## 六、自适应上报间隔
-
-```go
-type AdaptiveReporter struct {
-    mu           sync.RWMutex
-    viewerCount  int
-    fastInterval time.Duration // 有观看者 10s
-    slowInterval time.Duration // 无观看者 60s
-}
-
-func (a *AdaptiveReporter) Interval() time.Duration {
-    if a.viewerCount > 0 { return a.fastInterval }
-    return a.slowInterval
-}
-```
+**注意：** 401/403 退避后主循环还会再睡 INTERVAL（总 ~620s），属正常。
 
 ---
 
-## 七、安全模型
+## 六、安全模型
 
 | 维度 | 要求 |
 |------|------|
 | 镜像 | `scratch`（静态 CGO_ENABLED=0） |
-| 用户 | `USER 1000` |
+| 用户 | `USER 1000`，构建期 `chown 1000 /data` |
 | 能力 | `--cap-drop=ALL`（TCP 探测零 cap） |
+| 网络 | **bridge 网络**，读 `/hostproc/net/dev` 拿真实流量，禁用 `--network host` |
 | 挂载 | `-v /:/host:ro -v /proc:/hostproc:ro -v diting-state:/data` |
 | Token | 仅 env/内存、只经 HTTPS、不落盘 |
 | DEBUG | 不打印 token |
+| ICMP | 默认 **TCP-only（零 cap）**；ICMP 作可选构建变体 |
 
 ---
 
-## 八、实施计划
+## 七、实施计划
 
 | 阶段 | 内容 | 产出 |
 |------|------|------|
 | **P0** | Linux 全字段采集 + HTTPS 上报 + 正确月累计 | 能真收数据 |
-| **P1** | 多盘 `/host`、磁盘 IO、探测、Windows（延后） | 100% 对齐 Python |
-| **P2** | 退避/信号/月度重置/原子写 | 生产可用 |
-| **P3** | 压缩上报/断线缓存/资源限制 | 大规模部署 |
+| **P1** | 多盘 `/host`、磁盘 IO、探测并发/重试、Windows（延后） | 100% 对齐 Python |
+| **P2** | 退避/信号/月度重置/原子写/Mem 回退 | 生产可用 |
+| **P3** | 压缩上报/断线缓存/资源限制（seccomp 收紧可选） | 大规模部署 |
 
 ---
 
-## 九、迁移注意
+## 八、迁移注意
 
 - Go 与 Python **不得共用同一 `AGENT_ID`**（否则 `last_seen`/指标互相覆盖）
 - 对比时注册**两个独立 agent**并排看
@@ -268,13 +296,19 @@ func (a *AdaptiveReporter) Interval() time.Duration {
 
 ---
 
-## 十、验证清单
+## 九、验证清单
 
 | 检查项 | 方法 |
 |--------|------|
-| 字段完整 | 对比 Python collector.py 输出 vs Go 输出 |
+| 字段完整 | 对比 Python `collector.py` 输出 vs Go 输出 |
 | 400 拒收 | 服务端日志无 `invalid payload` |
+| `os/hostname` 落库非空 | touchAgent 后查 agent 行 |
+| `temp` null 通路 | 无传感器不 400 |
 | 流量累计 | 重启后月累计不丢 |
-| HTTPS 强制 | `http://` 非 localhost 直接退出 |
+| 首跑无流量尖峰 | fresh state 月累计 ≈0 |
+| 多盘去重 | 同盘多挂载只一条 |
+| `disks` 数量≤32 / pct 精度 2 位 |
+| HTTPS 强制 | `http://` 非 localhost/127.0.0.1/::1 直接退出 |
+| `http://127.0.0.1` 放行 | 本地开发正常 |
 | 状态原子写 | 断电后 state.json 不损坏 |
 | 资源占用 | 内存 <10 MB，CPU <1% |
