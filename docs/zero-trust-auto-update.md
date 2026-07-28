@@ -148,6 +148,56 @@
 
 **结论**：私有仓库 = 用户自己的数字空间，被投毒风险 ≈ 账号安全风险。
 
+### Agent 被控泄露面分析
+
+如果攻击者获取了 Agent 机器的访问权限，能拿到什么：
+
+| 凭证 | 泄露后果 | 风险 |
+|------|---------|------|
+| `SIGN_PUBKEY` | 公钥本就可公开 | ✅ 无风险 |
+| `UPDATE_REPO` | 仓库 URL 是公开信息 | ✅ 无风险 |
+| `AGENT_TOKEN` | 只能伪造本机数据，无法横向移动 | ✅ 项目已承认（README 场景②） |
+| ~~`GITHUB_TOKEN`/`PAT`~~ | **严禁配置，见下文** | 🔴 绝不允 |
+
+**关键设计**：即使 Agent 被控，攻击者无法：
+- 用公钥给其他 Agent 投毒（没有私钥，签名失败）
+- 通过更新通道横向移动（更新源是 GitHub，不是被控服务端）
+- 攻击服务端（Agent 只有 POST 权限，服务端不执行 Agent 指令）
+
+**唯一真正的坑**：为绕过 GitHub 60 次/小时限速而配置 `GITHUB_TOKEN`/`PAT`。
+
+### 限速的正确解法（禁止下发写凭证）
+
+**禁止**：给 Agent 配 `GITHUB_TOKEN`（写 scope）→ Agent 被控 = GitHub 账号泄露。
+
+**正确解法**：
+
+| 方案 | 实现 | 推荐 |
+|------|------|------|
+| 服务端代理 | 服务端缓存 GitHub API，给 Agent 提供同源只读代理 | ⭐ 推荐 |
+| 自托管 Forgejo | 替换 GitHub，无速率限制 | 大型部署 |
+| 错峰 + 缓存 | 随机偏移 + 本地缓存 ETag | 小型部署 |
+
+**服务端代理示例**：
+```javascript
+// 服务端添加代理端点
+app.get('/api/updates/:type', async (req, res) => {
+  const { type } = req.params; // 'agent' or 'server'
+  const repo = await getUpdateRepo(type); // 从配置读取
+  const cached = await cache.get(`update:${type}`);
+  if (cached) return res.json(cached);
+
+  const resp = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    headers: { 'Authorization': `Bearer ${process.env.GITHUB_TOKEN}` } // 服务端持 token
+  });
+  const data = await resp.json();
+  await cache.set(`update:${type}`, data, 3600); // 缓存 1 小时
+  res.json(data);
+});
+```
+
+Agent 只需请求 `https://monitor.example.com/api/upgrades/agent`，不直连 GitHub，无需任何凭证。
+
 ### 零入站保证
 
 本方案**不新增任何入站端口**，保持 Agent 纯单向上报模型。
@@ -850,7 +900,7 @@ func runUpdater(ctx context.Context, u *Updater, onUpdate func()) {
 | Token 不进命令行 | 环境变量传入 |
 | install.sh 校验 | SHA-256 checksum 先校验 |
 | 错峰检查 | 随机 0-10 分钟偏移 |
-| GitHub PAT | 可选，提速率限制 |
+| **Agent 禁止写凭证** | **严禁 `GITHUB_TOKEN`/`PAT`，限速由服务端代理解决** |
 
 ---
 
