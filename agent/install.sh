@@ -55,7 +55,7 @@ download_list() {
 }
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-INTERVAL=15
+INTERVAL=20
 REPO="https://raw.githubusercontent.com/fengzone85/diting/master/agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -72,7 +72,7 @@ Required (interactive if not given):
   --token-file FILE     Read token from FILE (recommended; avoids leaking via ps/shell history)
   --setup-token SECRET  One-click register with server SETUP_TOKEN (no need for --id/--token)
   --setup-name NAME     Node display name for self-registration (optional)
-  --interval SECONDS    Report interval in seconds (default: 15)
+  --interval SECONDS    Report interval in seconds (default: 20)
   --install-agent       （兼容一键命令语义标记；本脚本即受控端安装，忽略即可）
   --repo BASE_URL       Raw 仓库地址（agent.py 等配套文件来源，默认 master 分支）
 
@@ -81,7 +81,7 @@ Examples:
   sudo bash install.sh
 
   # Fully non-interactive (for Ansible / scripts)
-  sudo bash install.sh --server https://monitor:8008 --id node1 --token SECRET --interval 15
+  sudo bash install.sh --server https://monitor:8008 --id node1 --token SECRET --interval 20
 EOF
     exit 0
 }

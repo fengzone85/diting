@@ -17,7 +17,7 @@ AUTH_BACKOFF = 600  # seconds
 SERVER_URL = os.environ.get('SERVER_URL', '').rstrip('/')
 AGENT_ID = os.environ.get('AGENT_ID', '')
 AGENT_TOKEN = os.environ.get('AGENT_TOKEN', '')
-INTERVAL = max(5, int(os.environ.get('INTERVAL', '15')))
+INTERVAL = max(5, int(os.environ.get('INTERVAL', '20')))
 DISK_PATH = os.environ.get('DISK_PATH', '/')
 STATE_FILE = os.environ.get('STATE_FILE', '/data/state.json')
 # 网络质量自测目标（固定公共基础设施，写死在本地，服务端不可下发）。

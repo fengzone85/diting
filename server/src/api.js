@@ -135,7 +135,7 @@ router.post('/setup/generate', setupRateLimit, (req, res) => {
 // 仓库 raw 基址（diting.sh 位于根，agent 载荷位于 <base>/agent/）；可用 AGENT_RAW_REPO 覆盖。
 const REPO_BASE = (process.env.AGENT_RAW_REPO || 'https://raw.githubusercontent.com/fengzone85/diting/master').replace(/\/+$/, '');
 const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent';
-const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 15);
+const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 20);
 
 // 受控端接入用的服务端公网地址：优先级为
 // ① UI 设置中「Agent 连接地址」② UI 设置中「项目网址」③ 环境变量 PUBLIC_URL ④ 从请求头自动推导。
