@@ -141,7 +141,7 @@ func (c *Collector) Network() (rxRate, txRate float64, rx, tx uint64) {
 }
 ```
 
-### 探测（对齐 Python）
+### 探测（对齐 Python，参考 Pulse 并发模式）
 
 ```go
 type ProbeTarget struct {
@@ -154,10 +154,21 @@ func (c *Collector) Probes(targets []ProbeTarget) map[string]Probe {
     // ≤8 个目标
     // 默认 TCP 回退：依次试 443/80/目标端口
     // 每个目标重试 3 次吸收抖动
-    // goroutine 并发（errgroup）
-    // create_connection 成功即可达，返回 RTT
+    // sync.WaitGroup + goroutine 并发（参考 Pulse 模式）
+    // net.DialTimeout("tcp", target, 3s) 握手时延 ×1000→ms
     // ICMP 可选：golang.org/x/net/icmp，需 setcap cap_net_raw
     // 失败静默回退 TCP
+}
+```
+
+**输入校验（硬化解析）：**
+```go
+func parseProbeTarget(raw string) (*ProbeTarget, error) {
+    // net.SplitHostPort 解析 host:port
+    // port ∈ [1, 65535]
+    // hostname 正则: ^[a-zA-Z0-9.\-:]+$
+    // 长度 ≤ 255
+    // label ≤ 24 字符
 }
 ```
 
@@ -288,7 +299,22 @@ func (c *Config) Validate() error {
 
 ---
 
-## 八、迁移注意
+## 八、安全模型对比（vs Pulse 等项目）
+
+| 维度 | Pulse | 谛听（正确） |
+|------|-------|-------------|
+| 认证 | 共享 secret + query 传 token + 空 secret 无认证 | 每 agent 独立 token + SHA-256 + 恒定时间比较 |
+| 传输 | 不强制 HTTPS，默认 http://localhost:8080 | 强制 HTTPS（非 localhost/127.0.0.1/::1 拒 http） |
+| 指令通道 | 服务端下发探测目标 + 客户端监听 :9090 | 零入站、无指令通道、探测目标本地写死 |
+| 指纹采集 | CPU 型号、虚拟化类型、公网 IP、位置 | 只采性能数据，禁止任何指纹 |
+| 自动更新 | README 称有但代码完全没有（文档失实） | 无自更新，避免 RCE 面 |
+| 依赖 | gopsutil + shell-out（df/top/sysctl） | 直读 /proc，零外部依赖 |
+
+**结论：** Pulse 在安全模型上是"反向教材"，谛听现有设计（单向上报、per-agent token、强制 HTTPS、零入站、无指纹）是更安全的选择。
+
+---
+
+## 九、迁移注意
 
 - Go 与 Python **不得共用同一 `AGENT_ID`**（否则 `last_seen`/指标互相覆盖）
 - 对比时注册**两个独立 agent**并排看
