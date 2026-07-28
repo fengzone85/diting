@@ -201,7 +201,7 @@
   "setup.locked_subtitle": "Admin token already set. This page is locked.",
   "setup.locked_disabled": "✓ Setup wizard disabled",
   "setup.locked_reset_instruction": "✓ To reset the token, SSH into the server and run:",
-  "setup.locked_reset_command": "sudo bash install.sh --reset-admin-token",
+  "setup.locked_reset_command": "sudo bash diting.sh --reset-admin-token",
   "setup.go_to_login": "Go to Sign In",
   "setup.wizard_title": "First Time Setup",
   "setup.wizard_subtitle": "Generate an admin token. Save it securely!",

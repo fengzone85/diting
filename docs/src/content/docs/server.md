@@ -38,20 +38,20 @@ services:
 
 ### 备份与恢复
 
-通过 `install.sh` 管理命令操作，无需手动定位文件或停服：
+通过 `diting.sh` 管理命令操作，无需手动定位文件或停服：
 
 ```bash
 # 热备份（通过 sqlite3 .backup，不中断服务）
-sudo bash install.sh --backup
+sudo bash diting.sh --backup
 
 # 从备份恢复（自动先备份当前状态，可回滚）
-sudo bash install.sh --restore /var/backups/diting/monitor_20260723.db
+sudo bash diting.sh --restore /var/backups/diting/monitor_20260723.db
 
 # 列出备份
-sudo bash install.sh --backup-list
+sudo bash diting.sh --backup-list
 
 # 查看统计
-sudo bash install.sh --db-stats
+sudo bash diting.sh --db-stats
 ```
 
 ### 数据保留（自动清理）
@@ -74,14 +74,14 @@ environment:
 
 ```bash
 # 新服务器上
-sudo bash install.sh --restore /path/to/monitor_backup.db
+sudo bash diting.sh --restore /path/to/monitor_backup.db
 ```
 
 ### 定时备份
 
 ```bash
 # crontab 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
 ```
 
 ## 进程守护

@@ -50,7 +50,7 @@ docker run -d \
 ### Linux（原生 systemd）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting.sh | bash
 ```
 
 按提示输入 Server URL 和 Token 即可。
@@ -71,10 +71,10 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/instal
 
 ```bash
 # 首次备份
-sudo bash install.sh --backup
+sudo bash diting.sh --backup
 
 # 设置每天凌晨 3 点自动备份（需 root）
-(crontab -l 2>/dev/null; echo "0 3 * * * root bash $(which diting-install.sh || echo /usr/local/bin/diting-install.sh) --backup") | crontab -
+(crontab -l 2>/dev/null; echo "0 3 * * * root bash $(which diting-diting.sh || echo /usr/local/bin/diting-diting.sh) --backup") | crontab -
 ```
 
 > 数据库包含全部 Agent 记录、历史监控数据、设置项。Docker 重建容器不会丢失数据，但整机迁移或卷删除前需手动备份。

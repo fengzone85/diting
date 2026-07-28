@@ -74,7 +74,7 @@ sudo ufw enable
 原理：所有设备加入同一个 Tailscale 虚拟网络，通过**内网 IP / Magic DNS** 互访。VPS 可**关闭全部入站端口**，外部互联网根本找不到它。适合"只有你自己/少数设备访问"的场景。
 
 ### 1. 各设备安装 Tailscale 并加入同一 tailnet
-- VPS：`curl -fsSL https://tailscale.com/install.sh | sh` 然后 `sudo tailscale up`
+- VPS：`curl -fsSL https://tailscale.com/diting.sh | sh` 然后 `sudo tailscale up`
 - 你的电脑 / 受控端同样安装并登录同一账号。
 
 ### 2. 收紧 VPS 防火墙
@@ -110,6 +110,6 @@ Tailscale 流量经其 DERP 中继或 P2P，依赖**出站** UDP（及到 `derp.
 
 ## 更新服务端（不影响隧道）
 
-服务端更新请见 `README.md` 的「更新」章节（`sudo bash install.sh --update-server`）。该命令只重建 server 容器，**Nginx 反代与隧道配置（Cloudflared / Tailscale）均不受影响**，更新后外部访问方式（域名 / Magic DNS）保持不变，无需重新配置隧道。
+服务端更新请见 `README.md` 的「更新」章节（`sudo bash diting.sh --update-server`）。该命令只重建 server 容器，**Nginx 反代与隧道配置（Cloudflared / Tailscale）均不受影响**，更新后外部访问方式（域名 / Magic DNS）保持不变，无需重新配置隧道。
 
 > 若更新后发现访问异常，通常是 server 容器刚重建、Node 还在冷启动（约数秒），稍等再刷新即可；隧道本身不会因更新而中断。

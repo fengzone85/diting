@@ -50,19 +50,19 @@ npm start
 
 ```bash
 # 备份数据库（默认存到 /var/backups/diting/）
-sudo bash install.sh --backup
+sudo bash diting.sh --backup
 
 # 备份到指定路径
-sudo bash install.sh --backup /tmp/my-backup.db
+sudo bash diting.sh --backup /tmp/my-backup.db
 
 # 从备份恢复（恢复前自动备份当前状态，可回滚）
-sudo bash install.sh --restore /var/backups/diting/monitor_20260723_141022.db
+sudo bash diting.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
 # 列出已有备份
-sudo bash install.sh --backup-list
+sudo bash diting.sh --backup-list
 
 # 查看数据库统计（大小/记录数/时间范围）
-sudo bash install.sh --db-stats
+sudo bash diting.sh --db-stats
 ```
 
 **恢复安全机制**：
@@ -74,7 +74,7 @@ sudo bash install.sh --db-stats
 
 ```bash
 # 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/diting-install.sh --backup
+0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
 ```
 
 ## 数据保留与自动清理
