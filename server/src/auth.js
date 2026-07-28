@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('crypto');
+const db = require('./db');
 const totp = require('./totp');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。

@@ -58,7 +58,7 @@
 <td width="50%">
 
 ### ⚡ 一键部署
-- **统一 install.sh** — 服务端 + 受控端 + 更新 + 卸载 + 数据库管理
+- **统一 diting.sh** — 服务端 + 受控端 + 更新 + 卸载 + 数据库管理
 - **自动依赖安装** — Docker / git / curl 自动补齐
 - **交互式菜单** — 引导式配置，中英文双语
 - **自助注册** — SETUP_TOKEN 一键建客户端
@@ -72,9 +72,9 @@
 
 ```bash
 # 一条命令完成部署
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/install.sh -o install.sh
-chmod +x install.sh
-sudo ./install.sh
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/diting.sh -o diting.sh
+chmod +x diting.sh
+sudo ./diting.sh
 ```
 
 > 脚本会自动安装 Docker、git 等依赖，引导你完成服务端和受控端的配置。
@@ -82,13 +82,13 @@ sudo ./install.sh
 **非交互模式（CI / 批量）：**
 ```bash
 # 安装服务端
-sudo bash install.sh --install-server
+sudo bash diting.sh --install-server
 
 # 安装受控端（手动模式）
-sudo bash install.sh --install-agent --server https://your-server:8008 --id NODE1 --token SECRET
+sudo bash diting.sh --install-agent --server https://your-server:8008 --id NODE1 --token SECRET
 
 # 安装受控端（自助注册）
-sudo bash install.sh --install-agent --server https://your-server:8008 --setup-token <SETUP_TOKEN>
+sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-token <SETUP_TOKEN>
 ```
 
 ---
@@ -113,7 +113,7 @@ sudo bash install.sh --install-agent --server https://your-server:8008 --setup-t
 
 ```
 diting/
-├── install.sh              # 一键部署/更新/卸载/数据库管理
+├── diting.sh              # 一键部署/更新/卸载/数据库管理
 ├── docker-compose.yml      # 快速启动（测试用）
 ├── server/                 # 服务端（Node.js + Express + SQLite）
 │   ├── server.js           # 入口 + 路由 + WebSocket
@@ -130,7 +130,7 @@ diting/
 ├── agent/                  # 受控端
 │   ├── agent.py / collector.py  # Linux（Docker，纯标准库）
 │   ├── windows/            # Windows 原生（psutil）
-│   └── install.sh          # 受控端独立安装脚本
+│   └── diting.sh          # 受控端独立安装脚本
 ├── docs/                   # 用户技术文档（14 篇）
 └── nginx/monitor.conf.example  # TLS 反代 + 限流示例
 ```
@@ -234,7 +234,7 @@ diting/
 - [ ] 设置 `SESSION_SECRET`（固定随机值，防重启失效）
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
 - [ ] 配置 IP 白名单（支持 IPv4/IPv6/CIDR）
-- [ ] 定期备份数据库（`sudo bash install.sh --backup`）
+- [ ] 定期备份数据库（`sudo bash diting.sh --backup`）
 - [ ] 配置告警通知（邮件 / Telegram）
 - [ ] 使用 Cloudflare Tunnel 或 Tailscale 隐藏源站 IP（可选）
 
@@ -244,13 +244,13 @@ diting/
 
 ```bash
 # 更新安装脚本自身
-sudo bash install.sh --update-script
+sudo bash diting.sh --update-script
 
 # 更新服务端（git pull + 重建容器）
-sudo bash install.sh --update-server
+sudo bash diting.sh --update-server
 
 # 更新受控端（保留已注册身份）
-sudo bash install.sh --update-agent
+sudo bash diting.sh --update-agent
 ```
 
 ---
@@ -423,7 +423,7 @@ Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的�
 
 ### 远端动态配置 / 自动更新长什么样
 - **热更新配置**：服务端在 HTTP 响应头返回 `X-Agent-Config-Md5`，响应体下发采集间隔、流量校正、探测目标等指令，Agent 校验后写盘并热加载，无需重启。
-- **自更新**：开启 `AUTO_UPDATE` 后，Agent 从服务端推导出的地址拉取 `install.sh` 并以 `bash -s install` 执行——即**以 root 在受控机上运行远端脚本**。
+- **自更新**：开启 `AUTO_UPDATE` 后，Agent 从服务端推导出的地址拉取 `diting.sh` 并以 `bash -s install` 执行——即**以 root 在受控机上运行远端脚本**。
 
 ### 为什么我们不做
 1. **信任边界崩溃**：一旦存在「服务端 → Agent」的下行通道，信任模型就从「服务端和 Agent 互不信任」退化为「隐式信任服务端」。服务端一旦失陷，攻击者即可向**每一台**受控端下发指令，把整个机群变成可被远程操控的节点（甚至分布式探测跳板）。
@@ -433,7 +433,7 @@ Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的�
 我们的做法是**本地固定、单向上报**：
 - 采样逻辑在 Agent 本地写死，服务端既不推送也不感知；
 - 网络质量探测目标写死在本地 `PROBE_TARGETS`（`label:host[:port]`，默认三家运营商 DNS + 8.8.8.8），**服务端永远不下发任何探测目标**；
-- 更新受控端必须**由运维在受控机本地执行**（`sudo bash install.sh --update-agent`，保留已注册身份），而非 Agent 自己从远端拉脚本。
+- 更新受控端必须**由运维在受控机本地执行**（`sudo bash diting.sh --update-agent`，保留已注册身份），而非 Agent 自己从远端拉脚本。
 
 > 一句话：本项目用「功能减法」（无指令通道、无指纹、Agent 互不感知）换取「安全加法」。攻击者无法利用根本不存在的东西。需要更新时，请走本地运维通道，而非远端自更新。
 

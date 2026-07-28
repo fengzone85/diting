@@ -10,8 +10,17 @@ AGENT_ID=agt_5f4f4bfd979b
 AGENT_TOKEN=862548284f436a1ce28e53b82a1e00348b97089f22091a4e
 PROBE_TARGETS="移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
 
-echo "==> [1/5] 准备卷 server-data-test"
+echo "==> [1/5] 准备卷 server-data-test + 备份 admin_config"
 docker volume create server-data-test >/dev/null
+# 重建前备份 admin_config（站点信息/分组/通知等设置）
+if docker ps -q -f name=diting-server-test >/dev/null 2>&1; then
+  docker exec diting-server-test node -e "
+    const Database=require('/app/node_modules/better-sqlite3');
+    const db=new Database('/data/monitor.db');
+    const rows=db.prepare('SELECT key,value FROM admin_config').all();
+    console.log(JSON.stringify(rows));
+  " 2>/dev/null > /tmp/diting_admin_config_backup.json && echo "    已备份 admin_config"
+fi
 
 echo "==> [2/5] 启动测试服务端 diting-server-test (diting:latest, 8081)"
 docker rm -f diting-server-test >/dev/null 2>&1 || true
@@ -39,6 +48,21 @@ db.prepare('INSERT OR IGNORE INTO agents (id,name,token_hash,created_at,last_see
   .run('$AGENT_ID','test-agent',h,Date.now());
 console.log('    seeded:', JSON.stringify(db.prepare('SELECT id,name FROM agents').all()));
 "
+
+echo "==> [4.5/5] 恢复 admin_config（站点信息/分组/通知等设置）"
+if [ -f /tmp/diting_admin_config_backup.json ] && [ -s /tmp/diting_admin_config_backup.json ]; then
+  # 将备份拷进容器再恢复
+  docker cp /tmp/diting_admin_config_backup.json diting-server-test:/tmp/backup.json
+  docker exec diting-server-test node -e "
+    const Database=require('/app/node_modules/better-sqlite3');
+    const db=new Database('/data/monitor.db');
+    const fs=require('fs');
+    const rows=JSON.parse(fs.readFileSync('/tmp/backup.json','utf8'));
+    const ins=db.prepare('INSERT OR REPLACE INTO admin_config(key,value) VALUES (?,?)');
+    db.transaction(()=>{ rows.forEach(r=>ins.run(r.key,r.value)); })();
+    console.log('    已恢复', rows.length, '条设置');
+  " 2>/dev/null || echo "    恢复跳过（备份为空或格式异常）"
+fi
 
 echo "==> [5/5] 重建受控端 diting-agent (diting-agent:latest, 复用身份)"
 docker rm -f diting-agent >/dev/null 2>&1 || true
