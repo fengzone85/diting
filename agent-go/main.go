@@ -41,7 +41,7 @@ func main() {
 
 	// 初始化模块
 	c := collector.NewCollector(cfg.DiskPath)
-	r := reporter.NewReporter(cfg.ServerURL, cfg.AgentID, cfg.AgentToken)
+	r := reporter.NewReporter(cfg.ServerURL, cfg.AgentID, cfg.AgentToken, cfg.Interval)
 	st := state.Load(cfg.StateFile)
 	targets := collector.ParseProbeTargets(cfg.ProbeTargets)
 
