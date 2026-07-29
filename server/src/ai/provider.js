@@ -16,8 +16,75 @@
 
 const https = require('https');
 const http = require('http');
+const dns = require('dns');
 const { URL } = require('url');
 const { SYSTEM_PROMPT, buildUserMessage } = require('./prompt');
+
+// ── SSRF 防护：base_url 云元数据地址黑名单 ──────────────────────────────────────
+// 管理员可配置 base_url，若被恶意指向云 IMDS（169.254.169.254 等），服务端会向
+// 内部服务发起带 api_key 的请求并读回响应——可升级为云账号凭证泄露。
+// 此处只拦截云元数据专用地址，保留 RFC 1918 全段（10/172.16/192.168）与 localhost，
+// 以支持本地 Ollama / 内网 vLLM 等合法场景。
+const IMDS_BLOCKED = new Set([
+  '169.254.169.254',                                // AWS / GCP / Azure / 腾讯云 IMDS
+  '100.100.100.200',                                // 阿里云元数据
+]);
+
+function isDangerousIP(ip) {
+  if (!ip) return false;
+  // 精确匹配已知云元数据地址
+  if (IMDS_BLOCKED.has(ip)) return true;
+  // IPv4 link-local 全段拦截（169.254.0.0/16），含所有云厂商的 IMDS
+  if (ip.startsWith('169.254.')) return true;
+  // 非路由地址
+  if (ip === '0.0.0.0') return true;
+  // IPv6 link-local（fe80::/10）
+  if (ip.toLowerCase().startsWith('fe80:')) return true;
+  // RFC 1918 全段放行：10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+  // localhost（127.0.0.0/8, ::1）放行
+  return false;
+}
+
+async function checkBaseUrl(urlStr) {
+  let urlObj;
+  try { urlObj = new URL(urlStr); }
+  catch (e) { throw new AiError('无效的 base_url：' + urlStr, { retryable: false }); }
+
+  const hostname = urlObj.hostname;
+
+  // 纯 IP 字面量（含 IPv6）直接校验，不走 DNS
+  if (/^[\d.]+$/.test(hostname) || hostname.includes(':')) {
+    if (isDangerousIP(hostname)) {
+      throw new AiError('禁止访问云元数据地址：' + hostname, { retryable: false });
+    }
+    // IP 字面量无需二次解析，返回 null 让 httpRequest 走默认 DNS
+    return null;
+  }
+
+  // DNS 解析域名 → 逐个校验解析结果，返回首个可用 IP 供 httpRequest 绑定（防 DNS rebinding）
+  try {
+    const v4 = await dns.promises.resolve4(hostname).catch(() => []);
+    for (const addr of v4) {
+      if (isDangerousIP(addr)) {
+        throw new AiError(`禁止访问云元数据地址：${hostname} → ${addr}`, { retryable: false });
+      }
+    }
+    const v6 = await dns.promises.resolve6(hostname).catch(() => []);
+    for (const addr of v6) {
+      if (isDangerousIP(addr)) {
+        throw new AiError(`禁止访问云元数据地址：${hostname} → ${addr}`, { retryable: false });
+      }
+    }
+    // 返回已校验的 IP（优先 IPv4），httpRequest 将直连此 IP 跳过二次 DNS
+    if (v4.length) return { ip: v4[0], family: 4 };
+    if (v6.length) return { ip: v6[0], family: 6 };
+    return null;
+  } catch (e) {
+    if (e instanceof AiError) throw e;
+    // DNS 解析失败不阻塞（hosts 写死的域名等），信任管理员配置
+    return null;
+  }
+}
 
 class AiError extends Error {
   constructor(message, { retryable = false, status = 0 } = {}) {
@@ -41,6 +108,10 @@ async function analyze(config, summary) {
 
   const baseUrl = (config.base_url || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const endpoint = baseUrl + '/chat/completions';
+
+  // SSRF 防护：校验 base_url 指向的不是云元数据地址，同时获取已解析的 IP（防 DNS rebinding）
+  const resolved = await checkBaseUrl(baseUrl);
+
   const userMsg = buildUserMessage(summary);
 
   const body = JSON.stringify({
@@ -61,7 +132,9 @@ async function analyze(config, summary) {
       'Content-Length': Buffer.byteLength(body) // 显式声明，避免非标代理 411
     },
     body,
-    timeoutMs: 30000 // 超时偏保守：日报非实时，失败会降级而非丢失
+    timeoutMs: 30000, // 超时偏保守：日报非实时，失败会降级而非丢失
+    resolvedIp: resolved ? resolved.ip : null,
+    resolvedFamily: resolved ? resolved.family : null
   });
 
   // 解析 OpenAI 兼容响应结构
@@ -93,7 +166,8 @@ async function analyze(config, summary) {
 }
 
 // 底层 HTTP 请求（原生 http/https，避免引入额外依赖，与 alerts.js 的 Telegram 请求风格一致）。
-function httpRequest(urlStr, { method, headers, body, timeoutMs }) {
+// resolvedIp/resolvedFamily：已校验的 IP，用于绑定连接目标（防 DNS rebinding TOCTOU）。
+function httpRequest(urlStr, { method, headers, body, timeoutMs, resolvedIp, resolvedFamily }) {
   return new Promise((resolve, reject) => {
     let urlObj;
     try { urlObj = new URL(urlStr); }
@@ -102,7 +176,15 @@ function httpRequest(urlStr, { method, headers, body, timeoutMs }) {
     const lib = urlObj.protocol === 'https:' ? https : http;
     const MAX_BYTES = 2 * 1024 * 1024; // 响应上限 2MB，防异常端点撑爆内存
     let received = 0;
-    const req = lib.request(urlObj, { method, headers }, (res) => {
+
+    // 构造请求选项：若有已校验的 IP，用 lookup 绑定，跳过二次 DNS 解析
+    const reqOpts = { method, headers };
+    if (resolvedIp) {
+      reqOpts.lookup = (_hostname, _opts, cb) => cb(null, resolvedIp, resolvedFamily || 4);
+      // SNI / TLS Server Name Indication 需要原始 hostname（Node.js 用 urlObj.hostname 自动处理）
+    }
+
+    const req = lib.request(urlObj, reqOpts, (res) => {
       let chunks = '';
       res.on('data', (c) => {
         received += c.length;

@@ -13,10 +13,6 @@ server/server.out
 data/
 test_data/
 
-# 本助手内部数据
-.workbuddy/
-.codebuddy/
-
 # 本地运维/排查临时脚本
 .vps_test/
 
@@ -26,3 +22,6 @@ Thumbs.db
 *.swp
 .vscode/
 .idea/
+
+# 设计/模板稿（非项目源码）
+candyhouse.html

@@ -5,6 +5,16 @@ services:
     restart: unless-stopped
     # 共享宿主机网络命名空间，使 /proc/net/dev 反映真实流量（默认 bridge 网络读到的是容器视角）
     network_mode: host
+    # 降权：只保留 ICMP ping 所需的 NET_RAW，丢弃其余所有默认能力
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    # 纵深防御：禁止进程获取新特权（即使二进制有 setuid bit 也无法提权）
+    # agent 无需 setuid/setgid/创建新 namespace 等操作，零功能影响
+    security_opt:
+      - no-new-privileges:true
+    # 容器内已用 USER diting (uid=1000)，此处不重复 user: 字段
     environment:
       SERVER_URL: "${SERVER_URL}"
       AGENT_ID: "${AGENT_ID}"
@@ -15,7 +25,17 @@ services:
       # PROBE_TARGETS: "移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
       # 只读挂载宿主机根目录到 /host，DISK_PATH 指向它，才能统计真实根盘使用率
       DISK_PATH: "/host"
-    # 只读挂载宿主机根，供读取真实磁盘使用率（agent 仅做 statvfs，不会写入）
+    # ── 磁盘监控的结构性依赖 ────────────────────────────────────────────────
+    # /:/host:ro 不是安全欠账，而是宿主机磁盘监控的架构必须：
+    #   - disk_info()        → os.statvfs('/host') 取宿主机根盘使用率
+    #   - disk_list('/host') → 依赖容器 /proc/mounts 中出现 /host 前缀条目
+    #     （把宿主 / 递归 bind 后，容器的 mount 命名空间视图中会生成
+    #       /host、/host/data 等条目），再逐个 statvfs 得到多盘指标。
+    #     若去掉此挂载，disk_list 永远返回空，disk_info 回退到容器存储。
+    # agent 只做 statvfs + 只读采集 /proc（无指令通道），不会读取
+    # /host 下的 /etc/shadow / SSH 私钥等敏感文件。不存在可被远程利用
+    # 的读取路径。如需完全消除宿主文件暴露面，可设置 DISK_PATH=/ 并移除此挂载，
+    # 但磁盘指标将变为容器而非宿主机数据。
     volumes:
       - /:/host:ro
       - agent-data:/data

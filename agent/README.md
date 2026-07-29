@@ -143,8 +143,15 @@ docker compose up -d
 - **零入站**：Agent 不开放任何端口，不接受任何远程指令
 - **只读采集**：仅读 `/proc` 和 `statvfs`，无任何写操作
 - **最小 Token**：静态 Bearer Token 出站 HTTPS 推送，泄露风险仅限本机物理访问
-- **非 root 运行**：Docker 用 `monitor` 用户，原生用 `diting` 系统用户
+- **非 root 运行**：Docker 用 `diting` 用户（UID 1000），原生用 `diting` 系统用户
 - **服务端不可下发配置**：网络探测目标固定在本地环境变量，服务端无命令注入面
+- **供应链完整性**：部署受控端时强烈建议设置 `SP_AGENT_SHA256S` 环境变量，钉死已知良好版本的 SHA-256 哈希，防止 GitHub CDN / 中间人投毒。不设则跳过校验（等于信任每次拉取的最新内容）。计算方式：
+  ```bash
+  # 在可信任环境中计算（一次操作，所有机器复用）
+  SP_AGENT_SHA256S=$(sha256sum install.sh agent.py collector.py uninstall.sh | awk '{print $1}' | paste -sd,)
+  # 部署时传入
+  sudo SP_AGENT_SHA256S="$SP_AGENT_SHA256S" bash install.sh ...
+  ```
 
 ## 网络与防火墙
 
