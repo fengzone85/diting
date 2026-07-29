@@ -61,7 +61,10 @@ function parseCookies(req) {
   const out = {};
   h.split(';').forEach((p) => {
     const i = p.indexOf('=');
-    if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+    if (i > 0) {
+      try { out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim()); }
+      catch { /* 畸形 cookie 值（如 %ZZ）跳过，避免 URIError 导致 500 */ }
+    }
   });
   return out;
 }

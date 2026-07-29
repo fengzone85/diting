@@ -95,6 +95,9 @@ app.get('/metrics', (req, res) => {
   });
 });
 function _metricsHandler(req, res) {
+  if (!process.env.ADMIN_TOKEN) {
+    return res.status(401).set('Content-Type', 'text/plain').send('401 ADMIN_TOKEN not configured');
+  }
   const auth = req.header('Authorization') || '';
   const t = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!t || !safeEqual(t, process.env.ADMIN_TOKEN)) {
@@ -140,7 +143,8 @@ const THEME_MIME = {
   '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-  '.ico': 'image/x-icon', '.webp': 'image/webp', '.woff2': 'font/woff2'
+  '.ico': 'image/x-icon', '.webp': 'image/webp',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf'
 };
 
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
@@ -251,12 +255,14 @@ const server = app.listen(PORT, () => {
 // ② 按客户端 IP 限制并发连接数与新建速率，防资源耗尽型攻击。
 const WS_MAX_CONCURRENT = 5;   // 单 IP 最大并发连接
 const WS_MAX_PER_MIN = 20;     // 单 IP 每分钟最大新建连接数
+const WS_MAP_CAP = 10000;      // wsHits Map 最大条目数，防大量不同 IP 撑爆内存
 const wsConns = new Map();     // ip -> Set(ws)
 const wsHits = new Map();      // ip -> { reset, count }
 setInterval(() => wsHits.clear(), 60000).unref?.();
 function wsClientIp(req) {
-  const xff = String((req.headers && req.headers['x-forwarded-for']) || '').split(',')[0].trim();
-  return xff || (req.socket && req.socket.remoteAddress) || 'unknown';
+  // 只用 TCP 源地址，不读 X-Forwarded-For。XFF 可被直连攻击者伪造，
+  // 用于绕过 WebSocket 并发/速率限制。req.socket.remoteAddress 是真实连接源，不可伪造。
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 try {
   const { WebSocketServer } = require('ws');
@@ -273,6 +279,7 @@ try {
     let rec = wsHits.get(ip);
     if (!rec || now > rec.reset) rec = { reset: now + 60000, count: 0 };
     rec.count++;
+    if (wsHits.size >= WS_MAP_CAP) wsHits.clear();
     wsHits.set(ip, rec);
     if (rec.count > WS_MAX_PER_MIN) {
       try { ws.close(1008, 'rate limited'); } catch (_) {}

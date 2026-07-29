@@ -27,7 +27,8 @@ function parseDisks(s) {
 
 // 应用层限流（兜底，不依赖 Nginx）：每 IP 每 10s 最多 20 次。
 // /report 已由 Nginx 单独限流，此处放行。trust proxy 已在 server.js 启用，req.ip 为真实客户端。
-const RATE_WINDOW = 10000, RATE_MAX = 20;
+// MAP_CAP：限流 Map 最大条目数，超出则提前清空，防分布式攻击用大量不同 IP 撑爆内存。
+const RATE_WINDOW = 10000, RATE_MAX = 20, MAP_CAP = 10000;
 const rateHits = new Map();
 setInterval(() => rateHits.clear(), RATE_WINDOW).unref?.();
 const rateLimit = (req, res, next) => {
@@ -36,6 +37,7 @@ const rateLimit = (req, res, next) => {
   const now = Date.now();
   const rec = rateHits.get(ip);
   if (!rec || now > rec.reset) {
+    if (rateHits.size >= MAP_CAP) rateHits.clear();
     rateHits.set(ip, { reset: now + RATE_WINDOW, count: 1 });
     return next();
   }
@@ -57,6 +59,7 @@ const loginRateLimit = (req, res, next) => {
   const now = Date.now();
   let rec = loginHits.get(ip);
   if (!rec || now > rec.reset) {
+    if (loginHits.size >= MAP_CAP) loginHits.clear();
     loginHits.set(ip, { reset: now + LOGIN_WINDOW, count: 1 });
     return next();
   }
@@ -91,6 +94,7 @@ const setupRateLimit = (req, res, next) => {
   let rec = setupHits.get(ip);
   if (!rec || now > rec.reset) rec = { reset: now + SETUP_WINDOW, count: 0 };
   rec.count++;
+  if (setupHits.size >= MAP_CAP) setupHits.clear();
   setupHits.set(ip, rec);
   if (rec.count > SETUP_MAX) return res.status(429).json({ error: 'too many requests' });
   next();
@@ -144,6 +148,12 @@ function getPublicBaseUrl(req) {
   if (ui && ui.agent_server_url) return ui.agent_server_url.replace(/\/+$/, '');
   if (ui && ui.site_url) return ui.site_url.replace(/\/+$/, '');
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
+  // 最后兜底：从请求头推导。记录告警提示管理员配置 agent_server_url 或 PUBLIC_URL，
+  // 避免 X-Forwarded-Host 被攻击者注入导致一键安装命令指向恶意服务器。
+  if (!getPublicBaseUrl._warned) {
+    console.warn('[warn] getPublicBaseUrl: 未配置 agent_server_url/site_url/PUBLIC_URL，从请求头推导（建议显式配置以防 X-Forwarded-Host 注入）');
+    getPublicBaseUrl._warned = true;
+  }
   const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim() || 'https';
   const host = req.get('host');
   if (!host) return 'http://localhost:8081';
@@ -221,6 +231,7 @@ const registerRateLimit = (req, res, next) => {
   let rec = registerHits.get(ip);
   if (!rec || now > rec.reset) rec = { reset: now + REGISTER_WINDOW, count: 0 };
   rec.count++;
+  if (registerHits.size >= MAP_CAP) registerHits.clear();
   registerHits.set(ip, rec);
   if (rec.count > REGISTER_MAX) return res.status(429).json({ error: 'too many requests' });
   next();
