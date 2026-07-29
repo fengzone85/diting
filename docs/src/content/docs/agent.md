@@ -13,7 +13,7 @@ DiTing Lite 受控端支持三种部署形态，数据格式与上报契约完�
 |---|---|---|---|
 | 内存占用 | 65-150MB | 12-25MB | <10MB |
 | 前置依赖 | Docker Engine | Python 3.6+ | Go 工具链（仅构建期） |
-| 安全隔离 | 容器 + non-root + 只读挂载 | systemd 14 项加固 | scratch + USER 1000 + cap-drop（规划中） |
+| 安全隔离 | 容器 + diting 用户 + cap-drop(仅NET_RAW) + 只读挂载 | systemd 14 项加固 | scratch + USER 1000 + cap-drop（规划中） |
 | 部署复杂度 | 一条命令 | 交互脚本 | 编译二进制 / 待发布镜像 |
 | 适用场景 | 已有 Docker 环境 | 精简系统 / 小内存 | 极小体积 / 纯 Go 工具链 |
 | 实现 | `agent.py` + `collector.py` | 同左 | `agent-go/`（直读 /proc，零依赖） |
