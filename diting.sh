@@ -630,24 +630,25 @@ do_backup() {
         svc="$(echo "$loc" | cut -d: -f3)"
         cpath="$(echo "$loc" | cut -d: -f4)"
         # 优先用 sqlite3 .backup（一致性最好）；无 sqlite3 则 cp 读
-        if docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
+        # 所有 docker 调用外裹 timeout 180：避免本机 docker exec 偶发卡 300s 导致假死
+        if timeout 180 docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
             echo -e "${YELLOW}[信息] 通过 sqlite3 .backup 热备份（不中断服务）…${NC}"
-            docker exec "$cid" sqlite3 "$cpath" ".backup '${cpath}.bak'" >/dev/null 2>&1 \
+            timeout 180 docker exec "$cid" sqlite3 "$cpath" ".backup '${cpath}.bak'" >/dev/null 2>&1 \
               || {
                   # 兜底：容器内 cp（若 .backup 因权限失败）
-                  docker exec "$cid" cp "$cpath" "${cpath}.bak" 2>/dev/null || true
+                  timeout 180 docker exec "$cid" cp "$cpath" "${cpath}.bak" 2>/dev/null || true
               }
-            docker cp "${cid}:${cpath}.bak" "$out_path"
-            docker exec "$cid" rm -f "${cpath}.bak" 2>/dev/null || true
+            timeout 180 docker cp "${cid}:${cpath}.bak" "$out_path"
+            timeout 180 docker exec "$cid" rm -f "${cpath}.bak" 2>/dev/null || true
         else
             echo -e "${YELLOW}[信息] 容器无 sqlite3，直接 cp 拷贝…${NC}"
-            docker cp "${cid}:${cpath}" "$out_path"
+            timeout 180 docker cp "${cid}:${cpath}" "$out_path"
         fi
     elif [[ "$loc" == volume:* ]]; then
         # 卷存在但容器未运行：启动临时容器挂载卷并拷贝
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 容器未运行，通过临时容器挂载卷拷贝…${NC}"
-        docker run --rm -v "$vol":/data -v "$DB_BACKUP_DIR":/out \
+        timeout 180 docker run --rm -v "$vol":/data -v "$DB_BACKUP_DIR":/out \
             alpine:3.20 cp /data/monitor.db "/out/$(basename "$out_path")" 2>/dev/null
     else
         # 宿主机文件：需先 flush，直接 cp（SQLite 单文件）
@@ -722,34 +723,34 @@ do_restore() {
         svc="$(echo "$loc" | cut -d: -f3)"
         cpath="$(echo "$loc" | cut -d: -f4)"
         echo -e "${YELLOW}[信息] 停止服务端容器以安全替换数据库…${NC}"
-        docker stop "$cid" >/dev/null 2>&1 || true
+        timeout 180 docker stop "$cid" >/dev/null 2>&1 || true
         cp "$in_path" "${in_path}.tmp"
-        docker cp "${in_path}.tmp" "${cid}:${cpath}" 2>/dev/null
+        timeout 180 docker cp "${in_path}.tmp" "${cid}:${cpath}" 2>/dev/null
         rm -f "${in_path}.tmp"
         echo -e "${YELLOW}[信息] 重启服务端…${NC}"
-        docker start "$cid" >/dev/null 2>&1 || true
+        timeout 180 docker start "$cid" >/dev/null 2>&1 || true
         # compose 管理的容器用 restart 更稳妥
-        local proj; proj="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null)"
+        local proj; proj="$(timeout 180 docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null)"
         if [[ -n "$proj" && -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-            ( cd "$SRC_DIR/server" && docker compose up -d "$svc" 2>/dev/null ) || docker start "$cid" >/dev/null 2>&1 || true
+            ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d "$svc" 2>/dev/null ) || timeout 180 docker start "$cid" >/dev/null 2>&1 || true
         fi
     elif [[ "$loc" == volume:* ]]; then
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 通过临时容器写入卷…${NC}"
-        docker run --rm -v "$vol":/data -v "$(dirname "$in_path")":/in \
+        timeout 180 docker run --rm -v "$vol":/data -v "$(dirname "$in_path")":/in \
             alpine:3.20 cp "/in/$(basename "$in_path")" /data/monitor.db 2>/dev/null
     else
         local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 替换宿主机数据库文件…${NC}"
         # 停服
         if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-            ( cd "$SRC_DIR/server" && docker compose down 2>/dev/null ) || true
+            ( cd "$SRC_DIR/server" && timeout 180 docker compose down 2>/dev/null ) || true
         fi
         cp "$fpath" "${fpath}.before_restore.bak"
         cp "$in_path" "$fpath"
         # 重启
         if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-            ( cd "$SRC_DIR/server" && docker compose up -d 2>/dev/null ) || true
+            ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d 2>/dev/null ) || true
         fi
     fi
 
@@ -798,24 +799,24 @@ do_db_stats() {
         cid="$(echo "$loc" | cut -d: -f2)"
         cpath="$(echo "$loc" | cut -d: -f4)"
         # 容器内无 sqlite3 时用宿主机临时拷贝
-        if ! docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
+        if ! timeout 180 docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
             echo -e "${YELLOW}[信息] 容器无 sqlite3，临时导出统计…${NC}"
             local tmp; tmp="$(mktemp)"
-            docker cp "${cid}:${cpath}" "$tmp" 2>/dev/null
+            timeout 180 docker cp "${cid}:${cpath}" "$tmp" 2>/dev/null
             sqlite_cmd="sqlite3"
             db_arg="$tmp"
         else
             echo -e "${YELLOW}[信息] 通过容器内 sqlite3 查询统计…${NC}"
-            docker exec "$cid" sqlite3 "$cpath" <<'SQL'
+            timeout 180 docker exec "$cid" sqlite3 "$cpath" <<'SQL'
 SELECT '文件大小: ' || printf('%.2f MB', length(hex(a))/2.0/1048576) FROM (SELECT hex(randomblob(1)) a);
 SQL
-            sqlite_cmd="docker exec $cid sqlite3 $cpath"
+            sqlite_cmd="timeout 180 docker exec $cid sqlite3 $cpath"
             db_arg=""
         fi
     elif [[ "$loc" == volume:* ]]; then
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         local tmp; tmp="$(mktemp)"
-        docker run --rm -v "$vol":/data alpine:3.20 cp /data/monitor.db "$tmp" 2>/dev/null
+        timeout 180 docker run --rm -v "$vol":/data alpine:3.20 cp /data/monitor.db "$tmp" 2>/dev/null
         db_arg="$tmp"
     else
         db_arg="$(echo "$loc" | cut -d: -f2)"
