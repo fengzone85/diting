@@ -10,15 +10,7 @@ let publicTemplate = 'simple'; // 'simple' = 简约极简卡（无悬停）；'v
 let publicOverview = null;
 let publicSparklines = {}; // agentId -> 历史指标数组（仅视觉版使用）
 
-// ---------- helpers（与后台保持一致，独立页面自带） ----------
-function esc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); }
-function fmtBytes(b) {
-  if (b == null) return '—';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let i = 0; let n = Number(b);
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return n.toFixed(i ? 1 : 0) + ' ' + u[i];
-}
+// ---------- helpers（esc/fmtBytes 来自 vendor/common.js） ----------
 function fmtPct(p) { return (p == null ? '—' : Number(p).toFixed(1)) + '%'; }
 function fmtUptime(s) {
   s = Number(s) || 0;

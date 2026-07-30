@@ -140,14 +140,7 @@ function toast(msg, type) {
 }
 function showBanner(msg) { const b = $('banner'); if (b) { b.textContent = msg; b.hidden = false; } }
 function hideBanner() { const b = $('banner'); if (b) b.hidden = true; }
-function fmtBytes(b) {
-  if (b == null) return '—';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let i = 0; let n = Number(b);
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return n.toFixed(i ? 1 : 0) + ' ' + u[i];
-}
-function fmtPct(p) { return (p == null ? '—' : Number(p).toFixed(1)) + '%'; }
+// fmtBytes/esc 来自 vendor/common.js；fmtPct 见下方独立定义（语义不同）
 // 进度条阈值色 class（加在 <i class="bar-xxx"> 上，CSS 负责着色）
 function pctClass(p) {
   if (p == null) return '';
@@ -508,7 +501,6 @@ function fmtUptime(s) {
   const d = Math.floor(s / 86400); const h = Math.floor((s % 86400) / 3600);
   return d > 0 ? `${d}天${h}时` : `${h}时${Math.floor((s%3600)/60)}分`;
 }
-function esc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
 function copyText(id) {
   const el = $(id); if (!el) return;
   const text = el.textContent;

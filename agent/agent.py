@@ -8,6 +8,14 @@ import urllib.request
 import urllib.error
 from urllib.parse import urlparse
 from collector import Collector, parse_probe_targets
+import logging
+
+# 日志配置：默认 WARNING（安静），设环境变量 DEBUG=1 可见 collector 的 debug 级排障日志。
+logging.basicConfig(
+    level=logging.DEBUG if os.environ.get('DEBUG') else logging.WARNING,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    stream=sys.stderr,
+)
 
 # Long backoff on auth rejection (401/403): the agent token is static and cannot
 # self-heal, so hammering the server only aids brute-force and floods logs.

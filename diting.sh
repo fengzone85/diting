@@ -257,7 +257,7 @@ ensure_deps() {
 # ── 启动并确认 Docker 守护进程真正就绪（含 containerd / socket activation 兜底）──
 # 先确保容器运行时 containerd 健康：若 overlayfs snapshotter 的元数据目录缺失
 # （如曾被手动清理后残留的 containerd 进程未重建），build 阶段会报
-# “failed to open database file: .../io.containerd.snapshotter.v1.overlayfs/metadata.db”
+# "failed to open database file: .../io.containerd.snapshotter.v1.overlayfs/metadata.db"
 start_docker_daemon() {
     local i
     # 拉起并等待 containerd 重建 snapshotter 元数据目录
@@ -273,7 +273,7 @@ start_docker_daemon() {
         sleep 2
     done
     # 部分环境 docker.service 走 socket activation 会报
-    # “no sockets found via socket activation”，禁用 socket 后直启 service 即可
+    # "no sockets found via socket activation"，禁用 socket 后直启 service 即可
     systemctl disable docker.socket 2>/dev/null || true
     systemctl stop docker.socket 2>/dev/null || true
     systemctl restart containerd 2>/dev/null || true
@@ -549,27 +549,27 @@ update_agent() {
 
 # ── 状态 / 卸载 ────────────────────────────────────────────────────────────────
 status_all() {
-    echo “$(msg “status.server_header”)”
+    echo "$(msg "status.server_header")"
     local running=0 installed=0
-    if ( cd “$SRC_DIR/server” && docker compose ps --filter status=running -q 2>/dev/null ) | grep -q .; then
+    if ( cd "$SRC_DIR/server" && docker compose ps --filter status=running -q 2>/dev/null ) | grep -q .; then
         running=1
-        ( cd “$SRC_DIR/server” && docker compose ps --format '  {{.Name}}  {{.Status}}' )
+        ( cd "$SRC_DIR/server" && docker compose ps --format '  {{.Name}}  {{.Status}}' )
     fi
-    [[ -d “$SRC_DIR/server” ]] && installed=1
+    [[ -d "$SRC_DIR/server" ]] && installed=1
     if [[ $running -eq 0 && $installed -eq 1 ]]; then
-        echo “$(msg “status.server_not_running”), or: cd $SRC_DIR/server && docker compose up -d”
+        echo "$(msg "status.server_not_running"), or: cd $SRC_DIR/server && docker compose up -d"
     elif [[ $running -eq 0 && $installed -eq 0 ]]; then
-        echo “$(msg “status.server_not_installed”)”
+        echo "$(msg "status.server_not_installed")"
     fi
-    echo “$(msg “status.agent_header”)”
+    echo "$(msg "status.agent_header")"
     if systemctl list-unit-files diting-agent.service >/dev/null 2>&1; then
         if systemctl is-active --quiet diting-agent; then
-            echo “$(msg “status.agent_active”)”
+            echo "$(msg "status.agent_active")"
         else
-            echo “$(msg “status.agent_inactive”)”
+            echo "$(msg "status.agent_inactive")"
         fi
     else
-        echo “$(msg “status.agent_not_installed”)”
+        echo "$(msg "status.agent_not_installed")"
     fi
 }
 
