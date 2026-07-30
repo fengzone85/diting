@@ -6,9 +6,15 @@ set -euo pipefail
 
 NS=ghcr.io/fengzone85
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_ID=agt_5f4f4bfd979b
-AGENT_TOKEN=862548284f436a1ce28e53b82a1e00348b97089f22091a4e
-PROBE_TARGETS="移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
+AGENT_ID="${AGENT_ID:-agt_5f4f4bfd979b}"
+# 令牌不入库：由环境变量注入，避免真实凭证进入 git 历史。
+AGENT_TOKEN="${AGENT_TOKEN:-}"
+if [[ -z "$AGENT_TOKEN" ]]; then
+  echo "错误: 请通过环境变量 AGENT_TOKEN 提供受控端令牌后重试" >&2
+  echo "  例: AGENT_TOKEN=<token> sudo -E bash rebuild-test.sh" >&2
+  exit 1
+fi
+PROBE_TARGETS="${PROBE_TARGETS:-移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8}"
 
 echo "==> [1/5] 准备卷 server-data-test + 备份 admin_config"
 docker volume create server-data-test >/dev/null
@@ -38,14 +44,14 @@ for i in $(seq 1 30); do
 done
 
 echo "==> [4/5] 注入受控端身份(复用原 token, 免重新注册)"
-docker exec diting-server-test node -e "
+docker exec -e AGENT_TOKEN="$AGENT_TOKEN" -e AGENT_ID="$AGENT_ID" diting-server-test node -e "
 const Database = require('/app/node_modules/better-sqlite3');
 const crypto = require('crypto');
 const db = new Database('/data/monitor.db');
-const t = '$AGENT_TOKEN';
+const t = process.env.AGENT_TOKEN;
 const h = crypto.createHash('sha256').update(t).digest('hex');
 db.prepare('INSERT OR IGNORE INTO agents (id,name,token_hash,created_at,last_seen) VALUES (?,?,?,?,0)')
-  .run('$AGENT_ID','test-agent',h,Date.now());
+  .run(process.env.AGENT_ID,'test-agent',h,Date.now());
 console.log('    seeded:', JSON.stringify(db.prepare('SELECT id,name FROM agents').all()));
 "
 

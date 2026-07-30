@@ -1,8 +1,6 @@
 (function () {
   var card = document.getElementById('setupCard');
 
-  function esc(s) { return String(s == null ? '' : s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
-
   // ① 检查是否已初始化
   fetch('/api/setup/status').then(r => r.json()).then(function (s) {
     if (!s.needs_setup) {

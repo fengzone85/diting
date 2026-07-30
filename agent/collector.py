@@ -8,15 +8,19 @@ import shutil
 import socket
 import platform
 import subprocess
+import logging
 import concurrent.futures
 from datetime import datetime
+
+log = logging.getLogger('diting.collector')
 
 
 def _read(path):
     try:
         with open(path, 'r') as f:
             return f.read()
-    except Exception:
+    except Exception as e:
+        log.debug("read %s failed: %s", path, e)
         return ''
 
 
@@ -56,7 +60,8 @@ def disk_info(path='/'):
         path = '/'
     try:
         st = os.statvfs(path)
-    except Exception:
+    except Exception as e:
+        log.debug("statvfs %s failed: %s", path, e)
         return 0, 0, 0.0
     total = st.f_blocks * st.f_frsize
     free = st.f_bfree * st.f_frsize
@@ -126,12 +131,14 @@ def disk_list(root='/'):
                 try:
                     if not os.path.isdir(p):
                         continue
-                except Exception:
+                except Exception as e:
+                    log.debug("isdir %s failed: %s", p, e)
                     continue
                 try:
                     st = os.statvfs(p)
                     fsdev = os.stat(p).st_dev
-                except Exception:
+                except Exception as e:
+                    log.debug("statvfs %s failed: %s", p, e)
                     continue
                 total = st.f_blocks * st.f_frsize
                 free = st.f_bfree * st.f_frsize
@@ -139,8 +146,8 @@ def disk_list(root='/'):
                 pct = (used / total * 100.0) if total else 0.0
                 cands.append({'mount': disp_mount, 'used': used, 'total': total,
                               'pct': round(pct, 2), 'dev': fsdev})
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("disk usage scan failed: %s", e)
     # 按 st_dev 合并：同一物理盘只保留挂载点最短的一条。
     best = {}
     for c in cands:
@@ -156,15 +163,8 @@ def disk_list(root='/'):
 
 def disk_io_counters_robust():
     """读取系统级磁盘 IO 累计字节数 (read_bytes, write_bytes)。
-    优先用 psutil；若 psutil 不可用或返回全 0（常见于容器/LXC 的 I/O 隔离、
-    或纯缓存空闲机），则直接解析 /proc/diskstats，累加各真实磁盘的扇区数
-    （×512 得字节），跳过 ram/loop/zram/dm-/md 等伪设备。返回 (r, w)。"""
-    try:
-        dio = psutil.disk_io_counters()
-        if dio and (dio.read_bytes or dio.write_bytes):
-            return dio.read_bytes, dio.write_bytes
-    except Exception:
-        pass
+    直接解析 /proc/diskstats，累加各真实磁盘的扇区数（×512 得字节），
+    跳过 ram/loop/zram/dm-/md 等伪设备。返回 (r, w)。"""
     try:
         tot_r = tot_w = 0
         with open('/proc/diskstats') as f:
@@ -183,7 +183,8 @@ def disk_io_counters_robust():
                 tot_r += rsect * 512
                 tot_w += wsect * 512
         return tot_r, tot_w
-    except Exception:
+    except Exception as e:
+        log.debug("diskstats parse failed: %s", e)
         return 0, 0
 
 
@@ -215,15 +216,16 @@ def os_name():
             for line in f:
                 if line.startswith('PRETTY_NAME='):
                     return line.split('=', 1)[1].strip().strip('"')
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("os-release parse failed: %s", e)
     return ' '.join([platform.system(), platform.release()])
 
 
 def uptime_sec():
     try:
         return float(_read('/proc/uptime').split()[0])
-    except Exception:
+    except Exception as e:
+        log.debug("uptime parse failed: %s", e)
         return 0.0
 
 
@@ -255,10 +257,10 @@ def temp_celsius():
                 try:
                     v = int(_read(os.path.join(base, name, 'temp')).strip())
                     temps.append(v / 1000.0)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as e:
+                    log.debug("temp sensor %s failed: %s", name, e)
+    except Exception as e:
+        log.debug("temp scan failed: %s", e)
     return round(max(temps), 1) if temps else None
 
 
@@ -286,7 +288,8 @@ def parse_probe_targets(spec):
             host, p = rest.rsplit(':', 1)
             try:
                 port = int(p)
-            except Exception:
+            except Exception as e:
+                log.debug("bad probe port %r: %s", p, e)
                 port = 53
         # 基础格式校验（防御 operator 误配；host 来自本地配置，非服务端下发，无注入面）。
         # host 非空且长度 ≤ 253（域名上限）；port 落在 [1,65535]；label 超限截断到 24（与服务端一致）。
@@ -296,6 +299,8 @@ def parse_probe_targets(spec):
         if len(label) > 24:
             label = label[:24]
         out.append((label, host, port))
+        if len(out) >= 8:  # 上限 8 个目标，与 Go 端一致
+            break
     return out
 
 
@@ -325,8 +330,8 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
                 # 不可达也返回 0，故仅对非 nt 生效。
                 if out.returncode == 0 and os.name != 'nt':
                     return None, True
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("icmp probe failed: %s", e)
         return None, False
 
     def _tcp():
@@ -340,7 +345,8 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
                 t0 = time.time()
                 with _sock.create_connection((host, p), timeout=timeout):
                     return round((time.time() - t0) * 1000.0, 1), True
-            except Exception:
+            except Exception as e:
+                log.debug("tcp probe %s:%s failed: %s", host, p, e)
                 continue
         return None, False
 
@@ -372,16 +378,19 @@ class Collector:
         try:
             with open(self.state_file) as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            log.debug("load state failed: %s", e)
             return {}
 
     def _save_state(self):
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            with open(self.state_file, 'w') as f:
+            tmp = self.state_file + '.tmp'
+            with open(tmp, 'w') as f:
                 json.dump(self._state, f)
-        except Exception:
-            pass
+            os.replace(tmp, self.state_file)
+        except Exception as e:
+            log.debug("save state failed: %s", e)
 
     def collect(self):
         # CPU (needs a prior sample -> take new sample then compute)
@@ -417,8 +426,8 @@ class Collector:
                     disk_w_rate = max(0.0, (dw - self._disk_io_prev[1]) / dt)
             self._disk_io_prev = (dr, dw)
             self._disk_io_prev_ts = now
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("disk io rate failed: %s", e)
 
         # monthly cumulative (persisted, survives restart, resets on month rollover)
         month_key = datetime.now().strftime('%Y-%m')
@@ -441,7 +450,8 @@ class Collector:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.probe_targets)) as ex:
                     for label, ms, ok in ex.map(lambda t: (t[0],) + probe_one(t[1], t[2]), self.probe_targets):
                         probes[label] = {'ms': ms, 'ok': ok}
-            except Exception:
+            except Exception as e:
+                log.debug("probe collection failed: %s", e)
                 probes = {}
 
         return {

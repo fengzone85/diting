@@ -14,8 +14,11 @@ import shutil
 import socket
 import platform
 import subprocess
+import logging
 import concurrent.futures
 from datetime import datetime
+
+log = logging.getLogger('diting.win_collector')
 
 try:
     import psutil
@@ -49,7 +52,8 @@ def parse_probe_targets(spec):
             host, p = rest.rsplit(':', 1)
             try:
                 port = int(p)
-            except Exception:
+            except Exception as e:
+                log.debug("bad probe port %r: %s", p, e)
                 port = 53
         # 基础格式校验（防御 operator 误配；host 来自本地配置，非服务端下发，无注入面）。
         # host 非空且长度 ≤ 253（域名上限）；port 落在 [1,65535]；label 超限截断到 24（与服务端一致）。
@@ -59,6 +63,8 @@ def parse_probe_targets(spec):
         if len(label) > 24:
             label = label[:24]
         out.append((label, host, port))
+        if len(out) >= 8:  # 上限 8 个目标，与 Go 端一致
+            break
     return out
 
 
@@ -89,8 +95,8 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
                 # 不可达也返回 0，故仅对非 nt 生效。
                 if out.returncode == 0 and os.name != 'nt':
                     return None, True
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("icmp probe failed: %s", e)
         return None, False
 
     def _tcp():
@@ -104,7 +110,8 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
                 t0 = time.time()
                 with _sock.create_connection((host, p), timeout=timeout):
                     return round((time.time() - t0) * 1000.0, 1), True
-            except Exception:
+            except Exception as e:
+                log.debug("tcp probe %s:%s failed: %s", host, p, e)
                 continue
         return None, False
 
@@ -116,6 +123,8 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
         if ok:
             return ms, True
     return None, False
+
+
 def os_name():
     """Best-effort human-readable Windows edition, e.g. 'Windows 11 Pro 23H2'."""
     try:
@@ -127,22 +136,24 @@ def os_name():
             prod = winreg.QueryValueEx(k, 'ProductName')[0]
             try:
                 build = winreg.QueryValueEx(k, 'DisplayVersion')[0]
-            except Exception:
+            except Exception as e:
+                log.debug("DisplayVersion read failed: %s", e)
                 build = ''
             try:
                 cb = int(winreg.QueryValueEx(k, 'CurrentBuild')[0] or 0)
                 # Windows 11 has build >= 22000 (registry still says "Windows 10")
                 if cb >= 22000 and prod.startswith('Windows 10'):
                     prod = prod.replace('Windows 10', 'Windows 11')
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("CurrentBuild read failed: %s", e)
             return (prod + (' ' + build if build else '')).strip()
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("winreg os name failed: %s", e)
     try:
         ver = platform.win32_ver()
         return ' '.join([platform.system(), ver[0], ver[1]]).strip()
-    except Exception:
+    except Exception as e:
+        log.debug("win32_ver failed: %s", e)
         return platform.platform()
 
 
@@ -159,14 +170,15 @@ class WinCollector:
         # Prime the CPU sample so the first collect() returns a real percentage.
         try:
             psutil.cpu_percent(interval=0.1)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("cpu primer failed: %s", e)
 
     def _load_state(self):
         try:
             with open(self.state_file) as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
+            log.debug("load state failed: %s", e)
             return {}
 
     def _save_state(self):
@@ -175,8 +187,8 @@ class WinCollector:
             os.makedirs(d, exist_ok=True)
             with open(self.state_file, 'w') as f:
                 json.dump(self._state, f)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("save state failed: %s", e)
 
     def _net_totals(self):
         """Total rx/tx bytes across all interfaces (excludes loopback by psutil)."""
@@ -187,7 +199,8 @@ class WinCollector:
         # CPU: percent since the primer / last call.
         try:
             cpu = psutil.cpu_percent(interval=None)
-        except Exception:
+        except Exception as e:
+            log.debug("cpu percent failed: %s", e)
             cpu = 0.0
         if cpu is None:
             cpu = 0.0
@@ -212,12 +225,13 @@ class WinCollector:
                     du = psutil.disk_usage(p)
                     total_used += du.used
                     total_total += du.total
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("disk_usage %s failed: %s", p, e)
             disk_total = total_total
             disk_used = total_used
             disk_pct = round(total_used / total_total * 100, 2) if total_total > 0 else 0.0
-        except Exception:
+        except Exception as e:
+            log.debug("disk usage scan failed: %s", e)
             disk_total = disk_used = 0
             disk_pct = 0.0
 
@@ -245,8 +259,8 @@ class WinCollector:
                         disk_w_rate = max(0.0, (dw - self._disk_io_prev[1]) / dt)
                 self._disk_io_prev = (dr, dw)
                 self._disk_io_prev_ts = now
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("disk io rate failed: %s", e)
 
         # Monthly cumulative traffic (persisted, survives restart, resets on month rollover).
         month_key = datetime.now().strftime('%Y-%m')
@@ -269,23 +283,26 @@ class WinCollector:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.probe_targets)) as ex:
                     for label, ms, ok in ex.map(lambda t: (t[0],) + probe_one(t[1], t[2]), self.probe_targets):
                         probes[label] = {'ms': ms, 'ok': ok}
-            except Exception:
+            except Exception as e:
+                log.debug("probe collection failed: %s", e)
                 probes = {}
 
         try:
             uptime = time.time() - psutil.boot_time()
-        except Exception:
+        except Exception as e:
+            log.debug("boot_time failed: %s", e)
             uptime = 0.0
 
         # Temperature (may be empty on some hosts -> None). Non-fingerprint metric.
         try:
             temps = []
-            for _name, entries in psutil.sensors_temperatures().items():
+            for _, entries in psutil.sensors_temperatures().items():
                 for e in entries:
                     if e.current is not None:
                         temps.append(e.current)
             temp = round(max(temps), 1) if temps else None
-        except Exception:
+        except Exception as ex:
+            log.debug("temp scan failed: %s", ex)
             temp = None
 
         # Swap usage. Non-fingerprint metric.
@@ -294,7 +311,8 @@ class WinCollector:
             swap_used = sm.used
             swap_total = sm.total
             swap_pct = sm.percent
-        except Exception:
+        except Exception as e:
+            log.debug("swap_memory failed: %s", e)
             swap_used = swap_total = 0
             swap_pct = 0.0
 

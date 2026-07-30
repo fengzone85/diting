@@ -164,20 +164,30 @@ function getPublicBaseUrl(req) {
 // Docker 版现场从源码 git 构建镜像并运行，无需任何仓库账号。
 // probeTargets：网络质量自测目标（格式 label:host[:port] 逗号分隔），服务端可配置；
 // 为空则受控端回退到各自代码里的内置默认。部署时直接写进安装命令，免去手动改环境变量。
+// Shell 引号辅助：serverUrl/token/probeTargets 等动态字段可能含 shell 元字符，
+// 拼入生成的安装命令前必须整体加引号，避免破坏命令结构或被注入。
+// POSIX sh 单引号转义：整体单引号包裹，内部 ' 替换为 '\''。
+function shQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+// PowerShell 单引号字符串：内部 ' 翻倍为 ''。
+function psQuote(s) {
+  return `'${String(s).replace(/'/g, `''`)}'`;
+}
 function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTargets) {
   const iv = interval || AGENT_INTERVAL_DEFAULT;
-  const ptArg = probeTargets ? ` --probe-targets "${probeTargets}"` : '';
-  const ptEnv = probeTargets ? ` -e PROBE_TARGETS=${probeTargets}` : '';
-  const ptWin = probeTargets ? ` -ProbeTargets '${probeTargets}'` : '';
+  const ptArg = probeTargets ? ` --probe-targets ${shQuote(probeTargets)}` : '';
+  const ptEnv = probeTargets ? ` -e PROBE_TARGETS=${shQuote(probeTargets)}` : '';
+  const ptWin = probeTargets ? ` -ProbeTargets ${psQuote(probeTargets)}` : '';
   // 原生版采用 Komari 风格：先下载成文件、chmod +x、再 sudo 执行（相对 curl|bash 更透明、可审阅）。
   const native = `curl -fsSL ${REPO_BASE}/diting.sh -o diting.sh
 chmod +x diting.sh
-sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${serverUrl} --id ${agentId} --token ${agentToken} --interval ${iv}${ptArg}`;
-  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${serverUrl} -e AGENT_ID=${agentId} -e AGENT_TOKEN=${agentToken} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
+sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv}${ptArg}`;
+  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
   // Windows 版：一条 PowerShell 命令。外层用双引号、内部一律单引号，避免引号嵌套。
   // install.ps1 会自举下载 windows_agent.py/win_collector.py/requirements.txt 到
   // %ProgramData%\diting-agent，并注册登录自启的计划任务。需以管理员身份运行。
-  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'sp-agent-install.ps1'; iwr '${REPO_BASE}/agent/windows/install.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RegisterTask -Repo '${REPO_BASE}/agent/windows' -ServerUrl '${serverUrl}' -AgentId '${agentId}' -AgentToken '${agentToken}' -Interval ${iv}${ptWin}"`;
+  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'sp-agent-install.ps1'; iwr '${REPO_BASE}/agent/windows/install.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RegisterTask -Repo '${REPO_BASE}/agent/windows' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv}${ptWin}"`;
   return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '' };
 }
 
@@ -192,7 +202,7 @@ Environment="PROBE_TARGETS=${pt}"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart diting-agent`;
-  const win = `$id='${agentId}'; $pt='${pt}'
+  const win = `$id=${psQuote(agentId)}; $pt=${psQuote(pt)}
 $bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"
 $lines=Get-Content $bat
 if ($lines -match '^set PROBE_TARGETS=') {
@@ -240,6 +250,9 @@ router.post('/setup/register', registerRateLimit, (req, res) => {
   const setupToken = process.env.SETUP_TOKEN;
   if (!setupToken) {
     return res.status(403).json({ error: '服务端未启用一键注册（未配置 SETUP_TOKEN）' });
+  }
+  if (setupToken.trim().length < 16) {
+    return res.status(403).json({ error: 'SETUP_TOKEN 过弱（至少 16 字符，建议 openssl rand -hex 16），一键注册已停用' });
   }
   const provided = (req.body && req.body.setup_token) || (req.headers['x-setup-token'] || '').trim();
   if (!provided || !safeEqual(provided, setupToken)) {

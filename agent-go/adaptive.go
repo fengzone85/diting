@@ -41,7 +41,7 @@ func adaptiveInterval(prev, cur *collector.Metrics, fast, slow time.Duration, fa
 		*fastStreak = 3
 		return fast
 	}
-	// 内存使用相对变化 > 5%
+	// 内存使用相对变化 > 15%
 	if cur.MemTotal > 0 {
 		dMem := math.Abs(float64(cur.MemUsed) - float64(prev.MemUsed))
 		if dMem/float64(cur.MemTotal) > 0.15 {
@@ -49,7 +49,7 @@ func adaptiveInterval(prev, cur *collector.Metrics, fast, slow time.Duration, fa
 			return fast
 		}
 	}
-	// 网络速率显著变化（当前 >10KB/s 且相对变化 >50%）
+	// 网络速率显著变化（当前 >100KB/s 且相对变化 >100%）
 	if cur.NetRxRate > 100*1024 && changeRatio(prev.NetRxRate, cur.NetRxRate) > 1.0 {
 		*fastStreak = 3
 		return fast

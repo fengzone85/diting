@@ -8,6 +8,7 @@ package state
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -30,7 +31,9 @@ func Load(path string) *State {
 	if err != nil {
 		return s
 	}
-	json.Unmarshal(data, s)
+	if err := json.Unmarshal(data, s); err != nil {
+		log.Printf("[warn] state: unmarshal %s: %v", path, err)
+	}
 	return s
 }
 

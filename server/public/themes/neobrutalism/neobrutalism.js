@@ -602,10 +602,10 @@ function showDebug(msg) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'pvDebug';
-    el.style.cssText = 'position:fixed;top:60px;right:10px;z-index:9999;background:#FFE135;border:3px solid #000;padding:8px 12px;font:12px/1.4 JetBrains Mono,monospace;max-width:320px;box-shadow:4px 4px 0 0 #000;';
+    el.style.cssText = 'position:fixed;top:60px;right:10px;z-index:9999;background:#FFE135;border:3px solid #000;padding:8px 12px;font:12px/1.4 JetBrains Mono,monospace;max-width:320px;box-shadow:4px 4px 0 0 #000;white-space:pre;';
     document.body.appendChild(el);
   }
-  el.innerHTML += '<br>' + new Date().toLocaleTimeString() + ' ' + msg;
+  el.textContent += new Date().toLocaleTimeString() + ' ' + msg + '\n';
 }
 function initPublicSafe() {
   try {
