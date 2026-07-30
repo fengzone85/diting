@@ -178,7 +178,10 @@ function httpRequest(urlStr, { method, headers, body, timeoutMs, resolvedIp, res
     let received = 0;
 
     // 构造请求选项：若有已校验的 IP，用 lookup 绑定，跳过二次 DNS 解析
-    const reqOpts = { method, headers };
+    // 注：必须显式关闭 autoSelectFamily（Node v20 默认开启 Happy Eyeballs），
+    // 否则它会干扰下方自定义 lookup，使实际连接 IP 变为 undefined 并抛
+    // ERR_INVALID_IP_ADDRESS。关闭后自定义 lookup 绑定的已校验 IP 才能生效。
+    const reqOpts = { method, headers, autoSelectFamily: false };
     if (resolvedIp) {
       reqOpts.lookup = (_hostname, _opts, cb) => cb(null, resolvedIp, resolvedFamily || 4);
       // SNI / TLS Server Name Indication 需要原始 hostname（Node.js 用 urlObj.hostname 自动处理）
