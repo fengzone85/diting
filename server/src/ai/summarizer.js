@@ -8,6 +8,7 @@
 // 复用 db.getMetricsAll（全量 sparkline，db.js:174）与 db.getAgents，避免逐台 N+1 查询。
 
 const db = require('../db');
+const { daysUntil, cycleLabel } = require('../util');
 
 // 数值安全化：剔除 null/undefined/NaN，避免污染统计。
 function nums(arr) {
@@ -110,6 +111,15 @@ function summarizeAgent(agent, rows, opts) {
     network: {
       rx_rate_avg: stats(rows.map(r => r.net_rx_rate)).avg,
       tx_rate_avg: stats(rows.map(r => r.net_tx_rate)).avg
+    },
+    billing: {
+      price: typeof agent.price === 'number' ? agent.price : 0,
+      currency: agent.currency || '¥',
+      billing_cycle: typeof agent.billing_cycle === 'number' ? agent.billing_cycle : 30,
+      cycle_label: cycleLabel(typeof agent.billing_cycle === 'number' ? agent.billing_cycle : 30),
+      auto_renewal: agent.auto_renewal ? true : false,
+      expire_at: agent.expire_at || null,
+      days_until_expire: daysUntil(agent.expire_at)
     }
   };
 }

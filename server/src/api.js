@@ -7,6 +7,7 @@ const db = require('./db');
 const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
+const { daysUntil } = require('./util');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
 // 纯 IP / 无点则原样，避免误截。例：pt5.521.be -> pt5；192.168.1.10 -> 原样。
@@ -342,6 +343,33 @@ router.get('/overview', adminOrReadonly, (req, res) => {
   });
 });
 
+// ---- Admin: billing overview（月度费用 + 分组费用 + 7 天内到期列表）----
+router.get('/billing', adminOrReadonly, (req, res) => {
+  const agents = db.getAgents();
+  let monthlyTotal = 0;
+  const perGroup = {};
+  const expiringSoon = [];
+  for (const a of agents) {
+    const price = Number(a.price) || 0;
+    const cycle = Number(a.billing_cycle) || 30;
+    const monthly = price > 0 && cycle > 0 ? price * (30 / cycle) : 0;
+    monthlyTotal += monthly;
+    const g = (a.grp || '').trim() || '未分组';
+    perGroup[g] = (perGroup[g] || 0) + monthly;
+    const daysLeft = daysUntil(a.expire_at);
+    if (daysLeft !== null && daysLeft <= 7) {
+      expiringSoon.push({ id: a.id, name: a.name, days_left: daysLeft });
+    }
+  }
+  res.json({
+    monthly_total: +monthlyTotal.toFixed(2),
+    currency: '¥',
+    agent_count: agents.length,
+    per_group: Object.keys(perGroup).map(name => ({ name, cost: +perGroup[name].toFixed(2) })),
+    expiring_soon: expiringSoon.sort((a, b) => a.days_left - b.days_left)
+  });
+});
+
 // ---- Public（游客）视图：无需登录，受 ui_settings.public_enabled 控制 ----
 // 返回脱敏概览（仅总数/在线/离线/分组），不含任何敏感指标均值。
 function publicDisabled(res) { return res.status(403).json({ error: 'public view disabled' }); }
@@ -479,12 +507,18 @@ router.post('/agents', adminOnly, (req, res) => {
   // 探测目标：建客户端时未显式填写则回退到「设置」里的全局默认（不同地域可单独覆盖）。
   const ui = db.getUiSettings();
   const probeTargets = str(req.body.probe_targets, 600) || ui.probe_targets || '';
+  const price = Number(req.body.price);
+  const cycleNum = Number(req.body.billing_cycle);
   const { id, token } = db.createAgent({
     name: str(req.body.name, 100) || undefined,
     merchant: str(req.body.merchant, 100),
     note: str(req.body.note, 500),
     expire_at: str(req.body.expire_at, 40),
     monthly_quota_gb: req.body.monthly_quota_gb,
+    price: Number.isFinite(price) ? Math.max(0, Math.min(99999, price)) : undefined,
+    billing_cycle: Number.isFinite(cycleNum) && [0, 30, 60, 90, 180, 365, 730, 1095].includes(cycleNum) ? cycleNum : undefined,
+    currency: ['¥', '$', '€', '£'].includes(req.body.currency) ? req.body.currency : undefined,
+    auto_renewal: typeof req.body.auto_renewal === 'boolean' ? req.body.auto_renewal : undefined,
     grp: str(req.body.group, 60),
     country: str(req.body.country, 2),
     probe_targets: probeTargets
@@ -498,7 +532,9 @@ router.post('/agents', adminOnly, (req, res) => {
 router.put('/agents/:id', adminOnly, (req, res) => {
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
-  db.updateAgent(req.params.id, {
+  const priceUp = Number(req.body.price);
+  const cycleUp = Number(req.body.billing_cycle);
+  const updates = {
     name: str(req.body.name, 100) || a.name,
     merchant: str(req.body.merchant, 100),
     note: str(req.body.note, 500),
@@ -507,7 +543,12 @@ router.put('/agents/:id', adminOnly, (req, res) => {
     grp: str(req.body.group, 60),
     country: str(req.body.country, 2),
     probe_targets: str(req.body.probe_targets, 600)
-  });
+  };
+  if (Number.isFinite(priceUp)) updates.price = Math.max(0, Math.min(99999, priceUp));
+  if (Number.isFinite(cycleUp) && [0, 30, 60, 90, 180, 365, 730, 1095].includes(cycleUp)) updates.billing_cycle = cycleUp;
+  if (['¥', '$', '€', '£'].includes(req.body.currency)) updates.currency = req.body.currency;
+  if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
+  db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
 });
 
@@ -526,6 +567,21 @@ router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
   const a = db.getAgent(req.params.id);
   const install = buildInstallCommands(getPublicBaseUrl(req), req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
   res.json({ ok: true, token, install });
+});
+
+// ---- Admin: renew agent（续费一个周期）----
+router.post('/agents/:id/renew', adminOnly, (req, res) => {
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  // billing_cycle=0 表示白嫖/免费（无计费周期），须显式保留 0，不能用 || 30 吞掉。
+  const cycle = (a.billing_cycle === undefined || a.billing_cycle === null || isNaN(Number(a.billing_cycle))) ? 30 : Number(a.billing_cycle);
+  const base = (a.expire_at && new Date(a.expire_at + 'T00:00:00') > new Date())
+    ? new Date(a.expire_at + 'T00:00:00') : new Date();
+  // cycle<=0（白嫖）续费不改变到期日（保持当前/今天），仅刷新为今天以标识「已确认」。
+  const next = new Date(base.getTime() + Math.max(0, cycle) * 86400000);
+  const newExpire = next.toISOString().slice(0, 10);
+  db.updateAgent(a.id, Object.assign({}, a, { expire_at: newExpire }));
+  res.json({ ok: true, expire_at: newExpire });
 });
 
 // ---- Admin: 生成某受控端的「安装命令」与「修改探测目标命令」----

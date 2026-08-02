@@ -118,6 +118,14 @@ CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('probe_targets')) db.exec("ALTER TABLE agents ADD COLUMN probe_targets TEXT DEFAULT ''");
 }
+// schema migration: agents 增加账单字段（价格 / 计费周期 / 货币 / 自动续费）
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('price')) db.exec("ALTER TABLE agents ADD COLUMN price REAL DEFAULT 0");
+  if (!existing.has('billing_cycle')) db.exec("ALTER TABLE agents ADD COLUMN billing_cycle INTEGER DEFAULT 30");
+  if (!existing.has('currency')) db.exec("ALTER TABLE agents ADD COLUMN currency TEXT DEFAULT '¥'");
+  if (!existing.has('auto_renewal')) db.exec("ALTER TABLE agents ADD COLUMN auto_renewal INTEGER DEFAULT 1");
+}
 
 const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const genToken = () => crypto.randomBytes(24).toString('hex');
@@ -127,10 +135,12 @@ const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
   getAgents: db.prepare('SELECT * FROM agents ORDER BY created_at DESC'),
   insertAgent: db.prepare(`INSERT INTO agents
-    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, grp, country, probe_targets, created_at, last_seen)
-    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @grp, @country, @probe_targets, @created_at, 0)`),
+    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, created_at, last_seen)
+    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @created_at, 0)`),
   updateAgent: db.prepare(`UPDATE agents SET
-    name=@name, merchant=@merchant, note=@note, expire_at=@expire_at, monthly_quota_gb=@monthly_quota_gb, grp=@grp, country=@country, probe_targets=@probe_targets
+    name=@name, merchant=@merchant, note=@note, expire_at=@expire_at, monthly_quota_gb=@monthly_quota_gb,
+    price=@price, billing_cycle=@billing_cycle, currency=@currency, auto_renewal=@auto_renewal,
+    grp=@grp, country=@country, probe_targets=@probe_targets
     WHERE id=@id`),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
   touch: db.prepare('UPDATE agents SET last_seen=?, os=?, hostname=? WHERE id=?'),
@@ -171,6 +181,10 @@ const createAgent = (fields) => {
     note: fields.note || '',
     expire_at: fields.expire_at || '',
     monthly_quota_gb: Number(fields.monthly_quota_gb) || 0,
+    price: Number(fields.price) || 0,
+    billing_cycle: (fields.billing_cycle === undefined || fields.billing_cycle === null || fields.billing_cycle === '' || isNaN(Number(fields.billing_cycle))) ? 30 : Number(fields.billing_cycle),
+    currency: fields.currency || '¥',
+    auto_renewal: fields.auto_renewal !== false ? 1 : 0,
     grp: fields.grp || '',
     country: (fields.country || '').toUpperCase().slice(0, 2),
     probe_targets: fields.probe_targets || '',
@@ -200,6 +214,10 @@ const updateAgent = (id, f) => stmts.updateAgent.run({
   note: f.note || '',
   expire_at: f.expire_at || '',
   monthly_quota_gb: Number(f.monthly_quota_gb) || 0,
+  price: Number(f.price) || 0,
+  billing_cycle: (f.billing_cycle === undefined || f.billing_cycle === null || f.billing_cycle === '' || isNaN(Number(f.billing_cycle))) ? 30 : Number(f.billing_cycle),
+  currency: f.currency || '¥',
+  auto_renewal: f.auto_renewal !== false ? 1 : 0,
   grp: f.grp || '',
   country: (f.country || '').toUpperCase().slice(0, 2),
   probe_targets: f.probe_targets || ''

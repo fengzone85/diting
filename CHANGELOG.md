@@ -1,5 +1,50 @@
 # Changelog
 
+## 计费系统 + AI 日报到期 + 告警规则 + Phase 4 前端增强（2026-08-03）
+> 本期为一组功能增强，覆盖服务端计费/到期/告警与前端交互。所有改动已端到端验证（见各条「验证」）。
+
+### A. 计费系统（Phase 1 及周期扩展 / 白嫖修复）
+- `server/src/db.js`：`agents` 表新增 `price` / `billing_cycle` / `currency` / `auto_renewal` 四列；`createAgent` / `updateAgent` 透传这四列。billing_cycle 落地逻辑修复——原 `|| 30` 会把白嫖（0）吞成 30，改为「undefined/null/''/NaN 才回退 30」，**保留 0**。
+- `server/src/api.js`：
+  - 新增 `GET /api/billing`：返回 `monthly_total`（月费，price×30/cycle 累加）、`currency`、`agent_count`、`per_group`（分组月费）、`expiring_soon`（7 天内到期列表，用 `util.daysUntil` 计算）。
+  - 新增 `POST /api/agents/:id/renew`：在当前到期日（或今天）基础上顺延一个计费周期。修复 `billing_cycle=0` 被 `|| 30` 误推进 30 天的 bug——现显式保留 0，白嫖续费不改变到期日（仅刷新为今天标识已确认）。
+  - 创建/更新接口透传 `price` / `billing_cycle` / `currency` / `auto_renewal`，并做白名单与范围校验（`billing_cycle ∈ [0,30,60,90,180,365,730,1095]`、`price ∈ [0,99999]`、`currency ∈ [¥,$ €,£]`）。
+- `server/src/util.js`（新增）：导出 `daysUntil(dateStr)`（距今天数，null=未设/无效，负=已过期）与 `cycleLabel(days)`（30月/90季/180半年/365年/730两年/1095三年/0白嫖）。
+- 周期选项扩展：在年付(365)后新增 **两年(730) / 三年(1095) / 白嫖(0)**，前端 `admin.html` 的 `c_cycle` / `e_cycle` select 同步加三项；`util.cycleLabel` 加对应映射。
+- 前端 `admin.js` / `admin.html`：概览页新增「📊 费用概览」区块（月费总额 + 分组费用 + 7 天内到期提醒）；卡片价格 badge 加白嫖专属「白嫖」标签；创建/编辑表单回填 `billing_cycle`（含 0）、提交 `value==='' ? 30 : Number(value)` 保留 0。
+- **验证**：`/api/billing` 正常返回（5 节点、月费 0.82、分组费用、无临期）；创建白嫖节点后回读 `billing_cycle:0 / price:0 / auto_renewal:0` 落库正确；白嫖续费不再被推进到 30 天后（返回今天附近日期）。
+
+### B. AI 日报：计费/到期信息（Phase 2）
+- `server/src/ai/summarizer.js`：`summarizeAgent` 输出新增 `billing` 字段（`price` / `currency` / `billing_cycle` / `cycle_label` / `auto_renewal` / `expire_at` / `days_until_expire`）。
+- `server/src/ai/report.js`：新增双语 i18n（中/en）`expire_upcoming` / `expire_overdue` / `expire_free` / `expire_no_date`；新增 `renderExpireSection()` 渲染单节点到期行（白嫖不显示到期；无日期显示「未设到期日」）；统计文本节点循环追加到期行；flagged 过滤加入临期（≤7 天）判断。
+- `server/src/ai/prompt.js`：`PROMPT_VERSION` 升 `1.1`；SYSTEM_PROMPT 新增第 5 条引导（关注到期：≤7 天临期、<0 已过期、白嫖节点标注可用性）。
+
+### C. 告警规则（Phase 3）
+- `server/src/alerts.js`：新增 `checkExpiringAgents(now)`（白嫖跳过，≤7 天触发到期提醒，24h 冷却，远离到期清除状态）与 `checkTrafficQuota(now)`（月流量超 `monthly_quota_gb` 触发，24h 冷却）；`start()` 新增 `dailyTimer` 每 6 小时跑一次、启动即跑一次；导出两函数。
+- **验证**：服务端重启日志显示 `[alerts] checker started`，无加载错误，证明 `util.daysUntil` 与两新函数已正确加载。
+
+### D. 前端 Phase 4 交互增强
+- `server/public/admin.js` / `admin.html` / `style.css`：
+  - **全局搜索**：toolbar 加搜索框，按名称/分组/商家/备注/国家/ID 过滤（`filterAgents`），grid/client 渲染均应用。
+  - **批量操作**：卡片加复选框 + `selectedIds` 集合；选中后显示批量条（批量续费 / 批量删除 / 取消）；`renderBatchBar` 在未选中时 `hidden`。
+  - **紧凑模式**：`compactMode` 存 `localStorage('compactMode')`，toolbar 加切换按钮，`body.compact` 收紧卡片间距。
+  - **图表记忆**：`detailRange` 从 `localStorage('detailRange')` 读取并回填，切换时写回。
+- 前端缓存破译：`admin.js` 引用升 `?v=47`、`style.css` 引用随每次样式改动递增（本次到 `?v=49`），配合 server.js no-store 中间件防浏览器缓存旧资源。
+
+### E. 前端批量条 UI 修复（本期对话内）
+- 现象：搜索框下方出现一条「大长条」且选中后过长、左缘未与卡片对齐。
+- 根因与修复（`style.css`）：
+  1. 空长条常显：`.batch-bar` 设 `display:flex` 覆盖了 `hidden` 属性的默认 `display:none` → 加 `.batch-bar[hidden]{display:none!important}`。
+  2. 选中后过长：改为 `inline-flex` + `width:fit-content` + `flex-wrap:wrap` + 更小内边距（7px 12px），贴左按内容收缩，不再横贯整行。
+  3. 左缘未对齐：`.grid` 有 `padding:14px 26px 0`，批量条是 grid 兄弟节点无此缩进 → 加 `margin:0 0 12px 26px` 与 `max-width:calc(100% - 26px)` 对齐卡片左缘。
+- `admin.html` 的 CSS 版本号同步递增至 `?v=49` 触发重新拉取。
+
+## 第三方主题皮肤支持 + 安全审查文档（2026-08-03，独立工作，与本期 A–E 无关）
+- `server/server.js`：首页 `/` 若命中 `public/themes/<id>/index.html`，用一次性随机 `nonce` 注入主题内联 `<script>` 并**仅对该响应**放宽 CSP（允许内联脚本 + Iconify/IP 地理定位等外部源）；`admin.html`/API 等其他路由仍走全局严格 CSP，不受影响；响应加 `no-store` 防止 nonce 复用。
+- `server/public/themes/`：新增多套皮肤（demo / komari-demo / neobrutalism / glassmorphism 等）及 `README.md`。
+- `docs/CODE_REVIEW_2026-07-31.md`：全组件代码审查报告（v2，修正 5 处误判）。
+- 说明：上述三项属「主题皮肤 + 审查文档」独立任务，未纳入本期 A–E 的功能验证范围；如随本期一并提交，建议分开 commit 或在 PR 描述中标注。
+
 ## 受控端多盘识别兼容增强：支持仅挂 /host 的部署（2026-07-24）
 - 在「修复 Docker 形态多盘识别」基础上，将 `disk_list` 的 `mounts_path` 选择逻辑改为：Docker 形态始终读取**容器 mount 命名空间视图**（优先 `/hostproc/mounts`，否则回退容器自身 `/proc/mounts`），二者宿主真实盘均以 `/host` 前缀出现；**不再回退到 `/host/proc/mounts`**（那是宿主视图，宿主盘无 `/host` 前缀，会被前缀过滤全部跳过、读不到任何盘）。从而使 README 中仅挂 `-v /:/host:ro`（不挂 `/hostproc`）的示例也能正确识别多块硬盘。
 - 配套：`Dockerfile` 将 `apt` 安装 ping 前置为独立层，agent 代码改动不再使 apt 缓存失效（离线/弱网可复用缓存）；`README.md` 受控端 Docker 部署段落补充多盘识别原理与可选 `-v /proc:/hostproc:ro`。

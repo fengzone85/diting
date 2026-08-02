@@ -3,11 +3,15 @@
 const $ = (id) => document.getElementById(id);
 let totpRequired = false;
 let detailId = null;
-let detailRange = '24h';
+let detailRange = localStorage.getItem('detailRange') || '24h';
 let liveTimer = null;
 let orderedAgentIds = [];
 let dragEl = null;
 const charts = {};
+// Phase 4：全局搜索 / 批量选择 / 紧凑模式
+let searchQuery = '';
+const selectedIds = new Set();
+let compactMode = localStorage.getItem('compactMode') === '1';
 
 // ---------- hash router (#/node/:id) ----------
 function initRouter() {
@@ -254,6 +258,21 @@ async function loadOverview() {
   const quota = Number(o.total_quota_gb) || 0;
   const pct = quota > 0 ? Math.min(100, (usedGB / quota) * 100) : 0;
   const grp = (o.groups || []).map(g => `<div class="grp-chip"><span class="gc-name">${esc(g.name)}</span><span class="gc-count">${g.online}/${g.total} 在线</span></div>`).join('') || '<div class="empty small">暂无分组</div>';
+  // 费用概览（账单核心）
+  const billing = await api('/api/billing').catch(() => null);
+  const billHtml = billing ? `
+    <div class="ov-block billing-block">
+      <div class="ov-block-h">📊 费用概览</div>
+      <div class="billing-summary">
+        <span class="b-num">${esc(billing.currency || '¥')}${billing.monthly_total}</span>
+        <span class="b-label">/ 月（${billing.agent_count} 台节点）</span>
+      </div>
+      <div class="grp-list">${(billing.per_group || []).map(g =>
+        `<div class="grp-chip"><span class="gc-name">${esc(g.name)}</span><span class="gc-count">${esc(billing.currency || '¥')}${g.cost}/月</span></div>`
+      ).join('') || '<div class="empty small">暂无费用数据</div>'}</div>
+      ${billing.expiring_soon && billing.expiring_soon.length ? `<div class="billing-expiring">⚠️ ${billing.expiring_soon.length} 台节点 7 天内到期</div>` : ''}
+    </div>` : '';
+  $('ovBilling').innerHTML = billHtml;
   $('ovExtra').innerHTML = `
     <div class="ov-block traffic-block">
       <div class="ov-block-h">📶 流量概览 <small>（本月累计 · 仅在线节点）</small></div>
@@ -279,6 +298,19 @@ async function loadAgents() {
   renderGrid(agents, histMap);
   populateGroupDatalist();
 }
+// Phase 4：按搜索关键字过滤（名称/分组/商家/备注/国家/ID）
+function filterAgents(list) {
+  if (!searchQuery) return list;
+  const q = searchQuery.toLowerCase();
+  return list.filter(a =>
+    (a.name && a.name.toLowerCase().includes(q)) ||
+    (a.group && a.group.toLowerCase().includes(q)) ||
+    (a.merchant != null && String(a.merchant).toLowerCase().includes(q)) ||
+    (a.note && a.note.toLowerCase().includes(q)) ||
+    (a.country != null && String(a.country).toLowerCase().includes(q)) ||
+    (a.id && a.id.toLowerCase().includes(q))
+  );
+}
 function sortAgents(list) {
   const by = appSettings.default_sort || 'created';
   const arr = list.slice();
@@ -291,8 +323,10 @@ function sortAgents(list) {
 }
 function renderGrid(agents, histMap) {
   const grid = $('grid');
+  const filtered = filterAgents(agents || []);
   if (!agents || !agents.length) { grid.innerHTML = '<div class="empty">暂无客户端，点击右上角「新建客户端」。</div>'; return; }
-  const sorted = sortAgents(agents);
+  if (!filtered.length) { grid.innerHTML = '<div class="empty">无匹配结果</div>'; return; }
+  const sorted = sortAgents(filtered);
   // 按 group 分组
   const groups = {};
   for (const a of sorted) {
@@ -334,7 +368,7 @@ function renderClients() {
   if (!el) return;
   if (!currentAgents || !currentAgents.length) { el.innerHTML = '<div class="empty">暂无客户端，点击侧栏「+ 新建客户端」。</div>'; $('clientsCount').textContent = ''; return; }
   const al = getAlert();
-  const rows = sortAgents(currentAgents);
+  const rows = sortAgents(filterAgents(currentAgents));
   let online = 0;
   const body = rows.map((a) => {
     const m = a.latest || {};
@@ -411,6 +445,9 @@ function cardHtml(a, hist) {
     expireBadge = `<span class="badge ${cls}">${txt}</span>`;
   }
   const merchant = a.merchant ? `<span class="badge">${esc(a.merchant)}</span>` : '';
+  const priceBadge = (Number(a.price) > 0)
+    ? `<span class="badge price">${esc(a.currency || '¥')}${a.price}/${cycleLabel(a.billing_cycle)}</span>`
+    : (a.billing_cycle === 0 ? `<span class="badge price">白嫖</span>` : '');
   const countryBadge = (a.country && flagImg(a.country)) ? `<span class="badge flag" title="${esc(countryName(a.country))}">${flagImg(a.country)} ${esc(countryName(a.country))}</span>` : '';
   // 计算告警态：CPU/内存超过设置阈值，或磁盘 >= 90%
   const al = getAlert();
@@ -430,10 +467,13 @@ function cardHtml(a, hist) {
   const probes = parseProbes(m.probes);
   const diskPct = m.disk_pct != null ? m.disk_pct : 0;
   const diskCls = pctClass(diskPct);
-  return `<div class="card" data-id="${esc(a.id)}">
+  const checked = selectedIds.has(a.id) ? 'checked' : '';
+  const selCls = selectedIds.has(a.id) ? ' selected' : '';
+  return `<div class="card${selCls}" data-id="${esc(a.id)}">
+    <label class="card-check" title="选择"><input type="checkbox" data-select="${esc(a.id)}" ${checked}/></label>
     <div class="top">
       <span class="status ${statusCls}"></span>
-      <h3>${esc(a.name)}</h3>${merchant}${expireBadge}${countryBadge}
+      <h3>${esc(a.name)}</h3>${merchant}${priceBadge}${expireBadge}${countryBadge}
     </div>
     <div class="meta">${esc(a.hostname || '')} · ${esc(a.os || '')}</div>
     ${a.note ? `<div class="note">📝 ${esc(a.note)}</div>` : ''}
@@ -586,6 +626,14 @@ async function loadDetail() {
   if (!detailId) return;
   const rows = await api(`/api/agents/${detailId}/metrics?range=${detailRange}`).catch(() => []);
   const a = await api(`/api/agents/${detailId}`).catch(() => null);
+  // 绑定/更新续费按钮（每次打开详情都重置，避免事件残留或状态过期）
+  const renewBtn = $('panelRenew');
+  if (renewBtn) {
+    renewBtn.replaceWith(renewBtn.cloneNode(true));
+    $('panelRenew').addEventListener('click', () => renewAgent(detailId));
+  }
+  // Phase 4：根据记忆的 detailRange 高亮 rangeBar 按钮
+  document.querySelectorAll('#rangeBar .btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-r') === detailRange));
   const ts = rows.map(r => new Date(r.ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
   const cpu = rows.map(r => r.cpu);
   const mem = rows.map(r => r.mem_pct);
@@ -658,9 +706,24 @@ function drawLine(id, x, series, unit) {
 }
 function setRange(r, el) {
   detailRange = r;
+  localStorage.setItem('detailRange', r); // Phase 4：记忆图表时间范围，下次打开复用
   document.querySelectorAll('#rangeBar .btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   loadDetail();
+}
+
+// ---------- billing helpers ----------
+function cycleLabel(days) {
+  return { 30: '月', 90: '季', 180: '半年', 365: '年', 730: '两年', 1095: '三年', 0: '白嫖' }[days] || `${days}天`;
+}
+async function renewAgent(id) {
+  if (!confirm('确认续费一个周期？')) return;
+  try {
+    const r = await api(`/api/agents/${id}/renew`, { method: 'POST' });
+    toast(`续费成功，新到期日：${r.expire_at}`, 'ok');
+    if (detailId) { loadDetail(); updateNavButtons(detailId); }
+    refresh();
+  } catch (e) { toast('续费失败：' + e.message, 'err'); }
 }
 
 // ---------- test alert ----------
@@ -679,12 +742,16 @@ function openCreate() {
   const btn = $('btnCreateSubmit');
   if (btn) { btn.dataset.done = ''; btn.textContent = I18N.t('toast.create_default_btn'); btn.disabled = false; }
   const res = $('createResult'); if (res) res.innerHTML = '';
+  if ($('c_price')) $('c_price').value = '';
+  if ($('c_cycle')) $('c_cycle').value = '30';
+  if ($('c_currency')) $('c_currency').value = '¥';
+  if ($('c_auto_renew')) $('c_auto_renew').checked = true;
   disableCreateForm(false);
   openModal('createModal');
 }
 // 创建成功后禁用表单，避免重复生成第二张客户端卡片
 function disableCreateForm(disabled) {
-  ['c_name', 'c_merchant', 'c_expire', 'c_quota', 'c_group', 'c_note', 'c_country', 'c_probe_targets'].forEach(id => {
+  ['c_name', 'c_merchant', 'c_expire', 'c_quota', 'c_price', 'c_cycle', 'c_currency', 'c_auto_renew', 'c_group', 'c_note', 'c_country', 'c_probe_targets'].forEach(id => {
     const el = $(id); if (el) el.disabled = disabled;
   });
 }
@@ -726,6 +793,10 @@ async function submitCreate() {
       body: JSON.stringify({
         name: $('c_name').value.trim(), merchant: $('c_merchant').value.trim(),
         expire_at: $('c_expire').value, monthly_quota_gb: Number($('c_quota').value) || 0,
+        price: $('c_price').value === '' ? 0 : Number($('c_price').value) || 0,
+        billing_cycle: $('c_cycle').value === '' ? 30 : Number($('c_cycle').value),
+        currency: $('c_currency').value || '¥',
+        auto_renewal: $('c_auto_renew') ? $('c_auto_renew').checked : true,
         group: $('c_group').value.trim(),
         country: $('c_country').value.trim(),
         note: $('c_note').value.trim(),
@@ -755,6 +826,10 @@ async function openEdit(id) {
   if (!a) return;
   $('e_id').value = a.id; $('e_name').value = a.name; $('e_merchant').value = a.merchant || '';
   $('e_expire').value = (a.expire_at || '').slice(0, 10); $('e_quota').value = a.monthly_quota_gb || 0;
+  if ($('e_price')) $('e_price').value = Number(a.price) || 0;
+  if ($('e_cycle')) $('e_cycle').value = String(a.billing_cycle == null ? 30 : a.billing_cycle);
+  if ($('e_currency')) $('e_currency').value = a.currency || '¥';
+  if ($('e_auto_renew')) $('e_auto_renew').checked = a.auto_renewal !== 0;
   $('e_group').value = a.group || '';
   $('e_country').value = a.country || '';
   $('e_note').value = a.note || '';
@@ -770,6 +845,10 @@ async function submitEdit() {
       body: JSON.stringify({
         name: $('e_name').value.trim(), merchant: $('e_merchant').value.trim(),
         expire_at: $('e_expire').value, monthly_quota_gb: Number($('e_quota').value) || 0,
+        price: $('e_price').value === '' ? 0 : Number($('e_price').value) || 0,
+        billing_cycle: $('e_cycle').value === '' ? 30 : Number($('e_cycle').value),
+        currency: $('e_currency').value || '¥',
+        auto_renewal: $('e_auto_renew') ? $('e_auto_renew').checked : true,
         group: $('e_group').value.trim(),
         country: $('e_country').value.trim(),
         note: $('e_note').value.trim(),
@@ -1246,6 +1325,14 @@ function bindEvents() {
   $('btnSettingsBack').addEventListener('click', () => setView('dashboard'));
   populateCountrySelect();
   $('btnTheme').addEventListener('click', quickToggleTheme);
+  // Phase 4：全局搜索 + 紧凑模式
+  const $search = $('searchInput');
+  if ($search) { $search.addEventListener('input', onSearchInput); }
+  const $clear = $('searchClear');
+  if ($clear) { $clear.addEventListener('click', () => { $('searchInput').value = ''; onSearchInput(); }); }
+  const $compact = $('btnCompact');
+  if ($compact) { $compact.addEventListener('click', toggleCompact); }
+  if (compactMode) document.body.classList.add('compact');
   $('tfaToggle').addEventListener('click', start2FASetup);
   $('btnNew').addEventListener('click', openCreate);
   // 侧栏收起/展开：记忆偏好到 localStorage
@@ -1290,10 +1377,12 @@ function bindEvents() {
     if (b) setRange(b.getAttribute('data-r'), b);
   });
   $('grid').addEventListener('click', (e) => {
+    const sel = e.target.closest('[data-select]');
+    if (sel) { toggleSelect(sel.getAttribute('data-select'), sel.checked); e.stopPropagation(); return; }
     const editBtn = e.target.closest('[data-edit]');
     if (editBtn) { openEdit(editBtn.getAttribute('data-edit')); return; }
     const card = e.target.closest('.card[data-id]');
-    if (card) openDetail(card.getAttribute('data-id'));
+    if (card && !e.target.closest('.card-check')) openDetail(card.getAttribute('data-id'));
   });
   // 客户端列表视图：点击行打开详情面板
   $('clientsTable').addEventListener('click', (e) => {
@@ -1344,6 +1433,68 @@ function bindEvents() {
     const cp = e.target.closest('[data-copy]');
     if (cp) { copyText(cp.getAttribute('data-copy')); }
   });
+}
+
+// ---------- Phase 4：批量操作 / 搜索 / 紧凑模式 ----------
+function toggleSelect(id, on) {
+  if (on) selectedIds.add(id); else selectedIds.delete(id);
+  // 更新对应卡片视觉态（无需整网格重渲染）
+  const card = document.querySelector(`.card[data-id="${cssEscape(id)}"]`);
+  if (card) card.classList.toggle('selected', on);
+  renderBatchBar();
+}
+function clearSelection() { selectedIds.clear(); document.querySelectorAll('.card-check input').forEach(c => { c.checked = false; }); document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected')); renderBatchBar(); }
+function renderBatchBar() {
+  const bar = $('batchBar');
+  if (!bar) return;
+  if (selectedIds.size === 0) { bar.hidden = true; bar.innerHTML = ''; return; }
+  bar.hidden = false;
+  bar.innerHTML = `<span class="bb-count">已选 <b>${selectedIds.size}</b> 台</span>
+    <button class="btn sm" id="bbRenew">💳 批量续费</button>
+    <button class="btn sm danger" id="bbDelete">🗑 批量删除</button>
+    <button class="btn sm ghost" id="bbClear">取消</button>`;
+  $('bbRenew').addEventListener('click', batchRenew);
+  $('bbDelete').addEventListener('click', batchDelete);
+  $('bbClear').addEventListener('click', clearSelection);
+}
+async function batchRenew() {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  if (!confirm(`确认对选中的 ${ids.length} 台节点执行续费？`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try { await api(`/api/agents/${id}/renew`, { method: 'POST' }); ok++; }
+    catch (e) { fail++; }
+  }
+  toast(`续费完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'warn' : 'ok');
+  clearSelection();
+  refresh();
+}
+async function batchDelete() {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  if (!confirm(`确认删除选中的 ${ids.length} 台节点？此操作不可撤销！`)) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try { await api(`/api/agents/${id}`, { method: 'DELETE' }); ok++; }
+    catch (e) { fail++; }
+  }
+  toast(`删除完成：成功 ${ok}${fail ? '，失败 ' + fail : ''}`, fail ? 'warn' : 'ok');
+  clearSelection();
+  refresh();
+}
+function cssEscape(s) { return String(s).replace(/["\\]/g, '\\$&'); }
+function onSearchInput() {
+  const el = $('searchInput');
+  searchQuery = (el && el.value || '').trim();
+  renderGrid(currentAgents, {});
+  renderClients();
+}
+function toggleCompact() {
+  compactMode = !compactMode;
+  document.body.classList.toggle('compact', compactMode);
+  localStorage.setItem('compactMode', compactMode ? '1' : '0');
+  toast(compactMode ? '已切换紧凑模式' : '已退出紧凑模式');
 }
 
 async function refresh() {
