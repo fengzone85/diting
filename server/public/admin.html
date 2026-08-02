@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>谛听 · Diting · Host Monitor</title>
   <link rel="icon" type="image/svg+xml" href="logo-icon.svg" />
-  <link rel="stylesheet" href="style.css?v=46" />
+  <link rel="stylesheet" href="style.css?v=49" />
   <link id="customCssLink" rel="stylesheet" href="/custom.css" />
   <script src="vendor/echarts.min.js"></script>
   <script src="vendor/qrcode.js"></script>
@@ -65,6 +65,7 @@
           <div class="banner" id="banner" hidden></div>
           <section class="overview" id="overview"></section>
           <section class="ov-extra" id="ovExtra"></section>
+          <section class="billing" id="ovBilling"></section>
           <div class="toolbar">
             <span class="toolbar-label" data-i18n="dashboard.sort_label">排序</span>
             <select id="sortSelect">
@@ -75,7 +76,13 @@
               <option value="mem" data-i18n="dashboard.sort_mem">内存降序</option>
               <option value="group" data-i18n="dashboard.sort_group">分组</option>
             </select>
+            <div class="search-box">
+              <input id="searchInput" type="search" placeholder="搜索名称/分组/商家/备注/ID" />
+              <button class="search-clear" id="searchClear" title="清除">✕</button>
+            </div>
+            <button class="icon-btn" id="btnCompact" title="紧凑模式">▤</button>
           </div>
+          <div class="batch-bar" id="batchBar" hidden></div>
           <section class="grid" id="grid"></section>
         </section>
 
@@ -388,6 +395,7 @@
         </div>
         <div class="panel-actions" id="panelActions">
           <button class="btn ghost sm" id="panelEdit">✏️ 编辑信息</button>
+          <button class="btn ghost sm" id="panelRenew">💳 续费</button>
           <button class="btn ghost sm" id="panelReset">🔑 重置 Token</button>
           <button class="btn ghost sm" id="panelModify">🔧 修改探测命令</button>
           <button class="btn danger sm" id="panelDelete">🗑️ 删除节点</button>
@@ -421,6 +429,31 @@
           <div class="field"><label>月流量配额 (GB，0=不限)</label><input id="c_quota" type="number" value="0" /></div>
           <div class="field"><label>分组</label><input id="c_group" list="groupList" placeholder="可选，如 国内 / 海外" /></div>
         </div>
+        <div class="row2">
+          <div class="field"><label>价格</label><input id="c_price" type="number" min="0" step="0.1" value="0" placeholder="0.0" /></div>
+          <div class="field"><label>计费周期</label>
+            <select id="c_cycle">
+              <option value="30" selected>月付</option>
+              <option value="90">季付</option>
+              <option value="180">半年</option>
+              <option value="365">年付</option>
+              <option value="730">两年</option>
+              <option value="1095">三年</option>
+              <option value="0">白嫖</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>货币</label>
+            <select id="c_currency">
+              <option value="¥" selected>¥ 人民币</option>
+              <option value="$">$ 美元</option>
+              <option value="€">€ 欧元</option>
+              <option value="£">£ 英镑</option>
+            </select>
+          </div>
+          <div class="field billing-auto"><label><input type="checkbox" id="c_auto_renew" checked /> 自动续费</label></div>
+        </div>
         <div class="field"><label>备注</label><input id="c_note" placeholder="可选" /></div>
         <div class="field"><label>国家 / 地区（用于卡片国旗）</label><select id="c_country"></select></div>
         <datalist id="groupList"></datalist>
@@ -443,6 +476,31 @@
           <div class="field"><label>到期时间</label><input id="e_expire" type="date" /></div>
         </div>
         <div class="field"><label>月流量配额 (GB)</label><input id="e_quota" type="number" /></div>
+        <div class="row2">
+          <div class="field"><label>价格</label><input id="e_price" type="number" min="0" step="0.1" /></div>
+          <div class="field"><label>计费周期</label>
+            <select id="e_cycle">
+              <option value="30">月付</option>
+              <option value="90">季付</option>
+              <option value="180">半年</option>
+              <option value="365">年付</option>
+              <option value="730">两年</option>
+              <option value="1095">三年</option>
+              <option value="0">白嫖</option>
+            </select>
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field"><label>货币</label>
+            <select id="e_currency">
+              <option value="¥">¥ 人民币</option>
+              <option value="$">$ 美元</option>
+              <option value="€">€ 欧元</option>
+              <option value="£">£ 英镑</option>
+            </select>
+          </div>
+          <div class="field billing-auto"><label><input type="checkbox" id="e_auto_renew" /> 自动续费</label></div>
+        </div>
         <div class="row2">
           <div class="field"><label>分组</label><input id="e_group" list="groupList" placeholder="可选，用于分组展示" /></div>
           <div class="field"><label>备注</label><input id="e_note" /></div>
@@ -491,6 +549,6 @@
   <div class="toast" id="toast"></div>
   <script src="vendor/common.js?v=1"></script>
   <script src="flags.js?v=11"></script>
-  <script src="admin.js?v=46"></script>
+  <script src="admin.js?v=47"></script>
 </body>
 </html>

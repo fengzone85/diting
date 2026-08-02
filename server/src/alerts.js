@@ -1,6 +1,7 @@
 const https = require('https');
 const nodemailer = require('nodemailer');
 const db = require('./db');
+const { daysUntil } = require('./util');
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -123,6 +124,64 @@ async function check() {
   }
 }
 
+// 检查节点到期预警：白嫖(cycle=0)跳过；临期(<=7天)或已过期触发，冷却 24h。
+async function checkExpiringAgents(now) {
+  const agents = db.getAgents();
+  for (const a of agents) {
+    try {
+      // 白嫖节点无到期概念，跳过
+      if (a.billing_cycle === 0) continue;
+      if (!a.expire_at) continue;
+      const days = daysUntil(a.expire_at);
+      if (days == null) continue;
+      if (days <= 7) {
+        const st = db.getAlertState(a.id, 'expire');
+        if (!st || now - st.last_sent > 24 * 3600 * 1000) {
+          db.setAlertState(a.id, 'expire', now);
+          const when = days < 0 ? `已过期 ${Math.abs(days)} 天` : `将于 ${days} 天后到期`;
+          await sendAlert(
+            `[监控] ${a.name} 即将到期`,
+            `客户端 ${a.name}(${a.id}) ${when}，到期日 ${a.expire_at}。请及时处理续费或下线，避免服务中断。`
+          );
+        }
+      } else {
+        // 远离到期则清除状态，允许未来再次提醒
+        db.clearAlertState(a.id, 'expire');
+      }
+    } catch (e) {
+      console.error(`[alerts] checkExpiringAgents failed for ${a.id}:`, e.message);
+    }
+  }
+}
+
+// 检查月流量配额：基于 metrics 最近一条的 net_rx_month+net_tx_month（字节），超 monthly_quota_gb 触发，冷却 24h。
+async function checkTrafficQuota(now) {
+  const agents = db.getAgents();
+  const GIB = 1024 * 1024 * 1024;
+  for (const a of agents) {
+    try {
+      if (!a.monthly_quota_gb || a.monthly_quota_gb <= 0) continue;
+      const m = db.getLatestMetric(a.id);
+      if (!m) continue;
+      const usedGb = ((Number(m.net_rx_month) || 0) + (Number(m.net_tx_month) || 0)) / GIB;
+      if (usedGb >= a.monthly_quota_gb) {
+        const st = db.getAlertState(a.id, 'quota');
+        if (!st || now - st.last_sent > 24 * 3600 * 1000) {
+          db.setAlertState(a.id, 'quota', now);
+          await sendAlert(
+            `[监控] ${a.name} 月流量超额`,
+            `客户端 ${a.name}(${a.id}) 本月已用 ${usedGb.toFixed(2)} GB，超过配额 ${a.monthly_quota_gb} GB。请关注是否产生额外费用或被限速。`
+          );
+        }
+      } else {
+        db.clearAlertState(a.id, 'quota');
+      }
+    } catch (e) {
+      console.error(`[alerts] checkTrafficQuota failed for ${a.id}:`, e.message);
+    }
+  }
+}
+
 function notifyStatus() {
   const c = db.getNotifyConfig();
   return {
@@ -132,12 +191,22 @@ function notifyStatus() {
 }
 
 let timer = null;
+let dailyTimer = null;
+async function runDailyChecks() {
+  const now = Date.now();
+  try { await checkExpiringAgents(now); } catch (e) { console.error('[alerts] checkExpiringAgents error:', e.message); }
+  try { await checkTrafficQuota(now); } catch (e) { console.error('[alerts] checkTrafficQuota error:', e.message); }
+}
 function start() {
   const interval = Math.max(10000, (Number(process.env.OFFLINE_THRESHOLD_SEC || 60) * 1000) / 2);
   timer = setInterval(check, interval);
+  // 到期/流量为低频事件，每 6 小时检查一次即可，避免与秒级 check 互相干扰。
+  dailyTimer = setInterval(runDailyChecks, 6 * 3600 * 1000);
+  // 启动后立即跑一次，确保配置生效无需等 6h。
+  runDailyChecks();
   console.log('[alerts] checker started');
 }
 
-function stop() { if (timer) clearInterval(timer); }
+function stop() { if (timer) clearInterval(timer); if (dailyTimer) clearInterval(dailyTimer); }
 
-module.exports = { start, stop, sendAlert, notifyStatus };
+module.exports = { start, stop, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota };

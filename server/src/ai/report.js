@@ -40,6 +40,10 @@ const I18N = {
     degraded_section: '———— AI 运维分析 ————',
     degraded_body: (err) => `本次 AI 分析失败，已降级为纯统计版。失败原因：${err}`,
     degraded_hint: '可在「系统设置 → AI 运维分析」检查配置，或稍后手动重试。',
+    expire_upcoming: (date, days) => `  到期：${date}（剩 ${days} 天）`,
+    expire_overdue: (days) => `  到期：已过期 ${Math.abs(days)} 天`,
+    expire_free: (cycle) => `  ${cycle}节点（无到期日）`,
+    expire_no_date: (cycle) => `  ${cycle}节点（未设到期日）`,
   },
   en: {
     stats_header: (n, on, off) => `Agents: ${n} total (${on} online, ${off} offline)`,
@@ -61,6 +65,10 @@ const I18N = {
     degraded_section: '———— AI Ops Analysis ————',
     degraded_body: (err) => `AI analysis failed; degraded to stats-only. Reason: ${err}`,
     degraded_hint: 'Check config in Settings → AI Ops Analysis, or retry manually later.',
+    expire_upcoming: (date, days) => `  Expires: ${date} (${days}d left)`,
+    expire_overdue: (days) => `  Expired ${Math.abs(days)}d ago`,
+    expire_free: (cycle) => `  ${cycle} tier (no expiry)`,
+    expire_no_date: (cycle) => `  ${cycle} tier (no expiry date set)`,
   },
 };
 function t(key, locale, ...args) {
@@ -74,18 +82,33 @@ function pct(v) {
   return (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(1) + '%' : '-';
 }
 
+// 渲染单个节点的计费/到期信息行（若有）。纯文本，双语。
+// 逻辑：白嫖(cycle=0) 不显示到期；无 expire_at 显示「未设到期日」；
+// 已过期显示「已过期 N 天」；否则「剩 N 天」。
+function renderExpireSection(s, locale) {
+  const b = s.billing;
+  if (!b) return '';
+  const cycle = b.cycle_label || '';
+  if (b.billing_cycle === 0) return t('expire_free', locale, cycle);
+  if (b.days_until_expire == null) return t('expire_no_date', locale, cycle);
+  if (b.days_until_expire < 0) return t('expire_overdue', locale, b.days_until_expire);
+  return t('expire_upcoming', locale, b.expire_at, b.days_until_expire);
+}
+
 // 渲染【统计版】正文（纯文本，用于邮件 & 作为降级基底）。
 function renderStatsText(summary, locale) {
   const lines = [];
   lines.push(t('stats_header', locale, summary.agent_count, summary.online_count, summary.offline_count));
   lines.push(t('stats_period', locale, summary.period));
   lines.push('');
-  // 只列出有状况的节点（CPU/内存/磁盘偏高或离线），避免日报过长。
+  // 只列出有状况的节点（CPU/内存/磁盘偏高、离线、或临期/已过期），避免日报过长。
   const flagged = summary.agents.filter(s => {
     if (!s.online) return true;
     if (s.cpu && (s.cpu.avg >= 70 || (s.cpu.max || 0) >= 90)) return true;
     if (s.memory && (s.memory.avg >= 70 || (s.memory.max || 0) >= 90)) return true;
     if (s.disk && (s.disk.current_pct || 0) >= 80) return true;
+    // 临期(<=7天)或已过期也纳入关注，避免续费风险被忽略。
+    if (s.billing && s.billing.days_until_expire != null && s.billing.days_until_expire <= 7) return true;
     return false;
   });
 
@@ -108,6 +131,8 @@ function renderStatsText(summary, locale) {
       const full = s.disk.estimated_full_days;
       lines.push(t('disk_line', locale, pct(s.disk.current_pct), full));
     }
+    const expireLine = renderExpireSection(s, locale);
+    if (expireLine) lines.push(expireLine);
   }
   return lines.join('\n');
 }
