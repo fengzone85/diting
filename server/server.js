@@ -1,6 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const db = require('./src/db');
 const api = require('./src/api');
@@ -138,6 +139,18 @@ app.use('/api', komari.router);
 // 公开状态页（首页 /）：支持第三方主题皮肤
 // 若 ui_settings.public_theme 指向 public/themes/<id> 下的皮肤，则投放该皮肤首页；
 // 否则回退到内置默认 public/index.html。主题目录名经白名单校验，杜绝路径穿越。
+//
+// Komari 社区皮肤需要比 diting 默认更宽松的 CSP（内联脚本、Iconify/IP 地理定位等外部源）。
+// 为守住「admin/API 页保持严格、仅首页主题页放宽」的边界，这里按请求生成一次性 nonce，
+// 注入到主题的 inline <script>，并仅对本次响应覆盖 CSP 头。子资源（JS/CSS/图片）沿用文档策略，
+// 无需单独设头。nonce 每次请求随机生成，不可复用，不可预测。
+function themeRelaxedCsp(nonce) {
+  return `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://ipwho.is https://ipapi.co https://api.ip.sb; font-src 'self' data:`;
+}
+// 把 nonce 注入主题的每一个 inline <script>（没有 src 的那些），外部模块脚本不受影响。
+function injectNonce(html, nonce) {
+  return html.replace(/<script(?![^>]*\bsrc=)/g, `<script nonce="${nonce}"`);
+}
 const THEMES_DIR = path.join(__dirname, 'public', 'themes');
 const THEME_MIME = {
   '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
@@ -185,7 +198,16 @@ app.get('/', (req, res, next) => {
   const theme = (req.query.theme && typeof req.query.theme === 'string') ? req.query.theme : (ui.public_theme || 'default');
   if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
     const fp = path.join(THEMES_DIR, theme, 'index.html');
-    if (fs.existsSync(fp)) return res.sendFile(fp);
+    if (fs.existsSync(fp)) {
+      // 第三方 Komari 主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
+      // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
+      const nonce = crypto.randomBytes(16).toString('base64');
+      res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+      // nonce 必须每次请求都新鲜，禁止 CDN/浏览器复用旧响应（否则 nonce 失效 → 脚本被拦）
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
+      const html = fs.readFileSync(fp, 'utf8');
+      return res.send(injectNonce(html, nonce));
+    }
   }
   next();
 });

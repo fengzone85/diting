@@ -25,3 +25,6 @@ Thumbs.db
 
 # 设计/模板稿（非项目源码）
 candyhouse.html
+
+# 第三方主题皮肤（Komari 等社区皮肤，仅本地测试用，非本项目代码）
+server/public/themes/
