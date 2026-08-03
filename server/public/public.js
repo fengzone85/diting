@@ -322,51 +322,7 @@ function pubListHtml(list) {
   return `<table class="ctable"><thead><tr><th>${I18N.t('public.list_name')}</th><th>${I18N.t('public.list_country')}</th><th>${I18N.t('public.list_cpu')}</th><th>${I18N.t('public.list_mem')}</th><th>${I18N.t('public.list_disk')}</th><th>${I18N.t('public.list_uptime')}</th><th>${I18N.t('public.list_os')}</th><th>${I18N.t('public.list_net_rate')}</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 // ---------- 列表行点击下方展开详情（Komari 风格）----------
-function showPublicDetail(id, tr) {
-  // 切换展开/折叠
-  const next = tr.nextElementSibling;
-  if (next && next.classList.contains('expanded-row')) { next.remove(); tr.classList.remove('expanded'); return; }
-  // 移除其他展开行
-  document.querySelectorAll('#pvList .expanded-row').forEach(r => r.remove());
-  document.querySelectorAll('#pvList tr.expanded').forEach(r => r.classList.remove('expanded'));
-  const a = publicAgents.find(x => String(x.id) === String(id));
-  if (!a) return;
-  tr.classList.add('expanded');
-  const probes = parseProbes(a.probes);
-  const probeKeys = Object.keys(probes);
-  const statusCls = a.online ? 'on' : 'offline';
-  const row = document.createElement('tr');
-  row.className = 'expanded-row';
-  row.innerHTML = `<td colspan="8"><div class="expand-content">
-    <div class="ex-header">
-      <span class="status ${statusCls}"></span>
-      <strong>${esc(a.name)}</strong>
-      ${a.merchant ? `<span class="badge">${esc(a.merchant)}</span>` : ''}
-      ${a.country && flagImg(a.country) ? `<span class="badge flag">${flagImg(a.country)} ${esc(countryName(a.country))}</span>` : ''}
-      <span class="badge">${esc(a.hostname || '')}</span>
-      ${a.os ? `<span class="badge">${(() => { const o = osIcon(a.os); return o ? `<img class="os-icon" src="/${o.file}" title="${esc(o.alt)}" /> ` : ''; })()}${esc(a.os)}</span>` : ''}
-    </div>
-    <div class="ex-stats">
-      <div class="ex-stat"><span class="ex-lbl">CPU</span><span class="ex-val ${pctClass(a.cpu)}">${fmtPct(a.cpu)}</span></div>
-      <div class="ex-stat"><span class="ex-lbl">内存</span><span class="ex-val ${pctClass(a.mem_pct)}">${fmtPct(a.mem_pct)}</span></div>
-      <div class="ex-stat"><span class="ex-lbl">硬盘</span><span class="ex-val ${pctClass(a.disk_pct)}">${fmtPct(a.disk_pct)}</span></div>
-      <div class="ex-stat"><span class="ex-lbl">负载</span><span class="ex-val">${a.load1 != null ? Number(a.load1).toFixed(2) : '—'}</span></div>
-      <div class="ex-stat"><span class="ex-lbl">温度</span><span class="ex-val">${a.temp != null ? Number(a.temp).toFixed(1) + '°C' : '—'}</span></div>
-      <div class="ex-stat"><span class="ex-lbl">Swap</span><span class="ex-val">${fmtPct(a.swap_pct)}</span></div>
-    </div>
-    <div class="ex-network">
-      <div class="ex-net-row">
-        <span class="ex-lbl">网络</span>
-        <span class="ex-rate" style="color:var(--green)">↓ ${fmtRate(a.net_rx_rate)}</span>
-        <span class="ex-rate" style="color:var(--accent2)">↑ ${fmtRate(a.net_tx_rate)}</span>
-        <span class="ex-lbl">⏱ ${a.online ? fmtUptime(a.uptime) : '—'}</span>
-        <span class="ex-lbl">↓↑ ${fmtBytes((a.net_rx_month || 0) + (a.net_tx_month || 0))}</span>
-      </div>
-      <div class="ex-probes">${probeKeys.length ? probeKeys.map(l => { const p = probes[l]; return `<span class="probe ${probeClass(p && p.ms)}">${esc(probeLabel(l))} ${p && p.ok ? (p.ms != null ? p.ms : '✓') : '—'}</span>`; }).join('') : '<span class="hint" style="color:var(--muted)">暂无探测数据</span>'}</div>
-    </div>
-  </div></td>`;
-  tr.after(row);
-}
+function openNodeDetail(id) { location.href = 'node.html?id=' + encodeURIComponent(id); }
 
 function renderPublic() {
   const ov = publicOverview;
@@ -459,6 +415,11 @@ function bindGridDrag() {
     if (after) grid.insertBefore(dragging, target.nextSibling);
     else grid.insertBefore(dragging, target);
   });
+  // 点击卡片进入独立详情页
+  grid.addEventListener('click', e => {
+    const card = e.target.closest('.pub-card');
+    if (card) openNodeDetail(card.getAttribute('data-id'));
+  });
 }
 
 // ---------- 事件 ----------
@@ -467,9 +428,9 @@ function bindPublic() {
   document.querySelectorAll('[data-pvtemplate]').forEach(b => b.addEventListener('click', () => setPublicTemplate(b.getAttribute('data-pvtemplate'))));
   const tb = $('pvTheme'); if (tb) tb.addEventListener('click', quickToggleTheme);
   bindGridDrag();
-  // 列表行点击展开详情
+  // 列表行点击进入独立详情页
   const pl = $('pvList');
-  if (pl) pl.addEventListener('click', e => { const r = e.target.closest('tr[data-id]'); if (r) showPublicDetail(r.getAttribute('data-id'), r); });
+  if (pl) pl.addEventListener('click', e => { const r = e.target.closest('tr[data-id]'); if (r) openNodeDetail(r.getAttribute('data-id')); });
 }
 bindPublic();
 initPublic();
