@@ -305,34 +305,42 @@ def parse_probe_targets(spec):
 
 
 def probe_one(host, port=443, timeout=2.5, retries=3):
-    """Measure RTT (ms) to host. Prefer ICMP (system ping); fall back to TCP.
+    """Measure RTT (ms) + packet loss to host. Prefer ICMP (system ping); fall back to TCP.
 
-    宽松化：TCP 回退依次尝试 443 / 80 / 目标端口，只要任一可连通即视为可达；
-    并重试多次吸收单次抖动/端口偶发不可达，避免把运营商探测点（cm/cu 等）
-    轻易判为"中断"。返回 (ms: float|None, ok: bool)。纯网络自测，只采 RTT 与
-    可达性，不采任何主机指纹。"""
+    对齐 Komari 延迟采集标准：返回延迟 value 与丢包率 loss。
+    ICMP 用多次 ping 统计丢包率；放宽丢失条件——只要丢包率 < 100%（至少 1 次成功）
+    即视为可达并返回平均延迟，避免单次抖动把运营商 DNS 判为中断。
+    TCP 回退依次尝试 443 / 80 / 目标端口，loss 按重试失败比例计。
+    返回 (ms: float|None, ok: bool, loss: int)。纯网络自测，只采 RTT/可达性/丢包，不采主机指纹。"""
     def _icmp():
         if shutil.which('ping'):
             try:
+                count = 3  # 与 Komari 采集标准一致，多次采样统计丢包
                 if os.name == 'nt':
-                    cmd = ['ping', '-n', '1', '-w', str(int(timeout * 1000)), host]
+                    cmd = ['ping', '-n', str(count), '-w', str(int(timeout * 1000)), host]
                 else:
-                    cmd = ['ping', '-c', '1', '-W', str(int(timeout)), host]
-                out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2)
+                    cmd = ['ping', '-c', str(count), '-W', str(int(timeout)), host]
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout * count + 2)
                 s = (out.stdout or '') + (out.stderr or '')
+                # 丢包率：Linux "X% packet loss" / Windows "(loss% loss)"，支持小数百分比(如 33.3333%)
+                loss = 0
+                m_loss = re.search(r'([\d.]+)%\s*(?:packet loss|loss)', s)
+                if m_loss:
+                    loss = min(100, int(round(float(m_loss.group(1)))))
+                # 平均延迟
                 m = re.search(r'平均\s*=\s*([\d.,]+)\s*ms', s)            # Windows
                 if not m:
                     m = re.search(r'=\s*[\d.]+/([\d.]+)/[\d.]+/[\d.]+\s*ms', s)  # Linux avg(min/avg/max/mdev)
-                if m:
-                    return round(float(m.group(1).replace(',', '.')), 1), True
-                # ICMP 通但 RTT 解析失败（个别系统输出格式差异）仍判可达，
-                # 避免把能 ping 通的运营商 DNS 误判为中断。Windows 的 ping 对
-                # 不可达也返回 0，故仅对非 nt 生效。
-                if out.returncode == 0 and os.name != 'nt':
-                    return None, True
+                # 放宽条件：只要丢包率 < 100%（至少 1 次成功）即判可达
+                if m and loss < 100:
+                    return round(float(m.group(1).replace(',', '.')), 1), True, loss
+                if loss < 100 and out.returncode == 0 and os.name != 'nt':
+                    return None, True, loss
+                # 全部丢失（loss>=100）才判失败；否则视为可达（放宽丢失条件）
+                return None, loss < 100, loss
             except Exception as e:
                 log.debug("icmp probe failed: %s", e)
-        return None, False
+        return None, False, 100
 
     def _tcp():
         import socket as _sock
@@ -340,24 +348,32 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
         ports = [443, 80]
         if port not in ports:
             ports.append(port)
+        ok = 0
+        total = 0
+        ms_ok = None
         for p in ports:
+            total += 1
             try:
                 t0 = time.time()
                 with _sock.create_connection((host, p), timeout=timeout):
-                    return round((time.time() - t0) * 1000.0, 1), True
+                    ok += 1
+                    rtt = round((time.time() - t0) * 1000.0, 1)
+                    if ms_ok is None or rtt < ms_ok:
+                        ms_ok = rtt
             except Exception as e:
                 log.debug("tcp probe %s:%s failed: %s", host, p, e)
                 continue
-        return None, False
+        loss = round((1 - ok / total) * 100) if total else 100
+        return ms_ok, ok > 0, loss
 
     for _ in range(max(1, retries)):
-        ms, ok = _icmp()
+        ms, ok, loss = _icmp()
         if ok:
-            return ms, True
-        ms, ok = _tcp()
+            return ms, True, loss
+        ms, ok, loss = _tcp()
         if ok:
-            return ms, True
-    return None, False
+            return ms, True, loss
+    return None, False, 100
 
 
 class Collector:
@@ -365,6 +381,8 @@ class Collector:
         self.disk_path = disk_path
         self.state_file = state_file
         self.probe_targets = probe_targets or []
+        self._last_probe_ts = 0       # 探针独立采集间隔（对齐 Komari interval=60s）
+        self._probes_cache = {}       # 上次探针结果缓存（间隔未到则沿用）
         self._cpu_prev = None
         self._net_prev = None
         self._net_prev_ts = 0
@@ -444,15 +462,25 @@ class Collector:
         self._save_state()
 
         # Network self-test (fixed public targets from local config; no server command).
+        # 独立采集间隔 60s（对齐 Komari PingTask interval=60）；间隔未到则沿用上次结果，
+        # 避免探针随主循环(20s)频繁采集。返回含 ms/ok/loss（丢包率）。
         probes = {}
-        if self.probe_targets:
+        now = time.time()
+        if self.probe_targets and (now - self._last_probe_ts >= 60 or not self._probes_cache):
             try:
+                fresh = {}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.probe_targets)) as ex:
-                    for label, ms, ok in ex.map(lambda t: (t[0],) + probe_one(t[1], t[2]), self.probe_targets):
-                        probes[label] = {'ms': ms, 'ok': ok}
+                    for label, ms, ok, loss in ex.map(lambda t: (t[0],) + probe_one(t[1], t[2]), self.probe_targets):
+                        fresh[label] = {'ms': ms, 'ok': ok, 'loss': loss}
+                if fresh:
+                    self._probes_cache = fresh
+                    self._last_probe_ts = now
+                probes = self._probes_cache
             except Exception as e:
                 log.debug("probe collection failed: %s", e)
-                probes = {}
+                probes = self._probes_cache
+        else:
+            probes = self._probes_cache
 
         return {
             'hostname': socket.gethostname(),

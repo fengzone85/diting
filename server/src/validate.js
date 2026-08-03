@@ -92,7 +92,9 @@ const validateReport = (b) => {
         const v = p[k];
         if (!v || typeof v !== 'object') continue;
         const ms = (v.ms === null || v.ms === undefined) ? null : num(v.ms, 0, 100000);
-        out[k] = { ms, ok: v.ok === true };
+        // loss 丢包率 0-100（对齐 Komari 延迟采集标准）；缺省视为 0
+        const loss = (v.loss === null || v.loss === undefined) ? (v.ok === true ? 0 : 100) : Math.round(num(v.loss, 0, 100));
+        out[k] = { ms, ok: v.ok === true, loss };
         n++;
       }
       return JSON.stringify(out);
