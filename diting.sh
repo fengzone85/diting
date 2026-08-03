@@ -56,7 +56,7 @@ SRC_DIR="/opt/diting-src"
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
-A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""
+A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""
 
 show_usage() {
     cat <<EOF
@@ -116,6 +116,7 @@ show_usage() {
   --setup-token SECRET    用服务端 SETUP_TOKEN 自助注册（免 --id/--token）
   --setup-name NAME       自助注册的节点显示名（可选）
   --interval SEC          上报间隔（秒，默认 15）
+  --probe-targets LIST    网络质量自测目标（label:host[:port] 逗号分隔；覆盖默认）
   --repo URL              自定义 raw 仓库地址（默认本项目 master 分支）
 EOF
 }
@@ -207,11 +208,12 @@ install_agent() {
     [[ -n "$A_SETUP" ]]      && args+=(--setup-token "$A_SETUP")
     [[ -n "$A_SETUP_NAME" ]] && args+=(--setup-name "$A_SETUP_NAME")
     [[ -n "$A_INTERVAL" ]]   && args+=(--interval "$A_INTERVAL")
+    [[ -n "$A_PROBE_TARGETS" ]] && args+=(--probe-targets "$A_PROBE_TARGETS")
 
-    # 仓库内运行：直接复用本地 agent/diting.sh（已充分测试）
-    if [[ -f "$SCRIPT_DIR/agent/diting.sh" ]]; then
-        echo -e "${GREEN}[OK]   使用本地 agent/diting.sh${NC}"
-        bash "$SCRIPT_DIR/agent/diting.sh" "${args[@]}"
+    # 仓库内运行：直接复用本地 agent/install.sh（已充分测试）
+    if [[ -f "$SCRIPT_DIR/agent/install.sh" ]]; then
+        echo -e "${GREEN}[OK]   使用本地 agent/install.sh${NC}"
+        bash "$SCRIPT_DIR/agent/install.sh" "${args[@]}"
         return
     fi
 
@@ -219,12 +221,12 @@ install_agent() {
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载受控端载荷…${NC}"
     # L-6：可用 SP_AGENT_SHA256S（按序逗号串）对下载文件做 SHA256 校验
-    if ! download_list "$REPO_RAW/agent" "$tmp" "diting.sh unditing.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; exit 1
     fi
-    chmod +x "$tmp/diting.sh"
-    bash "$tmp/diting.sh" "${args[@]}"
+    chmod +x "$tmp/install.sh"
+    bash "$tmp/install.sh" "${args[@]}"
     rm -rf "$tmp"
 }
 
@@ -536,13 +538,13 @@ update_agent() {
     # 强制从 GitHub 拉取最新 agent 载荷（无论本脚本是否本地旧版），保证更新到最新
     local tmp; tmp="$(mktemp -d)"
     echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载最新受控端载荷…${NC}"
-    if ! download_list "$REPO_RAW/agent" "$tmp" "diting.sh unditing.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; return 1
     fi
-    chmod +x "$tmp/diting.sh"
+    chmod +x "$tmp/install.sh"
     # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务
-    bash "$tmp/diting.sh" --server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL"
+    bash "$tmp/install.sh" --server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL"
     rm -rf "$tmp"
     echo -e "${GREEN}[OK]   受控端已更新并重启${NC}"
 }
@@ -1088,6 +1090,7 @@ while [[ $# -gt 0 ]]; do
         --setup-token) A_SETUP="$2"; shift 2 ;;
         --setup-name)  A_SETUP_NAME="$2"; shift 2 ;;
         --interval)    A_INTERVAL="$2"; shift 2 ;;
+        --probe-targets) A_PROBE_TARGETS="$2"; shift 2 ;;
         --repo)        REPO_RAW="$2"; shift 2 ;;
         -h|--help)     show_usage; exit 0 ;;
         *) echo -e "${RED}[错误] 未知参数: $1${NC}" >&2; show_usage; exit 1 ;;
