@@ -180,7 +180,7 @@ function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTar
   const ptArg = probeTargets ? ` --probe-targets ${shQuote(probeTargets)}` : '';
   const ptEnv = probeTargets ? ` -e PROBE_TARGETS=${shQuote(probeTargets)}` : '';
   const ptWin = probeTargets ? ` -ProbeTargets ${psQuote(probeTargets)}` : '';
-  // 原生版采用 Komari 风格：先下载成文件、chmod +x、再 sudo 执行（相对 curl|bash 更透明、可审阅）。
+  // 原生版采用下载后执行风格：先下载成文件、chmod +x、再 sudo 执行（相对 curl|bash 更透明、可审阅）。
   const native = `curl -fsSL ${REPO_BASE}/diting.sh -o diting.sh
 chmod +x diting.sh
 sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv}${ptArg}`;
@@ -300,7 +300,7 @@ router.get('/agents/:id', adminOrReadonly, (req, res) => {
 });
 
 // ---- Admin: metrics time-series ----
-const RANGES = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
+const RANGES = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
 router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
   const sec = RANGES[req.query.range] || 3600;
   const rows = db.getMetrics(req.params.id, Date.now() - sec * 1000);
@@ -309,7 +309,7 @@ router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
 
 // ---- Admin: overview ----
 // 在原有「总数/在线/离线/平均 CPU/内存」基础上，补充「流量概览」与「分组概览」，
-// 供前端对标 Komari 的流量/地区概览区块直接渲染。
+// 供前端对标社区主题的流量/地区概览区块直接渲染。
 router.get('/overview', adminOrReadonly, (req, res) => {
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
@@ -410,6 +410,8 @@ router.get('/public/agents', (req, res) => {
       online: !!online,
       cpu: m ? m.cpu : null,
       mem_pct: m ? m.mem_pct : null,
+      mem_total: m ? m.mem_total : 0,
+      mem_used: m ? m.mem_used : 0,
       disk_pct: m ? m.disk_pct : null,
       disk_used: m ? m.disk_used : 0,
       disk_total: m ? m.disk_total : 0,
@@ -430,6 +432,10 @@ router.get('/public/agents', (req, res) => {
       expire_at: a.expire_at || '',
       note: a.note || '',
       monthly_quota_gb: a.monthly_quota_gb || 0,
+      // 计费套餐字段（与 Komari price/billing_cycle/currency 对齐）
+      price: a.price || 0,
+      billing_cycle: a.billing_cycle || 30,
+      currency: a.currency || '¥',
       disks: m ? parseDisks(m.disks) : []
     };
   });
@@ -442,17 +448,50 @@ router.get('/public/agents/sparklines', (req, res) => {
   const ui = db.getUiSettings();
   if (!ui.public_enabled) return publicDisabled(res);
   const sec = RANGES[req.query.range] || 21600;
-  const rows = db.getMetricsAll(Date.now() - sec * 1000);
+  const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
+  // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
+  const rows = onlyId
+    ? db.getMetrics(onlyId, Date.now() - sec * 1000)
+    : db.getMetricsAll(Date.now() - sec * 1000);
   const byAgent = {};
   for (const r of rows) {
     (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push({
-      cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
+      ts: r.ts, cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
       net_rx_rate: r.net_rx_rate, net_tx_rate: r.net_tx_rate,
       load1: r.load1, temp: r.temp, swap_pct: r.swap_pct, uptime: r.uptime,
       disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate
     });
   }
   res.json(byAgent);
+});
+
+// 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
+// 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。
+// 受 ui.public_enabled 控制；range 支持 1h/6h/24h/7d。
+router.get('/public/agents/:id/probes', (req, res) => {
+  const ui = db.getUiSettings();
+  if (!ui.public_enabled) return publicDisabled(res);
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'agent not found' });
+  const sec = RANGES[req.query.range] || 21600;
+  const rows = db.getMetrics(a.id, Date.now() - sec * 1000);
+  const series = {}; // label -> [{ts, ms}]
+  for (const r of rows) {
+    if (!r.probes) continue;
+    let probes;
+    try { probes = JSON.parse(r.probes); } catch (_) { continue; }
+    if (!probes || typeof probes !== 'object') continue;
+    for (const [label, p] of Object.entries(probes)) {
+      if (!p || typeof p !== 'object') continue;
+      if (!series[label]) series[label] = [];
+      series[label].push({
+        ts: r.ts,
+        ms: typeof p.ms === 'number' ? Math.round(p.ms) : null,
+        ok: p.ok !== false
+      });
+    }
+  }
+  res.json(series);
 });
 
 // 游客视图元信息（无需登录）：站点标题、是否开放、首页默认布局、卡片排序。
