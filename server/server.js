@@ -5,7 +5,9 @@ const crypto = require('crypto');
 const express = require('express');
 const db = require('./src/db');
 const api = require('./src/api');
-const komari = require('./src/komari');
+const compat = require('./src/compat');
+const { handleRpc } = require('./src/compat-rpc');
+const v1 = require('./src/v1');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
 const { safeEqual, ipWhitelist } = require('./src/auth');
@@ -127,20 +129,25 @@ function _metricsHandler(req, res) {
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8').send(lines.join('\n') + '\n');
 }
 
-// IP 白名单：保护管理 API（公开接口 /public/* 和 /report 除外）
+// IP 白名单：保护管理 API（公开只读接口除外）
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/public/') || req.path === '/report') return next();
+  if (req.path.startsWith('/public/') || req.path === '/report' ||
+      req.path.startsWith('/v1/') ||
+      req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
+      req.path === '/version' || req.path === '/rpc2') return next();
   ipWhitelist(req, res, next);
 });
 app.use('/api', api);
-// Komari 兼容 API 层：让 Komari 社区皮肤可指向本服务（只读、脱敏，受 public_enabled 约束）
-app.use('/api', komari.router);
+// 标准公开只读 API 层（/api/v1/*）：语义清晰、与皮肤协议解耦，供独立 adapter 翻译
+app.use('/api/v1', v1.router);
+// 第三方主题兼容 API 层：让社区皮肤可指向本服务（只读、脱敏，受 public_enabled 约束）
+app.use('/api', compat.router);
 
 // 公开状态页（首页 /）：支持第三方主题皮肤
 // 若 ui_settings.public_theme 指向 public/themes/<id> 下的皮肤，则投放该皮肤首页；
 // 否则回退到内置默认 public/index.html。主题目录名经白名单校验，杜绝路径穿越。
 //
-// Komari 社区皮肤需要比 diting 默认更宽松的 CSP（内联脚本、Iconify/IP 地理定位等外部源）。
+// 部分社区皮肤需要比 diting 默认更宽松的 CSP（内联脚本、Iconify/IP 地理定位等外部源）。
 // 为守住「admin/API 页保持严格、仅首页主题页放宽」的边界，这里按请求生成一次性 nonce，
 // 注入到主题的 inline <script>，并仅对本次响应覆盖 CSP 头。子资源（JS/CSS/图片）沿用文档策略，
 // 无需单独设头。nonce 每次请求随机生成，不可复用，不可预测。
@@ -159,19 +166,20 @@ const THEME_MIME = {
   '.ico': 'image/x-icon', '.webp': 'image/webp',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf'
 };
+// 需要 nonce 注入才能正常运行的社区主题白名单（CSP 仅对这些主题放宽）
+const THEME_NEEDS_NONCE = new Set(['glassmorphism']);
 
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
 // 规避前置 Nginx / Docker 部署时静态目录未被代理 / 未打进镜像导致的 404。
-// 主题目录名与文件名均经白名单校验，杜绝路径穿越。
-app.get('/themes/:id/:file', (req, res) => {
-  const { id, file } = req.params;
-  if (!/^[A-Za-z0-9_-]+$/.test(id) || !/^[A-Za-z0-9_.\-]+$/.test(file) || file.includes('..')) {
-    return res.status(400).end();
-  }
-  const fp = path.join(THEMES_DIR, id, file);
-  if (!fp.startsWith(THEMES_DIR + path.sep) || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) {
-    return res.status(404).end();
-  }
+// 主题目录名与路径均经白名单校验，杜绝路径穿越；按官方文档 /themes/{short}/... 映射主题包根目录。
+app.get('/themes/:id/*path', (req, res) => {
+  const id = req.params.id;
+  const subPath = req.params.path || '';
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return res.status(404).end();
+  const fp = path.join(THEMES_DIR, id, subPath);
+  if (!fp.startsWith(path.join(THEMES_DIR, id) + path.sep)) return res.status(404).end();
+  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return res.status(404).end();
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
   const ext = path.extname(fp).toLowerCase();
   res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
   fs.createReadStream(fp).pipe(res);
@@ -192,25 +200,6 @@ app.get('/setup.html', (req, res) => {
 });
 app.get('/setup', (req, res) => res.redirect(302, '/setup.html'));
 
-app.get('/', (req, res, next) => {
-  // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）；否则用后台设置的 public_theme。
-  const ui = db.getUiSettings();
-  const theme = (req.query.theme && typeof req.query.theme === 'string') ? req.query.theme : (ui.public_theme || 'default');
-  if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
-    const fp = path.join(THEMES_DIR, theme, 'index.html');
-    if (fs.existsSync(fp)) {
-      // 第三方 Komari 主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
-      // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
-      const nonce = crypto.randomBytes(16).toString('base64');
-      res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
-      // nonce 必须每次请求都新鲜，禁止 CDN/浏览器复用旧响应（否则 nonce 失效 → 脚本被拦）
-      res.setHeader('Cache-Control', 'no-store, must-revalidate');
-      const html = fs.readFileSync(fp, 'utf8');
-      return res.send(injectNonce(html, nonce));
-    }
-  }
-  next();
-});
 // admin.html 受 IP 白名单保护
 app.get('/admin.html', ipWhitelist, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 // 同源自定义 CSS 端点（M-1 修复）：以 <link> 投放而非内联 <style>，
@@ -222,6 +211,50 @@ app.get('/custom.css', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   res.send(css);
 });
+
+// 统一 SPA fallback：处理 / 及所有前端深链
+app.get('*', (req, res, next) => {
+  // API 与显式路由已注册在前，不会落到此处
+  if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
+
+  // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）
+  const ui = db.getUiSettings();
+  const theme = (req.query.theme && typeof req.query.theme === 'string')
+    ? req.query.theme
+    : (ui.public_theme || 'default');
+
+  // 带后缀文件：优先尝试当前主题根目录映射，未命中再交给 express.static
+  if (path.extname(req.path)) {
+    if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
+      const fp = path.join(THEMES_DIR, theme, req.path);
+      if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
+        res.setHeader('Cache-Control', 'no-store, must-revalidate');
+        const ext = path.extname(fp).toLowerCase();
+        res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
+        return fs.createReadStream(fp).pipe(res);
+      }
+    }
+    return next();
+  }
+
+  // 无后缀：返回主题 index.html（官方主题在 dist/ 下也按根目录 index.html 处理）
+  if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
+    const fp = path.join(THEMES_DIR, theme, 'index.html');
+    if (fs.existsSync(fp)) {
+      // 第三方社区主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
+      // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
+      if (THEME_NEEDS_NONCE.has(theme)) {
+        const nonce = crypto.randomBytes(16).toString('base64');
+        res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+        res.setHeader('Cache-Control', 'no-store, must-revalidate');
+        return res.send(injectNonce(fs.readFileSync(fp, 'utf8'), nonce));
+      }
+      return res.sendFile(fp);
+    }
+  }
+  next();
+});
+
 // 禁用 JS/CSS/SVG/HTML 的浏览器/CDN 缓存，确保更新后立即生效
 app.use((req, res, next) => {
   if (/\.(js|css|svg|html?)$/i.test(req.path)) {
@@ -271,7 +304,7 @@ const server = app.listen(PORT, () => {
   ai.start();
 });
 
-// Komari 兼容 WebSocket：主题通过 ws://host/api/clients 发送 "get" 获取实时快照。
+// 第三方主题兼容 WebSocket：主题通过 ws://host/api/clients 发送 "get" 获取实时快照。
 // 依赖 ws 包；若未安装则降级（REST 兼容接口 /api/public、/api/nodes、/api/recent 仍可用）。
 // M-5：公开快照端点无鉴权，需限制资源消耗：① 仅当 public_enabled 开启才开放；
 // ② 按客户端 IP 限制并发连接数与新建速率，防资源耗尽型攻击。
@@ -286,8 +319,23 @@ function wsClientIp(req) {
   // 用于绕过 WebSocket 并发/速率限制。req.socket.remoteAddress 是真实连接源，不可伪造。
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
+// 共用限流函数：/api/clients 与 /api/rpc2 共享同一套并发/速率计数器
+function wsRateLimit(ip) {
+  const now = Date.now();
+  let rec = wsHits.get(ip);
+  if (!rec || now > rec.reset) rec = { reset: now + 60000, count: 0 };
+  rec.count++;
+  if (wsHits.size >= WS_MAP_CAP) wsHits.clear();
+  wsHits.set(ip, rec);
+  if (rec.count > WS_MAX_PER_MIN) return false;
+  let set = wsConns.get(ip);
+  if (!set) { set = new Set(); wsConns.set(ip, set); }
+  if (set.size >= WS_MAX_CONCURRENT) return false;
+  return set;
+}
 try {
   const { WebSocketServer } = require('ws');
+
   const wss = new WebSocketServer({ server, path: '/api/clients' });
   wss.on('connection', (ws, req) => {
     // 仅公开状态页开启时开放（数据为脱敏的公开视图）
@@ -296,28 +344,15 @@ try {
       return;
     }
     const ip = wsClientIp(req);
-    // 新建速率限制
-    const now = Date.now();
-    let rec = wsHits.get(ip);
-    if (!rec || now > rec.reset) rec = { reset: now + 60000, count: 0 };
-    rec.count++;
-    if (wsHits.size >= WS_MAP_CAP) wsHits.clear();
-    wsHits.set(ip, rec);
-    if (rec.count > WS_MAX_PER_MIN) {
+    const set = wsRateLimit(ip);
+    if (!set) {
       try { ws.close(1008, 'rate limited'); } catch (_) {}
       return;
     }
-    // 并发限制
-    let set = wsConns.get(ip);
-    if (!set) { set = new Set(); wsConns.set(ip, set); }
-    if (set.size >= WS_MAX_CONCURRENT) {
-      try { ws.close(1008, 'too many connections'); } catch (_) {}
-      return;
-    }
     set.add(ws);
-    const send = () => { try { ws.send(JSON.stringify(komari.snapshot())); } catch (_) {} };
+    const send = () => { try { ws.send(JSON.stringify(compat.snapshot())); } catch (_) {} };
     send();
-    ws.on('message', () => send()); // Komari 客户端发送 "get" 触发刷新
+    ws.on('message', () => send()); // 社区主题客户端发送 "get" 触发刷新
     const timer = setInterval(send, 5000);
     ws.on('close', () => {
       clearInterval(timer);
@@ -325,7 +360,48 @@ try {
       if (set.size === 0) wsConns.delete(ip);
     });
   });
-  console.log('[monitor] Komari-compat WebSocket /api/clients enabled');
+  console.log('[monitor] theme-compat WebSocket /api/clients enabled');
+
+  // JSON-RPC WebSocket 端点：社区主题通过 /api/rpc2 拉实时状态
+  const wssRpc = new WebSocketServer({ server, path: '/api/rpc2' });
+  wssRpc.on('connection', (ws, req) => {
+    if (!db.getUiSettings().public_enabled) {
+      try { ws.close(1008, 'public disabled'); } catch (_) {}
+      return;
+    }
+    const ip = wsClientIp(req);
+    const set = wsRateLimit(ip);
+    if (!set) {
+      try { ws.close(1008, 'rate limited'); } catch (_) {}
+      return;
+    }
+    set.add(ws);
+
+    const pushStatus = () => {
+      try {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null }));
+      } catch (_) {}
+    };
+    pushStatus();
+    const timer = setInterval(pushStatus, 5000);
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        const result = handleRpc(msg.method, msg.params);
+        ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id }));
+      } catch (err) {
+        ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg?.id ?? null }));
+      }
+    });
+
+    ws.on('close', () => {
+      clearInterval(timer);
+      set.delete(ws);
+      if (set.size === 0) wsConns.delete(ip);
+    });
+  });
+  console.log('[monitor] theme-compat WebSocket /api/rpc2 enabled');
 } catch (e) {
-  console.warn('[monitor] Komari-compat WebSocket 未启用（缺少 ws 包，仅 REST 兼容可用）：', e.message);
+  console.warn('[monitor] theme-compat WebSocket 未启用（缺少 ws 包，仅 REST 兼容可用）：', e.message);
 }
