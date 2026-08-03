@@ -576,8 +576,8 @@ body.compact .group-head h3 { font-size: 14px; }
 /* ===== 公开受控端详情页（node.html，参考 Komari node detail） ===== */
 .node-view { min-height: 100vh; display: flex; flex-direction: column; }
 .nv-topbar { display: flex; align-items: center; gap: 16px; padding: 14px 26px; border-bottom: 1px solid var(--border); background: var(--bg-soft); position: sticky; top: 0; z-index: 10; }
-.nv-back { color: var(--muted); text-decoration: none; font-size: 13px; }
-.nv-back:hover { color: var(--accent); }
+.nv-back { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; white-space: nowrap; }
+.nv-back:hover { color: var(--accent); border-color: var(--accent); }
 .nv-brand { font-weight: 800; font-size: 15px; display: flex; align-items: center; margin-right: 8px; }
 .nv-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .nv-title { background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
@@ -631,10 +631,12 @@ body.compact .group-head h3 { font-size: 14px; }
 .muted { color: var(--muted); font-size: 13px; }
 
 /* ping 延迟分析图表（参考 Komari ping 记录趋势图） */
-.nv-range-bar { display: inline-flex; gap: 4px; margin-bottom: 10px; padding: 2px; border-radius: 8px; background: var(--bg-soft, #eef1f6); }
-.nv-range-btn { font-size: 12px; padding: 3px 14px; border-radius: 6px; color: var(--muted); cursor: pointer; user-select: none; }
-.nv-range-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
-.nv-range-btn:hover:not(.active) { color: var(--text); }
+.nv-bar-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.nv-range-bar { display: inline-flex; gap: 4px; padding: 2px; border-radius: 8px; background: var(--bg-soft, #eef1f6); }
+.nv-range-btn, .nv-agg-btn { font-size: 12px; padding: 3px 14px; border-radius: 6px; color: var(--muted); cursor: pointer; user-select: none; }
+.nv-range-btn.active, .nv-agg-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+.nv-range-btn:hover:not(.active), .nv-agg-btn:hover:not(.active) { color: var(--text); }
+.nv-agg-bar { display: inline-flex; gap: 4px; padding: 2px; border-radius: 8px; background: var(--bg-soft, #eef1f6); }
 .nv-ping { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; margin-bottom: 20px; }
 .nv-ping-wrap { width: 100%; position: relative; }
 .nv-ping-chart { width: 100%; aspect-ratio: 16 / 9; display: block; cursor: crosshair; }

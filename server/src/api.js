@@ -487,7 +487,8 @@ router.get('/public/agents/:id/probes', (req, res) => {
       series[label].push({
         ts: r.ts,
         ms: typeof p.ms === 'number' ? Math.round(p.ms) : null,
-        ok: p.ok !== false
+        ok: p.ok !== false,
+        loss: typeof p.loss === 'number' ? Math.round(p.loss) : (p.ok !== false ? 0 : 100)
       });
     }
   }

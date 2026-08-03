@@ -35,6 +35,31 @@
     return out;
   }
 
+  // 聚合序列：对每个探测点的 ms 序列做聚合（对齐 Komari 延迟聚合 value: avg/p95）
+  // raw 原样；avg 用窗口移动平均平滑看趋势；p95 用滚动窗口取 95 分位看最差情况。
+  function aggregateSeries(series, mode) {
+    if (!series || mode === 'raw') return series;
+    const WIN = mode === 'avg' ? 5 : 20; // avg 用小窗平滑，p95 用大窗统计
+    const out = {};
+    Object.keys(series).forEach((label) => {
+      const pts = series[label];
+      out[label] = pts.map((p, i) => {
+        // 滚动窗口 [i-WIN+1, i]
+        const from = Math.max(0, i - WIN + 1);
+        const win = pts.slice(from, i + 1).filter(x => x.ms != null).map(x => x.ms);
+        if (!win.length) return p;
+        let v;
+        if (mode === 'avg') v = Math.round(win.reduce((a, b) => a + b, 0) / win.length);
+        else { // p95
+          const s = win.slice().sort((a, b) => a - b);
+          v = s[Math.min(s.length - 1, Math.floor(s.length * 0.95))];
+        }
+        return { ts: p.ts, ms: v, ok: p.ok, agg: mode };
+      });
+    });
+    return out;
+  }
+
   // 剩余价值徽章 HTML
   function valueHtml(expireAt) {
     const v = valueInfo(expireAt);
@@ -325,11 +350,18 @@
 
       <section class="nv-col">
         <h2 class="nv-section" data-i18n="node.ping_analysis">Ping 延迟分析</h2>
-        <div class="nv-range-bar" id="nvRangeBar">
-          <span class="nv-range-btn active" data-range="1h">时</span>
-          <span class="nv-range-btn" data-range="24h">日</span>
-          <span class="nv-range-btn" data-range="7d">周</span>
-          <span class="nv-range-btn" data-range="30d">月</span>
+        <div class="nv-bar-group">
+          <div class="nv-range-bar" id="nvRangeBar">
+            <span class="nv-range-btn active" data-range="1h">时</span>
+            <span class="nv-range-btn" data-range="24h">日</span>
+            <span class="nv-range-btn" data-range="7d">周</span>
+            <span class="nv-range-btn" data-range="30d">月</span>
+          </div>
+          <div class="nv-agg-bar" id="nvAggBar">
+            <span class="nv-agg-btn active" data-mode="raw">原始</span>
+            <span class="nv-agg-btn" data-mode="avg">平均</span>
+            <span class="nv-agg-btn" data-mode="p95">P95</span>
+          </div>
         </div>
         <div class="nv-ping" id="nvPingWrap">${multiLine(probeSeries || {}, hiddenProbes)}</div>
       </section>
@@ -348,6 +380,7 @@
   let hiddenProbes = new Set(); // 图例点击隐藏的探测点（可选展示，对齐 Glassmorphism）
   let currentProbeSeries = {}; // 当前加载的探针历史（图例切换时重渲染用）
   let currentChartCfg = null; // 当前图表坐标配置（tooltip 交叉点换算用）
+  let currentProbeAgg = 'raw'; // 聚合模式：raw原始 / avg移动平均 / p95分位（对齐 Komari 延迟聚合）
 
   async function load() {
     const id = new URLSearchParams(location.search).get('id');
@@ -390,7 +423,7 @@
       const history = (sp && sp[id]) || [];
       try { currentProbeKeys = Object.keys(JSON.parse(agent.probes || '{}')); } catch (_) { currentProbeKeys = []; }
       currentProbeSeries = filterCurrentProbes(probes);
-      render(agent, history, currentProbeSeries);
+      render(agent, history, aggregateSeries(currentProbeSeries, currentProbeAgg));
       // 同步日/周/月切换栏激活态
       document.querySelectorAll('.nv-range-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-range') === currentProbeRange));
     } catch (e) {
@@ -408,8 +441,17 @@
       const probes = await fetch('/api/public/agents/' + encodeURIComponent(currentId) + '/probes?range=' + range, { cache: 'no-store' }).then(r => r.ok ? r.json() : {});
       currentProbeSeries = filterCurrentProbes(probes);
       const box = $('nvPingWrap');
-      if (box) box.innerHTML = multiLine(currentProbeSeries, hiddenProbes);
+      if (box) box.innerHTML = multiLine(aggregateSeries(currentProbeSeries, currentProbeAgg), hiddenProbes);
     } catch (_) {}
+  }
+
+  // 聚合模式切换（原始/平均/P95，对齐 Komari 延迟聚合）：仅重渲染 Ping 区块
+  function switchProbeAgg(mode) {
+    if (mode === currentProbeAgg) return;
+    currentProbeAgg = mode;
+    document.querySelectorAll('.nv-agg-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-mode') === mode));
+    const box = $('nvPingWrap');
+    if (box) box.innerHTML = multiLine(aggregateSeries(currentProbeSeries, mode), hiddenProbes);
   }
 
   // 主题切换（与 index.html 公开页一致）
@@ -447,6 +489,8 @@
     if (tb) return nvToggleTheme();
     const btn = e.target.closest && e.target.closest('#nvRangeBar .nv-range-btn');
     if (btn) return switchProbeRange(btn.getAttribute('data-range'));
+    const aggBtn = e.target.closest && e.target.closest('#nvAggBar .nv-agg-btn');
+    if (aggBtn) return switchProbeAgg(aggBtn.getAttribute('data-mode'));
     const legendItem = e.target.closest && e.target.closest('.nv-legend-item[data-key]');
     if (legendItem) {
       const key = legendItem.getAttribute('data-key');
