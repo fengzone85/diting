@@ -30,7 +30,9 @@ DISK_PATH = os.environ.get('DISK_PATH', '/')
 STATE_FILE = os.environ.get('STATE_FILE', '/data/state.json')
 # 网络质量自测目标（固定公共基础设施，写死在本地，服务端不可下发）。
 # 格式：label:host[:port]，逗号分隔。置空则关闭探测。仅测延迟/可达性，不采任何指纹。
-PROBE_TARGETS = os.environ.get('PROBE_TARGETS', '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8')
+# 精简为 4 个：移动/联通/电信 + 谷歌 DNS（8.8.8.8）。过多目标会让延迟曲线杂乱且浏览器卡顿。
+# 目标上限 8 个（与 Go 端一致）。
+PROBE_TARGETS = os.environ.get('PROBE_TARGETS', '移动:211.136.192.6,联通:202.106.0.20,电信:101.226.4.6,谷歌:8.8.8.8')
 
 if not SERVER_URL or not AGENT_ID or not AGENT_TOKEN:
     print('ERROR: SERVER_URL, AGENT_ID and AGENT_TOKEN must be set', file=sys.stderr)
