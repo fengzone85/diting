@@ -39,6 +39,11 @@ export interface Agent {
     disk_pct?: number;
     net_rx_rate?: number;
     net_tx_rate?: number;
+    net_rx_month?: number;
+    net_tx_month?: number;
+    load1?: number;
+    temp?: number;
+    swap_pct?: number;
     uptime?: number;
   };
 }
@@ -87,6 +92,7 @@ export interface PublicMeta {
   logo_url?: string;
   custom_css?: string;
   public_theme?: string;
+  public_enabled?: boolean;
 }
 
 export interface VersionInfo {
