@@ -8,16 +8,18 @@ export interface AuthStatus {
 }
 
 export const adminApi = {
-  // auth
+  // auth / 2fa
   status: () => api.get<{ enabled: boolean }>('/api/admin/2fa/status'),
+  twoFAStatus: () => api.get<{ enabled: boolean }>('/api/admin/2fa/status'),
   login: (token: string, totp?: string) =>
     api.post<{ ok: boolean; totp: boolean }>('/api/login', { token, totp }),
   logout: () => api.post<void>('/api/logout'),
-  totpQr: () => api.get<{ qr: string; secret: string }>('/api/admin/2fa/qr'),
-  setupTotp: (secret: string, token: string) =>
-    api.post<AuthStatus>('/api/admin/2fa/setup', { secret, token }),
-  verifyTotp: (token: string) =>
-    api.post<AuthStatus>('/api/admin/2fa/verify', { token }),
+  setup2FA: () =>
+    api.post<{ secret: string; otpauth_uri: string; enabled: boolean }>('/api/admin/2fa/setup', {}),
+  enable2FA: (code: string) =>
+    api.post<{ ok: boolean; enabled: boolean }>('/api/admin/2fa/enable', { code }),
+  disable2FA: (code: string) =>
+    api.post<{ ok: boolean; enabled: boolean }>('/api/admin/2fa/disable', { code }),
 
   // setup
   register: (setupToken: string, username: string, password: string) =>

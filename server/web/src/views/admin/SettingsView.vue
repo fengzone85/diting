@@ -4,6 +4,7 @@ import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import type { Settings } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
+import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 
 interface ThemeOption {
   id: string;
@@ -161,5 +162,7 @@ async function save() {
         {{ saving ? '保存中...' : '保存' }}
       </button>
     </div>
+
+    <TwoFactorPanel class="mt-6" />
   </div>
 </template>
