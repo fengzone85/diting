@@ -190,18 +190,23 @@ app.get('/api/version', (req, res) => {
   res.json({ version: APP_VERSION, build_time: APP_BUILD_TIME });
 });
 
-// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin.html
+// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
 app.get('/setup.html', (req, res) => {
   const { getAdminToken } = require('./src/auth');
   if (getAdminToken()) {
-    return res.redirect(302, '/admin.html');
+    return res.redirect(302, '/admin');
   }
   res.sendFile(path.join(__dirname, 'public', 'setup.html'));
 });
 app.get('/setup', (req, res) => res.redirect(302, '/setup.html'));
 
-// admin.html 受 IP 白名单保护
-app.get('/admin.html', ipWhitelist, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+// admin 路由由 SPA 接管：网络层 IP 白名单闸 + 显式返回 SPA 入口
+// 正则覆盖裸 /admin 与 /admin/*（Express 4 中 /admin/* 不匹配裸 /admin）
+app.get(/^\/admin(\/.*)?$/, ipWhitelist, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+// 旧书签 / 外链兼容：/admin.html 301 到 /admin
+app.get('/admin.html', (req, res) => res.redirect(301, '/admin'));
 // 同源自定义 CSS 端点（M-1 修复）：以 <link> 投放而非内联 <style>，
 // 既让 custom_css 在严格 CSP（style-src 'self'）下真正生效，又避免内联注入。
 // 内容为落库前已清洗的版本；公开可读（仅样式，无敏感数据），并对所有访客生效。
@@ -217,6 +222,10 @@ app.get('*', (req, res, next) => {
   // API 与显式路由已注册在前，不会落到此处
   if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
 
+  // Vue SPA 内部路由前缀优先：这些路径不应被第三方主题吞掉
+  const SPA_PREFIXES = ['/admin', '/login', '/node'];
+  const isSpaRoute = SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + '/'));
+
   // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）
   const ui = db.getUiSettings();
   const theme = (req.query.theme && typeof req.query.theme === 'string')
@@ -225,7 +234,7 @@ app.get('*', (req, res, next) => {
 
   // 带后缀文件：优先尝试当前主题根目录映射，未命中再交给 express.static
   if (path.extname(req.path)) {
-    if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
+    if (!isSpaRoute && theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
       const fp = path.join(THEMES_DIR, theme, req.path);
       if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
@@ -235,6 +244,11 @@ app.get('*', (req, res, next) => {
       }
     }
     return next();
+  }
+
+  // 无后缀路径：SPA 路由直接返回 Vue 入口
+  if (isSpaRoute) {
+    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   }
 
   // 无后缀：返回主题 index.html（官方主题在 dist/ 下也按根目录 index.html 处理）
