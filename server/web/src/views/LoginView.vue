@@ -22,10 +22,19 @@ onMounted(async () => {
 });
 
 async function submit() {
+  const t = token.value.trim();
+  if (!t) {
+    error.value = '请输入 Admin Token';
+    return;
+  }
+  if (needTotp.value && !totp.value.trim()) {
+    error.value = '请输入 TOTP 验证码';
+    return;
+  }
   loading.value = true;
   error.value = '';
   try {
-    const res = await adminApi.login(token.value.trim(), totp.value.trim() || undefined);
+    const res = await adminApi.login(t, totp.value.trim() || undefined);
     if (res.totp && !totp.value.trim()) {
       needTotp.value = true;
       error.value = '请输入 TOTP 验证码';
