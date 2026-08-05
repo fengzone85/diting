@@ -94,12 +94,12 @@ async function remove(id: string) {
       </div>
     </div>
     <div class="space-y-3">
-      <div v-for="agent in state.agents" :key="agent.id" class="glass flex items-center justify-between p-4">
-        <div>
-          <p class="font-semibold">{{ agent.name }}</p>
-          <p class="text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
+      <div v-for="agent in state.agents" :key="agent.id" class="glass flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div class="min-w-0">
+          <p class="truncate font-semibold">{{ agent.name }}</p>
+          <p class="truncate text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-shrink-0 gap-2">
           <button class="rounded-lg px-3 py-1 text-sm text-sky-400 hover:bg-sky-500/10" @click="router.push(`/admin/agents/${agent.id}`)">详情</button>
           <button class="rounded-lg px-3 py-1 text-sm text-rose-400 hover:bg-rose-500/10" @click="remove(agent.id)">删除</button>
         </div>
