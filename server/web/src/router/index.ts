@@ -8,6 +8,8 @@ import DashboardView from '../views/admin/DashboardView.vue';
 import AgentsView from '../views/admin/AgentsView.vue';
 import AgentDetailView from '../views/admin/AgentDetailView.vue';
 import SettingsView from '../views/admin/SettingsView.vue';
+import BillingView from '../views/admin/BillingView.vue';
+import AiView from '../views/admin/AiView.vue';
 
 const routes = [
   { path: '/', component: HomeView },
@@ -21,6 +23,8 @@ const routes = [
       { path: '', component: DashboardView },
       { path: 'agents', component: AgentsView },
       { path: 'agents/:id', component: AgentDetailView, props: true },
+      { path: 'billing', component: BillingView },
+      { path: 'ai', component: AiView },
       { path: 'settings', component: SettingsView },
     ],
   },
