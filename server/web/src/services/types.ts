@@ -101,10 +101,17 @@ export type Probes = Record<string, ProbePoint[]>;
 export interface PublicMeta {
   site_title?: string;
   site_description?: string;
+  site_url?: string;
   logo_url?: string;
   custom_css?: string;
   public_theme?: string;
   public_enabled?: boolean;
+  home_layout?: 'grid' | 'list' | 'compact';
+  agent_order?: string[];
+  social_email?: string;
+  social_telegram?: string;
+  social_qq?: string;
+  social_website?: string;
 }
 
 export interface VersionInfo {

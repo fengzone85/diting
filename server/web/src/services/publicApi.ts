@@ -7,4 +7,5 @@ export const publicApi = {
   sparklines: () => api.get<Sparklines>('/api/public/agents/sparklines'),
   probes: (id: string) => api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
+  saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),
 };

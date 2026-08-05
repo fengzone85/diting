@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import type { Settings } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 
+interface ThemeOption {
+  id: string;
+  name: string;
+}
+
 interface UiSettings {
   site_title?: string;
+  site_description?: string;
   site_url?: string;
+  logo_url?: string;
   custom_css?: string;
   default_sort?: string;
   group_order?: string[];
@@ -19,7 +26,7 @@ interface UiSettings {
     offline_sec?: number;
   };
   public_enabled?: boolean;
-  home_layout?: string;
+  home_layout?: 'grid' | 'list' | 'compact';
   public_theme?: string;
   probe_targets?: string;
   retention_days?: number;
@@ -50,6 +57,16 @@ const { state } = useAdmin();
 const saving = ref(false);
 const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
+const themes = ref<ThemeOption[]>([{ id: 'default', name: '内置默认 (Vue SPA)' }]);
+
+onMounted(async () => {
+  try {
+    const list = await adminApi.listThemes();
+    themes.value = [{ id: 'default', name: '内置默认 (Vue SPA)' }, ...list];
+  } catch {
+    // ignore
+  }
+});
 
 function cloneSettings(src: Settings): SettingsForm {
   const ui = (src.ui || {}) as UiSettings;
@@ -89,9 +106,24 @@ async function save() {
       <div class="glass p-6">
         <h2 class="mb-4 text-lg font-semibold">站点 UI</h2>
         <FormInput v-model="local.ui.site_title" label="站点标题" />
+        <FormInput v-model="local.ui.site_description" label="站点描述" />
         <FormInput v-model="local.ui.site_url" label="站点 URL" />
-        <FormInput v-model="local.ui.public_theme" label="默认公开主题" />
-        <FormInput v-model="local.ui.home_layout" label="首页布局" />
+        <FormInput v-model="local.ui.logo_url" label="Logo URL" />
+        <div>
+          <label class="mb-1 block text-sm text-slate-400">默认公开主题</label>
+          <select v-model="local.ui.public_theme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
+            <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
+          </select>
+          <p class="mt-1 text-xs text-slate-500">选择第三方主题后，访客访问首页将看到主题皮肤；选择「内置默认」则继续使用本 SPA。</p>
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-slate-400">首页默认布局</label>
+          <select v-model="local.ui.home_layout" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
+            <option value="grid">网格</option>
+            <option value="list">列表</option>
+            <option value="compact">紧凑</option>
+          </select>
+        </div>
         <FormInput v-model="local.ui.default_sort" label="默认排序" />
         <FormInput v-model="local.ui.agent_server_url" label="Agent 上报地址" />
         <FormInput v-model="local.ui.admin_allow_ips" label="管理端 IP 白名单" />
