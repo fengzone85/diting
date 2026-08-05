@@ -15,16 +15,16 @@ const displayTitle = computed(() => props.title || props.meta?.site_title || 'Di
 
 <template>
   <header class="glass sticky top-0 z-50 mb-6">
-    <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-      <RouterLink to="/" class="flex items-center gap-3 text-xl font-bold text-sky-400 hover:text-sky-300">
-        <img v-if="meta?.logo_url" :src="meta.logo_url" class="h-8 w-8 rounded object-cover" :alt="displayTitle" />
-        <span v-else class="status-dot status-online" />
-        <div class="flex flex-col">
-          <span>{{ displayTitle }}</span>
-          <span v-if="meta?.site_description" class="text-xs font-normal text-slate-500">{{ meta.site_description }}</span>
+    <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+      <RouterLink to="/" class="flex min-w-0 items-center gap-3 text-lg font-bold text-sky-400 hover:text-sky-300 sm:text-xl">
+        <img v-if="meta?.logo_url" :src="meta.logo_url" class="h-7 w-7 flex-shrink-0 rounded object-cover sm:h-8 sm:w-8" :alt="displayTitle" />
+        <span v-else class="status-dot status-online flex-shrink-0" />
+        <div class="min-w-0">
+          <span class="truncate">{{ displayTitle }}</span>
+          <span v-if="meta?.site_description" class="block truncate text-[10px] font-normal text-slate-500 sm:text-xs">{{ meta.site_description }}</span>
         </div>
       </RouterLink>
-      <nav class="flex items-center gap-4 text-sm text-slate-300">
+      <nav class="flex items-center gap-3 text-sm text-slate-300">
         <RouterLink to="/" class="hover:text-white">首页</RouterLink>
         <RouterLink to="/admin" class="hover:text-white">管理</RouterLink>
         <button

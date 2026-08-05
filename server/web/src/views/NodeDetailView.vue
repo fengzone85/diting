@@ -5,6 +5,9 @@ import AppHeader from '../components/AppHeader.vue';
 import AppFooter from '../components/AppFooter.vue';
 import StatCard from '../components/ui/StatCard.vue';
 import ChartLatency from '../components/ChartLatency.vue';
+import Loading from '../components/ui/Loading.vue';
+import EmptyState from '../components/ui/EmptyState.vue';
+import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import type { Probes, ChartPoint } from '../services/types';
@@ -58,10 +61,10 @@ onMounted(load);
     <AppHeader :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-6">
       <RouterLink to="/" class="mb-4 inline-block text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
-      <div v-if="error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
-        {{ error }}
-      </div>
-      <div v-if="agent" class="space-y-6">
+      <ErrorMessage v-if="error" class="mb-6" :message="error" />
+      <Loading v-if="loading && !agent" />
+      <EmptyState v-else-if="!agent" />
+      <div v-else class="space-y-6">
         <div class="glass p-6">
           <div class="flex flex-wrap items-center gap-3">
             <img v-if="agent.country || agent.country_code" :src="`/flags/${(agent.country_code || agent.country || '').toLowerCase()}.svg`" class="h-6 w-8 rounded-sm" :alt="agent.country" />
@@ -96,10 +99,10 @@ onMounted(load);
         <div v-if="agent.disks?.length" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">磁盘</h3>
           <div class="space-y-2">
-            <div v-for="disk in agent.disks" :key="disk.mount" class="flex items-center justify-between rounded-lg bg-slate-800/40 px-4 py-2 text-sm">
+            <div v-for="disk in agent.disks" :key="disk.mount" class="flex flex-col gap-2 rounded-lg bg-slate-800/40 px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
               <span class="text-slate-300">{{ disk.mount }}</span>
               <div class="flex items-center gap-4">
-                <div class="h-2 w-32 overflow-hidden rounded-full bg-slate-700">
+                <div class="h-2 w-24 flex-shrink-0 overflow-hidden rounded-full bg-slate-700 sm:w-32">
                   <div class="h-full bg-sky-500" :style="{ width: `${Math.min(disk.pct || 0, 100)}%` }" />
                 </div>
                 <span class="text-slate-400">{{ formatBytes(disk.used) }} / {{ formatBytes(disk.total) }} ({{ formatPercent(disk.pct) }})</span>
@@ -111,7 +114,7 @@ onMounted(load);
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
           <div class="space-y-2">
-            <div v-for="(points, target) in probes" :key="target" class="flex items-center justify-between rounded-lg bg-slate-800/40 px-4 py-2 text-sm">
+            <div v-for="(points, target) in probes" :key="target" class="flex flex-col gap-1 rounded-lg bg-slate-800/40 px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
               <span class="text-slate-300">{{ target }}</span>
               <div class="flex gap-4">
                 <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'">

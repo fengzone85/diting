@@ -5,6 +5,9 @@ import AppFooter from '../components/AppFooter.vue';
 import NodeCard from '../components/NodeCard.vue';
 import NodeRow from '../components/NodeRow.vue';
 import StatCard from '../components/ui/StatCard.vue';
+import Loading from '../components/ui/Loading.vue';
+import EmptyState from '../components/ui/EmptyState.vue';
+import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { useApp } from '../composables/useApp';
 import type { Agent } from '../services/types';
 
@@ -55,27 +58,25 @@ function groupOrder(groups: Record<string, Agent[]>) {
   <div class="min-h-screen">
     <AppHeader :title="state.meta?.site_title" :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-4 sm:px-6">
-      <div v-if="state.error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
-        {{ state.error }}
-      </div>
+      <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
-      <div class="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div class="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard label="受控端总数" :value="state.overview?.total ?? '-'" variant="default" />
         <StatCard label="在线" :value="state.overview?.online ?? '-'" variant="success" />
         <StatCard label="离线" :value="state.overview?.offline ?? '-'" variant="danger" />
         <StatCard label="平均 CPU" :value="state.overview?.cpu_avg != null ? `${state.overview.cpu_avg.toFixed(1)}%` : '-'" variant="warning" />
       </div>
 
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-center gap-2">
           <input
             v-model="searchInput"
             placeholder="搜索节点 / 分组 / 商家..."
-            class="w-48 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-64"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-64"
           />
-          <span class="text-xs text-slate-500">{{ visibleAgents.length }} 个节点</span>
+          <span class="whitespace-nowrap text-xs text-slate-500">{{ visibleAgents.length }} 个节点</span>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span class="text-xs text-slate-500">布局</span>
           <button
             v-for="l in ['grid', 'list', 'compact'] as const"
@@ -99,8 +100,8 @@ function groupOrder(groups: Record<string, Agent[]>) {
         </div>
       </div>
 
-      <div v-if="!state.initialized && state.loading" class="py-12 text-center text-slate-400">加载中...</div>
-      <div v-else-if="visibleAgents.length === 0" class="py-12 text-center text-slate-500">暂无数据</div>
+      <Loading v-if="!state.initialized && state.loading" />
+      <EmptyState v-else-if="visibleAgents.length === 0" />
 
       <template v-else>
         <div v-if="state.layout === 'list'" class="space-y-2">
