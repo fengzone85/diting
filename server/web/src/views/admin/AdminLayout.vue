@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted } from 'vue';
 import Sidebar from '../../components/admin/Sidebar.vue';
-import { loadAdmin } from '../../composables/useAdmin';
+import { loadAdmin, startAutoRefresh, stopAutoRefresh } from '../../composables/useAdmin';
 
-onMounted(loadAdmin);
+onMounted(() => {
+  loadAdmin();
+  startAutoRefresh();
+});
+onUnmounted(stopAutoRefresh);
 </script>
 
 <template>

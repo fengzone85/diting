@@ -4,26 +4,38 @@ import { useRouter } from 'vue-router';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { formatBytes, formatDuration } from '../../utils/format';
+import type { InstallCommands } from '../../services/types';
 
 const { state } = useAdmin();
 const router = useRouter();
 const newName = ref('');
 const error = ref('');
+const created = ref<{ id: string; token: string; install: InstallCommands } | null>(null);
+const showToken = ref(false);
 
 async function add() {
   error.value = '';
+  created.value = null;
   const name = newName.value.trim();
   if (!name) {
     error.value = '请输入受控端名称';
     return;
   }
   try {
-    await adminApi.createAgent({ name });
+    const res = await adminApi.createAgent({ name });
     newName.value = '';
+    created.value = { id: res.id, token: res.token, install: res.install };
     await loadAdmin();
   } catch (e) {
     error.value = (e as Error).message || '新增失败';
   }
+}
+
+function copy(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    error.value = '已复制到剪贴板';
+    setTimeout(() => (error.value = ''), 2000);
+  });
 }
 
 async function remove(id: string) {
@@ -47,6 +59,38 @@ async function remove(id: string) {
       <div class="flex gap-3">
         <input v-model="newName" placeholder="名称" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white" @keyup.enter="add" />
         <button class="rounded-lg bg-sky-500 px-4 py-2 text-white hover:bg-sky-400" @click="add">新增</button>
+      </div>
+      <div v-if="created" class="mt-4 space-y-3 border-t border-slate-700 pt-4">
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-emerald-300">已创建：{{ created.id }}</span>
+          <span class="text-xs text-slate-500">首次返回的 Token 仅此一次可见</span>
+        </div>
+        <div class="flex gap-2">
+          <input :type="showToken ? 'text' : 'password'" readonly class="flex-1 rounded-lg border border-slate-700 bg-slate-900/30 px-3 py-2 text-xs text-slate-300" :value="created.token" />
+          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</button>
+          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(created.token)">复制</button>
+        </div>
+        <div>
+          <div class="mb-1 flex items-center justify-between">
+            <label class="text-xs text-slate-400">Linux 原生</label>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.native_cmd)">复制</button>
+          </div>
+          <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.native_cmd" />
+        </div>
+        <div>
+          <div class="mb-1 flex items-center justify-between">
+            <label class="text-xs text-slate-400">Docker</label>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.docker_cmd)">复制</button>
+          </div>
+          <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.docker_cmd" />
+        </div>
+        <div>
+          <div class="mb-1 flex items-center justify-between">
+            <label class="text-xs text-slate-400">Windows</label>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.windows_cmd)">复制</button>
+          </div>
+          <textarea readonly rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.windows_cmd" />
+        </div>
       </div>
     </div>
     <div class="space-y-3">

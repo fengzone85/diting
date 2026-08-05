@@ -2,6 +2,9 @@ import { reactive, readonly } from 'vue';
 import { adminApi } from '../services/adminApi';
 import type { Agent, Settings, User, Alert } from '../services/types';
 
+const REFRESH_INTERVAL_MS = 10000;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
 export interface AdminState {
   initialized: boolean;
   loading: boolean;
@@ -45,6 +48,20 @@ export async function loadAdmin() {
     state.error = (e as Error).message || '加载失败';
   } finally {
     state.loading = false;
+  }
+}
+
+export function startAutoRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = setInterval(() => {
+    loadAdmin().catch(() => {});
+  }, REFRESH_INTERVAL_MS);
+}
+
+export function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 }
 
