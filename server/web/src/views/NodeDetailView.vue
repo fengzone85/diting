@@ -55,7 +55,7 @@ onMounted(load);
 
 <template>
   <div class="min-h-screen">
-    <AppHeader />
+    <AppHeader :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-6">
       <RouterLink to="/" class="mb-4 inline-block text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
       <div v-if="error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
@@ -124,6 +124,6 @@ onMounted(load);
         </div>
       </div>
     </main>
-    <AppFooter />
+    <AppFooter :meta="state.meta" />
   </div>
 </template>

@@ -40,6 +40,7 @@ export const adminApi = {
     api.get<{ id: string; probe_targets: string; install: InstallCommands; modify: ModifyCommands }>(
       `/api/agents/${encodeURIComponent(id)}/commands${probeTargets ? `?probe_targets=${encodeURIComponent(probeTargets)}` : ''}`
     ),
+  listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
 
   // overview / settings
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
