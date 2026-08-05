@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, User, Alert, InstallCommands, ModifyCommands } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -50,16 +50,17 @@ export const adminApi = {
   saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
 
   // alerts
-  listAlerts: () => api.get<Alert[]>('/api/alerts'),
-  createAlert: (payload: Partial<Alert>) => api.post<Alert>('/api/alerts', payload),
-  deleteAlert: (id: string) => api.del<void>(`/api/alerts/${encodeURIComponent(id)}`),
-
-  // users
-  listUsers: () => api.get<User[]>('/api/admin/users'),
-  createUser: (payload: Partial<User> & { password: string }) =>
-    api.post<User>('/api/admin/users', payload),
-  deleteUser: (id: string) => api.del<void>(`/api/admin/users/${encodeURIComponent(id)}`),
+  testAlert: () => api.post<{ ok: boolean; message?: string }>('/api/test-alert', {}),
 
   // billing
-  billingStatus: () => api.get<{ enabled: boolean }>('/api/billing/status'),
+  billingOverview: () => api.get<Billing>('/api/billing'),
+
+  // AI 运维分析
+  aiConfig: () => api.get<{ config: AiConfig }>('/api/ai/config'),
+  saveAiConfig: (config: Partial<AiConfig>) => api.put<{ ok: boolean }>('/api/ai/config', { config }),
+  aiStatus: () => api.get<AiStatus>('/api/ai/status'),
+  runAi: () => api.post<Record<string, unknown>>('/api/ai/run', {}),
+  aiReports: (limit = 20, offset = 0) =>
+    api.get<AiReportList>(`/api/ai/reports?limit=${limit}&offset=${offset}`),
+  aiReport: (id: number) => api.get<AiReport>(`/api/ai/reports/${encodeURIComponent(String(id))}`),
 };

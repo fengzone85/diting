@@ -137,6 +137,59 @@ export interface Alert {
   condition: string;
 }
 
+export interface Billing {
+  monthly_total: number;
+  currency: string;
+  agent_count: number;
+  per_group: { name: string; cost: number }[];
+  expiring_soon: { id: string; name: string; days_left: number }[];
+}
+
+export interface AiConfig {
+  enabled: boolean;
+  provider?: string;
+  base_url?: string;
+  model?: string;
+  api_key?: string;
+  has_key?: boolean;
+  schedule_freq?: 'daily' | 'weekly';
+  schedule_time?: string;
+  tz_offset_hours?: number;
+  batch_mode?: boolean;
+  locale?: 'zh-CN' | 'en';
+  log_retention_days?: number;
+}
+
+export interface AiStatus {
+  enabled: boolean;
+  provider?: string;
+  model?: string;
+  schedule?: string;
+  last_run_ts?: number;
+  last_status?: string;
+  last_error?: string;
+  report_count?: number;
+}
+
+export interface AiReport {
+  id: number;
+  period?: string;
+  risk_level?: string;
+  summary?: string;
+  suggestion?: string;
+  report_json?: string;
+  report_json_parsed?: Record<string, unknown>;
+  prompt_version?: string;
+  created_at: number;
+}
+
+export interface AiReportList {
+  total: number;
+  limit: number;
+  offset: number;
+  list: AiReport[];
+}
+
 export interface InstallCommands {
   server_url: string;
   native_cmd: string;

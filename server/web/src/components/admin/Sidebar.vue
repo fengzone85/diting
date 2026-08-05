@@ -15,6 +15,8 @@ const router = useRouter();
 const links = [
   { to: '/admin', label: '总览' },
   { to: '/admin/agents', label: '受控端' },
+  { to: '/admin/billing', label: '账单概览' },
+  { to: '/admin/ai', label: 'AI 分析' },
   { to: '/admin/settings', label: '设置' },
 ];
 
