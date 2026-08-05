@@ -4,6 +4,7 @@ export interface Agent {
   country?: string;
   country_code?: string;
   group?: string;
+  grp?: string;
   online?: boolean;
   cpu?: number;
   cpu_percent?: number;
@@ -46,6 +47,17 @@ export interface Agent {
     swap_pct?: number;
     uptime?: number;
   };
+  // metadata
+  merchant?: string;
+  note?: string;
+  expire_at?: string;
+  monthly_quota_gb?: number;
+  price?: number;
+  billing_cycle?: number;
+  currency?: '¥' | '$' | '€' | '£';
+  auto_renewal?: boolean;
+  probe_targets?: string;
+  created_at?: string;
 }
 
 export interface Overview {
@@ -101,7 +113,8 @@ export interface VersionInfo {
 }
 
 export interface Settings {
-  [key: string]: unknown;
+  ui?: Record<string, unknown>;
+  notify?: Record<string, unknown>;
 }
 
 export interface User {
@@ -115,4 +128,18 @@ export interface Alert {
   name: string;
   enabled: boolean;
   condition: string;
+}
+
+export interface InstallCommands {
+  server_url: string;
+  native_cmd: string;
+  docker_cmd: string;
+  windows_cmd: string;
+  probe_targets: string;
+}
+
+export interface ModifyCommands {
+  linux_cmd: string;
+  windows_cmd: string;
+  probe_targets: string;
 }

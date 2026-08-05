@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
+import type { Settings } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 
 interface UiSettings {
@@ -50,7 +51,7 @@ const saving = ref(false);
 const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
 
-function cloneSettings(src: Record<string, unknown>): SettingsForm {
+function cloneSettings(src: Settings): SettingsForm {
   const ui = (src.ui || {}) as UiSettings;
   const notify = (src.notify || {}) as NotifySettings;
   return {

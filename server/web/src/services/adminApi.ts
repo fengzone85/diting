@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, User, Alert } from './types';
+import type { Agent, Settings, User, Alert, InstallCommands, ModifyCommands } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -28,15 +28,23 @@ export const adminApi = {
   // agents
   listAgents: () => api.get<Agent[]>('/api/agents'),
   getAgent: (id: string) => api.get<Agent>(`/api/agents/${encodeURIComponent(id)}`),
-  createAgent: (payload: Partial<Agent>) => api.post<Agent>('/api/agents', payload),
+  createAgent: (payload: Partial<Agent>) => api.post<Agent & { token: string; install: InstallCommands }>('/api/agents', payload),
   updateAgent: (id: string, payload: Partial<Agent>) =>
     api.put<Agent>(`/api/agents/${encodeURIComponent(id)}`, payload),
   deleteAgent: (id: string) => api.del<void>(`/api/agents/${encodeURIComponent(id)}`),
+  resetToken: (id: string) =>
+    api.post<{ ok: boolean; token: string; install: InstallCommands }>(`/api/agents/${encodeURIComponent(id)}/reset-token`, {}),
+  renewAgent: (id: string) =>
+    api.post<{ ok: boolean; expire_at: string }>(`/api/agents/${encodeURIComponent(id)}/renew`, {}),
+  getCommands: (id: string, probeTargets?: string) =>
+    api.get<{ id: string; probe_targets: string; install: InstallCommands; modify: ModifyCommands }>(
+      `/api/agents/${encodeURIComponent(id)}/commands${probeTargets ? `?probe_targets=${encodeURIComponent(probeTargets)}` : ''}`
+    ),
 
   // overview / settings
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
   getSettings: () => api.get<Settings>('/api/settings'),
-  saveSettings: (payload: Settings) => api.post<Settings>('/api/settings', payload),
+  saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
 
   // alerts
   listAlerts: () => api.get<Alert[]>('/api/alerts'),
