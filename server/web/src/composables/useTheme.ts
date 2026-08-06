@@ -8,8 +8,10 @@ function getInitialTheme(): Theme {
   // B4: ?theme= 预览优先于本地存储（用于分享/预览链接）
   const q = new URLSearchParams(window.location.search).get('theme');
   if (q === 'light' || q === 'dark' || q === 'auto') return q;
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
+  } catch { /* incognito */ }
   return 'auto';
 }
 
@@ -112,7 +114,7 @@ applyThemeAttr(theme.value);
 applyGlassConfig();
 
 watch(theme, (t) => {
-  localStorage.setItem(STORAGE_KEY, t);
+  try { localStorage.setItem(STORAGE_KEY, t); } catch { /* 无痕模式/配额满时忽略 */ }
   applyThemeAttr(t);
   applyGlassConfig();
 });
