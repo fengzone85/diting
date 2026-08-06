@@ -217,6 +217,7 @@ const filteredAgents = computed(() => {
                 :template="state.template"
                 :size="(state.meta?.card_size as any) || 'comfortable'"
                 :tag="customTag(agent.id)"
+                :sparklines="state.sparklines"
                 :draggable="true"
                 :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
                 @dragstart="onDragStart(agent, $event)"

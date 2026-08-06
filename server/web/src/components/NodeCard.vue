@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
-import type { Agent } from '../services/types';
+import type { Agent, Sparklines, SparklinePoint } from '../services/types';
 import { formatBytes, formatDuration, formatPercent, formatBitsPerSecond, formatNumber } from '../utils/format';
 import { providerAlias } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
@@ -14,6 +14,7 @@ const props = defineProps<{
   draggable?: boolean;
   size?: 'mini' | 'compact' | 'comfortable' | 'large';
   tag?: string;
+  sparklines?: Sparklines;
 }>();
 
 const emit = defineEmits<{
@@ -84,6 +85,40 @@ function pctClass(v: number | null | undefined) {
 }
 
 const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('windows'));
+
+// ---- sparkline 迷你图（points 数据，模板中内联 SVG） ----
+const hist = computed(() => props.sparklines?.[props.agent.id] || []);
+const histOk = computed(() => Array.isArray(hist.value) && hist.value.length > 0);
+const SPARK_W = 60, SPARK_H = 16;
+
+function ptsString(values: (number | undefined | null)[], w = SPARK_W, h = SPARK_H) {
+  const arr = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (arr.length === 0) return '';
+  const max = Math.max(...arr, 1e-9);
+  const min = Math.min(...arr, 0);
+  const range = (max - min) || 1;
+  return arr.map((v, i) => {
+    const x = (i / (arr.length - 1 || 1)) * w;
+    const y = h - ((v - min) / range) * (h - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+function ptsString2(rArr: (number | undefined | null)[], wArr: (number | undefined | null)[]) {
+  return { r: ptsString(rArr), w: ptsString(wArr) };
+}
+
+const sparkCpuPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.cpu ?? x.cpu_percent) : [cpu.value]));
+const sparkMemPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.mem_pct) : [props.agent.mem_pct]));
+const sparkLoadPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.load1) : [props.agent.load1]));
+const sparkTempPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.temp) : [props.agent.temp]));
+const sparkSwapPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.swap_pct) : [props.agent.swap_pct]));
+const sparkIOPts = computed(() => {
+  const r = histOk.value ? hist.value.map((x: SparklinePoint) => +(x.disk_r_rate! / 1048576).toFixed(1)) : [0];
+  const w = histOk.value ? hist.value.map((x: SparklinePoint) => +(x.disk_w_rate! / 1048576).toFixed(1)) : [0];
+  return ptsString2(r, w);
+});
+const sparkNetPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => +((x.net_rx_rate || 0) / 1024).toFixed(1)) : [0]));
 </script>
 
 <template>
@@ -148,27 +183,33 @@ const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('
       <div class="grid grid-cols-3 gap-x-2 gap-y-2 sm:grid-cols-6">
         <div>
           <p class="text-secondary">{{ t('card.cpu') }}</p>
-          <p class="mt-0.5 font-medium" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="1.5" /></svg>
+          <p class="font-medium" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</p>
         </div>
         <div>
           <p class="text-secondary">{{ t('card.memory') }}</p>
-          <p class="mt-0.5 font-medium" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="1.5" /></svg>
+          <p class="font-medium" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</p>
         </div>
         <div>
           <p class="text-secondary">{{ isWindows ? '进程' : '负载' }}</p>
-          <p class="mt-0.5 font-medium">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="1.5" /></svg>
+          <p class="font-medium">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</p>
         </div>
         <div>
           <p class="text-secondary">温度</p>
-          <p class="mt-0.5 font-medium">{{ agent.temp != null ? agent.temp.toFixed(1) + '°C' : '—' }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="1.5" /></svg>
+          <p class="font-medium">{{ agent.temp != null ? agent.temp.toFixed(1) + '°C' : '—' }}</p>
         </div>
         <div>
           <p class="text-secondary">Swap</p>
-          <p class="mt-0.5 font-medium" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="1.5" /></svg>
+          <p class="font-medium" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</p>
         </div>
         <div>
           <p class="text-secondary">IO MB/s</p>
-          <p class="mt-0.5 font-medium">{{ ((agent.disk_r_rate || 0) / 1048576).toFixed(2) }}/{{ ((agent.disk_w_rate || 0) / 1048576).toFixed(2) }}</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkIOPts.r" :points="sparkIOPts.r" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPts.w" :points="sparkIOPts.w" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg>
+          <p class="font-medium">{{ ((agent.disk_r_rate || 0) / 1048576).toFixed(2) }}/{{ ((agent.disk_w_rate || 0) / 1048576).toFixed(2) }}</p>
         </div>
       </div>
 
@@ -176,6 +217,7 @@ const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('
       <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <p class="text-secondary">网络</p>
+          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="1.5" /></svg>
           <p class="mt-0.5 font-medium">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} · ↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</p>
         </div>
         <div v-if="probeTargets().length" class="flex flex-wrap items-center gap-1.5">
