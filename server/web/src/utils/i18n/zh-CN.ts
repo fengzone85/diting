@@ -138,6 +138,19 @@ export const zhCN: Record<string, string> = {
   'card.expire': '到期',
   'card.quota': '配额',
 
+  // 主题切换
+  'theme.auto': '跟随系统',
+  'theme.light': '亮色',
+  'theme.dark': '暗色',
+
+  // UI 组件
+  'ui.loading': '加载中…',
+  'ui.empty': '暂无数据',
+
+  // 页脚社交链接
+  'footer.email': '邮箱',
+  'footer.website': '网站',
+
   // 页脚
   'footer.visitorIp': '您的 IP',
 

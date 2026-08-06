@@ -75,12 +75,25 @@ function applyBackground() {
       overlay.className = 'app-bg-overlay';
       document.body.appendChild(overlay);
     }
+    // 协议白名单：仅允许 http/https/data，阻止 javascript: 等危险协议
+    const safeUrl = /^(https?:|data:)/i.test(bg.url) ? bg.url : '';
     const blur = `blur(${bg.blur || 0}px)`;
-    if (bg.type === 'video') {
-      layer.innerHTML = `<video autoplay muted loop playsinline style="filter:${blur}"><source src="${bg.url}"></video>`;
+    if (bg.type === 'video' && safeUrl) {
+      // 用 DOM API 替代 innerHTML 拼接，避免 XSS
+      const video = document.createElement('video');
+      video.autoplay = true;
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.style.filter = blur;
+      const source = document.createElement('source');
+      source.src = safeUrl;
+      video.appendChild(source);
+      layer.innerHTML = '';
+      layer.appendChild(video);
     } else {
       layer.innerHTML = '';
-      layer.style.backgroundImage = `url("${bg.url}")`;
+      layer.style.backgroundImage = safeUrl ? `url("${safeUrl.replace(/"/g, '\\"')}")` : '';
       layer.style.filter = blur;
     }
     const op = Math.max(0, Math.min(100, bg.overlay ?? 50)) / 100;
