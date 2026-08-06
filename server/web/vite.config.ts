@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     outDir: '../public',
     emptyOutDir: false,
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {
