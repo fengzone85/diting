@@ -18,8 +18,8 @@ const variantClass = {
 
 <template>
   <div class="glass card-hover p-5" :class="variantClass">
-    <p class="text-sm text-muted">{{ label }}</p>
+    <p class="text-sm text-secondary">{{ label }}</p>
     <p class="mt-2 text-2xl font-semibold text-content">{{ value }}</p>
-    <p v-if="sub" class="mt-1 text-xs text-muted">{{ sub }}</p>
+    <p v-if="sub" class="mt-1 text-xs text-secondary">{{ sub }}</p>
   </div>
 </template>
