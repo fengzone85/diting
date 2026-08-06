@@ -79,7 +79,7 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
           :alt="agent.country"
         />
         <div>
-          <h3 class="font-semibold text-white">{{ agent.name }}</h3>
+          <h3 class="font-semibold text-content">{{ agent.name }}</h3>
           <p v-if="template === 'visual' && (agent.group || merchantName)" class="text-xs text-secondary">
             {{ agent.group || '' }}{{ agent.group && merchantName ? ' · ' : '' }}{{ merchantName || '' }}
           </p>
