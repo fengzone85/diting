@@ -6,7 +6,7 @@ import { useTheme } from '../composables/useTheme';
 import type { PublicMeta } from '../services/publicApi';
 
 const { t, locale, setLocale } = useI18n();
-const { theme, setTheme } = useTheme();
+const { theme, set: setTheme } = useTheme();
 const route = useRoute();
 
 const props = defineProps<{ meta?: PublicMeta | null }>();
@@ -25,10 +25,10 @@ const themeOptions = computed(() => [
   { id: 'dark' as const, label: t('theme.dark') },
 ]);
 
-function pickTheme(mode: 'auto' | 'light' | 'dark') {
+const pickTheme = (mode: 'auto' | 'light' | 'dark') => {
   setTheme(mode);
   themeMenu.value = false;
-}
+};
 
 function switchLang() {
   setLocale(locale.value === 'zh-CN' ? 'en-US' : 'zh-CN');
