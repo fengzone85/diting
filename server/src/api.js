@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const { daysUntil } = require('./util');
@@ -509,8 +509,33 @@ router.get('/public/meta', (req, res) => {
     social_email: ui.social_email || '',
     social_telegram: ui.social_telegram || '',
     social_qq: ui.social_qq || '',
-    social_website: ui.social_website || ''
+    social_website: ui.social_website || '',
+    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    glass_preset: ui.glass_preset || 'emerald',
+    glass_custom: ui.glass_custom || {},
+    color_vision: ui.color_vision || 'normal',
+    card_scheme: ui.card_scheme || 'official',
+    card_size: ui.card_size || 'comfortable',
+    background: ui.background || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
+    announcement: ui.announcement || { enabled: false, title: '', content: '' },
+    provider_aliases: ui.provider_aliases || {},
+    custom_tags: ui.custom_tags || {},
+    visitor_info: !!ui.visitor_info
   });
+});
+
+// 访客信息条（对齐 komari 主题的 visitorInfoEnabled）：返回访客 IP 与 UA 摘要。
+router.get('/public/visitor', (req, res) => {
+  const fwd = req.headers['x-forwarded-for'];
+  let ip = req.ip || (typeof fwd === 'string' ? fwd.split(',')[0].trim() : '') || '';
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  const ua = req.headers['user-agent'] || '';
+  let browser = 'Unknown';
+  if (/Edg\//.test(ua)) browser = 'Edge';
+  else if (/Chrome\//.test(ua)) browser = 'Chrome';
+  else if (/Firefox\//.test(ua)) browser = 'Firefox';
+  else if (/Safari\//.test(ua)) browser = 'Safari';
+  res.json({ ip, browser, ua: ua.slice(0, 80) });
 });
 
 // 游客页卡片自定义排序（需管理员会话，避免游客随意更改全局顺序）。
@@ -566,6 +591,7 @@ router.post('/agents', adminOnly, (req, res) => {
   // 创建时一次性把「地址 + 该客户端令牌 + 探测目标」预填进一键命令返回（令牌仅此刻明文可用）。
   const install = buildInstallCommands(getPublicBaseUrl(req), id, token, AGENT_INTERVAL_DEFAULT, probeTargets);
   res.json({ id, token, install });
+  auditLog(req, 'create_agent', `name=${req.body.name || ''} id=${id}`);
 });
 
 // ---- Admin: update agent metadata ----
@@ -590,12 +616,14 @@ router.put('/agents/:id', adminOnly, (req, res) => {
   if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
   db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
+  auditLog(req, 'update_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: delete agent ----
 router.delete('/agents/:id', adminOnly, (req, res) => {
   db.deleteAgent(req.params.id);
   res.json({ ok: true });
+  auditLog(req, 'delete_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
@@ -607,6 +635,7 @@ router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
   const a = db.getAgent(req.params.id);
   const install = buildInstallCommands(getPublicBaseUrl(req), req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
   res.json({ ok: true, token, install });
+  auditLog(req, 'reset_token', `id=${req.params.id}`);
 });
 
 // ---- Admin: renew agent（续费一个周期）----
@@ -622,6 +651,7 @@ router.post('/agents/:id/renew', adminOnly, (req, res) => {
   const newExpire = next.toISOString().slice(0, 10);
   db.updateAgent(a.id, Object.assign({}, a, { expire_at: newExpire }));
   res.json({ ok: true, expire_at: newExpire });
+  auditLog(req, 'renew_agent', `id=${a.id} expire_at=${newExpire}`);
 });
 
 // ---- Admin: 生成某受控端的「安装命令」与「修改探测目标命令」----
@@ -654,6 +684,7 @@ router.put('/settings', adminOnly, (req, res) => {
   }
   if (b.notify && typeof b.notify === 'object') db.setNotifyConfig(b.notify);
   res.json({ ok: true });
+  auditLog(req, 'update_settings', b.ui ? 'ui updated' : '' + (b.notify ? ' notify updated' : ''));
 });
 
 
@@ -709,12 +740,14 @@ router.put('/ai/config', adminOnly, (req, res) => {
   }
   db.setAiConfig(allowed);
   res.json({ ok: true });
+  auditLog(req, 'update_ai_config', allowed.enabled != null ? `enabled=${allowed.enabled}` : '');
 });
 // 手动触发一次日报生成（不等调度时刻）。返回生成结果。
 router.post('/ai/run', adminOnly, async (req, res) => {
   try {
     const r = await ai.runNow();
     res.json(r);
+    auditLog(req, 'ai_run', '');
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -786,6 +819,7 @@ router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
   if (!code || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(true);
   res.json({ ok: true, enabled: true });
+  auditLog(req, '2fa_enable', '');
 });
 
 router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
@@ -795,6 +829,16 @@ router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
   if (!code || !secret || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(false);
   res.json({ ok: true, enabled: false });
+  auditLog(req, '2fa_disable', '');
+});
+
+// ---- Admin: 审计日志查询 ----
+router.get('/admin/audit-logs', adminOnly, (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const logs = db.getAuditLogs(limit, offset);
+  const total = db.countAudit();
+  res.json({ logs, total, limit, offset });
 });
 
 module.exports = router;

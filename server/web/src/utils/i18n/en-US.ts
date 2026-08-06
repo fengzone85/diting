@@ -27,6 +27,7 @@ export const enUS: Record<string, string> = {
   'nav.settings': 'Settings',
   'nav.logout': 'Logout',
   'nav.admin': 'Admin',
+  'nav.auditLogs': 'Audit Logs',
 
   // agents
   'agents.title': 'Agents',
@@ -94,6 +95,51 @@ export const enUS: Record<string, string> = {
   'public.compact': 'Compact',
   'public.simple': 'Simple',
   'public.visual': 'Visual',
+  'public.highLoad': 'High load',
+  'public.expiring': 'Expiring',
+  'public.favorites': 'Favorites',
+  'public.avgMem': 'Avg memory',
+  'public.diskUsage': 'Disk usage',
+  'public.netRate': 'Net rate',
+  'public.swap': 'Swap',
+  'public.traffic': 'Traffic',
+  'public.trafficTotal': 'Total traffic',
+  'public.rxMonth': 'Monthly RX',
+  'public.txMonth': 'Monthly TX',
+  'public.monthlyCost': 'Monthly cost',
+  'public.quota': 'Quota',
+  'public.groups': 'Groups',
+  'public.countries': 'Countries',
+  'public.merchants': 'Merchants',
+  'public.gpu': 'GPU',
+
+  // theme
+  'theme.colorVision': 'Color vision mode',
+  'theme.glassPreset': 'Glass preset',
+  'theme.colorVisionMode': 'Color vision',
+  'theme.background': 'Background',
+  'theme.announcement': 'Announcement',
+  'theme.cardScheme': 'Overview card scheme',
+  'theme.cardSize': 'Node card size',
+  'theme.providerAliases': 'Provider aliases',
+  'theme.customTags': 'Custom tags',
+  'theme.visitorInfo': 'Visitor info bar',
+
+  // node card
+  'card.online': 'Online',
+  'card.offline': 'Offline',
+  'card.warn': 'Warn',
+  'card.cpu': 'CPU',
+  'card.memory': 'Memory',
+  'card.disk': 'Disk',
+  'card.uptime': 'Uptime',
+  'card.monthlyTraffic': 'Monthly traffic',
+  'card.timeout': 'Timeout',
+  'card.expire': 'Expire',
+  'card.quota': 'Quota',
+
+  // footer
+  'footer.visitorIp': 'Your IP',
 
   // ai
   'ai.title': 'AI Analysis',

@@ -101,6 +101,28 @@ export interface ProbePoint {
 
 export type Probes = Record<string, ProbePoint[]>;
 
+export type GlassPreset = 'emerald' | 'soft' | 'high-contrast' | 'midnight' | 'custom';
+export type ColorVision = 'normal' | 'protanopia' | 'deuteranopia' | 'tritanopia';
+export type CardScheme = 'official' | 'basic' | 'ops' | 'resource' | 'finance' | 'traffic' | 'gpu' | 'asset' | 'full';
+export type CardSize = 'mini' | 'compact' | 'comfortable' | 'large';
+
+export interface BackgroundConfig {
+  enabled: boolean;
+  type: 'image' | 'video';
+  url: string;
+  blur: number;
+  overlay: number;
+}
+export interface AnnouncementConfig {
+  enabled: boolean;
+  title: string;
+  content: string;
+}
+export interface GlassCustomColors {
+  light?: string[];
+  dark?: string[];
+}
+
 export interface PublicMeta {
   site_title?: string;
   site_description?: string;
@@ -115,6 +137,17 @@ export interface PublicMeta {
   social_telegram?: string;
   social_qq?: string;
   social_website?: string;
+  // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+  glass_preset?: GlassPreset;
+  glass_custom?: GlassCustomColors;
+  color_vision?: ColorVision;
+  card_scheme?: CardScheme;
+  card_size?: CardSize;
+  background?: BackgroundConfig;
+  announcement?: AnnouncementConfig;
+  provider_aliases?: Record<string, string>;
+  custom_tags?: Record<string, string>;
+  visitor_info?: boolean;
 }
 
 export interface VersionInfo {

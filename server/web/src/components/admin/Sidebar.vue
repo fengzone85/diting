@@ -20,6 +20,7 @@ const links = [
   { to: '/admin/billing', label: t('nav.billing') },
   { to: '/admin/ai', label: t('nav.ai') },
   { to: '/admin/settings', label: t('nav.settings') },
+  { to: '/admin/audit-logs', label: t('nav.auditLogs') },
 ];
 
 async function logout() {

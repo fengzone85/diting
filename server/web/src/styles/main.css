@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  /* 基础语义色 */
   --bg-primary: #0f172a;
   --bg-secondary: rgba(30, 41, 59, 0.6);
   --text-primary: #f8fafc;
@@ -14,6 +15,42 @@
   --warning: #facc15;
   --danger: #f87171;
   --border: rgba(148, 163, 184, 0.15);
+
+  /* 毛玻璃预设（data-glass 控制），默认 emerald */
+  --glass-tint: rgba(16, 185, 129, 0.08);          /* 卡片淡色叠加 */
+  --glass-saturate: 145%;                            /* 饱和度增强 */
+  --glass-blur: 14px;
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-shadow: rgba(2, 8, 23, 0.45);
+}
+
+/* 毛玻璃预设：data-glass 由 useTheme 写入 <html> */
+[data-glass="emerald"] {
+  --glass-tint: rgba(16, 185, 129, 0.08);
+  --glass-saturate: 145%;
+  --glass-blur: 14px;
+  --glass-border: rgba(255, 255, 255, 0.12);
+}
+[data-glass="soft"] {
+  --glass-tint: rgba(255, 255, 255, 0.06);
+  --glass-saturate: 120%;
+  --glass-blur: 18px;
+  --glass-border: rgba(255, 255, 255, 0.10);
+}
+[data-glass="high-contrast"] {
+  --glass-tint: rgba(255, 255, 255, 0.02);
+  --glass-saturate: 180%;
+  --glass-blur: 10px;
+  --glass-border: rgba(255, 255, 255, 0.28);
+}
+[data-glass="midnight"] {
+  --glass-tint: rgba(99, 102, 241, 0.10);
+  --glass-saturate: 135%;
+  --glass-blur: 16px;
+  --glass-border: rgba(129, 140, 248, 0.22);
+}
+[data-glass="custom"] {
+  /* --glass-tint 等由 useTheme 内联覆盖 */
 }
 
 /* 明亮风格模板 */
@@ -31,6 +68,9 @@
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgba(15, 23, 42, 0.12);
+  --glass-tint: rgba(2, 132, 199, 0.06);
+  --glass-border: rgba(15, 23, 42, 0.10);
+  --glass-shadow: rgba(15, 23, 42, 0.12);
 }
 
 [data-theme="light"] body {
@@ -40,7 +80,7 @@
 
 [data-theme="light"] .glass {
   background: var(--bg-secondary);
-  border-color: var(--border);
+  border-color: var(--glass-border);
 }
 
 [data-theme="light"] .card-hover:hover {
@@ -70,12 +110,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 背景层（图片/视频），由 useTheme 注入 */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.app-bg video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.app-bg-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 毛玻璃卡片：saturate 增强 + Firefox 降级 + 旧 webkit 兜底 */
 .glass {
-  background: var(--bg-secondary);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
+  background: var(--glass-tint, var(--bg-secondary));
+  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px));
+  border: 1px solid var(--glass-border, var(--border));
   border-radius: 1rem;
+}
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .glass { background: var(--bg-secondary); }
 }
 
 .card-hover {
@@ -84,7 +150,7 @@ body {
 
 .card-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(2, 8, 23, 0.5);
+  box-shadow: 0 10px 30px var(--glass-shadow, rgba(2, 8, 23, 0.5));
   border-color: rgba(56, 189, 248, 0.3);
 }
 
@@ -98,3 +164,19 @@ body {
 .status-online { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
 .status-offline { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
 .status-warn { background-color: var(--warning); box-shadow: 0 0 8px var(--warning); }
+
+/* 色觉辅助模式（data-color-vision 写入 <html>，对齐 komari 主题） */
+[data-color-vision="protanopia"] { filter: url(#cv-protanopia); }
+[data-color-vision="deuteranopia"] { filter: url(#cv-deuteranopia); }
+[data-color-vision="tritanopia"] { filter: url(#cv-tritanopia); }
+/* 降级提示条样式 */
+.cv-banner {
+  position: fixed;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+}

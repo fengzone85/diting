@@ -82,6 +82,17 @@ CREATE TABLE IF NOT EXISTS ai_reports (
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts        INTEGER NOT NULL,
+  admin     TEXT NOT NULL,
+  ip        TEXT DEFAULT '',
+  action    TEXT NOT NULL,
+  detail    TEXT DEFAULT '',
+  via       TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 `);
 
 // ---- schema migration: add temp / swap columns if missing (existing DBs) ----
@@ -265,7 +276,19 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: false, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '' };
+  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: false, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
+    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
+    glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
+    color_vision: 'normal',           // 色觉辅助：normal/protanopia/deuteranopia/tritanopia
+    card_scheme: 'official',          // 首页总览卡片方案：official/basic/ops/resource/finance/traffic/gpu/asset/full
+    card_size: 'comfortable',         // 节点卡片尺寸：mini/compact/comfortable/large
+    background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 }, // 背景图/视频
+    announcement: { enabled: false, title: '', content: '' }, // 公告
+    provider_aliases: {},             // 厂商别名映射 { "原始厂商": "显示名" }
+    custom_tags: {},                  // 节点自定义标签 { "agent_id": "标签文本" }
+    visitor_info: false               // 访客信息条（底部 IP 条）
+  };
   try {
     const o = JSON.parse(getConfig(SETTINGS_KEY) || '{}');
     const merged = Object.assign(def, o);
@@ -393,6 +416,25 @@ function pruneAiReports(retentionDays) {
   return stmts.pruneAiReports.run(cutoff).changes;
 }
 
+// ---- 审计日志 ----
+const insertAuditLog = db.prepare(`INSERT INTO audit_logs (ts, admin, ip, action, detail, via)
+  VALUES (@ts, @admin, @ip, @action, @detail, @via)`);
+const listAuditLogs = db.prepare('SELECT * FROM audit_logs ORDER BY ts DESC LIMIT ? OFFSET ?');
+const countAuditLogs = db.prepare('SELECT COUNT(*) AS n FROM audit_logs');
+const pruneAuditLogs = db.prepare('DELETE FROM audit_logs WHERE ts < ?');
+
+function addAuditLog(ts, admin, ip, action, detail, via) {
+  insertAuditLog.run({ ts, admin, ip, action, detail: detail || '', via: via || '' });
+}
+function getAuditLogs(limit, offset) {
+  return listAuditLogs.all(Math.max(1, Number(limit) || 100), Math.max(0, Number(offset) || 0));
+}
+function countAudit() { return countAuditLogs.get().n; }
+function pruneAudit(retentionDays) {
+  const cutoff = Date.now() - retentionDays * 86400000;
+  return pruneAuditLogs.run(cutoff).changes;
+}
+
 module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
@@ -401,5 +443,6 @@ module.exports = {
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
-  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports
+  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports,
+  addAuditLog, getAuditLogs, countAudit, pruneAudit
 };

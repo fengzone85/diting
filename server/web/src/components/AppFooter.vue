@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { PublicMeta } from '../services/types';
+import { t } from '../composables/useI18n';
 
 const props = defineProps<{
   version?: string;
   meta?: PublicMeta | null;
+  ip?: string;
+  browser?: string;
 }>();
 
 const socialItems = computed(() => [
@@ -42,5 +45,8 @@ function href(item: typeof socialItems.value[number]) {
         {{ item.icon }}
       </a>
     </div>
+    <p v-if="ip" class="mt-2 text-[11px] text-slate-600">
+      {{ t('footer.visitorIp') }}: {{ ip }}<span v-if="browser"> · {{ browser }}</span>
+    </p>
   </footer>
 </template>

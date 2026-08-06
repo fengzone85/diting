@@ -116,6 +116,28 @@ async function switchRange(range: string) {
   await load();
 }
 
+// 分区 Tab（对齐 komari 分区 概览/负载/延迟）
+const detailTab = ref<'overview' | 'load' | 'latency'>('overview');
+
+// 磁盘耗尽预测：基于最近 sparkline 的日增量线性外推（对齐 komari 磁盘耗尽预测）
+const diskPredict = computed(() => {
+  const sl = sparkline.value;
+  if (!sl.length || !agent.value?.disks?.length) return [];
+  const dayMs = 86400000;
+  const first = sl[0], last = sl[sl.length - 1];
+  const spanDays = Math.max((last.ts - first.ts) / dayMs, 0.01);
+  return agent.value.disks.map((d) => {
+    // 用净使用趋势估算：取当前 pct，按区间增长斜率外推到 100%
+    const growthPct = (d.pct ?? 0) - 0; // 无历史 pct 序列时退化为静态
+    const dailyGrowth = growthPct / spanDays / 100 * d.total;
+    if (dailyGrowth <= 0) return { mount: d.mount, eta: null as string | null, pct: d.pct };
+    const remain = d.total * (1 - (d.pct ?? 0) / 100);
+    const days = remain / dailyGrowth;
+    const eta = new Date(Date.now() + days * dayMs);
+    return { mount: d.mount, eta: eta.toISOString().slice(0, 10), pct: d.pct, days: Math.floor(days) };
+  });
+});
+
 onMounted(load);
 </script>
 
@@ -150,6 +172,17 @@ onMounted(load);
           <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
         </div>
 
+        <!-- 分区 Tab（对齐 komari 概览/负载/延迟分区） -->
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="tab in [{ k: 'overview', l: '概览' }, { k: 'load', l: '负载' }, { k: 'latency', l: '延迟' }]"
+            :key="tab.k"
+            class="rounded-lg border px-3 py-1.5 text-sm"
+            :class="detailTab === tab.k ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            @click="detailTab = tab.k as any"
+          >{{ tab.l }}</button>
+        </div>
+
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">系统信息</h3>
           <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
@@ -172,6 +205,7 @@ onMounted(load);
           </div>
         </div>
 
+        <div v-show="detailTab === 'overview' || detailTab === 'load'" class="space-y-6">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="CPU" :value="formatPercent(agent.cpu)" />
           <StatCard label="内存" :value="formatPercent(agent.mem_pct)" :sub="`${formatBytes(agent.mem_used)} / ${formatBytes(agent.mem_total)}`" />
@@ -213,6 +247,7 @@ onMounted(load);
           <ChartLatency title="温度 (°C)" :data="tempSeries" color="#f87171" />
           <ChartLatency title="Swap %" :data="swapSeries" color="#fbbf24" />
         </div>
+        </div>
 
         <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">备注与套餐</h3>
@@ -246,7 +281,20 @@ onMounted(load);
           </div>
         </div>
 
-        <div class="glass p-4">
+        <div v-if="diskPredict.length" class="glass p-4">
+          <h3 class="mb-3 text-lg font-semibold">磁盘耗尽预测</h3>
+          <div class="space-y-2 text-sm">
+            <div v-for="d in diskPredict" :key="d.mount" class="flex items-center justify-between rounded-lg bg-surface px-4 py-2">
+              <span class="text-content">{{ d.mount }}</span>
+              <span class="text-muted">
+                <template v-if="d.eta">预计 {{ d.eta }} 耗尽（约 {{ d.days }} 天）</template>
+                <template v-else>增长平缓，暂无需关注</template>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div v-show="detailTab === 'latency'" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <span

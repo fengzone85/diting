@@ -13,6 +13,7 @@ export interface AppState {
   agents: Agent[];
   sparklines: Sparklines;
   meta: PublicMeta | null;
+  visitor: { ip: string; browser: string } | null;
   layout: PublicLayout;
   template: CardTemplate;
   search: string;
@@ -57,7 +58,7 @@ function sortByOrder(list: Agent[], serverOrder: string[], localOrder: string[])
   });
 }
 
-const state = reactive<AppState>({
+export const state = reactive<AppState>({
   initialized: false,
   loading: false,
   error: null,
@@ -65,6 +66,7 @@ const state = reactive<AppState>({
   agents: [],
   sparklines: {},
   meta: null,
+  visitor: null,
   layout: getStoredLayout() ?? defaultLayout(),
   template: getStoredTemplate() ?? defaultTemplate(),
   search: '',
@@ -86,11 +88,42 @@ export const visibleAgents = computed<Agent[]>(() => {
         (a.group || '').toLowerCase().includes(q) ||
         (a.hostname || '').toLowerCase().includes(q) ||
         (a.merchant || '').toLowerCase().includes(q) ||
-        (a.country || '').toLowerCase().includes(q)
+        (a.country || '').toLowerCase().includes(q) ||
+        (providerAlias(a.id, a.merchant).toLowerCase().includes(q)) ||
+        (customTag(a.id) || '').toLowerCase().includes(q)
     );
   }
   return sortByOrder(list, serverOrder, localOrder);
 });
+
+// 厂商别名：meta.provider_aliases 覆盖原始 merchant 显示名
+export function providerAlias(_agentId: string, merchant?: string): string {
+  const aliases = state.meta?.provider_aliases || {};
+  if (merchant && aliases[merchant]) return aliases[merchant];
+  return merchant || '';
+}
+
+// 节点自定义标签：meta.custom_tags[agentId]
+export function customTag(agentId: string): string {
+  return (state.meta?.custom_tags && state.meta.custom_tags[agentId]) || '';
+}
+
+// 卡片方案：返回需要展示的总览 StatCard 字段集合
+const CARD_SCHEMES: Record<string, string[]> = {
+  official: ['online', 'total', 'cpu', 'mem', 'traffic', 'uptime'],
+  basic: ['online', 'total', 'cpu', 'mem'],
+  ops: ['online', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
+  resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'uptime'],
+  finance: ['total', 'price', 'expire', 'quota'],
+  traffic: ['traffic_total', 'rx_month', 'tx_month', 'net'],
+  gpu: ['online', 'total', 'cpu', 'mem', 'gpu'],
+  asset: ['total', 'groups', 'country', 'merchant'],
+  full: ['online', 'total', 'cpu', 'mem', 'disk', 'net', 'traffic', 'uptime', 'price', 'expire', 'quota'],
+};
+export function cardSchemeKeys(): string[] {
+  const scheme = (state.meta?.card_scheme as string) || 'official';
+  return CARD_SCHEMES[scheme] || CARD_SCHEMES.official;
+}
 
 export const groupedAgents = computed<Record<string, Agent[]>>(() => {
   const groups: Record<string, Agent[]> = {};
@@ -154,6 +187,20 @@ export function reorderAgents(ids: string[]) {
   publicApi.saveOrder(ids).catch(() => {});
 }
 
+export async function loadMeta() {
+  try {
+    const meta = await publicApi.meta();
+    state.meta = meta;
+    serverOrder = meta?.agent_order || [];
+    if (meta?.visitor_info) {
+      publicApi.visitor().then((v) => { state.visitor = v; }).catch(() => {});
+    } else {
+      state.visitor = null;
+    }
+  } catch {}
+  return state.meta;
+}
+
 export function useApp() {
   onMounted(() => {
     if (!state.initialized) refresh();
@@ -169,5 +216,8 @@ export function useApp() {
     setTemplate,
     setSearch,
     reorderAgents,
+    providerAlias,
+    customTag,
+    cardSchemeKeys,
   };
 }

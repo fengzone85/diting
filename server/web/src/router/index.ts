@@ -10,6 +10,7 @@ import AgentDetailView from '../views/admin/AgentDetailView.vue';
 import SettingsView from '../views/admin/SettingsView.vue';
 import BillingView from '../views/admin/BillingView.vue';
 import AiView from '../views/admin/AiView.vue';
+import AuditLogView from '../views/admin/AuditLogView.vue';
 
 const routes = [
   { path: '/', component: HomeView },
@@ -26,6 +27,7 @@ const routes = [
       { path: 'billing', component: BillingView },
       { path: 'ai', component: AiView },
       { path: 'settings', component: SettingsView },
+      { path: 'audit-logs', component: AuditLogView },
     ],
   },
 ];

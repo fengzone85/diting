@@ -27,6 +27,7 @@ export const zhCN: Record<string, string> = {
   'nav.settings': '设置',
   'nav.logout': '退出',
   'nav.admin': '管理后台',
+  'nav.auditLogs': '审计日志',
 
   // 受控端列表
   'agents.title': '受控端',
@@ -94,6 +95,51 @@ export const zhCN: Record<string, string> = {
   'public.compact': '紧凑',
   'public.simple': '简约',
   'public.visual': '完整',
+  'public.highLoad': '高负载',
+  'public.expiring': '即将到期',
+  'public.favorites': '收藏',
+  'public.avgMem': '平均内存',
+  'public.diskUsage': '磁盘占用',
+  'public.netRate': '实时速率',
+  'public.swap': '交换分区',
+  'public.traffic': '总流量',
+  'public.trafficTotal': '累计流量',
+  'public.rxMonth': '月下载',
+  'public.txMonth': '月上传',
+  'public.monthlyCost': '月度费用',
+  'public.quota': '流量配额',
+  'public.groups': '分组数',
+  'public.countries': '地区数',
+  'public.merchants': '商家数',
+  'public.gpu': 'GPU',
+
+  // 主题
+  'theme.colorVision': '色觉辅助',
+  'theme.glassPreset': '毛玻璃预设',
+  'theme.colorVisionMode': '色觉模式',
+  'theme.background': '背景',
+  'theme.announcement': '公告',
+  'theme.cardScheme': '总览卡片方案',
+  'theme.cardSize': '节点卡片尺寸',
+  'theme.providerAliases': '厂商别名',
+  'theme.customTags': '自定义标签',
+  'theme.visitorInfo': '访客信息条',
+
+  // 节点卡片
+  'card.online': '在线',
+  'card.offline': '离线',
+  'card.warn': '告警',
+  'card.cpu': 'CPU',
+  'card.memory': '内存',
+  'card.disk': '磁盘',
+  'card.uptime': '运行时间',
+  'card.monthlyTraffic': '月流量',
+  'card.timeout': '超时',
+  'card.expire': '到期',
+  'card.quota': '配额',
+
+  // 页脚
+  'footer.visitorIp': '您的 IP',
 
   // AI
   'ai.title': 'AI 运维分析',
