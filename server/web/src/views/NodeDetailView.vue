@@ -6,6 +6,7 @@ import AppFooter from '../components/AppFooter.vue';
 import StatCard from '../components/ui/StatCard.vue';
 import ChartLatency from '../components/ChartLatency.vue';
 import ChartLatencyMulti from '../components/ChartLatencyMulti.vue';
+import ChartLatencyDual from '../components/ChartLatencyDual.vue';
 import Loading from '../components/ui/Loading.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
@@ -194,12 +195,22 @@ onMounted(load);
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <ChartLatency title="CPU %" :data="cpuSeries" color="#38bdf8" />
           <ChartLatency title="内存 %" :data="memSeries" color="#a78bfa" />
-          <ChartLatency title="下载速率 (bps)" :data="rxSeries" color="#4ade80" />
-          <ChartLatency title="上传速率 (bps)" :data="txSeries" color="#facc15" />
+          <ChartLatencyDual
+            title="网络上下行 (bps)"
+            :series="[
+              { name: '下行', data: rxSeries, color: '#4ade80' },
+              { name: '上行', data: txSeries, color: '#facc15' },
+            ]"
+          />
+          <ChartLatencyDual
+            title="磁盘读写 (B/s)"
+            :series="[
+              { name: '读取', data: diskReadSeries, color: '#22d3ee' },
+              { name: '写入', data: diskWriteSeries, color: '#c084fc' },
+            ]"
+          />
           <ChartLatency title="Load 1m" :data="loadSeries" color="#fb923c" />
           <ChartLatency title="温度 (°C)" :data="tempSeries" color="#f87171" />
-          <ChartLatency title="磁盘读取 (B/s)" :data="diskReadSeries" color="#22d3ee" />
-          <ChartLatency title="磁盘写入 (B/s)" :data="diskWriteSeries" color="#c084fc" />
           <ChartLatency title="Swap %" :data="swapSeries" color="#fbbf24" />
         </div>
 
