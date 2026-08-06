@@ -19,7 +19,8 @@ export const publicApi = {
     return list.map((a) => ({ ...a, probes: parseProbes(a.probes) }));
   },
   sparklines: () => api.get<Sparklines>('/api/public/agents/sparklines'),
-  probes: (id: string) => api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes`),
+  probes: (id: string, range?: string) =>
+    api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
   saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),
 };
