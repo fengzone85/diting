@@ -142,7 +142,7 @@ const filteredAgents = computed(() => {
     <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
-      <div class="mb-4 grid gap-3 sm:gap-4" :class="`grid-cols-2 lg:grid-cols-${overviewCards.cols}`">
+      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
         <StatCard
           v-for="(c, i) in overviewCards.items"
           :key="i"
