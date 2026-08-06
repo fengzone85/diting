@@ -39,9 +39,9 @@ function lockPreview() {
 </script>
 
 <template>
-  <header class="glass sticky top-0 z-50 mb-6">
-    <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
-      <RouterLink to="/" class="flex min-w-0 items-center gap-3 text-lg font-bold text-sky-500 hover:text-sky-400 sm:text-xl">
+  <header class="sticky top-0 z-50">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <RouterLink to="/" class="flex min-w-0 items-center gap-3 text-lg font-bold text-accent hover:text-accent-hover sm:text-xl">
         <img v-if="meta?.logo_url" :src="meta.logo_url" class="h-7 w-7 flex-shrink-0 rounded object-cover sm:h-8 sm:w-8" :alt="displayTitle" />
         <span v-else class="status-dot status-online flex-shrink-0" />
         <div class="min-w-0">
@@ -49,12 +49,12 @@ function lockPreview() {
           <span v-if="meta?.site_description" class="block truncate text-[10px] font-normal text-muted sm:text-xs">{{ meta.site_description }}</span>
         </div>
       </RouterLink>
-      <nav class="flex items-center gap-3 text-sm text-content">
-        <RouterLink to="/" class="hover:text-accent">{{ t('nav.dashboard') }}</RouterLink>
-        <RouterLink to="/admin" class="hover:text-accent">{{ t('nav.admin') }}</RouterLink>
+      <nav class="flex items-center gap-2 text-sm text-content">
+        <RouterLink to="/" class="rounded-lg p-2 hover:bg-surface" :title="t('nav.dashboard')">🏠</RouterLink>
+        <RouterLink to="/admin" class="rounded-lg p-2 hover:bg-surface" :title="t('nav.admin')">⚙</RouterLink>
         <div class="relative">
           <button
-            class="rounded-lg border border-divider px-2 py-1 text-xs hover:border-sky-500 hover:text-accent"
+            class="rounded-lg p-2 hover:bg-surface"
             :title="theme === 'dark' ? t('theme.light') : t('theme.dark')"
             @click="themeMenu = !themeMenu"
           >
@@ -65,7 +65,7 @@ function lockPreview() {
               v-for="opt in themeOptions"
               :key="opt.id"
               class="block w-full rounded px-3 py-1.5 text-left text-xs hover:bg-slate-800/30"
-              :class="theme === opt.id ? 'text-sky-500' : 'text-content'"
+              :class="theme === opt.id ? 'text-accent' : 'text-content'"
               @click="pickTheme(opt.id)"
             >
               {{ opt.label }}
@@ -73,7 +73,7 @@ function lockPreview() {
           </div>
         </div>
         <button
-          class="rounded-lg border border-divider px-2 py-1 text-xs hover:border-sky-500 hover:text-accent"
+          class="rounded-lg p-2 text-xs font-semibold hover:bg-surface"
           :title="t('common.language')"
           @click="switchLang"
         >
@@ -81,7 +81,7 @@ function lockPreview() {
         </button>
       </nav>
     </div>
-    <div v-if="hasThemePreview" class="border-t border-divider bg-sky-500/10 px-4 py-1.5 text-center text-xs text-sky-600">
+    <div v-if="hasThemePreview" class="border-t border-divider bg-accent/10 px-4 py-1.5 text-center text-xs text-content">
       当前为 <code>?theme</code> 预览模式 ·
       <button class="underline hover:text-accent" @click="lockPreview">应用此预览</button>
     </div>

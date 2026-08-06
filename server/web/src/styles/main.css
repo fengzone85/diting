@@ -98,13 +98,6 @@
   box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
 }
 
-[data-theme="light"] header.glass {
-  background-color: rgb(241 245 249 / 0.76) !important;
-  backdrop-filter: saturate(150%) blur(14px) !important;
-  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
-  border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
-}
-
 [data-theme="light"] .card-hover:hover {
   box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
 }
@@ -171,14 +164,20 @@ body {
   .glass { background-color: var(--bg-secondary) !important; }
 }
 
-/* header 独立毛玻璃：对齐 komari（saturate 150% + border-bottom） */
-header.glass {
+/* header 纯毛玻璃顶栏：对齐 komari（无圆角、无阴影、仅 border-bottom） */
+header {
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
   backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
   border-bottom: 1px solid var(--glass-border, var(--border)) !important;
   border-radius: 0;
   box-shadow: none;
+}
+[data-theme="light"] header {
+  background-color: rgb(241 245 249 / 0.76) !important;
+  backdrop-filter: saturate(150%) blur(14px) !important;
+  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
+  border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
 }
 
 .card-hover {
