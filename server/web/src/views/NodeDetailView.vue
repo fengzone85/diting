@@ -5,6 +5,7 @@ import AppHeader from '../components/AppHeader.vue';
 import AppFooter from '../components/AppFooter.vue';
 import StatCard from '../components/ui/StatCard.vue';
 import ChartLatency from '../components/ChartLatency.vue';
+import ChartLatencyMulti from '../components/ChartLatencyMulti.vue';
 import Loading from '../components/ui/Loading.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
@@ -66,17 +67,15 @@ function probeSeries(points: { ts: number; ms: number; ok: boolean; loss: number
     .sort((a, b) => a.t - b.t);
 }
 
-function movingAvgSeries(points: { ts: number; ms: number; ok: boolean; loss: number }[], window = 10): ChartPoint[] {
-  const src = probeSeries(points);
-  const out: ChartPoint[] = [];
-  for (let i = 0; i < src.length; i++) {
-    const start = Math.max(0, i - window + 1);
-    const slice = src.slice(start, i + 1);
-    const avg = slice.reduce((s, d) => s + d.v, 0) / slice.length;
-    out.push({ t: src[i].t, v: Math.round(avg * 10) / 10 });
-  }
-  return out;
-}
+const PALETTE = ['#f472b6', '#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185'];
+
+const probeSeriesList = computed(() =>
+  Object.entries(probes.value).map(([target, points], i) => ({
+    name: target,
+    color: PALETTE[i % PALETTE.length],
+    data: probeSeries(points),
+  }))
+);
 
 async function load() {
   loading.value = true;
@@ -162,26 +161,21 @@ onMounted(load);
 
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div v-for="(points, target) in probes" :key="target" class="rounded-lg bg-slate-800/40 p-3">
-              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span class="text-sm font-medium text-slate-300">{{ target }}</span>
-                <div class="flex gap-3 text-xs">
-                  <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'">
-                    avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
-                  </span>
-                  <span class="text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
-                  <span class="text-slate-500">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
-                </div>
-              </div>
-              <div class="h-40 w-full">
-                <ChartLatency title="延迟 (ms)" :data="probeSeries(points)" color="#f472b6" />
-              </div>
-              <div class="h-32 w-full">
-                <ChartLatency title="移动平均 (10点)" :data="movingAvgSeries(points)" color="#38bdf8" />
-              </div>
-            </div>
+          <div class="mb-3 flex flex-wrap gap-4 text-xs">
+            <span
+              v-for="(points, target) in probes"
+              :key="`stat-${target}`"
+              class="rounded-lg bg-slate-800/40 px-3 py-1.5"
+            >
+              <span class="text-slate-300">{{ target }}</span>
+              <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'" class="ml-2">
+                avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
+              </span>
+              <span class="ml-2 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
+              <span class="ml-2 text-slate-500">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
+            </span>
           </div>
+          <ChartLatencyMulti title="延迟波形 (ms)" :series="probeSeriesList" />
         </div>
       </div>
     </main>
