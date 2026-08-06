@@ -164,21 +164,7 @@ body {
   .glass { background-color: var(--bg-secondary) !important; }
 }
 
-/* header 纯毛玻璃顶栏：对齐 komari（无圆角、无阴影、仅 border-bottom） */
-header {
-  background-color: var(--glass-tint, var(--bg-secondary)) !important;
-  backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
-  -webkit-backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
-  border-bottom: 1px solid var(--glass-border, var(--border)) !important;
-  border-radius: 0;
-  box-shadow: none;
-}
-[data-theme="light"] header {
-  background-color: rgb(241 245 249 / 0.76) !important;
-  backdrop-filter: saturate(150%) blur(14px) !important;
-  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
-  border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
-}
+/* komari 风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */
 
 .card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;

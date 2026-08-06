@@ -1,21 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { RouterLink } from 'vue-router';
-import { useTheme } from '../composables/useTheme';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { useI18n } from '../composables/useI18n';
-import type { PublicMeta } from '../services/types';
+import { useTheme } from '../composables/useTheme';
+import type { PublicMeta } from '../services/publicApi';
 
-const props = defineProps<{
-  title?: string;
-  meta?: PublicMeta | null;
-}>();
+const { t, locale, setLocale } = useI18n();
+const { theme, setTheme } = useTheme();
+const route = useRoute();
 
-const { theme, set, applyQueryPreview } = useTheme();
-const { locale, setLocale, t } = useI18n();
-const displayTitle = computed(() => props.title || props.meta?.site_title || 'Diting');
+const props = defineProps<{ meta?: PublicMeta | null }>();
+
+const isScrolled = ref(false);
+function onScroll() { isScrolled.value = window.scrollY > 10; }
+onMounted(() => window.addEventListener('scroll', onScroll, { passive: true }));
+onUnmounted(() => window.removeEventListener('scroll', onScroll));
 
 const themeMenu = ref(false);
-const hasThemePreview = ref(new URLSearchParams(window.location.search).has('theme'));
+const displayTitle = computed(() => props.meta?.site_title || 'DiTing');
 
 const themeOptions = computed(() => [
   { id: 'auto' as const, label: t('theme.auto') },
@@ -23,44 +25,46 @@ const themeOptions = computed(() => [
   { id: 'dark' as const, label: t('theme.dark') },
 ]);
 
+function pickTheme(mode: 'auto' | 'light' | 'dark') {
+  setTheme(mode);
+  themeMenu.value = false;
+}
+
 function switchLang() {
   setLocale(locale.value === 'zh-CN' ? 'en-US' : 'zh-CN');
 }
 
-function pickTheme(id: 'auto' | 'light' | 'dark') {
-  set(id);
-  themeMenu.value = false;
-}
-
-function lockPreview() {
-  applyQueryPreview();
-  hasThemePreview.value = false;
-}
+const themeIcon = computed(() => {
+  if (theme.value === 'dark') return '🌙';
+  if (theme.value === 'light') return '☀️';
+  return '🌗';
+});
 </script>
 
 <template>
-  <header class="sticky top-0 z-50">
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-      <RouterLink to="/" class="flex min-w-0 items-center gap-3 text-lg font-bold text-accent hover:text-accent-hover sm:text-xl">
-        <img v-if="meta?.logo_url" :src="meta.logo_url" class="h-7 w-7 flex-shrink-0 rounded object-cover sm:h-8 sm:w-8" :alt="displayTitle" />
+  <!-- 对齐 komari: 无 <header> 标签，无固定毛玻璃，滚动才出现 blur -->
+  <div
+    class="sticky top-0 z-10 border-b border-transparent transition-all duration-200"
+    :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
+  >
+    <div class="mx-auto flex h-14 max-w-[1280px] items-center px-4">
+      <RouterLink to="/" class="flex cursor-pointer items-center gap-3">
+        <img v-if="meta?.logo_url" :src="meta.logo_url" class="size-8 rounded" :alt="displayTitle" />
         <span v-else class="status-dot status-online flex-shrink-0" />
-        <div class="min-w-0">
-          <span class="truncate text-content">{{ displayTitle }}</span>
-          <span v-if="meta?.site_description" class="block truncate text-[10px] font-normal text-muted sm:text-xs">{{ meta.site_description }}</span>
-        </div>
+        <h3 class="m-0 text-lg font-semibold text-content">{{ displayTitle }}</h3>
       </RouterLink>
-      <nav class="flex items-center gap-2 text-sm text-content">
-        <RouterLink to="/" class="rounded-lg p-2 hover:bg-surface" :title="t('nav.dashboard')">🏠</RouterLink>
-        <RouterLink to="/admin" class="rounded-lg p-2 hover:bg-surface" :title="t('nav.admin')">⚙</RouterLink>
+
+      <div class="ml-auto flex items-center gap-1">
+        <!-- 主题切换 -->
         <div class="relative">
           <button
-            class="rounded-lg p-2 hover:bg-surface"
-            :title="theme === 'dark' ? t('theme.light') : t('theme.dark')"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-base hover:bg-surface"
+            :title="t('theme.auto')"
             @click="themeMenu = !themeMenu"
           >
-            {{ theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '🌗' }}
+            {{ themeIcon }}
           </button>
-          <div v-if="themeMenu" class="absolute right-0 z-50 mt-2 w-32 rounded-lg border border-divider bg-surface p-1 shadow-xl">
+          <div v-if="themeMenu" class="absolute right-0 z-50 mt-1 w-32 rounded-lg border border-divider bg-surface p-1 shadow-xl">
             <button
               v-for="opt in themeOptions"
               :key="opt.id"
@@ -72,18 +76,24 @@ function lockPreview() {
             </button>
           </div>
         </div>
+
+        <!-- 语言切换 -->
         <button
-          class="rounded-lg p-2 text-xs font-semibold hover:bg-surface"
+          class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-xs font-semibold hover:bg-surface"
           :title="t('common.language')"
           @click="switchLang"
         >
           {{ locale === 'zh-CN' ? '中' : 'EN' }}
         </button>
-      </nav>
+
+        <!-- 管理后台 -->
+        <RouterLink
+          v-if="route.name !== 'admin'"
+          to="/admin"
+          class="inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-surface"
+          :title="t('nav.admin')"
+        >⚙</RouterLink>
+      </div>
     </div>
-    <div v-if="hasThemePreview" class="border-t border-divider bg-accent/10 px-4 py-1.5 text-center text-xs text-content">
-      当前为 <code>?theme</code> 预览模式 ·
-      <button class="underline hover:text-accent" @click="lockPreview">应用此预览</button>
-    </div>
-  </header>
+  </div>
 </template>

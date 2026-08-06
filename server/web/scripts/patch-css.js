@@ -1,6 +1,5 @@
 // Tailwind v4 + Vite esbuild minifier 会丢 backdrop-filter 标准属性，
-// 只保留 -webkit-backdrop-filter。本脚本构建后自动补回。
-// 需要 patch 的选择器：.glass 和 header
+// 只保留 -webkit-backdrop-filter。本脚本构建后自动补回 .glass 规则。
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,7 +12,7 @@ if (!fs.existsSync(assetsDir)) {
   process.exit(0);
 }
 
-function patchBlock(css, selectorRegex, blockName) {
+function patchBlock(css, selectorRegex) {
   return css.replace(selectorRegex, (m, body) => {
     if (!/webkit-backdrop-filter/i.test(body)) return m;
     if (/[^-]backdrop-filter\s*:/i.test(body)) return m;
@@ -21,7 +20,6 @@ function patchBlock(css, selectorRegex, blockName) {
     if (!webkitLine) return m;
     const value = webkitLine[1].replace(/-webkit-backdrop-filter\s*:\s*/, '').replace(/\s*!important\s*$/, '').trim();
     const newBody = body.replace(/(-webkit-backdrop-filter\s*:[^;]+;?)/, `backdrop-filter: ${value} !important;\n  $1`);
-    // 提取原选择器名
     const sel = m.match(/^([^{]+)\{/)[1];
     return `${sel}{${newBody}}`;
   });
@@ -35,9 +33,7 @@ for (const f of files) {
   const before = css;
 
   // Patch .glass（不包括 [data-theme="light"] .glass 等变体）
-  css = patchBlock(css, /(?<![.\w-])\.glass\s*\{([\s\S]*?)\}/g, '.glass');
-  // Patch header（独立的 header 块，不匹配 [data-theme] header 等变体）
-  css = patchBlock(css, /(?<![.\w\[\]-])header\s*\{([\s\S]*?)\}/g, 'header');
+  css = patchBlock(css, /(?<![.\w-])\.glass\s*\{([\s\S]*?)\}/g);
 
   if (css !== before) {
     fs.writeFileSync(p, css);
