@@ -15,6 +15,11 @@ import type { Probes, ChartPoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber } from '../utils/format';
 import { ref } from 'vue';
 
+function formatDate(s: string | undefined): string {
+  if (!s) return '—';
+  return s;
+}
+
 const route = useRoute();
 const { state, visibleAgents } = useApp();
 const agentId = computed(() => route.params.id as string);
@@ -144,6 +149,28 @@ onMounted(load);
           <p class="mt-2 text-sm text-slate-500">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
         </div>
 
+        <div class="glass p-4">
+          <h3 class="mb-3 text-lg font-semibold">系统信息</h3>
+          <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">主机名</span><span class="text-slate-200">{{ agent.hostname || '—' }}</span>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">操作系统</span><span class="text-slate-200">{{ agent.os || '—' }}</span>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">Agent 版本</span><span class="text-slate-200">{{ agent.version || '—' }}</span>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">在线状态</span>
+              <span :class="agent.online ? 'text-emerald-400' : 'text-rose-400'">{{ agent.online ? '在线' : '离线' }}</span>
+            </div>
+            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">Agent ID</span><span class="text-slate-200">{{ agent.id }}</span>
+            </div>
+          </div>
+        </div>
+
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="CPU" :value="formatPercent(agent.cpu)" />
           <StatCard label="内存" :value="formatPercent(agent.mem_pct)" :sub="`${formatBytes(agent.mem_used)} / ${formatBytes(agent.mem_total)}`" />
@@ -174,6 +201,23 @@ onMounted(load);
           <ChartLatency title="磁盘读取 (B/s)" :data="diskReadSeries" color="#22d3ee" />
           <ChartLatency title="磁盘写入 (B/s)" :data="diskWriteSeries" color="#c084fc" />
           <ChartLatency title="Swap %" :data="swapSeries" color="#fbbf24" />
+        </div>
+
+        <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-4">
+          <h3 class="mb-3 text-lg font-semibold">备注与套餐</h3>
+          <div v-if="agent.note" class="mb-3 rounded-lg bg-slate-800/40 px-4 py-3 text-sm text-slate-300">{{ agent.note }}</div>
+          <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div v-if="agent.monthly_quota_gb != null" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">月流量配额</span><span class="text-slate-200">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
+            </div>
+            <div v-if="agent.expire_at" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">到期时间</span><span class="text-slate-200">{{ formatDate(agent.expire_at) }}</span>
+            </div>
+            <div v-if="agent.price != null" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
+              <span class="text-slate-400">价格</span>
+              <span class="text-slate-200">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ agent.billing_cycle }}天</span></span>
+            </div>
+          </div>
         </div>
 
         <div v-if="agent.disks?.length" class="glass p-4">
