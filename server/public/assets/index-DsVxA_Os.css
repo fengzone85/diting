@@ -1263,10 +1263,6 @@
     color: var(--color-sky-500);
   }
 
-  .text-sky-600 {
-    color: var(--color-sky-600);
-  }
-
   .text-slate-200 {
     color: var(--color-slate-200);
   }
@@ -1816,12 +1812,6 @@
   background-color: var(--glass-tint-hover) !important;
 }
 
-[data-theme="light"] header.glass {
-  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
-  background-color: #f1f5f9c2 !important;
-  border-bottom: 1px solid #e2e8f094 !important;
-}
-
 [data-theme="light"] .card-hover:hover {
   box-shadow: 0 12px 38px #0f172a33;
 }
@@ -1904,12 +1894,20 @@ body {
   }
 }
 
-header.glass {
+header {
   box-shadow: none;
   border-radius: 0;
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
+  backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
   border-bottom: 1px solid var(--glass-border, var(--border)) !important;
+}
+
+[data-theme="light"] header {
+  backdrop-filter: saturate(150%) blur(14px) !important;
+  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
+  background-color: #f1f5f9c2 !important;
+  border-bottom: 1px solid #e2e8f094 !important;
 }
 
 .card-hover {
