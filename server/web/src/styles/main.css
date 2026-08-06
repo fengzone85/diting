@@ -4,17 +4,17 @@
   /* 基础语义色 — 对齐 komari-theme-Glassmorphism dark */
   --bg-primary: #0c1117;
   --bg-secondary: rgb(10 14 22 / 0.82);
-  --text-primary: #edf3f5;
-  --text-secondary: #a9b6be;
-  --text-muted: #7a8a94;
-  --bg-surface: rgb(15 24 35 / 0.42);
-  --border-divider: rgb(214 228 234 / 0.16);
+  --text-primary: #fafafa;                           /* komari --foreground oklch(0.985) */
+  --text-secondary: #c7cdd4;                          /* komari --muted-foreground oklch(0.86) */
+  --text-muted: #8b929a;                              /* 介于 secondary 和 divider 之间 */
+  --bg-surface: #3a3e44;                              /* komari --accent oklch(0.274) — hover 背景 */
+  --border-divider: rgb(255 255 255 / 0.10);          /* komari --border */
   --accent: #3ccf91;
   --accent-hover: #48d9a0;
   --success: #31c99a;
   --warning: #fbbf24;
   --danger: #fb7185;
-  --border: rgb(214 228 234 / 0.16);
+  --border: rgb(255 255 255 / 0.10);
 
   /* 毛玻璃预设（data-glass 控制），默认 emerald — 对齐 komari */
   --glass-tint: rgb(10 14 22 / 0.82);               /* 暗色卡片底色 */
@@ -67,10 +67,10 @@
 [data-theme="light"] {
   --bg-primary: #eef2f5;
   --bg-secondary: rgb(255 255 255 / 0.68);
-  --text-primary: #172026;
-  --text-secondary: #52616b;
+  --text-primary: #1a1c22;                           /* komari --foreground oklch(0.11) */
+  --text-secondary: #4a4f56;                          /* komari --muted-foreground oklch(0.34) */
   --text-muted: #7a8a94;
-  --bg-surface: rgb(255 255 255 / 0.42);
+  --bg-surface: #eeeff1;                              /* komari --accent oklch(0.967) — hover 背景 */
   --border-divider: rgb(68 83 94 / 0.22);
   --accent: #087f5b;
   --accent-hover: #0b8f68;
@@ -107,6 +107,16 @@
 [data-theme="light"] .bg-card:hover,
 [data-theme="light"] [data-slot='card']:hover {
   background-color: var(--glass-tint-hover) !important;
+}
+
+/* komari 字体颜色映射 — 卡片内文字/次级文字 */
+.glass {
+  color: var(--text-primary) !important;
+}
+.glass .text-muted,
+.glass .text-slate-400,
+.glass .text-slate-500 {
+  color: var(--text-secondary) !important;
 }
 
 [data-theme="light"] .status-dot {
