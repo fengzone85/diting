@@ -13,6 +13,38 @@
   --border: rgba(148, 163, 184, 0.15);
 }
 
+/* 明亮风格模板 */
+[data-theme="light"] {
+  --bg-primary: #f1f5f9;
+  --bg-secondary: rgba(255, 255, 255, 0.75);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --danger: #dc2626;
+  --border: rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .glass {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+}
+
+[data-theme="light"] .card-hover:hover {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .status-dot {
+  box-shadow: none;
+}
+
 html, body, #app {
   height: 100%;
 }

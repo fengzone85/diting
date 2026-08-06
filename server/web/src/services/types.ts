@@ -72,8 +72,11 @@ export interface Overview {
 export interface SparklinePoint {
   ts: number;
   cpu?: number;
+  cpu_percent?: number;
   mem_pct?: number;
   disk_pct?: number;
+  disk_r_rate?: number;
+  disk_w_rate?: number;
   net_rx_rate?: number;
   net_tx_rate?: number;
   load1?: number;

@@ -22,6 +22,16 @@ const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
 
+// 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
+const RANGES = [
+  { key: '1h', label: '时' },
+  { key: '6h', label: '6小时' },
+  { key: '24h', label: '日' },
+  { key: '7d', label: '周' },
+  { key: '30d', label: '月' },
+];
+const currentRange = ref('1h');
+
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
 
 const neighborIds = computed(() => {
@@ -35,10 +45,15 @@ const neighborIds = computed(() => {
 });
 
 const sparkline = computed(() => state.sparklines[agentId.value] || []);
-const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? 0 })));
+const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? d.cpu_percent ?? 0 })));
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
 const rxSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.net_rx_rate ?? 0 })));
 const txSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.net_tx_rate ?? 0 })));
+const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
+const diskReadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_r_rate ?? 0 })));
+const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_w_rate ?? 0 })));
+const tempSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.temp ?? 0 })));
+const swapSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.swap_pct ?? 0 })));
 
 function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
   if (!points || !points.length) return null;
@@ -81,12 +96,18 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    probes.value = await publicApi.probes(agentId.value);
+    probes.value = await publicApi.probes(agentId.value, currentRange.value);
   } catch (e) {
     error.value = (e as Error).message || '加载失败';
   } finally {
     loading.value = false;
   }
+}
+
+async function switchRange(range: string) {
+  if (range === currentRange.value) return;
+  currentRange.value = range;
+  await load();
 }
 
 onMounted(load);
@@ -137,11 +158,22 @@ onMounted(load);
           <StatCard label="月上传" :value="formatBytes(agent.net_tx_month)" />
         </div>
 
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <StatCard label="Load 1m" :value="formatNumber(agent.load1)" />
+          <StatCard label="温度" :value="agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—'" />
+          <StatCard label="Swap %" :value="formatPercent(agent.swap_pct)" />
+        </div>
+
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <ChartLatency title="CPU %" :data="cpuSeries" color="#38bdf8" />
           <ChartLatency title="内存 %" :data="memSeries" color="#a78bfa" />
           <ChartLatency title="下载速率 (bps)" :data="rxSeries" color="#4ade80" />
           <ChartLatency title="上传速率 (bps)" :data="txSeries" color="#facc15" />
+          <ChartLatency title="Load 1m" :data="loadSeries" color="#fb923c" />
+          <ChartLatency title="温度 (°C)" :data="tempSeries" color="#f87171" />
+          <ChartLatency title="磁盘读取 (B/s)" :data="diskReadSeries" color="#22d3ee" />
+          <ChartLatency title="磁盘写入 (B/s)" :data="diskWriteSeries" color="#c084fc" />
+          <ChartLatency title="Swap %" :data="swapSeries" color="#fbbf24" />
         </div>
 
         <div v-if="agent.disks?.length" class="glass p-4">
@@ -161,6 +193,15 @@ onMounted(load);
 
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
+          <div class="mb-3 flex flex-wrap items-center gap-2">
+            <span
+              v-for="r in RANGES"
+              :key="r.key"
+              @click="switchRange(r.key)"
+              class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
+              :class="currentRange === r.key ? 'bg-sky-500 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-sky-300'"
+            >{{ r.label }}</span>
+          </div>
           <div class="mb-3 flex flex-wrap gap-4 text-xs">
             <span
               v-for="(points, target) in probes"
