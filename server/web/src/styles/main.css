@@ -229,7 +229,10 @@ body {
 }
 
 /* ====== 旧版卡片内部组件（对齐 admin.js cardHtml） ====== */
-.card-top { display: flex; align-items: center; gap: 8px; padding: 13px 15px 9px; border-bottom: 1px solid var(--border-divider); }
+.node-card { width: 330px; max-width: 100%; }
+.card-top { display: flex; align-items: center; gap: 6px; padding: 13px 15px 9px; border-bottom: 1px solid var(--border-divider); }
+.card-top h3 { font-size: 14px; }
+.flag-icon { width: 22px; height: 15px; border-radius: 2px; flex-shrink: 0; }
 .card-meta { color: var(--text-muted); font-size: 11px; padding: 5px 15px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-note { font-size: 11px; color: var(--text-muted); padding: 4px 15px 0; font-style: italic; }
 .card-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; padding: 11px 15px 6px; }
