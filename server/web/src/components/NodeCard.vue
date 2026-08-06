@@ -133,7 +133,7 @@ const trafficPct = computed(() => {
       </div>
       <div class="card-metric">
         <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg></div>
-        <div class="m-info"><span class="m-lbl">IO MB/s</span><span class="m-val">{{ ((agent.disk_r_rate||0)/1048576).toFixed(2) }}/{{ ((agent.disk_w_rate||0)/1048576).toFixed(2) }}</span></div>
+        <div class="m-info"><span class="m-lbl">IO</span><span class="m-val">{{ ((agent.disk_r_rate||0)/1048576).toFixed(2) }}/{{ ((agent.disk_w_rate||0)/1048576).toFixed(2) }}</span></div>
       </div>
       <!-- 网络+探针 跨3列 -->
       <div class="card-metric card-metric-wide">
@@ -142,7 +142,7 @@ const trafficPct = computed(() => {
           <span class="m-lbl">网络</span>
           <span class="m-val">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} &nbsp;↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</span>
           <div v-if="probeTargets().length" class="card-probes">
-            <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok!==false&&pt.ms!=null?'probe-ok':'probe-timeout'">{{ pt.target }} {{ pt.ok!==false&&pt.ms!=null?`${formatNumber(pt.ms as number,1)}ms`:t('card.timeout') }}</span>
+            <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok!==false&&pt.ms!=null?'probe-ok':'probe-timeout'">{{ pt.target }} {{ pt.ok!==false&&pt.ms!=null?formatNumber(pt.ms as number,1):t('card.timeout') }}</span>
           </div>
         </div>
       </div>
