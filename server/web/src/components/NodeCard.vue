@@ -178,87 +178,71 @@ const sparkNetPts = computed(() => ptsString(histOk.value ? hist.value.map((x: S
       </div>
     </div>
 
-    <div v-else class="mt-4 space-y-2.5 text-xs">
-      <!-- 紧凑 6 指标网格：CPU | 内存 | 负载 | 温度 | Swap | IO -->
-      <div class="grid grid-cols-3 gap-x-2 gap-y-2 sm:grid-cols-6">
-        <div>
-          <p class="text-secondary">{{ t('card.cpu') }}</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="1.5" /></svg>
-          <p class="font-medium" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</p>
-        </div>
-        <div>
-          <p class="text-secondary">{{ t('card.memory') }}</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="1.5" /></svg>
-          <p class="font-medium" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</p>
-        </div>
-        <div>
-          <p class="text-secondary">{{ isWindows ? '进程' : '负载' }}</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="1.5" /></svg>
-          <p class="font-medium">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</p>
-        </div>
-        <div>
-          <p class="text-secondary">温度</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="1.5" /></svg>
-          <p class="font-medium">{{ agent.temp != null ? agent.temp.toFixed(1) + '°C' : '—' }}</p>
-        </div>
-        <div>
-          <p class="text-secondary">Swap</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="1.5" /></svg>
-          <p class="font-medium" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</p>
-        </div>
-        <div>
-          <p class="text-secondary">IO MB/s</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkIOPts.r" :points="sparkIOPts.r" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPts.w" :points="sparkIOPts.w" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg>
-          <p class="font-medium">{{ ((agent.disk_r_rate || 0) / 1048576).toFixed(2) }}/{{ ((agent.disk_w_rate || 0) / 1048576).toFixed(2) }}</p>
-        </div>
+    <div v-else>
+      <!-- 旧版 .top：border-bottom + 名称 + badges -->
+      <div class="card-top">
+        <h3 class="min-w-0 flex-1 truncate text-sm font-bold text-content">{{ agent.name }}</h3>
+        <span v-if="merchantName" class="badge">{{ merchantName }}</span>
+        <span v-if="daysUntil(agent.expire_at) != null" class="badge"
+          :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'badge-danger' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'badge-warn' : ''"
+        >{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? '过期' : '' }}{{ Math.abs(daysUntil(agent.expire_at) ?? 0) }}天</span>
       </div>
+      <!-- 旧版 .meta：hostname · os -->
+      <div v-if="agent.hostname || agent.os" class="card-meta">{{ [agent.hostname, agent.os].filter(Boolean).join(' · ') }}</div>
+      <!-- 旧版 .note：备注 -->
+      <div v-if="agent.note" class="card-note">📝 {{ agent.note }}</div>
 
-      <!-- 网络 + 探针（独立行） -->
-      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div>
-          <p class="text-secondary">网络</p>
-          <svg class="spark block h-4 w-full" viewBox="0 0 60 16" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="1.5" /></svg>
-          <p class="mt-0.5 font-medium">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} · ↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</p>
+      <!-- 旧版 .metrics：3 列 grid，每个 metric 独立 box -->
+      <div class="card-metrics">
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">{{ t('card.cpu') }}</span><span class="m-val" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</span></div>
         </div>
-        <div v-if="probeTargets().length" class="flex flex-wrap items-center gap-1.5">
-          <span class="text-secondary">探针：</span>
-          <span
-            v-for="pt in probeTargets()"
-            :key="pt.target"
-            class="rounded-full bg-slate-800 px-2 py-0.5"
-            :class="pt.ok !== false && pt.ms != null ? 'text-emerald-400' : 'text-rose-400'"
-          >{{ pt.target }} {{ pt.ok !== false && pt.ms != null ? `${formatNumber(pt.ms as number, 1)} ms` : t('card.timeout') }}</span>
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">{{ t('card.memory') }}</span><span class="m-val" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</span></div>
         </div>
-      </div>
-
-      <!-- 磁盘条 + 月流量 -->
-      <div class="space-y-1.5 text-[11px]">
-        <div class="flex items-center gap-2">
-          <span class="w-8 shrink-0 text-secondary">{{ t('card.disk') }}</span>
-          <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-700">
-            <div class="h-full rounded-full transition-all" :class="pctClass(agent.disk_pct)" :style="{ width: `${Math.min(agent.disk_pct || 0, 100)}%` }"></div>
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">{{ isWindows ? '进程' : '负载' }}</span><span class="m-val">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</span></div>
+        </div>
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">温度</span><span class="m-val">{{ agent.temp != null ? agent.temp.toFixed(1) + '°C' : '—' }}</span></div>
+        </div>
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">Swap</span><span class="m-val" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</span></div>
+        </div>
+        <div class="card-metric">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkIOPts.r" :points="sparkIOPts.r" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPts.w" :points="sparkIOPts.w" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">IO MB/s</span><span class="m-val">{{ ((agent.disk_r_rate || 0) / 1048576).toFixed(2) }}/{{ ((agent.disk_w_rate || 0) / 1048576).toFixed(2) }}</span></div>
+        </div>
+        <!-- 网络 + 探针：跨 3 列 -->
+        <div class="card-metric card-metric-wide">
+          <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="1.5" /></svg></div>
+          <div class="m-info"><span class="m-lbl">网络</span><span class="m-val">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} &nbsp;↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</span>
+            <div v-if="probeTargets().length" class="card-probes">
+              <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok !== false && pt.ms != null ? 'probe-ok' : 'probe-timeout'">{{ pt.target }} {{ pt.ok !== false && pt.ms != null ? `${formatNumber(pt.ms as number, 1)}ms` : t('card.timeout') }}</span>
+            </div>
           </div>
-          <span class="w-32 text-right text-secondary">{{ formatBytes(agent.disk_used) }}/{{ formatBytes(agent.disk_total) }}</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="w-8 shrink-0 text-secondary">流量</span>
-          <span class="text-secondary">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
-          <span class="ml-auto text-secondary">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</span>
         </div>
       </div>
 
-      <!-- 到期/配额 -->
-      <div v-if="agent.expire_at || agent.monthly_quota_gb" class="flex flex-wrap gap-1.5 text-secondary">
-        <span v-if="agent.expire_at">
-          {{ t('card.expire') }}
-          <span
-            :class="{
-              'text-rose-400': (daysUntil(agent.expire_at) ?? 0) < 0,
-              'text-amber-400': (daysUntil(agent.expire_at) ?? 999) <= 7 && (daysUntil(agent.expire_at) ?? 0) >= 0,
-            }"
-          >{{ agent.expire_at }}</span>
-        </span>
-        <span v-if="agent.monthly_quota_gb">{{ t('card.quota') }} {{ agent.monthly_quota_gb }} GB</span>
+      <!-- 磁盘条 + 月流量（旧版 disk-row） -->
+      <div class="card-disk-row"><span class="m-lbl">{{ t('card.disk') }}</span><div class="bar"><div class="bar-fill" :class="pctClass(agent.disk_pct)" :style="{ width: `${Math.min(agent.disk_pct || 0, 100)}%` }"></div></div><span class="m-val">{{ formatBytes(agent.disk_used) }}/{{ formatBytes(agent.disk_total) }}</span></div>
+      <div class="card-disk-row"><span class="m-lbl">流量</span><span class="m-val flex-1">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span></div>
+
+      <!-- 旧版 .foot：uptime + 到期/配额 -->
+      <div class="card-foot">
+        <span class="uptime">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</span>
+        <div v-if="agent.expire_at || agent.monthly_quota_gb" class="flex flex-wrap gap-1.5 text-secondary">
+          <span v-if="agent.expire_at">
+            {{ t('card.expire') }}
+            <span :class="{ 'text-rose-400': (daysUntil(agent.expire_at) ?? 0) < 0, 'text-amber-400': (daysUntil(agent.expire_at) ?? 999) <= 7 && (daysUntil(agent.expire_at) ?? 0) >= 0 }">{{ agent.expire_at }}</span>
+          </span>
+          <span v-if="agent.monthly_quota_gb">{{ t('card.quota') }} {{ agent.monthly_quota_gb }} GB</span>
+        </div>
       </div>
     </div>
   </RouterLink>
