@@ -380,16 +380,26 @@ router.get('/public/overview', (req, res) => {
   const now = Date.now();
   const agents = db.getAgents();
   let online = 0;
+  let cpuSum = 0, memSum = 0, cpuCount = 0, memCount = 0;
   const groups = {};
   for (const a of agents) {
     const isOn = a.last_seen && now - a.last_seen < offlineSec * 1000;
-    if (isOn) online++;
+    if (isOn) {
+      online++;
+      const m = db.getLatestMetric(a.id);
+      if (m) {
+        if (typeof m.cpu === 'number') { cpuSum += m.cpu; cpuCount++; }
+        if (typeof m.mem_pct === 'number') { memSum += m.mem_pct; memCount++; }
+      }
+    }
     const g = (a.grp || '').trim() || '未分组';
     const ge = groups[g] || (groups[g] = { total: 0, online: 0 });
     ge.total++; if (isOn) ge.online++;
   }
   res.json({
     total: agents.length, online, offline: agents.length - online,
+    cpu_avg: cpuCount > 0 ? +(cpuSum / cpuCount).toFixed(1) : null,
+    mem_avg: memCount > 0 ? +(memSum / memCount).toFixed(1) : null,
     groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
   });
 });
