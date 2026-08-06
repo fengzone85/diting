@@ -139,7 +139,7 @@ const filteredAgents = computed(() => {
 <template>
   <div class="min-h-screen">
     <AppHeader :title="state.meta?.site_title" :meta="state.meta" />
-    <main class="mx-auto max-w-7xl px-4 sm:px-6">
+    <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
       <div class="mb-4 grid gap-3 sm:gap-4" :class="`grid-cols-2 lg:grid-cols-${overviewCards.cols}`">

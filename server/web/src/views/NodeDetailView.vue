@@ -143,7 +143,7 @@ onMounted(load);
 <template>
   <div class="min-h-screen">
     <AppHeader :meta="state.meta" />
-    <main class="mx-auto max-w-7xl px-6">
+    <main class="mx-auto max-w-7xl px-6 pt-4">
       <div class="mb-4 flex items-center gap-3">
         <RouterLink to="/" class="text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
         <RouterLink
