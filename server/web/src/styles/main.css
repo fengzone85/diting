@@ -1,76 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  /* 基础语义色 */
-  --bg-primary: #0f172a;
-  --bg-secondary: rgba(30, 41, 59, 0.6);
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --bg-surface: rgba(51, 65, 85, 0.4);
-  --border-divider: rgba(148, 163, 184, 0.15);
-  --accent: #38bdf8;
-  --accent-hover: #0ea5e9;
-  --success: #4ade80;
-  --warning: #facc15;
-  --danger: #f87171;
-  --border: rgba(148, 163, 184, 0.15);
+  /* 基础语义色 — 对齐 komari-theme-Glassmorphism dark */
+  --bg-primary: #0c1117;
+  --bg-secondary: rgb(10 14 22 / 0.82);
+  --text-primary: #edf3f5;
+  --text-secondary: #a9b6be;
+  --text-muted: #7a8a94;
+  --bg-surface: rgb(15 24 35 / 0.42);
+  --border-divider: rgb(214 228 234 / 0.16);
+  --accent: #3ccf91;
+  --accent-hover: #48d9a0;
+  --success: #31c99a;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --border: rgb(214 228 234 / 0.16);
 
-  /* 毛玻璃预设（data-glass 控制），默认 emerald */
-  --glass-tint: rgba(16, 185, 129, 0.08);          /* 卡片淡色叠加 */
-  --glass-saturate: 145%;                            /* 饱和度增强 */
+  /* 毛玻璃预设（data-glass 控制），默认 emerald — 对齐 komari */
+  --glass-tint: rgb(15 24 35 / 0.62);               /* 暗色卡片底色 */
+  --glass-tint-hover: rgb(15 24 35 / 0.80);          /* hover 时提亮 */
+  --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: rgba(255, 255, 255, 0.12);
-  --glass-shadow: rgba(2, 8, 23, 0.45);
+  --glass-border: rgb(255 255 255 / 0.18);
+  --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
 }
 
 /* 毛玻璃预设：data-glass 由 useTheme 写入 <html> */
 [data-glass="emerald"] {
-  --glass-tint: rgba(16, 185, 129, 0.08);
+  --glass-tint: rgb(15 24 35 / 0.62);
+  --glass-tint-hover: rgb(15 24 35 / 0.80);
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border: rgb(255 255 255 / 0.18);
+  --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
 }
 [data-glass="soft"] {
-  --glass-tint: rgba(255, 255, 255, 0.06);
+  --glass-tint: rgb(10 16 25 / 0.58);
+  --glass-tint-hover: rgb(10 16 25 / 0.76);
   --glass-saturate: 120%;
   --glass-blur: 18px;
-  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-border: rgb(255 255 255 / 0.14);
+  --glass-shadow: 0 8px 28px rgb(0 0 0 / 0.42);
 }
 [data-glass="high-contrast"] {
-  --glass-tint: rgba(255, 255, 255, 0.02);
+  --glass-tint: rgb(12 20 30 / 0.78);
+  --glass-tint-hover: rgb(12 20 30 / 0.92);
   --glass-saturate: 180%;
   --glass-blur: 10px;
-  --glass-border: rgba(255, 255, 255, 0.28);
+  --glass-border: rgb(255 255 255 / 0.28);
+  --glass-shadow: 0 6px 22px rgb(0 0 0 / 0.55);
 }
 [data-glass="midnight"] {
-  --glass-tint: rgba(99, 102, 241, 0.10);
+  --glass-tint: rgb(15 20 38 / 0.66);
+  --glass-tint-hover: rgb(15 20 38 / 0.84);
   --glass-saturate: 135%;
   --glass-blur: 16px;
-  --glass-border: rgba(129, 140, 248, 0.22);
+  --glass-border: rgb(129 140 248 / 0.22);
+  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.50);
 }
 [data-glass="custom"] {
   /* --glass-tint 等由 useTheme 内联覆盖 */
 }
 
-/* 明亮风格模板 */
+/* 明亮风格模板 — 对齐 komari glass-admin light */
 [data-theme="light"] {
-  --bg-primary: #f1f5f9;
-  --bg-secondary: rgba(255, 255, 255, 0.75);
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --bg-surface: rgba(203, 213, 225, 0.35);
-  --border-divider: rgba(15, 23, 42, 0.1);
-  --accent: #0284c7;
-  --accent-hover: #0369a1;
-  --success: #16a34a;
+  --bg-primary: #eef2f5;
+  --bg-secondary: rgb(255 255 255 / 0.68);
+  --text-primary: #172026;
+  --text-secondary: #52616b;
+  --text-muted: #7a8a94;
+  --bg-surface: rgb(255 255 255 / 0.42);
+  --border-divider: rgb(68 83 94 / 0.22);
+  --accent: #087f5b;
+  --accent-hover: #0b8f68;
+  --success: #079b75;
   --warning: #ca8a04;
   --danger: #dc2626;
-  --border: rgba(15, 23, 42, 0.12);
-  --glass-tint: rgba(2, 132, 199, 0.06);
-  --glass-border: rgba(15, 23, 42, 0.10);
-  --glass-shadow: rgba(15, 23, 42, 0.12);
+  --border: rgb(68 83 94 / 0.22);
+  --glass-tint: rgb(255 255 255 / 0.68);
+  --glass-tint-hover: rgb(255 255 255 / 0.80);
+  --glass-border: rgb(226 232 240 / 0.68);
+  --glass-shadow: 0 8px 28px rgb(15 23 42 / 0.18);
 }
 
 [data-theme="light"] body {
@@ -79,12 +89,24 @@
 }
 
 [data-theme="light"] .glass {
-  background: var(--bg-secondary);
-  border-color: var(--glass-border);
+  background-color: var(--glass-tint) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--glass-shadow);
+}
+[data-theme="light"] .glass:hover {
+  background-color: var(--glass-tint-hover) !important;
+  box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
+}
+
+[data-theme="light"] header.glass {
+  background-color: rgb(241 245 249 / 0.76) !important;
+  backdrop-filter: saturate(150%) blur(14px) !important;
+  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
+  border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
 }
 
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
 }
 
 [data-theme="light"] .status-dot {
@@ -132,16 +154,31 @@ body {
   pointer-events: none;
 }
 
-/* 毛玻璃卡片：saturate 增强 + Firefox 降级 + 旧 webkit 兜底 */
+/* 毛玻璃卡片：对齐 komari-theme-Glassmorphism */
 .glass {
-  background: var(--glass-tint, var(--bg-secondary));
+  background-color: var(--glass-tint, var(--bg-secondary)) !important;
   backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
-  border: 1px solid var(--glass-border, var(--border));
+  border: 1px solid var(--glass-border, var(--border)) !important;
   border-radius: 1rem;
+  box-shadow: var(--glass-shadow, 0 8px 30px rgb(0 0 0 / 0.48));
+}
+.glass:hover {
+  background-color: var(--glass-tint-hover, var(--bg-secondary)) !important;
+  box-shadow: 0 12px 38px var(--glass-shadow, rgb(0 0 0 / 0.55));
 }
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
-  .glass { background: var(--bg-secondary); }
+  .glass { background-color: var(--bg-secondary) !important; }
+}
+
+/* header 独立毛玻璃：对齐 komari（saturate 150% + border-bottom） */
+header.glass {
+  background-color: var(--glass-tint, var(--bg-secondary)) !important;
+  backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
+  -webkit-backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
+  border-bottom: 1px solid var(--glass-border, var(--border)) !important;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .card-hover {
@@ -150,8 +187,8 @@ body {
 
 .card-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 30px var(--glass-shadow, rgba(2, 8, 23, 0.5));
-  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 12px 38px var(--glass-shadow, rgb(0 0 0 / 0.55));
+  border-color: var(--accent-hover);
 }
 
 .status-dot {

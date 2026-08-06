@@ -1723,71 +1723,81 @@
 }
 
 :root {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b99;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --bg-surface: #33415566;
-  --border-divider: #94a3b826;
-  --accent: #38bdf8;
-  --accent-hover: #0ea5e9;
-  --success: #4ade80;
-  --warning: #facc15;
-  --danger: #f87171;
-  --border: #94a3b826;
-  --glass-tint: #10b98114;
+  --bg-primary: #0c1117;
+  --bg-secondary: #0a0e16d1;
+  --text-primary: #edf3f5;
+  --text-secondary: #a9b6be;
+  --text-muted: #7a8a94;
+  --bg-surface: #0f18236b;
+  --border-divider: #d6e4ea29;
+  --accent: #3ccf91;
+  --accent-hover: #48d9a0;
+  --success: #31c99a;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --border: #d6e4ea29;
+  --glass-tint: #0f18239e;
+  --glass-tint-hover: #0f1823cc;
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: #ffffff1f;
-  --glass-shadow: #02081773;
+  --glass-border: #ffffff2e;
+  --glass-shadow: 0 8px 30px #0000007a;
 }
 
 [data-glass="emerald"] {
-  --glass-tint: #10b98114;
+  --glass-tint: #0f18239e;
+  --glass-tint-hover: #0f1823cc;
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: #ffffff1f;
+  --glass-border: #ffffff2e;
+  --glass-shadow: 0 8px 30px #0000007a;
 }
 
 [data-glass="soft"] {
-  --glass-tint: #ffffff0f;
+  --glass-tint: #0a101994;
+  --glass-tint-hover: #0a1019c2;
   --glass-saturate: 120%;
   --glass-blur: 18px;
-  --glass-border: #ffffff1a;
+  --glass-border: #ffffff24;
+  --glass-shadow: 0 8px 28px #0000006b;
 }
 
 [data-glass="high-contrast"] {
-  --glass-tint: #ffffff05;
+  --glass-tint: #0c141ec7;
+  --glass-tint-hover: #0c141eeb;
   --glass-saturate: 180%;
   --glass-blur: 10px;
   --glass-border: #ffffff47;
+  --glass-shadow: 0 6px 22px #0000008c;
 }
 
 [data-glass="midnight"] {
-  --glass-tint: #6366f11a;
+  --glass-tint: #0f1426a8;
+  --glass-tint-hover: #0f1426d6;
   --glass-saturate: 135%;
   --glass-blur: 16px;
   --glass-border: #818cf838;
+  --glass-shadow: 0 8px 32px #00000080;
 }
 
 [data-theme="light"] {
-  --bg-primary: #f1f5f9;
-  --bg-secondary: #ffffffbf;
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --bg-surface: #cbd5e159;
-  --border-divider: #0f172a1a;
-  --accent: #0284c7;
-  --accent-hover: #0369a1;
-  --success: #16a34a;
+  --bg-primary: #eef2f5;
+  --bg-secondary: #ffffffad;
+  --text-primary: #172026;
+  --text-secondary: #52616b;
+  --text-muted: #7a8a94;
+  --bg-surface: #ffffff6b;
+  --border-divider: #44535e38;
+  --accent: #087f5b;
+  --accent-hover: #0b8f68;
+  --success: #079b75;
   --warning: #ca8a04;
   --danger: #dc2626;
-  --border: #0f172a1f;
-  --glass-tint: #0284c70f;
-  --glass-border: #0f172a1a;
-  --glass-shadow: #0f172a1f;
+  --border: #44535e38;
+  --glass-tint: #ffffffad;
+  --glass-tint-hover: #fffc;
+  --glass-border: #e2e8f0ad;
+  --glass-shadow: 0 8px 28px #0f172a2e;
 }
 
 [data-theme="light"] body {
@@ -1796,12 +1806,24 @@
 }
 
 [data-theme="light"] .glass {
-  background: var(--bg-secondary);
-  border-color: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  background-color: var(--glass-tint) !important;
+  border-color: var(--glass-border) !important;
+}
+
+[data-theme="light"] .glass:hover {
+  box-shadow: 0 12px 38px #0f172a33;
+  background-color: var(--glass-tint-hover) !important;
+}
+
+[data-theme="light"] header.glass {
+  -webkit-backdrop-filter: saturate(150%) blur(14px) !important;
+  background-color: #f1f5f9c2 !important;
+  border-bottom: 1px solid #e2e8f094 !important;
 }
 
 [data-theme="light"] .card-hover:hover {
-  box-shadow: 0 10px 30px #0f172a1f;
+  box-shadow: 0 12px 38px #0f172a33;
 }
 
 [data-theme="light"] .status-dot {
@@ -1863,17 +1885,31 @@ body {
 }
 
 .glass {
-  background: var(--glass-tint, var(--bg-secondary));
-  border: 1px solid var(--glass-border, var(--border));
+  box-shadow: var(--glass-shadow, 0 8px 30px #0000007a);
   border-radius: 1rem;
+  background-color: var(--glass-tint, var(--bg-secondary)) !important;
   backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
+  border: 1px solid var(--glass-border, var(--border)) !important;
+}
+
+.glass:hover {
+  box-shadow: 0 12px 38px var(--glass-shadow, #0000008c);
+  background-color: var(--glass-tint-hover, var(--bg-secondary)) !important;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {
   .glass {
-    background: var(--bg-secondary);
+    background-color: var(--bg-secondary) !important;
   }
+}
+
+header.glass {
+  box-shadow: none;
+  border-radius: 0;
+  background-color: var(--glass-tint, var(--bg-secondary)) !important;
+  -webkit-backdrop-filter: saturate(150%) blur(var(--glass-blur, 14px)) !important;
+  border-bottom: 1px solid var(--glass-border, var(--border)) !important;
 }
 
 .card-hover {
@@ -1881,8 +1917,8 @@ body {
 }
 
 .card-hover:hover {
-  box-shadow: 0 10px 30px var(--glass-shadow, #02081780);
-  border-color: #38bdf84d;
+  box-shadow: 0 12px 38px var(--glass-shadow, #0000008c);
+  border-color: var(--accent-hover);
   transform: translateY(-2px);
 }
 
