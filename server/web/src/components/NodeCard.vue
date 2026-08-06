@@ -157,13 +157,13 @@ const trafficPct = computed(() => {
     <div class="card-disk-row">
       <span class="m-lbl">流量</span>
       <div v-if="trafficPct != null" class="bar"><div class="bar-fill" :class="pctClass(trafficPct)" :style="{ width: `${trafficPct}%` }"></div></div>
-      <span class="m-val">{{ formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0)) }}</span>
+      <span class="m-val">{{ formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0)) }}<span v-if="agent.monthly_quota_gb"> /{{ agent.monthly_quota_gb }} GB</span></span>
     </div>
 
     <!-- ===== 旧版 .foot ===== -->
     <div class="card-foot">
       <span class="uptime">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</span>
-      <div v-if="agent.monthly_quota_gb" class="text-[10px] text-muted">配额 {{ agent.monthly_quota_gb }} GB</div>
+      <span v-if="agent.expire_at" class="text-[10px]" :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'text-rose-400' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'text-amber-400' : 'text-muted'">{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? '已过期' : `剩余 ${daysUntil(agent.expire_at)} 天` }}</span>
     </div>
   </RouterLink>
 </template>
