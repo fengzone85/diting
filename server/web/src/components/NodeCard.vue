@@ -80,7 +80,7 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
         />
         <div>
           <h3 class="font-semibold text-white">{{ agent.name }}</h3>
-          <p v-if="template === 'visual' && (agent.group || merchantName)" class="text-xs text-slate-500">
+          <p v-if="template === 'visual' && (agent.group || merchantName)" class="text-xs text-secondary">
             {{ agent.group || '' }}{{ agent.group && merchantName ? ' · ' : '' }}{{ merchantName || '' }}
           </p>
         </div>
@@ -101,19 +101,19 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
 
     <div v-if="template === 'simple'" class="mt-4 grid grid-cols-2 gap-4 text-sm">
       <div>
-        <p class="text-slate-500">{{ t('card.cpu') }}</p>
+        <p class="text-secondary">{{ t('card.cpu') }}</p>
         <p class="font-medium">{{ formatPercent(cpu) }}</p>
       </div>
       <div>
-        <p class="text-slate-500">{{ t('card.memory') }}</p>
+        <p class="text-secondary">{{ t('card.memory') }}</p>
         <p class="font-medium">{{ formatBytes(agent.mem_used) }} / {{ formatBytes(agent.mem_total) }}</p>
       </div>
       <div>
-        <p class="text-slate-500">{{ t('card.disk') }}</p>
+        <p class="text-secondary">{{ t('card.disk') }}</p>
         <p class="font-medium">{{ formatBytes(agent.disk_used) }} / {{ formatBytes(agent.disk_total) }}</p>
       </div>
       <div>
-        <p class="text-slate-500">{{ t('card.uptime') }}</p>
+        <p class="text-secondary">{{ t('card.uptime') }}</p>
         <p class="font-medium">{{ formatDuration(agent.uptime) }}</p>
       </div>
     </div>
@@ -121,26 +121,26 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
     <div v-else class="mt-4 space-y-3 text-sm">
       <div class="grid grid-cols-3 gap-3">
         <div>
-          <p class="text-slate-500">{{ t('card.cpu') }}</p>
+          <p class="text-secondary">{{ t('card.cpu') }}</p>
           <p class="font-medium">{{ formatPercent(cpu) }}</p>
         </div>
         <div>
-          <p class="text-slate-500">{{ t('card.memory') }}</p>
+          <p class="text-secondary">{{ t('card.memory') }}</p>
           <p class="font-medium">{{ formatPercent(agent.mem_pct) }}</p>
         </div>
         <div>
-          <p class="text-slate-500">{{ t('card.disk') }}</p>
+          <p class="text-secondary">{{ t('card.disk') }}</p>
           <p class="font-medium">{{ formatPercent(agent.disk_pct) }}</p>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 text-xs">
         <div>
-          <p class="text-slate-500">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</p>
-          <p class="text-slate-500">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</p>
+          <p class="text-secondary">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</p>
+          <p class="text-secondary">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</p>
         </div>
         <div>
-          <p class="text-slate-500">{{ t('card.monthlyTraffic') }} {{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</p>
-          <p class="text-slate-500">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</p>
+          <p class="text-secondary">{{ t('card.monthlyTraffic') }} {{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</p>
+          <p class="text-secondary">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</p>
         </div>
       </div>
       <div v-if="agent.probes && Object.keys(agent.probes).length" class="flex flex-wrap gap-2 text-xs">
@@ -153,7 +153,7 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
           {{ target }} {{ avgProbe(points) != null ? `${formatNumber(avgProbe(points)!, 1)} ms` : t('card.timeout') }}
         </span>
       </div>
-      <div v-if="agent.expire_at || agent.monthly_quota_gb || tag" class="flex flex-wrap gap-3 text-xs text-slate-500">
+      <div v-if="agent.expire_at || agent.monthly_quota_gb || tag" class="flex flex-wrap gap-3 text-xs text-secondary">
         <span v-if="agent.expire_at">
           {{ t('card.expire') }}
           <span
