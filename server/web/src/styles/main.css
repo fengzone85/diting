@@ -17,42 +17,43 @@
   --border: rgb(214 228 234 / 0.16);
 
   /* 毛玻璃预设（data-glass 控制），默认 emerald — 对齐 komari */
-  --glass-tint: rgb(15 24 35 / 0.62);               /* 暗色卡片底色 */
-  --glass-tint-hover: rgb(15 24 35 / 0.80);          /* hover 时提亮 */
+  --glass-tint: rgb(10 14 22 / 0.82);               /* 暗色卡片底色 */
+  --glass-tint-hover: rgb(10 14 22 / 0.90);          /* hover 时提亮 */
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: rgb(255 255 255 / 0.18);
   --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
+  --radius: 0.625rem;
 }
 
 /* 毛玻璃预设：data-glass 由 useTheme 写入 <html> */
 [data-glass="emerald"] {
-  --glass-tint: rgb(15 24 35 / 0.62);
-  --glass-tint-hover: rgb(15 24 35 / 0.80);
+  --glass-tint: rgb(10 14 22 / 0.82);
+  --glass-tint-hover: rgb(10 14 22 / 0.90);
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: rgb(255 255 255 / 0.18);
   --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
 }
 [data-glass="soft"] {
-  --glass-tint: rgb(10 16 25 / 0.58);
-  --glass-tint-hover: rgb(10 16 25 / 0.76);
+  --glass-tint: rgb(10 14 22 / 0.78);
+  --glass-tint-hover: rgb(10 14 22 / 0.86);
   --glass-saturate: 120%;
   --glass-blur: 18px;
   --glass-border: rgb(255 255 255 / 0.14);
   --glass-shadow: 0 8px 28px rgb(0 0 0 / 0.42);
 }
 [data-glass="high-contrast"] {
-  --glass-tint: rgb(12 20 30 / 0.78);
-  --glass-tint-hover: rgb(12 20 30 / 0.92);
+  --glass-tint: rgb(10 14 22 / 0.88);
+  --glass-tint-hover: rgb(10 14 22 / 0.95);
   --glass-saturate: 180%;
   --glass-blur: 10px;
   --glass-border: rgb(255 255 255 / 0.28);
   --glass-shadow: 0 6px 22px rgb(0 0 0 / 0.55);
 }
 [data-glass="midnight"] {
-  --glass-tint: rgb(15 20 38 / 0.66);
-  --glass-tint-hover: rgb(15 20 38 / 0.84);
+  --glass-tint: rgb(15 20 38 / 0.84);
+  --glass-tint-hover: rgb(15 20 38 / 0.92);
   --glass-saturate: 135%;
   --glass-blur: 16px;
   --glass-border: rgb(129 140 248 / 0.22);
@@ -77,8 +78,8 @@
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgb(68 83 94 / 0.22);
-  --glass-tint: rgb(255 255 255 / 0.68);
-  --glass-tint-hover: rgb(255 255 255 / 0.80);
+  --glass-tint: rgb(241 245 249 / 0.74);
+  --glass-tint-hover: rgb(248 250 252 / 0.80);
   --glass-border: rgb(226 232 240 / 0.68);
   --glass-shadow: 0 8px 28px rgb(15 23 42 / 0.18);
 }
@@ -100,6 +101,12 @@
 
 [data-theme="light"] .card-hover:hover {
   box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
+}
+
+[data-theme="light"] .node-card:hover,
+[data-theme="light"] .bg-card:hover,
+[data-theme="light"] [data-slot='card']:hover {
+  background-color: var(--glass-tint-hover) !important;
 }
 
 [data-theme="light"] .status-dot {
@@ -153,7 +160,7 @@ body {
   backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   border: 1px solid var(--glass-border, var(--border)) !important;
-  border-radius: 1rem;
+  border-radius: var(--radius, 0.625rem);
   box-shadow: var(--glass-shadow, 0 8px 30px rgb(0 0 0 / 0.48));
 }
 .glass:hover {
