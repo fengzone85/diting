@@ -135,8 +135,8 @@ body {
 /* 毛玻璃卡片：saturate 增强 + Firefox 降级 + 旧 webkit 兜底 */
 .glass {
   background: var(--glass-tint, var(--bg-secondary));
-  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px));
+  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   border: 1px solid var(--glass-border, var(--border));
   border-radius: 1rem;
 }

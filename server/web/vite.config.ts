@@ -10,6 +10,7 @@ export default defineConfig({
     outDir: '../public',
     emptyOutDir: false,
     sourcemap: false,
+    cssMinify: false,
     rollupOptions: {
       output: {
         manualChunks: {
