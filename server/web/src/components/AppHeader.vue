@@ -60,17 +60,17 @@ const themeIcon = computed(() => {
           <button
             class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-base hover:bg-surface"
             :title="t('theme.auto')"
-            @click="themeMenu = !themeMenu"
+            @click.stop="themeMenu = !themeMenu"
           >
             {{ themeIcon }}
           </button>
-          <div v-if="themeMenu" class="absolute right-0 z-50 mt-1 w-32 rounded-lg border border-divider bg-surface p-1 shadow-xl">
+          <div v-if="themeMenu" class="absolute right-0 z-50 mt-1 w-32 rounded-lg border border-divider bg-surface p-1 shadow-xl" @click.stop>
             <button
               v-for="opt in themeOptions"
               :key="opt.id"
               class="block w-full rounded px-3 py-1.5 text-left text-xs hover:bg-slate-800/30"
               :class="theme === opt.id ? 'text-accent' : 'text-content'"
-              @click="pickTheme(opt.id)"
+              @click.stop="pickTheme(opt.id)"
             >
               {{ opt.label }}
             </button>
