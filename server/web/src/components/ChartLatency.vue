@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { useChartTheme } from '../composables/useChartTheme';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -18,25 +19,30 @@ const props = defineProps<{
   color?: string;
 }>();
 
+const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 
-function init() {
-  if (!chartRef.value) return;
-  chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
-  chart.setOption({
+function baseOption(): any {
+  const c = colors.value;
+  return {
     backgroundColor: 'transparent',
     grid: { top: 30, right: 20, bottom: 30, left: 50 },
-    tooltip: { trigger: 'axis' },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: c.tooltipBg,
+      borderColor: c.tooltipBorder,
+      textStyle: { color: c.text },
+    },
     xAxis: {
       type: 'time',
-      axisLine: { lineStyle: { color: '#475569' } },
-      axisLabel: { color: '#94a3b8' },
+      axisLine: { lineStyle: { color: c.axisLine } },
+      axisLabel: { color: c.text },
     },
     yAxis: {
       type: 'value',
-      splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },
-      axisLabel: { color: '#94a3b8' },
+      splitLine: { lineStyle: { color: c.splitLine, type: 'dashed' } },
+      axisLabel: { color: c.text },
     },
     series: [{
       type: 'line',
@@ -46,8 +52,16 @@ function init() {
       areaStyle: { color: props.color || '#38bdf8', opacity: 0.15 },
       data: props.data.map(d => [d.t, d.v]),
     }],
-  });
+  };
 }
+
+function init() {
+  if (!chartRef.value) return;
+  chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
+  chart.setOption(baseOption());
+}
+
+watch(colors, () => chart?.setOption(baseOption(), true));
 
 watch(() => props.data, (next) => {
   chart?.setOption({
@@ -61,7 +75,7 @@ onUnmounted(() => chart?.dispose());
 
 <template>
   <div class="glass p-4">
-    <h4 v-if="title" class="mb-3 text-sm font-medium text-slate-300">{{ title }}</h4>
+    <h4 v-if="title" class="mb-3 text-sm font-medium text-content">{{ title }}</h4>
     <div ref="chartRef" class="h-48 w-full" />
   </div>
 </template>

@@ -128,12 +128,12 @@ onMounted(load);
         <RouterLink
           v-if="neighborIds.prev"
           :to="`/node/${neighborIds.prev.id}`"
-          class="text-sm text-slate-400 hover:text-sky-300"
+          class="text-sm text-muted hover:text-sky-300"
         >← {{ neighborIds.prev.name }}</RouterLink>
         <RouterLink
           v-if="neighborIds.next"
           :to="`/node/${neighborIds.next.id}`"
-          class="ml-auto text-sm text-slate-400 hover:text-sky-300"
+          class="ml-auto text-sm text-muted hover:text-sky-300"
         >{{ neighborIds.next.name }} →</RouterLink>
       </div>
       <ErrorMessage v-if="error" class="mb-6" :message="error" />
@@ -145,29 +145,29 @@ onMounted(load);
             <img v-if="agent.country || agent.country_code" :src="`/flags/${(agent.country_code || agent.country || '').toLowerCase()}.svg`" class="h-6 w-8 rounded-sm" :alt="agent.country" />
             <h1 class="text-2xl font-bold">{{ agent.name }}</h1>
             <span class="status-dot" :class="agent.online ? 'status-online' : 'status-offline'" />
-            <span v-if="agent.version" class="ml-auto rounded-full bg-slate-700/50 px-3 py-1 text-xs text-slate-400">v{{ agent.version }}</span>
+            <span v-if="agent.version" class="ml-auto rounded-full bg-surface px-3 py-1 text-xs text-muted">v{{ agent.version }}</span>
           </div>
-          <p class="mt-2 text-sm text-slate-500">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
+          <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
         </div>
 
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">系统信息</h3>
           <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">主机名</span><span class="text-slate-200">{{ agent.hostname || '—' }}</span>
+            <div class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">主机名</span><span class="text-content">{{ agent.hostname || '—' }}</span>
             </div>
-            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">操作系统</span><span class="text-slate-200">{{ agent.os || '—' }}</span>
+            <div class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">操作系统</span><span class="text-content">{{ agent.os || '—' }}</span>
             </div>
-            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">Agent 版本</span><span class="text-slate-200">{{ agent.version || '—' }}</span>
+            <div class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">Agent 版本</span><span class="text-content">{{ agent.version || '—' }}</span>
             </div>
-            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">在线状态</span>
+            <div class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">在线状态</span>
               <span :class="agent.online ? 'text-emerald-400' : 'text-rose-400'">{{ agent.online ? '在线' : '离线' }}</span>
             </div>
-            <div class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">Agent ID</span><span class="text-slate-200">{{ agent.id }}</span>
+            <div class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">Agent ID</span><span class="text-content">{{ agent.id }}</span>
             </div>
           </div>
         </div>
@@ -192,7 +192,7 @@ onMounted(load);
           <StatCard label="Swap %" :value="formatPercent(agent.swap_pct)" />
         </div>
 
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <ChartLatency title="CPU %" :data="cpuSeries" color="#38bdf8" />
           <ChartLatency title="内存 %" :data="memSeries" color="#a78bfa" />
           <ChartLatencyDual
@@ -216,17 +216,17 @@ onMounted(load);
 
         <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">备注与套餐</h3>
-          <div v-if="agent.note" class="mb-3 rounded-lg bg-slate-800/40 px-4 py-3 text-sm text-slate-300">{{ agent.note }}</div>
+          <div v-if="agent.note" class="mb-3 rounded-lg bg-surface px-4 py-3 text-sm text-content">{{ agent.note }}</div>
           <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            <div v-if="agent.monthly_quota_gb != null" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">月流量配额</span><span class="text-slate-200">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
+            <div v-if="agent.monthly_quota_gb != null" class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">月流量配额</span><span class="text-content">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
             </div>
-            <div v-if="agent.expire_at" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">到期时间</span><span class="text-slate-200">{{ formatDate(agent.expire_at) }}</span>
+            <div v-if="agent.expire_at" class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">到期时间</span><span class="text-content">{{ formatDate(agent.expire_at) }}</span>
             </div>
-            <div v-if="agent.price != null" class="flex justify-between gap-4 border-b border-slate-700/40 py-1">
-              <span class="text-slate-400">价格</span>
-              <span class="text-slate-200">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ agent.billing_cycle }}天</span></span>
+            <div v-if="agent.price != null" class="flex justify-between gap-4 border-b border-divider py-1">
+              <span class="text-muted">价格</span>
+              <span class="text-content">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ agent.billing_cycle }}天</span></span>
             </div>
           </div>
         </div>
@@ -234,13 +234,13 @@ onMounted(load);
         <div v-if="agent.disks?.length" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">磁盘</h3>
           <div class="space-y-2">
-            <div v-for="disk in agent.disks" :key="disk.mount" class="flex flex-col gap-2 rounded-lg bg-slate-800/40 px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <span class="text-slate-300">{{ disk.mount }}</span>
+            <div v-for="disk in agent.disks" :key="disk.mount" class="flex flex-col gap-2 rounded-lg bg-surface px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <span class="text-content">{{ disk.mount }}</span>
               <div class="flex items-center gap-4">
-                <div class="h-2 w-24 flex-shrink-0 overflow-hidden rounded-full bg-slate-700 sm:w-32">
+                <div class="h-2 w-24 flex-shrink-0 overflow-hidden rounded-full bg-surface sm:w-32">
                   <div class="h-full bg-sky-500" :style="{ width: `${Math.min(disk.pct || 0, 100)}%` }" />
                 </div>
-                <span class="text-slate-400">{{ formatBytes(disk.used) }} / {{ formatBytes(disk.total) }} ({{ formatPercent(disk.pct) }})</span>
+                <span class="text-muted">{{ formatBytes(disk.used) }} / {{ formatBytes(disk.total) }} ({{ formatPercent(disk.pct) }})</span>
               </div>
             </div>
           </div>
@@ -254,21 +254,21 @@ onMounted(load);
               :key="r.key"
               @click="switchRange(r.key)"
               class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
-              :class="currentRange === r.key ? 'bg-sky-500 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-sky-300'"
+              :class="currentRange === r.key ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
             >{{ r.label }}</span>
           </div>
           <div class="mb-3 flex flex-wrap gap-4 text-xs">
             <span
               v-for="(points, target) in probes"
               :key="`stat-${target}`"
-              class="rounded-lg bg-slate-800/40 px-3 py-1.5"
+              class="rounded-lg bg-surface px-3 py-1.5"
             >
-              <span class="text-slate-300">{{ target }}</span>
+              <span class="text-content">{{ target }}</span>
               <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'" class="ml-2">
                 avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
               </span>
               <span class="ml-2 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
-              <span class="ml-2 text-slate-500">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
+              <span class="ml-2 text-muted">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
             </span>
           </div>
           <ChartLatencyMulti title="延迟波形 (ms)" :series="probeSeriesList" />

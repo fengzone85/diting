@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { useChartTheme } from '../composables/useChartTheme';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -25,6 +26,7 @@ const props = defineProps<{
 
 const PALETTE = ['#f472b6', '#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185'];
 
+const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 
@@ -39,38 +41,48 @@ function buildSeries() {
   }));
 }
 
-function init() {
-  if (!chartRef.value) return;
-  chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
-  chart.setOption({
+function baseOption(): any {
+  const c = colors.value;
+  return {
     backgroundColor: 'transparent',
     legend: {
       top: 2,
-      textStyle: { color: '#cbd5e1', fontSize: 11 },
+      textStyle: { color: c.text, fontSize: 11 },
       icon: 'roundRect',
     },
     grid: { top: 34, right: 20, bottom: 30, left: 52 },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'cross', label: { backgroundColor: '#334155' } },
+      backgroundColor: c.tooltipBg,
+      borderColor: c.tooltipBorder,
+      textStyle: { color: c.text },
+      axisPointer: { type: 'cross', label: { backgroundColor: c.splitLine } },
     },
     xAxis: {
       type: 'time',
-      axisLine: { lineStyle: { color: '#475569' } },
-      axisLabel: { color: '#94a3b8' },
-      splitLine: { show: true, lineStyle: { color: '#1e293b' } },
+      axisLine: { lineStyle: { color: c.axisLine } },
+      axisLabel: { color: c.text },
+      splitLine: { show: true, lineStyle: { color: c.splitLine } },
     },
     yAxis: {
       type: 'value',
       name: 'ms',
-      nameTextStyle: { color: '#94a3b8' },
-      splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },
-      axisLabel: { color: '#94a3b8' },
-      axisLine: { show: true, lineStyle: { color: '#475569' } },
+      nameTextStyle: { color: c.text },
+      splitLine: { lineStyle: { color: c.splitLine, type: 'dashed' } },
+      axisLabel: { color: c.text },
+      axisLine: { show: true, lineStyle: { color: c.axisLine } },
     },
     series: buildSeries(),
-  });
+  };
 }
+
+function init() {
+  if (!chartRef.value) return;
+  chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
+  chart.setOption(baseOption());
+}
+
+watch(colors, () => chart?.setOption(baseOption(), true));
 
 watch(() => props.series, () => {
   chart?.setOption({ series: buildSeries() });
@@ -82,7 +94,7 @@ onUnmounted(() => chart?.dispose());
 
 <template>
   <div class="glass p-4">
-    <h4 v-if="title" class="mb-2 text-sm font-medium text-slate-300">{{ title }}</h4>
+    <h4 v-if="title" class="mb-2 text-sm font-medium text-content">{{ title }}</h4>
     <div ref="chartRef" class="h-56 w-full" />
   </div>
 </template>
