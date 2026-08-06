@@ -1,0 +1,100 @@
+export const zhCN: Record<string, string> = {
+  // 通用
+  'common.search': '搜索',
+  'common.name': '名称',
+  'common.id': 'ID',
+  'common.online': '在线',
+  'common.offline': '离线',
+  'common.loading': '加载中…',
+  'common.error': '加载失败',
+  'common.cancel': '取消',
+  'common.confirm': '确认',
+  'common.save': '保存',
+  'common.delete': '删除',
+  'common.reset': '重置',
+  'common.renew': '续期',
+  'common.detail': '详情',
+  'common.back': '返回',
+  'common.copy': '复制',
+  'common.copied': '已复制',
+  'common.language': '语言',
+
+  // 导航
+  'nav.dashboard': '仪表盘',
+  'nav.agents': '受控端',
+  'nav.billing': '账单概览',
+  'nav.ai': 'AI 运维分析',
+  'nav.settings': '设置',
+  'nav.logout': '退出',
+  'nav.admin': '管理后台',
+
+  // 受控端列表
+  'agents.title': '受控端',
+  'agents.add': '新增',
+  'agents.searchPlaceholder': '搜索名称 / ID',
+  'agents.sortByName': '按名称',
+  'agents.sortByCpu': '按 CPU',
+  'agents.sortByMem': '按内存',
+  'agents.sortByStatus': '按在线状态',
+  'agents.selectAll': '全选',
+  'agents.selected': '已选 {n} 项',
+  'agents.batchDelete': '批量删除',
+  'agents.batchReset': '批量重置 Token',
+  'agents.batchRenew': '批量续期',
+  'agents.noMatch': '无匹配的受控端',
+  'agents.empty': '暂无受控端',
+  'agents.tokenOnce': '首次返回的 Token 仅此一次可见',
+  'agents.linux': 'Linux 原生',
+  'agents.docker': 'Docker',
+  'agents.windows': 'Windows',
+
+  // 仪表盘
+  'dashboard.title': '仪表盘',
+  'dashboard.totalAgents': '受控端总数',
+  'dashboard.online': '在线',
+  'dashboard.offline': '离线',
+  'dashboard.avgCpu': '平均 CPU',
+  'dashboard.avgMem': '平均内存',
+  'dashboard.monthlyCost': '本月费用',
+  'dashboard.testAlert': '发送测试告警',
+  'dashboard.quickLinks': '快捷入口',
+
+  // 设置
+  'settings.title': '设置',
+  'settings.ui': '界面设置',
+  'settings.notify': '通知设置',
+  'settings.smtp': 'SMTP',
+  'settings.telegram': 'Telegram',
+
+  // 登录
+  'login.title': '登录管理后台',
+  'login.token': '管理员 Token',
+  'login.totp': '两步验证码',
+  'login.submit': '登录',
+  'login.twofaRequired': '需要输入两步验证码',
+
+  // 公开页
+  'public.nodes': '节点',
+  'public.cpu': 'CPU',
+  'public.memory': '内存',
+  'public.disk': '磁盘',
+  'public.network': '网络',
+  'public.uptime': '运行时间',
+  'public.noNodes': '暂无节点',
+
+  // AI
+  'ai.title': 'AI 运维分析',
+  'ai.config': '配置',
+  'ai.status': '运行状态',
+  'ai.reports': '历史报告',
+  'ai.noReports': '暂无报告',
+  'ai.run': '立即运行',
+  'ai.enabled': '启用 AI 运维分析',
+
+  // 账单
+  'billing.title': '账单概览',
+  'billing.monthlyTotal': '本月总费用',
+  'billing.perGroup': '分组费用',
+  'billing.expiringSoon': '即将到期',
+  'billing.agentCount': '受控端数量',
+};

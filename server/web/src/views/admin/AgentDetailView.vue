@@ -3,7 +3,8 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
-import type { Agent, InstallCommands, ModifyCommands } from '../../services/types';
+import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
+import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
 
 const route = useRoute();
@@ -144,6 +145,47 @@ function copy(text: string) {
     setTimeout(() => (message.value = ''), 2000);
   });
 }
+
+// B7: 单 agent 历史趋势图
+const chartRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('6h');
+const cpuTrend = ref<ChartPoint[]>([]);
+const memTrend = ref<ChartPoint[]>([]);
+const netTrend = ref<ChartPoint[]>([]);
+const chartError = ref('');
+
+function toPoints(rows: { ts: number; cpu?: number; mem_pct?: number; net_rx_rate?: number; net_tx_rate?: number }[]): void {
+  cpuTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: r.cpu ?? 0 }));
+  memTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: r.mem_pct ?? 0 }));
+  netTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: ((r.net_rx_rate || 0) + (r.net_tx_rate || 0)) / 1024 / 1024 }));
+}
+
+async function loadMetrics() {
+  chartError.value = '';
+  try {
+    const rows = await adminApi.metrics(agentId.value, chartRange.value);
+    toPoints(rows as { ts: number; cpu?: number; mem_pct?: number; net_rx_rate?: number; net_tx_rate?: number }[]);
+  } catch (e) {
+    chartError.value = '趋势加载失败：' + ((e as Error).message || '未知错误');
+  }
+}
+
+async function changeRange(r: '1h' | '6h' | '24h' | '7d' | '30d') {
+  chartRange.value = r;
+  await loadMetrics();
+}
+
+onMounted(async () => {
+  loading.value = true;
+  try {
+    await loadAdmin();
+    await fetchCommands();
+    await loadMetrics();
+  } catch (e) {
+    error.value = (e as Error).message || '加载失败';
+  } finally {
+    loading.value = false;
+  }
+});
 
 function formatDate(ts?: number) {
   if (!ts) return '-';
@@ -303,6 +345,21 @@ function formatDate(ts?: number) {
                 <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(newToken)">复制</button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="glass p-6">
+          <div class="mb-3 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">资源趋势</h2>
+            <div class="flex gap-1 text-xs">
+              <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-400'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
+            </div>
+          </div>
+          <div v-if="chartError" class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{{ chartError }}</div>
+          <div class="grid grid-cols-1 gap-4">
+            <ChartLatency title="CPU (%)" :data="cpuTrend" color="#38bdf8" />
+            <ChartLatency title="内存 (%)" :data="memTrend" color="#a78bfa" />
+            <ChartLatency title="流量 (MB/s)" :data="netTrend" color="#34d399" />
           </div>
         </div>
 

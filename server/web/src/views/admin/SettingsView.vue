@@ -112,9 +112,17 @@ async function save() {
         <FormInput v-model="local.ui.logo_url" label="Logo URL" />
         <div>
           <label class="mb-1 block text-sm text-slate-400">默认公开主题</label>
-          <select v-model="local.ui.public_theme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-            <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </select>
+          <div class="flex gap-2">
+            <select v-model="local.ui.public_theme" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
+              <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
+            </select>
+            <a
+              v-if="local.ui.public_theme && local.ui.public_theme !== 'default'"
+              :href="`/?theme=${local.ui.public_theme}`"
+              target="_blank"
+              class="flex-shrink-0 rounded-lg border border-slate-700 px-3 py-2 text-sm text-sky-400 hover:border-sky-500"
+            >预览</a>
+          </div>
           <p class="mt-1 text-xs text-slate-500">选择第三方主题后，访客访问首页将看到主题皮肤；选择「内置默认」则继续使用本 SPA。</p>
         </div>
         <div>

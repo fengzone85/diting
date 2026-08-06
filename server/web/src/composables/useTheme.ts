@@ -4,6 +4,9 @@ type Theme = 'auto' | 'light' | 'dark';
 const STORAGE_KEY = 'diting-theme';
 
 function getInitialTheme(): Theme {
+  // B4: ?theme= 预览优先于本地存储（用于分享/预览链接）
+  const q = new URLSearchParams(window.location.search).get('theme');
+  if (q === 'light' || q === 'dark' || q === 'auto') return q;
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
   return 'auto';
@@ -33,5 +36,12 @@ export function useTheme() {
   function set(value: Theme) {
     theme.value = value;
   }
-  return { theme, toggle, set };
+  // 从 ?theme= 预览并持久化到本地（设置页"应用此预览"按钮调用）
+  function applyQueryPreview() {
+    const q = new URLSearchParams(window.location.search).get('theme');
+    if (q === 'light' || q === 'dark' || q === 'auto') {
+      theme.value = q;
+    }
+  }
+  return { theme, toggle, set, applyQueryPreview };
 }

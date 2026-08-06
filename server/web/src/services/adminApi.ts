@@ -63,4 +63,23 @@ export const adminApi = {
   aiReports: (limit = 20, offset = 0) =>
     api.get<AiReportList>(`/api/ai/reports?limit=${limit}&offset=${offset}`),
   aiReport: (id: number) => api.get<AiReport>(`/api/ai/reports/${encodeURIComponent(String(id))}`),
+
+  // 批量时序（所有受控端），避免前端 N+1
+  sparklines: (range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
+    api.get<Record<string, MetricRow[]>>(`/api/agents/sparklines?range=${range}`),
+  // 单受控端时序
+  metrics: (id: string, range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
+    api.get<MetricRow[]>(`/api/agents/${encodeURIComponent(id)}/metrics?range=${range}`),
 };
+
+export interface MetricRow {
+  ts: number;
+  cpu?: number;
+  mem_pct?: number;
+  net_rx_rate?: number;
+  net_tx_rate?: number;
+  net_rx_month?: number;
+  net_tx_month?: number;
+  load1?: number;
+  [k: string]: unknown;
+}
