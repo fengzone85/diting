@@ -5,6 +5,9 @@
   --bg-secondary: rgba(30, 41, 59, 0.6);
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --bg-surface: rgba(51, 65, 85, 0.4);
+  --border-divider: rgba(148, 163, 184, 0.15);
   --accent: #38bdf8;
   --accent-hover: #0ea5e9;
   --success: #4ade80;
@@ -19,6 +22,9 @@
   --bg-secondary: rgba(255, 255, 255, 0.75);
   --text-primary: #0f172a;
   --text-secondary: #475569;
+  --text-muted: #64748b;
+  --bg-surface: rgba(203, 213, 225, 0.35);
+  --border-divider: rgba(15, 23, 42, 0.1);
   --accent: #0284c7;
   --accent-hover: #0369a1;
   --success: #16a34a;
@@ -44,6 +50,14 @@
 [data-theme="light"] .status-dot {
   box-shadow: none;
 }
+
+/* 语义化颜色（在亮/暗主题下自适应） */
+.text-content { color: var(--text-primary); }
+.text-muted { color: var(--text-muted); }
+.text-accent { color: var(--accent); }
+.hover\:text-accent:hover { color: var(--accent); }
+.bg-surface { background-color: var(--bg-surface); }
+.border-divider { border-color: var(--border-divider); }
 
 html, body, #app {
   height: 100%;
