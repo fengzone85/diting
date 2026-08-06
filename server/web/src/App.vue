@@ -24,7 +24,7 @@ const cvLabel: Record<string, string> = {
 
 <template>
   <RouterView />
-  <AppFooter :ip="state.visitor?.ip" :browser="state.visitor?.browser" />
+  <AppFooter :meta="state.meta" :ip="state.visitor?.ip" :browser="state.visitor?.browser" />
 
   <!-- 色觉辅助提示条 -->
   <div v-if="colorVision !== 'normal'" class="cv-banner glass text-muted">

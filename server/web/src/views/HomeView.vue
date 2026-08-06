@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import AppHeader from '../components/AppHeader.vue';
-import AppFooter from '../components/AppFooter.vue';
 import NodeCard from '../components/NodeCard.vue';
 import NodeRow from '../components/NodeRow.vue';
 import StatCard from '../components/ui/StatCard.vue';
@@ -230,6 +229,5 @@ const filteredAgents = computed(() => {
         </template>
       </template>
     </main>
-    <AppFooter :meta="state.meta" />
   </div>
 </template>

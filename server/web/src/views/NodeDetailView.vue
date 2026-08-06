@@ -2,7 +2,6 @@
 import { onMounted, computed } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
-import AppFooter from '../components/AppFooter.vue';
 import StatCard from '../components/ui/StatCard.vue';
 import ChartLatency from '../components/ChartLatency.vue';
 import ChartLatencyMulti from '../components/ChartLatencyMulti.vue';
@@ -323,6 +322,5 @@ onMounted(load);
         </div>
       </div>
     </main>
-    <AppFooter :meta="state.meta" />
   </div>
 </template>
