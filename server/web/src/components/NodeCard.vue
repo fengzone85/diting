@@ -98,10 +98,10 @@ const trafficPct = computed(() => {
         class="flag-icon" :alt="agent.country" />
       <span v-if="agent.group && !merchantName" class="badge">{{ agent.group }}</span>
       <span v-if="merchantName" class="badge">{{ merchantName }}</span>
+      <span v-if="agent.group && !merchantName" class="badge">{{ agent.group }}</span>
       <span v-if="daysUntil(agent.expire_at) != null" class="badge"
         :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'badge-danger' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'badge-warn' : ''"
       >{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? '过期' : '' }}{{ Math.abs(daysUntil(agent.expire_at) ?? 0) }}天</span>
-      <span class="text-[10px] text-muted flex-shrink-0">{{ statusText }}</span>
     </div>
 
     <!-- ===== 旧版 .meta：hostname · os ===== -->
