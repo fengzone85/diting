@@ -26,7 +26,7 @@ const tag = computed(() => customTag(props.agent.id));
     <div class="min-w-0 flex-1">
       <div class="flex items-center gap-2">
         <span class="status-dot" :class="`status-${status}`" />
-        <span class="font-medium text-white">{{ agent.name }}</span>
+        <span class="font-medium text-content">{{ agent.name }}</span>
         <span class="text-xs text-slate-500">{{ agent.group || agent.grp || '' }}</span>
         <span v-if="merchantName" class="text-xs text-slate-600">{{ merchantName }}</span>
         <span v-if="tag" class="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-300">{{ tag }}</span>
