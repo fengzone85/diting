@@ -23,18 +23,25 @@ const socialItems = computed(() => {
 
 <template>
   <footer class="mx-auto mt-12 w-full max-w-[1280px] px-4 py-4 text-xs text-secondary">
-    <div class="flex w-full flex-row flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center gap-1">
-        Powered by
-        <a
-          href="https://github.com/fengzone85/diting" target="_blank" rel="noopener noreferrer"
-          class="font-medium text-content transition-opacity hover:opacity-80"
-        >
-          DiTing
-        </a>
-        <span v-if="version" class="ml-1 text-muted">v{{ version }}</span>
+    <div class="flex w-full flex-row flex-wrap items-center justify-between gap-3">
+      <!-- 左侧：版权 + IP 两排 -->
+      <div class="flex flex-col gap-0.5">
+        <div class="flex items-center gap-1">
+          Powered by
+          <a
+            href="https://github.com/fengzone85/diting" target="_blank" rel="noopener noreferrer"
+            class="font-medium text-content transition-opacity hover:opacity-80"
+          >
+            DiTing
+          </a>
+          <span v-if="version" class="text-muted">v{{ version }}</span>
+        </div>
+        <div v-if="ip">
+          {{ t('footer.visitorIp') }}: {{ ip }}<span v-if="browser"> · {{ browser }}</span>
+        </div>
       </div>
 
+      <!-- 右侧：社交链接图标 -->
       <div v-if="socialItems.some((i) => i.raw)" class="flex items-center gap-3">
         <a
           v-for="item in socialItems.filter((i) => i.raw)"
@@ -49,10 +56,6 @@ const socialItems = computed(() => {
             <path :d="item.icon" />
           </svg>
         </a>
-      </div>
-
-      <div v-if="ip" class="text-right">
-        {{ t('footer.visitorIp') }}: {{ ip }}<span v-if="browser"> · {{ browser }}</span>
       </div>
     </div>
   </footer>
