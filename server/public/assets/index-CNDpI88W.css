@@ -1767,17 +1767,18 @@
   --warning: #fbbf24;
   --danger: #fb7185;
   --border: #d6e4ea29;
-  --glass-tint: #0f18239e;
-  --glass-tint-hover: #0f1823cc;
+  --glass-tint: #0a0e16d1;
+  --glass-tint-hover: #0a0e16e6;
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: #ffffff2e;
   --glass-shadow: 0 8px 30px #0000007a;
+  --radius: .625rem;
 }
 
 [data-glass="emerald"] {
-  --glass-tint: #0f18239e;
-  --glass-tint-hover: #0f1823cc;
+  --glass-tint: #0a0e16d1;
+  --glass-tint-hover: #0a0e16e6;
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: #ffffff2e;
@@ -1785,8 +1786,8 @@
 }
 
 [data-glass="soft"] {
-  --glass-tint: #0a101994;
-  --glass-tint-hover: #0a1019c2;
+  --glass-tint: #0a0e16c7;
+  --glass-tint-hover: #0a0e16db;
   --glass-saturate: 120%;
   --glass-blur: 18px;
   --glass-border: #ffffff24;
@@ -1794,8 +1795,8 @@
 }
 
 [data-glass="high-contrast"] {
-  --glass-tint: #0c141ec7;
-  --glass-tint-hover: #0c141eeb;
+  --glass-tint: #0a0e16e0;
+  --glass-tint-hover: #0a0e16f2;
   --glass-saturate: 180%;
   --glass-blur: 10px;
   --glass-border: #ffffff47;
@@ -1803,8 +1804,8 @@
 }
 
 [data-glass="midnight"] {
-  --glass-tint: #0f1426a8;
-  --glass-tint-hover: #0f1426d6;
+  --glass-tint: #0f1426d6;
+  --glass-tint-hover: #0f1426eb;
   --glass-saturate: 135%;
   --glass-blur: 16px;
   --glass-border: #818cf838;
@@ -1825,8 +1826,8 @@
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: #44535e38;
-  --glass-tint: #ffffffad;
-  --glass-tint-hover: #fffc;
+  --glass-tint: #f1f5f9bd;
+  --glass-tint-hover: #f8fafccc;
   --glass-border: #e2e8f0ad;
   --glass-shadow: 0 8px 28px #0f172a2e;
 }
@@ -1849,6 +1850,10 @@
 
 [data-theme="light"] .card-hover:hover {
   box-shadow: 0 12px 38px #0f172a33;
+}
+
+[data-theme="light"] .node-card:hover, [data-theme="light"] .bg-card:hover, [data-theme="light"] [data-slot="card"]:hover {
+  background-color: var(--glass-tint-hover) !important;
 }
 
 [data-theme="light"] .status-dot {
@@ -1910,8 +1915,8 @@ body {
 }
 
 .glass {
+  border-radius: var(--radius, .625rem);
   box-shadow: var(--glass-shadow, 0 8px 30px #0000007a);
-  border-radius: 1rem;
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
   backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
