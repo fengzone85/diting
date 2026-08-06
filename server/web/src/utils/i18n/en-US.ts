@@ -138,6 +138,19 @@ export const enUS: Record<string, string> = {
   'card.expire': 'Expire',
   'card.quota': 'Quota',
 
+  // theme toggle
+  'theme.auto': 'Auto',
+  'theme.light': 'Light',
+  'theme.dark': 'Dark',
+
+  // ui components
+  'ui.loading': 'Loading…',
+  'ui.empty': 'No data',
+
+  // footer social links
+  'footer.email': 'Email',
+  'footer.website': 'Website',
+
   // footer
   'footer.visitorIp': 'Your IP',
 

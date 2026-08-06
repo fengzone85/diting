@@ -11,10 +11,10 @@ const props = defineProps<{
 }>();
 
 const socialItems = computed(() => [
-  { key: 'social_email', icon: '✉', prefix: 'mailto:', label: '邮箱', raw: props.meta?.social_email },
+  { key: 'social_email', icon: '✉', prefix: 'mailto:', label: t('footer.email'), raw: props.meta?.social_email },
   { key: 'social_telegram', icon: '✈', prefix: 'https://t.me/', label: 'Telegram', raw: props.meta?.social_telegram },
   { key: 'social_qq', icon: '🐧', prefix: 'https://wpa.qq.com/msgrd?v=3&uin=', label: 'QQ', raw: props.meta?.social_qq },
-  { key: 'social_website', icon: '🌐', prefix: '', label: '网站', raw: props.meta?.social_website },
+  { key: 'social_website', icon: '🌐', prefix: '', label: t('footer.website'), raw: props.meta?.social_website },
 ]);
 
 function href(item: typeof socialItems.value[number]) {

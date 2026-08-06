@@ -201,6 +201,10 @@ export async function loadMeta() {
   return state.meta;
 }
 
+export function stopAutoRefresh() {
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+}
+
 export function useApp() {
   onMounted(() => {
     if (!state.initialized) refresh();
@@ -219,5 +223,6 @@ export function useApp() {
     providerAlias,
     customTag,
     cardSchemeKeys,
+    stopAutoRefresh,
   };
 }

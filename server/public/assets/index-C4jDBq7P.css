@@ -1862,16 +1862,12 @@ body {
   inset: 0;
 }
 
-:root {
-  --glass-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px));
-}
-
 .glass {
   background: var(--glass-tint, var(--bg-secondary));
   border: 1px solid var(--glass-border, var(--border));
   border-radius: 1rem;
-  backdrop-filter: var(--glass-backdrop-filter) !important;
-  -webkit-backdrop-filter: var(--glass-backdrop-filter) !important;
+  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
 }
 
 @supports not ((-webkit-backdrop-filter: blur(2px)) or (backdrop-filter: blur(2px))) {

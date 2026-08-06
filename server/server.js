@@ -38,7 +38,7 @@ app.set('trust proxy', true);
 app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https:; connect-src 'self'"
   );
   // L-1 修复：补充安全响应头，纵深防御 XSS / 点击劫持 / MIME 嗅探
   res.setHeader('X-Content-Type-Options', 'nosniff');

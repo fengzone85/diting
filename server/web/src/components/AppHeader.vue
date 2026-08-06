@@ -17,11 +17,11 @@ const displayTitle = computed(() => props.title || props.meta?.site_title || 'Di
 const themeMenu = ref(false);
 const hasThemePreview = ref(new URLSearchParams(window.location.search).has('theme'));
 
-const themeOptions: { id: 'auto' | 'light' | 'dark'; label: string }[] = [
-  { id: 'auto', label: '跟随系统' },
-  { id: 'light', label: '亮色' },
-  { id: 'dark', label: '暗色' },
-];
+const themeOptions = computed(() => [
+  { id: 'auto' as const, label: t('theme.auto') },
+  { id: 'light' as const, label: t('theme.light') },
+  { id: 'dark' as const, label: t('theme.dark') },
+]);
 
 function switchLang() {
   setLocale(locale.value === 'zh-CN' ? 'en-US' : 'zh-CN');
@@ -55,7 +55,7 @@ function lockPreview() {
         <div class="relative">
           <button
             class="rounded-lg border border-divider px-2 py-1 text-xs hover:border-sky-500 hover:text-accent"
-            :title="theme === 'dark' ? '亮色' : '暗色'"
+            :title="theme === 'dark' ? t('theme.light') : t('theme.dark')"
             @click="themeMenu = !themeMenu"
           >
             {{ theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '🌗' }}
