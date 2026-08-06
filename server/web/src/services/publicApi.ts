@@ -22,5 +22,6 @@ export const publicApi = {
   probes: (id: string, range?: string) =>
     api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
+  visitor: () => api.get<{ ip: string; browser: string; ua: string }>('/api/public/visitor'),
   saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),
 };

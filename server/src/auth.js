@@ -253,9 +253,22 @@ function ip6ToBits(ip) {
   }
 }
 
+// ---- 审计日志：记录管理员写操作 ----
+// 从 req 提取操作者身份（session 中的 admin name 或 via 信息）和 IP。
+function auditLog(req, action, detail) {
+  try {
+    const sess = getSession(req);
+    const r = resolveRole(req);
+    const admin = sess?.role === 'admin' ? 'admin(session)' : (r?.via === 'token' ? 'admin(token)' : 'unknown');
+    const ip = String(req.ip || req.socket?.remoteAddress || '');
+    const via = r?.via || '';
+    db.addAuditLog(Date.now(), admin, ip, action, detail, via);
+  } catch { /* 审计失败不影响主流程 */ }
+}
+
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
-  verifyTotpHeader,
+  verifyTotpHeader, auditLog,
 };

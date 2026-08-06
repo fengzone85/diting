@@ -70,6 +70,10 @@ export const adminApi = {
   // 单受控端时序
   metrics: (id: string, range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
     api.get<MetricRow[]>(`/api/agents/${encodeURIComponent(id)}/metrics?range=${range}`),
+
+  // 审计日志
+  auditLogs: (limit = 100, offset = 0) =>
+    api.get<AuditLogList>(`/api/admin/audit-logs?limit=${limit}&offset=${offset}`),
 };
 
 export interface MetricRow {
@@ -82,4 +86,20 @@ export interface MetricRow {
   net_tx_month?: number;
   load1?: number;
   [k: string]: unknown;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  ts: number;
+  admin: string;
+  ip: string;
+  action: string;
+  detail: string;
+  via: string;
+}
+export interface AuditLogList {
+  logs: AuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
 }
