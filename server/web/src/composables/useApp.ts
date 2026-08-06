@@ -18,15 +18,22 @@ export interface AppState {
   search: string;
 }
 
-function getStoredLayout(): PublicLayout {
+function getStoredLayout(): PublicLayout | null {
   const v = localStorage.getItem('diting-layout');
   if (v === 'grid' || v === 'list' || v === 'compact') return v;
-  return 'grid';
+  return null;
 }
 
-function getStoredTemplate(): CardTemplate {
+function getStoredTemplate(): CardTemplate | null {
   const v = localStorage.getItem('diting-template');
   if (v === 'simple' || v === 'visual') return v;
+  return null;
+}
+
+function defaultLayout(): PublicLayout {
+  return 'grid';
+}
+function defaultTemplate(): CardTemplate {
   return 'visual';
 }
 
@@ -58,14 +65,16 @@ const state = reactive<AppState>({
   agents: [],
   sparklines: {},
   meta: null,
-  layout: getStoredLayout(),
-  template: getStoredTemplate(),
+  layout: getStoredLayout() ?? defaultLayout(),
+  template: getStoredTemplate() ?? defaultTemplate(),
   search: '',
 });
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let serverOrder: string[] = [];
 let localOrder: string[] = getStoredOrder();
+// 用户是否在本地主动选择过布局（优先于服务端默认配置）
+const userChoseLayout = localStorage.getItem('diting-layout') != null;
 
 export const visibleAgents = computed<Agent[]>(() => {
   const q = state.search.trim().toLowerCase();
@@ -109,6 +118,10 @@ async function refresh() {
     state.meta = meta;
     state.sparklines = sparklines;
     serverOrder = meta?.agent_order || [];
+    // B6: 后端 ui.home_layout 作为访客默认布局；用户本地选择优先
+    if (!userChoseLayout && meta?.home_layout && (meta.home_layout === 'grid' || meta.home_layout === 'list' || meta.home_layout === 'compact')) {
+      state.layout = meta.home_layout;
+    }
     state.initialized = true;
   } catch (e) {
     state.error = (e as Error).message || '加载失败';

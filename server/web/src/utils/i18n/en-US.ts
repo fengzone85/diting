@@ -1,0 +1,100 @@
+export const enUS: Record<string, string> = {
+  // common
+  'common.search': 'Search',
+  'common.name': 'Name',
+  'common.id': 'ID',
+  'common.online': 'Online',
+  'common.offline': 'Offline',
+  'common.loading': 'Loading…',
+  'common.error': 'Failed to load',
+  'common.cancel': 'Cancel',
+  'common.confirm': 'Confirm',
+  'common.save': 'Save',
+  'common.delete': 'Delete',
+  'common.reset': 'Reset',
+  'common.renew': 'Renew',
+  'common.detail': 'Detail',
+  'common.back': 'Back',
+  'common.copy': 'Copy',
+  'common.copied': 'Copied',
+  'common.language': 'Language',
+
+  // nav
+  'nav.dashboard': 'Dashboard',
+  'nav.agents': 'Agents',
+  'nav.billing': 'Billing',
+  'nav.ai': 'AI Analysis',
+  'nav.settings': 'Settings',
+  'nav.logout': 'Logout',
+  'nav.admin': 'Admin',
+
+  // agents
+  'agents.title': 'Agents',
+  'agents.add': 'Add',
+  'agents.searchPlaceholder': 'Search name / ID',
+  'agents.sortByName': 'By name',
+  'agents.sortByCpu': 'By CPU',
+  'agents.sortByMem': 'By memory',
+  'agents.sortByStatus': 'By status',
+  'agents.selectAll': 'Select all',
+  'agents.selected': '{n} selected',
+  'agents.batchDelete': 'Batch delete',
+  'agents.batchReset': 'Batch reset token',
+  'agents.batchRenew': 'Batch renew',
+  'agents.noMatch': 'No matching agents',
+  'agents.empty': 'No agents yet',
+  'agents.tokenOnce': 'Token is shown only once',
+  'agents.linux': 'Linux native',
+  'agents.docker': 'Docker',
+  'agents.windows': 'Windows',
+
+  // dashboard
+  'dashboard.title': 'Dashboard',
+  'dashboard.totalAgents': 'Total agents',
+  'dashboard.online': 'Online',
+  'dashboard.offline': 'Offline',
+  'dashboard.avgCpu': 'Avg CPU',
+  'dashboard.avgMem': 'Avg memory',
+  'dashboard.monthlyCost': 'Monthly cost',
+  'dashboard.testAlert': 'Send test alert',
+  'dashboard.quickLinks': 'Quick links',
+
+  // settings
+  'settings.title': 'Settings',
+  'settings.ui': 'UI',
+  'settings.notify': 'Notifications',
+  'settings.smtp': 'SMTP',
+  'settings.telegram': 'Telegram',
+
+  // login
+  'login.title': 'Admin login',
+  'login.token': 'Admin token',
+  'login.totp': '2FA code',
+  'login.submit': 'Login',
+  'login.twofaRequired': '2FA code required',
+
+  // public
+  'public.nodes': 'Nodes',
+  'public.cpu': 'CPU',
+  'public.memory': 'Memory',
+  'public.disk': 'Disk',
+  'public.network': 'Network',
+  'public.uptime': 'Uptime',
+  'public.noNodes': 'No nodes',
+
+  // ai
+  'ai.title': 'AI Analysis',
+  'ai.config': 'Config',
+  'ai.status': 'Status',
+  'ai.reports': 'Reports',
+  'ai.noReports': 'No reports',
+  'ai.run': 'Run now',
+  'ai.enabled': 'Enable AI analysis',
+
+  // billing
+  'billing.title': 'Billing',
+  'billing.monthlyTotal': 'Monthly total',
+  'billing.perGroup': 'Per group',
+  'billing.expiringSoon': 'Expiring soon',
+  'billing.agentCount': 'Agent count',
+};

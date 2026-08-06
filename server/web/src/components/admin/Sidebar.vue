@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { useI18n } from '../../composables/useI18n';
 
 defineProps<{
   open?: boolean;
@@ -11,13 +12,14 @@ const emit = defineEmits<{
 
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 
 const links = [
-  { to: '/admin', label: '总览' },
-  { to: '/admin/agents', label: '受控端' },
-  { to: '/admin/billing', label: '账单概览' },
-  { to: '/admin/ai', label: 'AI 分析' },
-  { to: '/admin/settings', label: '设置' },
+  { to: '/admin', label: t('nav.dashboard') },
+  { to: '/admin/agents', label: t('nav.agents') },
+  { to: '/admin/billing', label: t('nav.billing') },
+  { to: '/admin/ai', label: t('nav.ai') },
+  { to: '/admin/settings', label: t('nav.settings') },
 ];
 
 async function logout() {
@@ -63,7 +65,7 @@ function isActive(to: string) {
         class="mt-4 block w-full rounded-lg px-4 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
         @click="logout"
       >
-        退出
+        {{ t('nav.logout') }}
       </button>
     </nav>
   </aside>

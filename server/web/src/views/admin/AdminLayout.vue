@@ -2,8 +2,10 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import Sidebar from '../../components/admin/Sidebar.vue';
 import { loadAdmin, startAutoRefresh, stopAutoRefresh } from '../../composables/useAdmin';
+import { useI18n } from '../../composables/useI18n';
 
 const menuOpen = ref(false);
+const { t } = useI18n();
 
 onMounted(() => {
   loadAdmin();
@@ -21,7 +23,7 @@ onUnmounted(stopAutoRefresh);
         @click="menuOpen = true"
       >
         <span>☰</span>
-        菜单
+        {{ t('common.language') === '语言' ? '菜单' : 'Menu' }}
       </button>
       <RouterView />
     </main>
