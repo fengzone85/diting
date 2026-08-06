@@ -15,13 +15,23 @@ import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, format
 import { ref } from 'vue';
 
 const route = useRoute();
-const { state } = useApp();
+const { state, visibleAgents } = useApp();
 const agentId = computed(() => route.params.id as string);
 const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
+
+const neighborIds = computed(() => {
+  const list = visibleAgents.value.length ? visibleAgents.value : state.agents;
+  const idx = list.findIndex(a => a.id === agentId.value);
+  if (idx < 0) return { prev: null, next: null };
+  return {
+    prev: idx > 0 ? list[idx - 1] : null,
+    next: idx < list.length - 1 ? list[idx + 1] : null,
+  };
+});
 
 const sparkline = computed(() => state.sparklines[agentId.value] || []);
 const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? 0 })));
@@ -39,6 +49,33 @@ function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[
 function lossPercent(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
   if (!points || !points.length) return 0;
   return points.filter(p => !p.ok).length / points.length * 100;
+}
+
+function p95Probe(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
+  const ok = (points || []).filter(p => p.ok).map(p => p.ms).sort((a, b) => a - b);
+  if (!ok.length) return null;
+  const idx = Math.min(ok.length - 1, Math.ceil(ok.length * 0.95) - 1);
+  return ok[Math.max(0, idx)];
+}
+
+function probeSeries(points: { ts: number; ms: number; ok: boolean; loss: number }[]): ChartPoint[] {
+  if (!points) return [];
+  return points
+    .filter(p => p.ok)
+    .map(p => ({ t: p.ts * 1000, v: p.ms }))
+    .sort((a, b) => a.t - b.t);
+}
+
+function movingAvgSeries(points: { ts: number; ms: number; ok: boolean; loss: number }[], window = 10): ChartPoint[] {
+  const src = probeSeries(points);
+  const out: ChartPoint[] = [];
+  for (let i = 0; i < src.length; i++) {
+    const start = Math.max(0, i - window + 1);
+    const slice = src.slice(start, i + 1);
+    const avg = slice.reduce((s, d) => s + d.v, 0) / slice.length;
+    out.push({ t: src[i].t, v: Math.round(avg * 10) / 10 });
+  }
+  return out;
 }
 
 async function load() {
@@ -60,7 +97,19 @@ onMounted(load);
   <div class="min-h-screen">
     <AppHeader :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-6">
-      <RouterLink to="/" class="mb-4 inline-block text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
+      <div class="mb-4 flex items-center gap-3">
+        <RouterLink to="/" class="text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
+        <RouterLink
+          v-if="neighborIds.prev"
+          :to="`/node/${neighborIds.prev.id}`"
+          class="text-sm text-slate-400 hover:text-sky-300"
+        >← {{ neighborIds.prev.name }}</RouterLink>
+        <RouterLink
+          v-if="neighborIds.next"
+          :to="`/node/${neighborIds.next.id}`"
+          class="ml-auto text-sm text-slate-400 hover:text-sky-300"
+        >{{ neighborIds.next.name }} →</RouterLink>
+      </div>
       <ErrorMessage v-if="error" class="mb-6" :message="error" />
       <Loading v-if="loading && !agent" />
       <EmptyState v-else-if="!agent" />
@@ -113,14 +162,23 @@ onMounted(load);
 
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
-          <div class="space-y-2">
-            <div v-for="(points, target) in probes" :key="target" class="flex flex-col gap-1 rounded-lg bg-slate-800/40 px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-              <span class="text-slate-300">{{ target }}</span>
-              <div class="flex gap-4">
-                <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'">
-                  {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
-                </span>
-                <span class="text-slate-500">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div v-for="(points, target) in probes" :key="target" class="rounded-lg bg-slate-800/40 p-3">
+              <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm font-medium text-slate-300">{{ target }}</span>
+                <div class="flex gap-3 text-xs">
+                  <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'">
+                    avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
+                  </span>
+                  <span class="text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
+                  <span class="text-slate-500">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
+                </div>
+              </div>
+              <div class="h-40 w-full">
+                <ChartLatency title="延迟 (ms)" :data="probeSeries(points)" color="#f472b6" />
+              </div>
+              <div class="h-32 w-full">
+                <ChartLatency title="移动平均 (10点)" :data="movingAvgSeries(points)" color="#38bdf8" />
               </div>
             </div>
           </div>
