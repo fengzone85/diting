@@ -9,9 +9,11 @@ import Loading from '../components/ui/Loading.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { useApp } from '../composables/useApp';
+import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
 
 const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents } = useApp();
+const { t } = useI18n();
 
 const searchInput = ref(state.search);
 watch(searchInput, (v) => setSearch(v));
@@ -61,23 +63,23 @@ function groupOrder(groups: Record<string, Agent[]>) {
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
       <div class="mb-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatCard label="受控端总数" :value="state.overview?.total ?? '-'" variant="default" />
-        <StatCard label="在线" :value="state.overview?.online ?? '-'" variant="success" />
-        <StatCard label="离线" :value="state.overview?.offline ?? '-'" variant="danger" />
-        <StatCard label="平均 CPU" :value="state.overview?.cpu_avg != null ? `${state.overview.cpu_avg.toFixed(1)}%` : '-'" variant="warning" />
+        <StatCard :label="t('public.totalAgents')" :value="state.overview?.total ?? '-'" variant="default" />
+        <StatCard :label="t('public.online')" :value="state.overview?.online ?? '-'" variant="success" />
+        <StatCard :label="t('public.offline')" :value="state.overview?.offline ?? '-'" variant="danger" />
+        <StatCard :label="t('public.avgCpu')" :value="state.overview?.cpu_avg != null ? `${state.overview.cpu_avg.toFixed(1)}%` : '-'" variant="warning" />
       </div>
 
       <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-center gap-2">
           <input
             v-model="searchInput"
-            placeholder="搜索节点 / 分组 / 商家..."
+            :placeholder="t('public.searchPlaceholder')"
             class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-64"
           />
-          <span class="whitespace-nowrap text-xs text-slate-500">{{ visibleAgents.length }} 个节点</span>
+          <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: visibleAgents.length }) }}</span>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs text-slate-500">布局</span>
+          <span class="text-xs text-slate-500">{{ t('public.layout') }}</span>
           <button
             v-for="l in ['grid', 'list', 'compact'] as const"
             :key="l"
@@ -85,17 +87,17 @@ function groupOrder(groups: Record<string, Agent[]>) {
             :class="state.layout === l ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
             @click="setLayout(l)"
           >
-            {{ l === 'grid' ? '网格' : l === 'list' ? '列表' : '紧凑' }}
+            {{ t(`public.${l}`) }}
           </button>
-          <span class="ml-2 text-xs text-slate-500">卡片</span>
+          <span class="ml-2 text-xs text-slate-500">{{ t('public.card') }}</span>
           <button
-            v-for="t in ['simple', 'visual'] as const"
-            :key="t"
+            v-for="tpl in ['simple', 'visual'] as const"
+            :key="tpl"
             class="rounded-lg border px-2 py-1 text-xs"
-            :class="state.template === t ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-            @click="setTemplate(t)"
+            :class="state.template === tpl ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            @click="setTemplate(tpl)"
           >
-            {{ t === 'simple' ? '简约' : '完整' }}
+            {{ t(`public.${tpl}`) }}
           </button>
         </div>
       </div>
