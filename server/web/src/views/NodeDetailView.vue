@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
+import { onMounted, computed, watch, ref, nextTick } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import StatCard from '../components/ui/StatCard.vue';
@@ -11,9 +11,9 @@ import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
+import { t } from '../composables/useI18n';
 import type { Probes, ChartPoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber } from '../utils/format';
-import { ref } from 'vue';
 
 function formatDate(s: string | undefined): string {
   if (!s) return '—';
@@ -28,13 +28,7 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
-const RANGES = [
-  { key: '1h', label: '时' },
-  { key: '6h', label: '6小时' },
-  { key: '24h', label: '日' },
-  { key: '7d', label: '周' },
-  { key: '30d', label: '月' },
-];
+const RANGES = ['1h', '6h', '24h', '7d', '30d'];
 const currentRange = ref('1h');
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
@@ -103,7 +97,7 @@ async function load() {
   try {
     probes.value = await publicApi.probes(agentId.value, currentRange.value);
   } catch (e) {
-    error.value = (e as Error).message || '加载失败';
+    error.value = (e as Error).message || t('common.error');
   } finally {
     loading.value = false;
   }
@@ -138,6 +132,10 @@ const diskPredict = computed(() => {
 });
 
 onMounted(load);
+
+// 切换分区 Tab 时，延迟图若由隐藏变显示需 resize 铺满
+const latencyChart = ref<InstanceType<typeof ChartLatencyMulti> | null>(null);
+watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.value?.resize()); });
 </script>
 
 <template>
@@ -145,7 +143,7 @@ onMounted(load);
     <AppHeader :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-6 pt-4">
       <div class="mb-4 flex items-center gap-3">
-        <RouterLink to="/" class="text-sm text-sky-400 hover:text-sky-300">← 返回首页</RouterLink>
+        <RouterLink to="/" class="text-sm text-sky-400 hover:text-sky-300">← {{ t('node.backHome') }}</RouterLink>
         <RouterLink
           v-if="neighborIds.prev"
           :to="`/node/${neighborIds.prev.id}`"
@@ -174,99 +172,99 @@ onMounted(load);
         <!-- 分区 Tab（对齐 komari 概览/负载/延迟分区） -->
         <div class="flex flex-wrap gap-2">
           <button
-            v-for="tab in [{ k: 'overview', l: '概览' }, { k: 'load', l: '负载' }, { k: 'latency', l: '延迟' }]"
-            :key="tab.k"
+            v-for="tab in ['overview', 'load', 'latency']"
+            :key="tab"
             class="rounded-lg border px-3 py-1.5 text-sm"
-            :class="detailTab === tab.k ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-            @click="detailTab = tab.k as any"
-          >{{ tab.l }}</button>
+            :class="detailTab === tab ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            @click="detailTab = tab as any"
+          >{{ t('node.tab.' + tab) }}</button>
         </div>
 
         <div class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">系统信息</h3>
+          <h3 class="mb-3 text-lg font-semibold">{{ t('node.sysInfo') }}</h3>
           <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
             <div class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">主机名</span><span class="text-content">{{ agent.hostname || '—' }}</span>
+              <span class="text-muted">{{ t('node.hostname') }}</span><span class="text-content">{{ agent.hostname || '—' }}</span>
             </div>
             <div class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">操作系统</span><span class="text-content">{{ agent.os || '—' }}</span>
+              <span class="text-muted">{{ t('node.os') }}</span><span class="text-content">{{ agent.os || '—' }}</span>
             </div>
             <div class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">Agent 版本</span><span class="text-content">{{ agent.version || '—' }}</span>
+              <span class="text-muted">{{ t('node.agentVersion') }}</span><span class="text-content">{{ agent.version || '—' }}</span>
             </div>
             <div class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">在线状态</span>
-              <span :class="agent.online ? 'text-emerald-400' : 'text-rose-400'">{{ agent.online ? '在线' : '离线' }}</span>
+              <span class="text-muted">{{ t('node.status') }}</span>
+              <span :class="agent.online ? 'text-emerald-400' : 'text-rose-400'">{{ agent.online ? t('common.online') : t('common.offline') }}</span>
             </div>
             <div class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">Agent ID</span><span class="text-content">{{ agent.id }}</span>
+              <span class="text-muted">{{ t('node.agentId') }}</span><span class="text-content">{{ agent.id }}</span>
             </div>
           </div>
         </div>
 
         <div v-show="detailTab === 'overview' || detailTab === 'load'" class="space-y-6">
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="CPU" :value="formatPercent(agent.cpu)" />
-          <StatCard label="内存" :value="formatPercent(agent.mem_pct)" :sub="`${formatBytes(agent.mem_used)} / ${formatBytes(agent.mem_total)}`" />
-          <StatCard label="磁盘" :value="formatPercent(agent.disk_pct)" :sub="`${formatBytes(agent.disk_used)} / ${formatBytes(agent.disk_total)}`" />
-          <StatCard label="运行时间" :value="formatDuration(agent.uptime)" />
+          <StatCard :label="t('public.cpu')" :value="formatPercent(agent.cpu)" />
+          <StatCard :label="t('public.memory')" :value="formatPercent(agent.mem_pct)" :sub="`${formatBytes(agent.mem_used)} / ${formatBytes(agent.mem_total)}`" />
+          <StatCard :label="t('public.disk')" :value="formatPercent(agent.disk_pct)" :sub="`${formatBytes(agent.disk_used)} / ${formatBytes(agent.disk_total)}`" />
+          <StatCard :label="t('public.uptime')" :value="formatDuration(agent.uptime)" />
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard label="下载速率" :value="formatBitsPerSecond(agent.net_rx_rate)" />
-          <StatCard label="上传速率" :value="formatBitsPerSecond(agent.net_tx_rate)" />
-          <StatCard label="月下载" :value="formatBytes(agent.net_rx_month)" />
-          <StatCard label="月上传" :value="formatBytes(agent.net_tx_month)" />
+          <StatCard :label="t('node.downRate')" :value="formatBitsPerSecond(agent.net_rx_rate)" />
+          <StatCard :label="t('node.upRate')" :value="formatBitsPerSecond(agent.net_tx_rate)" />
+          <StatCard :label="t('public.rxMonth')" :value="formatBytes(agent.net_rx_month)" />
+          <StatCard :label="t('public.txMonth')" :value="formatBytes(agent.net_tx_month)" />
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          <StatCard label="Load 1m" :value="formatNumber(agent.load1)" />
-          <StatCard label="温度" :value="agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—'" />
-          <StatCard label="Swap %" :value="formatPercent(agent.swap_pct)" />
+          <StatCard :label="t('node.load1')" :value="formatNumber(agent.load1)" />
+          <StatCard :label="t('node.temp')" :value="agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—'" />
+          <StatCard :label="t('node.swap')" :value="formatPercent(agent.swap_pct)" />
         </div>
 
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <ChartLatency title="CPU %" :data="cpuSeries" color="#38bdf8" />
-          <ChartLatency title="内存 %" :data="memSeries" color="#a78bfa" />
+          <ChartLatency :title="t('node.chart.cpu')" :data="cpuSeries" color="#38bdf8" />
+          <ChartLatency :title="t('node.chart.mem')" :data="memSeries" color="#a78bfa" />
           <ChartLatencyDual
-            title="网络上下行 (bps)"
+            :title="t('node.chart.net')"
             :series="[
-              { name: '下行', data: rxSeries, color: '#4ade80' },
-              { name: '上行', data: txSeries, color: '#facc15' },
+              { name: t('node.down'), data: rxSeries, color: '#4ade80' },
+              { name: t('node.up'), data: txSeries, color: '#facc15' },
             ]"
           />
           <ChartLatencyDual
-            title="磁盘读写 (B/s)"
+            :title="t('node.chart.diskIo')"
             :series="[
-              { name: '读取', data: diskReadSeries, color: '#22d3ee' },
-              { name: '写入', data: diskWriteSeries, color: '#c084fc' },
+              { name: t('node.read'), data: diskReadSeries, color: '#22d3ee' },
+              { name: t('node.write'), data: diskWriteSeries, color: '#c084fc' },
             ]"
           />
-          <ChartLatency title="Load 1m" :data="loadSeries" color="#fb923c" />
-          <ChartLatency title="温度 (°C)" :data="tempSeries" color="#f87171" />
-          <ChartLatency title="Swap %" :data="swapSeries" color="#fbbf24" />
+          <ChartLatency :title="t('node.chart.load')" :data="loadSeries" color="#fb923c" />
+          <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" />
+          <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" />
         </div>
         </div>
 
         <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">备注与套餐</h3>
+          <h3 class="mb-3 text-lg font-semibold">{{ t('node.notePlan') }}</h3>
           <div v-if="agent.note" class="mb-3 rounded-lg bg-surface px-4 py-3 text-sm text-content">{{ agent.note }}</div>
           <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
             <div v-if="agent.monthly_quota_gb != null" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">月流量配额</span><span class="text-content">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
+              <span class="text-muted">{{ t('node.quotaMonthly') }}</span><span class="text-content">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
             </div>
             <div v-if="agent.expire_at" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">到期时间</span><span class="text-content">{{ formatDate(agent.expire_at) }}</span>
+              <span class="text-muted">{{ t('node.expireAt') }}</span><span class="text-content">{{ formatDate(agent.expire_at) }}</span>
             </div>
             <div v-if="agent.price != null" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">价格</span>
-              <span class="text-content">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ agent.billing_cycle }}天</span></span>
+              <span class="text-muted">{{ t('node.price') }}</span>
+              <span class="text-content">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ t('node.daysCycle', { n: agent.billing_cycle }) }}</span></span>
             </div>
           </div>
         </div>
 
         <div v-if="agent.disks?.length" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">磁盘</h3>
+          <h3 class="mb-3 text-lg font-semibold">{{ t('node.disks') }}</h3>
           <div class="space-y-2">
             <div v-for="disk in agent.disks" :key="disk.mount" class="flex flex-col gap-2 rounded-lg bg-surface px-4 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
               <span class="text-content">{{ disk.mount }}</span>
@@ -281,28 +279,28 @@ onMounted(load);
         </div>
 
         <div v-if="diskPredict.length" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">磁盘耗尽预测</h3>
+          <h3 class="mb-3 text-lg font-semibold">{{ t('node.diskEta') }}</h3>
           <div class="space-y-2 text-sm">
             <div v-for="d in diskPredict" :key="d.mount" class="flex items-center justify-between rounded-lg bg-surface px-4 py-2">
               <span class="text-content">{{ d.mount }}</span>
               <span class="text-muted">
-                <template v-if="d.eta">预计 {{ d.eta }} 耗尽（约 {{ d.days }} 天）</template>
-                <template v-else>增长平缓，暂无需关注</template>
+                <template v-if="d.eta">{{ t('node.etaIn', { eta: d.eta, days: d.days ?? 0 }) }}</template>
+                <template v-else>{{ t('node.growthFlat') }}</template>
               </span>
             </div>
           </div>
         </div>
 
         <div v-show="detailTab === 'latency'" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">网络质量</h3>
+          <h3 class="mb-3 text-lg font-semibold">{{ t('node.netQuality') }}</h3>
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <span
               v-for="r in RANGES"
-              :key="r.key"
-              @click="switchRange(r.key)"
+              :key="r"
+              @click="switchRange(r)"
               class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
-              :class="currentRange === r.key ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
-            >{{ r.label }}</span>
+              :class="currentRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
+            >{{ t('node.range.' + r) }}</span>
           </div>
           <div class="mb-3 flex flex-wrap gap-4 text-xs">
             <span
@@ -312,13 +310,13 @@ onMounted(load);
             >
               <span class="text-content">{{ target }}</span>
               <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'" class="ml-2">
-                avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : '超时' }}
+                avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : t('card.timeout') }}
               </span>
               <span class="ml-2 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
-              <span class="ml-2 text-muted">丢包 {{ formatNumber(lossPercent(points), 1) }}%</span>
+              <span class="ml-2 text-muted">{{ t('node.loss', { pct: formatNumber(lossPercent(points), 1) }) }}</span>
             </span>
           </div>
-          <ChartLatencyMulti title="延迟波形 (ms)" :series="probeSeriesList" />
+          <ChartLatencyMulti ref="latencyChart" :title="t('node.chart.latency')" :series="probeSeriesList" />
         </div>
       </div>
     </main>

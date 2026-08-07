@@ -72,7 +72,7 @@ async function add() {
   created.value = null;
   const name = newName.value.trim();
   if (!name) {
-    error.value = '请输入受控端名称';
+    error.value = t('agents.nameRequired');
     return;
   }
   try {
@@ -81,35 +81,35 @@ async function add() {
     created.value = { id: res.id, token: res.token, install: res.install };
     await loadAdmin();
   } catch (e) {
-    error.value = (e as Error).message || '新增失败';
+    error.value = (e as Error).message || t('agents.addFailed');
   }
 }
 
 function copy(text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    error.value = '已复制到剪贴板';
+    error.value = t('common.copied');
     setTimeout(() => (error.value = ''), 2000);
   });
 }
 
 async function remove(id: string) {
-  if (!confirm('确认删除该受控端？')) return;
+  if (!confirm(t('agents.deleteConfirm'))) return;
   try {
     await adminApi.deleteAgent(id);
     selected.value.delete(id);
     await loadAdmin();
   } catch (e) {
-    error.value = (e as Error).message || '删除失败';
+    error.value = (e as Error).message || t('agents.deleteFailed');
   }
 }
 
 async function resetToken(id: string) {
-  if (!confirm('确认重置该受控端 Token？旧 Token 将立即失效。')) return;
+  if (!confirm(t('agents.resetConfirm'))) return;
   try {
     await adminApi.resetToken(id);
     await loadAdmin();
   } catch (e) {
-    error.value = (e as Error).message || '重置失败';
+    error.value = (e as Error).message || t('agents.resetFailed');
   }
 }
 
@@ -118,43 +118,43 @@ async function renew(id: string) {
     await adminApi.renewAgent(id);
     await loadAdmin();
   } catch (e) {
-    error.value = (e as Error).message || '续期失败';
+    error.value = (e as Error).message || t('agents.renewFailed');
   }
 }
 
 async function batchRemove() {
   const ids = [...selected.value];
   if (!ids.length) return;
-  if (!confirm(`确认删除选中的 ${ids.length} 个受控端？`)) return;
+  if (!confirm(t('agents.batchDeleteConfirm', { n: ids.length }))) return;
   let ok = 0;
   for (const id of ids) {
     try {
       await adminApi.deleteAgent(id);
       ok++;
     } catch (e) {
-      error.value = `部分删除失败：${(e as Error).message}`;
+      error.value = t('agents.partialDeleteFailed', { msg: (e as Error).message });
     }
   }
   selected.value = new Set();
   await loadAdmin();
-  if (!error.value) error.value = `已删除 ${ok} 个受控端`;
+  if (!error.value) error.value = t('agents.batchDeleted', { n: ok });
   setTimeout(() => (error.value = ''), 2500);
 }
 
 async function batchResetToken() {
   const ids = [...selected.value];
   if (!ids.length) return;
-  if (!confirm(`确认重置选中 ${ids.length} 个受控端的 Token？`)) return;
+  if (!confirm(t('agents.batchResetConfirm', { n: ids.length }))) return;
   for (const id of ids) {
     try {
       await adminApi.resetToken(id);
     } catch (e) {
-      error.value = `部分重置失败：${(e as Error).message}`;
+      error.value = t('agents.partialResetFailed', { msg: (e as Error).message });
     }
   }
   selected.value = new Set();
   await loadAdmin();
-  if (!error.value) error.value = `已重置 ${ids.length} 个 Token`;
+  if (!error.value) error.value = t('agents.batchResetDone', { n: ids.length });
   setTimeout(() => (error.value = ''), 2500);
 }
 
@@ -165,12 +165,12 @@ async function batchRenew() {
     try {
       await adminApi.renewAgent(id);
     } catch (e) {
-      error.value = `部分续期失败：${(e as Error).message}`;
+      error.value = t('agents.partialRenewFailed', { msg: (e as Error).message });
     }
   }
   selected.value = new Set();
   await loadAdmin();
-  if (!error.value) error.value = `已续期 ${ids.length} 个受控端`;
+  if (!error.value) error.value = t('agents.batchRenewDone', { n: ids.length });
   setTimeout(() => (error.value = ''), 2500);
 }
 </script>
@@ -189,32 +189,32 @@ async function batchRenew() {
       </div>
       <div v-if="created" class="mt-4 space-y-3 border-t border-slate-700 pt-4">
         <div class="flex items-center gap-3">
-          <span class="text-sm text-emerald-300">已创建：{{ created.id }}</span>
+          <span class="text-sm text-emerald-300">{{ t('agents.created', { id: created.id }) }}</span>
           <span class="text-xs text-slate-500">{{ t('agents.tokenOnce') }}</span>
         </div>
         <div class="flex gap-2">
           <input :type="showToken ? 'text' : 'password'" readonly class="flex-1 rounded-lg border border-slate-700 bg-slate-900/30 px-3 py-2 text-xs text-slate-300" :value="created.token" />
-          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</button>
-          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(created.token)">复制</button>
+          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="showToken = !showToken">{{ showToken ? t('common.hide') : t('common.show') }}</button>
+          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(created.token)">{{ t('common.copy') }}</button>
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
             <label class="text-xs text-slate-400">{{ t('agents.linux') }}</label>
-            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.native_cmd)">复制</button>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.native_cmd)">{{ t('common.copy') }}</button>
           </div>
           <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.native_cmd" />
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
             <label class="text-xs text-slate-400">{{ t('agents.docker') }}</label>
-            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.docker_cmd)">复制</button>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.docker_cmd)">{{ t('common.copy') }}</button>
           </div>
           <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.docker_cmd" />
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
             <label class="text-xs text-slate-400">{{ t('agents.windows') }}</label>
-            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.windows_cmd)">复制</button>
+            <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.windows_cmd)">{{ t('common.copy') }}</button>
           </div>
           <textarea readonly rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.windows_cmd" />
         </div>

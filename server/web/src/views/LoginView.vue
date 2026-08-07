@@ -26,7 +26,7 @@ onMounted(async () => {
 async function submit() {
   const tk = token.value.trim();
   if (!tk) {
-    error.value = t('login.token') + ' 必填';
+    error.value = t('login.tokenRequired');
     return;
   }
   if (needTotp.value && !totp.value.trim()) {
@@ -44,7 +44,7 @@ async function submit() {
     }
     router.replace((route.query.redirect as string) || '/admin');
   } catch (e) {
-    error.value = (e as Error).message || '登录失败';
+    error.value = (e as Error).message || t('login.failed');
   } finally {
     loading.value = false;
   }

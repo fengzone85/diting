@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from '../composables/useI18n';
 import { useTheme } from '../composables/useTheme';
-import type { PublicMeta } from '../services/publicApi';
+import type { PublicMeta } from '../services/types';
 
 const { t, locale, setLocale } = useI18n();
 const { theme, set: setTheme } = useTheme();

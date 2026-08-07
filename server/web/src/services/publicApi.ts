@@ -1,7 +1,8 @@
 import { api } from './api';
 import type { Agent, Overview, Sparklines, Probes, PublicMeta } from './types';
 
-function parseProbes(raw: unknown): Record<string, { ts: number; ms: number; ok: boolean; loss: number }[]> {
+// agent 快照的 probes 是 JSON 字符串 `{"目标":{ts,ms,ok,loss}}`（单对象），解析后返回对象形态
+function parseProbes(raw: unknown): Record<string, { ts?: number; ms?: number; ok?: boolean; loss?: number }> {
   if (raw && typeof raw !== 'object') {
     try {
       return JSON.parse(raw as string);
@@ -9,7 +10,7 @@ function parseProbes(raw: unknown): Record<string, { ts: number; ms: number; ok:
       return {};
     }
   }
-  return (raw as Record<string, { ts: number; ms: number; ok: boolean; loss: number }[]>) || {};
+  return (raw as Record<string, { ts?: number; ms?: number; ok?: boolean; loss?: number }>) || {};
 }
 
 export const publicApi = {
