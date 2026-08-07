@@ -73,7 +73,10 @@ function getSession(req) {
 }
 function setSessionCookie(res, payload) {
   const cookie = signSession(payload);
-  const attrs = `HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL / 1000)}`;
+  // ADMIN_ALLOW_HTTP=1（仅本地开发直连 http 时启用）下不附加 Secure，
+  // 使浏览器可在 http 上下文持有登录态；生产环境不设该变量，cookie 仍强制 Secure。
+  const secure = process.env.ADMIN_ALLOW_HTTP === '1' ? '' : 'Secure; ';
+  const attrs = `HttpOnly; ${secure}SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL / 1000)}`;
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${attrs}`);
 }
 function clearSessionCookie(res) {

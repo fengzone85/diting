@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useChartTheme } from '../composables/useChartTheme';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
@@ -29,6 +29,7 @@ const PALETTE = ['#f472b6', '#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185
 const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
+let ro: ResizeObserver | null = null;
 
 function buildSeries() {
   return props.series.map((s, i) => ({
@@ -80,7 +81,11 @@ function init() {
   if (!chartRef.value) return;
   chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
   chart.setOption(baseOption());
+  ro = new ResizeObserver(() => chart?.resize());
+  ro.observe(chartRef.value);
 }
+
+function resize() { nextTick(() => chart?.resize()); }
 
 watch(colors, () => chart?.setOption(baseOption(), true));
 
@@ -89,7 +94,9 @@ watch(() => props.series, () => {
 }, { deep: true });
 
 onMounted(init);
-onUnmounted(() => chart?.dispose());
+onUnmounted(() => { ro?.disconnect(); chart?.dispose(); });
+
+defineExpose({ resize });
 </script>
 
 <template>

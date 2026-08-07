@@ -29,7 +29,10 @@ function parseDisks(s) {
 // 应用层限流（兜底，不依赖 Nginx）：每 IP 每 10s 最多 20 次。
 // /report 已由 Nginx 单独限流，此处放行。trust proxy 已在 server.js 启用，req.ip 为真实客户端。
 // MAP_CAP：限流 Map 最大条目数，超出则提前清空，防分布式攻击用大量不同 IP 撑爆内存。
-const RATE_WINDOW = 10000, RATE_MAX = 20, MAP_CAP = 10000;
+// 放宽到每 IP 每 10s 60 次：单标签页前端每 5s 约 4 请求(8/10s)，
+// 多标签页/多设备共享同一源 IP 时极易超过 20 次阈值而误伤正常浏览。
+// 应用层限流仅为兜底，真实安全边界仍由 Nginx limit_req 承担。
+const RATE_WINDOW = 10000, RATE_MAX = 60, MAP_CAP = 10000;
 const rateHits = new Map();
 setInterval(() => rateHits.clear(), RATE_WINDOW).unref?.();
 const rateLimit = (req, res, next) => {
