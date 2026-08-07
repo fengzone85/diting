@@ -66,7 +66,7 @@ async function loadSparklines() {
     cpuTrend.value = agg.cpu;
     memTrend.value = agg.mem;
   } catch (e) {
-    sparkError.value = '趋势数据加载失败：' + ((e as Error).message || '未知错误');
+    sparkError.value = t('dashboard.trendFailed', { msg: (e as Error).message || t('common.unknownError') });
   }
 }
 
@@ -89,9 +89,9 @@ async function testAlert() {
   testMessage.value = '';
   try {
     await adminApi.testAlert();
-    testMessage.value = '测试告警已发送';
+    testMessage.value = t('dashboard.testSent');
   } catch (e) {
-    testMessage.value = '发送失败：' + ((e as Error).message || '未知错误');
+    testMessage.value = t('dashboard.sendFailed', { msg: (e as Error).message || t('common.unknownError') });
   } finally {
     testingAlert.value = false;
   }
@@ -118,15 +118,15 @@ async function testAlert() {
     </div>
     <div class="mt-6">
       <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-lg font-semibold">{{ t('dashboard.avgCpu') }} / {{ t('dashboard.avgMem') }} 趋势</h2>
+        <h2 class="text-lg font-semibold">{{ t('dashboard.avgCpu') }} / {{ t('dashboard.avgMem') }} {{ t('dashboard.trend') }}</h2>
         <div class="flex gap-1 text-xs">
           <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-400'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
         </div>
       </div>
       <div v-if="sparkError" class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{{ sparkError }}</div>
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartLatency title="集群平均 CPU (%)" :data="cpuTrend" color="#38bdf8" />
-        <ChartLatency title="集群平均内存 (%)" :data="memTrend" color="#a78bfa" />
+        <ChartLatency :title="t('dashboard.trendCpu')" :data="cpuTrend" color="#38bdf8" />
+        <ChartLatency :title="t('dashboard.trendMem')" :data="memTrend" color="#a78bfa" />
       </div>
     </div>
     <div v-if="testMessage" class="mt-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200">{{ testMessage }}</div>

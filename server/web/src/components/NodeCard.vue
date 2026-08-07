@@ -23,13 +23,8 @@ const emit = defineEmits<{
 }>();
 
 const status = computed(() => props.agent.status || (props.agent.online ? 'online' : 'offline'));
-const statusText = computed(() => {
-  const map: Record<string, string> = { online: t('card.online'), offline: t('card.offline'), warn: t('card.warn') };
-  return map[status.value];
-});
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
-const padClass = computed(() => ({ mini:'p-3', compact:'p-3.5', comfortable:'p-5', large:'p-6' }[props.size || 'comfortable']));
 
 function daysUntil(dateStr?: string) {
   if (!dateStr) return null;
@@ -39,9 +34,16 @@ function daysUntil(dateStr?: string) {
 }
 
 function probeTargets() {
-  const p = props.agent.probes; if (!p) return [];
-  if (Array.isArray(p)) return p;
-  return Object.entries(p).map(([target, v]) => ({ target, ...(v as Record<string, unknown>) }));
+  const p = props.agent.probes;
+  if (!p) return [];
+  let parsed: Record<string, { ts?: number; ms?: number; ok?: boolean; loss?: number }> | null = null;
+  if (typeof p === 'string') {
+    try { parsed = JSON.parse(p); } catch { return []; }
+  } else {
+    parsed = p;
+  }
+  if (!parsed) return [];
+  return Object.entries(parsed).map(([target, v]) => ({ target, ...v }));
 }
 
 function pctClass(v: number | null | undefined) {
@@ -55,13 +57,18 @@ const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('
 const hist = computed(() => props.sparklines?.[props.agent.id] || []);
 const histOk = computed(() => Array.isArray(hist.value) && hist.value.length > 0);
 
-function ptsString(values: (number | undefined | null)[], w = 60, h = 32) {
+function ptsString(values: (number | undefined | null)[], w = 60, h = 32, fixedMin?: number, fixedMax?: number) {
   const arr = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   if (arr.length === 0) return '';
-  const max = Math.max(...arr, 1e-9), min = Math.min(...arr, 0), range = (max - min) || 1;
+  const max = fixedMax != null ? fixedMax : Math.max(...arr, 1e-9);
+  const min = fixedMin != null ? fixedMin : Math.min(...arr, 0);
+  const range = (max - min) || 1;
   return arr.map((v, i) => `${(i/(arr.length-1||1)*w).toFixed(1)},${(h-((v-min)/range)*(h-2)-1).toFixed(1)}`).join(' ');
 }
 
+// 百分比类指标（CPU/内存/温度/swap）使用统一 0–100 基准，保证各图尺度一致、可比
+// 为了让各胶囊 sparkline 在视觉上均紧贴文字、占满容器高度,统一使用自适应缩放。
+// 若后续需要跨胶囊 0-100 可比性,可在设置中增加统一尺度开关。
 const sparkCpuPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.cpu ?? x.cpu_percent) : [cpu.value]));
 const sparkMemPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.mem_pct) : [props.agent.mem_pct]));
 const sparkLoadPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.load1) : [props.agent.load1]));
@@ -108,34 +115,35 @@ const trafficPct = computed(() => {
     <!-- ===== 旧版 .metrics：3 列 grid ===== -->
     <div class="card-metrics">
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="1.5" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="1.5" /></svg></div>
         <div class="m-info"><span class="m-lbl">{{ t('card.cpu') }}</span><span class="m-val" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="1.5" /></svg></div>
-        <div class="m-info"><span class="m-lbl">{{ t('card.memory') }}</span><span class="m-val" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</span></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="1.5" /></svg></div>
+        <div class="m-info"><span class="m-lbl">{{ isWindows ? t('card.process') : t('card.load') }}</span><span class="m-val">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="1.5" /></svg></div>
-        <div class="m-info"><span class="m-lbl">{{ isWindows ? '进程' : '负载' }}</span><span class="m-val">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</span></div>
-      </div>
-      <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="1.5" /></svg></div>
-        <div class="m-info"><span class="m-lbl">温度</span><span class="m-val">{{ agent.temp != null ? agent.temp.toFixed(1)+'°C' : '—' }}</span></div>
-      </div>
-      <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="1.5" /></svg></div>
-        <div class="m-info"><span class="m-lbl">Swap</span><span class="m-val" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</span></div>
-      </div>
-      <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="1.5" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="1.5" /></svg></div>
         <div class="m-info"><span class="m-lbl">IO</span><span class="m-val">{{ ((agent.disk_r_rate||0)/1048576).toFixed(2) }}/{{ ((agent.disk_w_rate||0)/1048576).toFixed(2) }}</span></div>
       </div>
-      <!-- 网络+探针 跨3列 -->
+      <!-- 内存/温度/swap 独立胶囊，图形在上、文字紧贴图形下方 -->
+      <div class="card-metric">
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="1.5" /></svg></div>
+        <div class="m-info"><span class="m-lbl">RAM</span><span class="m-val" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</span></div>
+      </div>
+      <div class="card-metric">
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="1.5" /></svg></div>
+        <div class="m-info"><span class="m-lbl">{{ t('node.temp') }}</span><span class="m-val">{{ agent.temp != null ? agent.temp.toFixed(1)+'°C' : '—' }}</span></div>
+      </div>
+      <div class="card-metric">
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="1.5" /></svg></div>
+        <div class="m-info"><span class="m-lbl">Swap</span><span class="m-val" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</span></div>
+      </div>
+      <!-- 网络+探针 跨3列（置于内存胶囊下方） -->
       <div class="card-metric card-metric-wide">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="1.5" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="1.5" /></svg></div>
         <div class="m-info">
-          <span class="m-lbl">网络</span>
+          <span class="m-lbl">{{ t('public.network') }}</span>
           <span class="m-val">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} &nbsp;↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</span>
           <div v-if="probeTargets().length" class="card-probes">
             <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok!==false&&pt.ms!=null?'probe-ok':'probe-timeout'">{{ pt.target }} {{ pt.ok!==false&&pt.ms!=null?formatNumber(pt.ms as number,1):t('card.timeout') }}</span>
@@ -151,7 +159,7 @@ const trafficPct = computed(() => {
       <span class="m-val">{{ formatBytes(agent.disk_used) }}/{{ formatBytes(agent.disk_total) }}</span>
     </div>
     <div class="card-disk-row">
-      <span class="m-lbl">流量</span>
+      <span class="m-lbl">{{ t('public.traffic') }}</span>
       <div v-if="trafficPct != null" class="bar"><div class="bar-fill" :class="pctClass(trafficPct)" :style="{ width: `${trafficPct}%` }"></div></div>
       <span class="m-val">{{ formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0)) }}<span v-if="agent.monthly_quota_gb"> /{{ agent.monthly_quota_gb }} GB</span></span>
     </div>
@@ -159,7 +167,7 @@ const trafficPct = computed(() => {
     <!-- ===== 旧版 .foot ===== -->
     <div class="card-foot">
       <span class="uptime">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</span>
-      <span v-if="agent.expire_at" class="text-[10px]" :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'text-rose-400' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'text-amber-400' : 'text-muted'">{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? '已过期' : `剩余 ${daysUntil(agent.expire_at)} 天` }}</span>
+      <span v-if="agent.expire_at" class="text-[10px]" :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'text-rose-400' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'text-amber-400' : 'text-muted'">{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? t('card.expired') : t('card.remainingDays', { n: daysUntil(agent.expire_at) ?? 0 }) }}</span>
     </div>
   </RouterLink>
 </template>

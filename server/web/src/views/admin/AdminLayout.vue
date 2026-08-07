@@ -23,7 +23,7 @@ onUnmounted(stopAutoRefresh);
         @click="menuOpen = true"
       >
         <span>☰</span>
-        {{ t('common.language') === '语言' ? '菜单' : 'Menu' }}
+        {{ t('nav.menu') }}
       </button>
       <RouterView />
     </main>

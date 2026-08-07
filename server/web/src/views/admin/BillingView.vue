@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { adminApi } from '../../services/adminApi';
+import { t } from '../../composables/useI18n';
 import type { Billing } from '../../services/types';
 import Loading from '../../components/ui/Loading.vue';
 import ErrorMessage from '../../components/ui/ErrorMessage.vue';
@@ -14,54 +15,54 @@ onMounted(async () => {
   try {
     data.value = await adminApi.billingOverview();
   } catch (e) {
-    error.value = (e as Error).message || '加载账单失败';
+    error.value = (e as Error).message || t('billing.loadFailed');
   } finally {
     loading.value = false;
   }
 });
 
 function formatDate(days: number) {
-  if (days <= 0) return '已到期';
-  if (days === 1) return '明天到期';
-  return `${days} 天后到期`;
+  if (days <= 0) return t('billing.expired');
+  if (days === 1) return t('billing.expireTomorrow');
+  return t('billing.expireInDays', { n: days });
 }
 </script>
 
 <template>
   <div>
-    <h1 class="mb-6 text-2xl font-bold">账单概览</h1>
+    <h1 class="mb-6 text-2xl font-bold">{{ t('billing.title') }}</h1>
     <Loading v-if="loading" />
     <ErrorMessage v-else-if="error" :message="error" />
     <div v-else-if="data" class="grid gap-6">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">月度总费用</p>
+          <p class="text-sm text-slate-400">{{ t('billing.monthlyTotal') }}</p>
           <p class="mt-1 text-3xl font-bold text-emerald-400">{{ data.currency }}{{ data.monthly_total.toFixed(2) }}</p>
         </div>
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">受控端数量</p>
+          <p class="text-sm text-slate-400">{{ t('billing.agentCount') }}</p>
           <p class="mt-1 text-3xl font-bold text-sky-400">{{ data.agent_count }}</p>
         </div>
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">7 天内到期</p>
+          <p class="text-sm text-slate-400">{{ t('billing.expire7d') }}</p>
           <p class="mt-1 text-3xl font-bold" :class="data.expiring_soon.length ? 'text-amber-400' : 'text-slate-200'">{{ data.expiring_soon.length }}</p>
         </div>
       </div>
 
       <div class="glass p-6">
-        <h2 class="mb-4 text-lg font-semibold">分组月均费用</h2>
-        <div v-if="!data.per_group.length" class="py-8 text-center text-sm text-slate-500">暂无分组费用数据</div>
+        <h2 class="mb-4 text-lg font-semibold">{{ t('billing.perGroupMonthly') }}</h2>
+        <div v-if="!data.per_group.length" class="py-8 text-center text-sm text-slate-500">{{ t('billing.noGroupData') }}</div>
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-slate-700 text-left text-slate-400">
-                <th class="py-2 font-medium">分组</th>
-                <th class="py-2 font-medium text-right">月均费用</th>
+                <th class="py-2 font-medium">{{ t('billing.group') }}</th>
+                <th class="py-2 font-medium text-right">{{ t('billing.monthlyAvg') }}</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="g in data.per_group" :key="g.name" class="border-b border-slate-800">
-                <td class="py-3">{{ g.name || '未分组' }}</td>
+                <td class="py-3">{{ g.name || t('billing.ungrouped') }}</td>
                 <td class="py-3 text-right font-mono">{{ data.currency }}{{ g.cost.toFixed(2) }}</td>
               </tr>
             </tbody>
@@ -70,14 +71,14 @@ function formatDate(days: number) {
       </div>
 
       <div class="glass p-6">
-        <h2 class="mb-4 text-lg font-semibold">即将到期</h2>
-        <div v-if="!data.expiring_soon.length" class="py-8 text-center text-sm text-slate-500">未来 7 天内没有到期机器</div>
+        <h2 class="mb-4 text-lg font-semibold">{{ t('billing.expiringSoon') }}</h2>
+        <div v-if="!data.expiring_soon.length" class="py-8 text-center text-sm text-slate-500">{{ t('billing.noExpiring') }}</div>
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-slate-700 text-left text-slate-400">
-                <th class="py-2 font-medium">机器</th>
-                <th class="py-2 font-medium">剩余时间</th>
+                <th class="py-2 font-medium">{{ t('billing.machine') }}</th>
+                <th class="py-2 font-medium">{{ t('billing.timeLeft') }}</th>
               </tr>
             </thead>
             <tbody>

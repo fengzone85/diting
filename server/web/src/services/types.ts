@@ -28,7 +28,10 @@ export interface Agent {
   version?: string;
   last_seen?: number;
   status?: 'online' | 'offline' | 'warn';
-  probes?: Record<string, { ts: number; ms: number; ok: boolean; loss: number }[]>;
+  // 后端 agent 快照的 probes 是 JSON 字符串（`{"目标":{ts,ms,ok,loss}}`），NodeCard 内部 parse
+  probes?: string | Record<string, { ts?: number; ms?: number; ok?: boolean; loss?: number }>;
+  disk_r_rate?: number;
+  disk_w_rate?: number;
   disks?: { mount: string; used: number; total: number; pct: number }[];
   latest?: {
     cpu?: number;
