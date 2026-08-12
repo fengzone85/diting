@@ -366,15 +366,17 @@ stop_diting() {
     log_success "已停止"
 }
 
-# 操作后暂停：whiptail/dialog 退出后终端回到普通模式，统一用 read 等待
-# 5 秒超时兜底（非交互 EOF 时也不会真卡死）
+# 操作后暂停：固定 sleep 等待（不依赖 stdin，避免非交互环境 read 秒过）
+# 若 stdin 是真实 TTY，则允许按回车提前跳过；否则纯等待 PAUSE_SECONDS 秒
+PAUSE_SECONDS=4
 press_any_key() {
-    if tui_enabled; then
-        echo "操作已完成。按回车（或等待 5 秒）返回菜单..." >&2
+    echo "操作已完成。${PAUSE_SECONDS} 秒后返回菜单（TTY 下可按回车跳过）..." >&2
+    if [ -t 0 ]; then
+        # 真实终端：回车立即返回，否则等 PAUSE_SECONDS 秒
+        read -r -t "$PAUSE_SECONDS" _ 2>/dev/null || true
     else
-        echo "操作已完成。按回车（或等待 5 秒）返回菜单..." >&2
+        sleep "$PAUSE_SECONDS"
     fi
-    read -r -t 5 _ 2>/dev/null || true
 }
 
 # ============ 横幅 + 主菜单 ============
