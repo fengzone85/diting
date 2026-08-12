@@ -32,6 +32,7 @@ export const zhCN: Record<string, string> = {
   'nav.logout': '退出',
   'nav.admin': '管理后台',
   'nav.auditLogs': '审计日志',
+  'nav.template': '模板设置',
   'nav.menu': '菜单',
 
   // 受控端列表
@@ -222,6 +223,17 @@ export const zhCN: Record<string, string> = {
   'theme.providerAliases': '厂商别名',
   'theme.customTags': '自定义标签',
   'theme.visitorInfo': '访客信息条',
+  // 模板设置（可视化编辑器）
+  'template.title': '模板设置',
+  'template.desc': '分别自定义暗色与亮色两套主题下的卡片配色、透明度与背景图片。',
+  'template.darkSection': '暗色主题',
+  'template.lightSection': '亮色主题',
+  'template.cardColor': '卡片颜色与透明度',
+  'template.alphaHint': '透明度越高卡片越不透明；调低（如 5%）即可实现近乎全透明的毛玻璃效果。',
+  'template.blur': '毛玻璃模糊',
+  'template.background': '背景',
+  'template.appearance': '外观与展示',
+  'settings.jsonError': 'JSON 格式错误，请检查后重试',
 
   // 节点卡片
   'card.online': '在线',

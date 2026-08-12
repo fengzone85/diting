@@ -32,6 +32,7 @@ export const enUS: Record<string, string> = {
   'nav.logout': 'Logout',
   'nav.admin': 'Admin',
   'nav.auditLogs': 'Audit Logs',
+  'nav.template': 'Template',
   'nav.menu': 'Menu',
 
   // agents
@@ -135,6 +136,17 @@ export const enUS: Record<string, string> = {
   'settings.cv.protanopia': 'Protanopia',
   'settings.cv.deuteranopia': 'Deuteranopia',
   'settings.cv.tritanopia': 'Tritanopia',
+  // Template settings (look & feel editor)
+  'template.title': 'Template',
+  'template.desc': 'Customize card color, transparency and background images for dark and light themes independently.',
+  'template.darkSection': 'Dark Theme',
+  'template.lightSection': 'Light Theme',
+  'template.cardColor': 'Card Color & Transparency',
+  'template.alphaHint': 'Higher alpha = more opaque card. Set low (e.g. 5%) for near-transparent glass.',
+  'template.blur': 'Glass Blur',
+  'template.background': 'Background',
+  'template.appearance': 'Appearance & Display',
+  'settings.jsonError': 'Invalid JSON, please fix and retry',
   'settings.scheme.official': 'Official',
   'settings.scheme.basic': 'Basic',
   'settings.scheme.ops': 'Ops',

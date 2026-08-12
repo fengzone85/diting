@@ -120,18 +120,6 @@ function cloneSettings(src: Settings): SettingsForm {
   };
 }
 
-const providerAliasesText = computed({
-  get: () => JSON.stringify(local.value.ui.provider_aliases || {}, null, 0),
-  set: (v) => {
-    try { local.value.ui.provider_aliases = JSON.parse(v || '{}'); } catch {}
-  },
-});
-const customTagsText = computed({
-  get: () => JSON.stringify(local.value.ui.custom_tags || {}, null, 0),
-  set: (v) => {
-    try { local.value.ui.custom_tags = JSON.parse(v || '{}'); } catch {}
-  },
-});
 
 watch(() => state.settings, (s) => {
   if (s) local.value = cloneSettings(s);
@@ -220,108 +208,6 @@ async function save() {
         <FormInput v-model="local.ui.social_website" :label="t('footer.website')" />
       </div>
 
-      <div class="glass p-6">
-        <h2 class="mb-4 text-lg font-semibold">{{ t('settings.themeVisual') }}</h2>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('theme.glassPreset') }}</label>
-            <select v-model="local.ui.glass_preset" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-              <option value="emerald">{{ t('settings.preset.emerald') }}</option>
-              <option value="soft">{{ t('settings.preset.soft') }}</option>
-              <option value="high-contrast">{{ t('settings.preset.highContrast') }}</option>
-              <option value="midnight">{{ t('settings.preset.midnight') }}</option>
-              <option value="custom">{{ t('settings.preset.custom') }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('theme.colorVision') }}</label>
-            <select v-model="local.ui.color_vision" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-              <option value="normal">{{ t('settings.cv.normal') }}</option>
-              <option value="protanopia">{{ t('settings.cv.protanopia') }}</option>
-              <option value="deuteranopia">{{ t('settings.cv.deuteranopia') }}</option>
-              <option value="tritanopia">{{ t('settings.cv.tritanopia') }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardScheme') }}</label>
-            <select v-model="local.ui.card_scheme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-              <option value="official">{{ t('settings.scheme.official') }}</option>
-              <option value="basic">{{ t('settings.scheme.basic') }}</option>
-              <option value="ops">{{ t('settings.scheme.ops') }}</option>
-              <option value="resource">{{ t('settings.scheme.resource') }}</option>
-              <option value="finance">{{ t('settings.scheme.finance') }}</option>
-              <option value="traffic">{{ t('settings.scheme.traffic') }}</option>
-              <option value="gpu">{{ t('settings.scheme.gpu') }}</option>
-              <option value="asset">{{ t('settings.scheme.asset') }}</option>
-              <option value="full">{{ t('settings.scheme.full') }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardSize') }}</label>
-            <select v-model="local.ui.card_size" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-              <option value="mini">{{ t('settings.size.mini') }}</option>
-              <option value="compact">{{ t('settings.size.compact') }}</option>
-              <option value="comfortable">{{ t('settings.size.comfortable') }}</option>
-              <option value="large">{{ t('settings.size.large') }}</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="mt-4 rounded-lg bg-surface p-4">
-          <label class="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" v-model="local.ui.background!.enabled" class="rounded" />
-            {{ t('settings.backgroundEnabled') }}
-          </label>
-          <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label class="mb-1 block text-sm text-slate-400">{{ t('settings.type') }}</label>
-              <select v-model="local.ui.background!.type" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
-                <option value="image">{{ t('settings.image') }}</option>
-                <option value="video">{{ t('settings.video') }}</option>
-              </select>
-            </div>
-            <div>
-              <label class="mb-1 block text-sm text-slate-400">{{ t('settings.url') }}</label>
-              <input v-model="local.ui.background!.url" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" placeholder="https://..." />
-            </div>
-            <div>
-              <label class="mb-1 block text-sm text-slate-400">{{ t('settings.blur', { n: local.ui.background!.blur }) }}</label>
-              <input type="range" min="0" max="30" v-model.number="local.ui.background!.blur" class="w-full" />
-            </div>
-          </div>
-          <div class="mt-3">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.overlay', { n: local.ui.background!.overlay }) }}</label>
-            <input type="range" min="0" max="100" v-model.number="local.ui.background!.overlay" class="w-full" />
-          </div>
-        </div>
-
-        <div class="mt-4 rounded-lg bg-surface p-4">
-          <label class="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" v-model="local.ui.announcement!.enabled" class="rounded" />
-            {{ t('settings.announcementEnabled') }}
-          </label>
-          <FormInput v-model="local.ui.announcement!.title" :label="t('settings.announcementTitle')" class="mt-2" />
-          <FormInput v-model="local.ui.announcement!.content" :label="t('settings.announcementContent')" type="textarea" />
-        </div>
-
-        <div class="mt-4 flex items-center gap-6">
-          <label class="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" v-model="local.ui.visitor_info" class="rounded" />
-            {{ t('settings.visitorInfo') }}
-          </label>
-        </div>
-
-        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.providerAliases') }}</label>
-            <textarea v-model="providerAliasesText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"></textarea>
-          </div>
-          <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.customTags') }}</label>
-            <textarea v-model="customTagsText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"></textarea>
-          </div>
-        </div>
-      </div>
     </div>
     <div class="mt-6">
       <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-white hover:bg-sky-400 disabled:opacity-50" @click="save">

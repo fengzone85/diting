@@ -63,7 +63,11 @@ function applyBackground() {
   const root = document.documentElement;
   let layer = document.getElementById('app-bg');
   let overlay = document.getElementById('app-bg-overlay');
-  const bg = m && m.background;
+  // 按当前主题选用暗/亮背景配置（兼容旧版单 background 字段）
+  const isLight = root.getAttribute('data-theme') === 'light';
+  const bgDark = (m && m.background_dark) || (m && m.background) || null;
+  const bgLight = (m && m.background_light) || null;
+  const bg = isLight ? (bgLight || bgDark) : bgDark;
   if (bg && bg.enabled && bg.url) {
     if (!layer) {
       layer = document.createElement('div');
@@ -145,4 +149,9 @@ export function useTheme() {
     applyGlassConfig();
   }
   return { theme, toggle, set, applyQueryPreview, refreshGlass };
+}
+
+// 供模板设置页保存后即时刷新主题
+export function refreshGlass() {
+  applyGlassConfig();
 }
