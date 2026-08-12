@@ -190,12 +190,18 @@ generate_env() {
         port=$(ui_input "服务端口" "端口非法，请输入 1-65535 之间的数字:" "8081") || return 1
     done
 
-    # 管理员 Token（必填）
+    # 管理员 Token（必填，支持自动生成）
     local admin_token
-    admin_token=$(ui_password "管理员 Token" "请输入管理员 Token（用于后台管理，必填，请使用强随机串）:") || return 1
-    while [ -z "$admin_token" ]; do
-        admin_token=$(ui_password "管理员 Token" "Token 不能为空，请重新输入:") || return 1
-    done
+    if ui_yesno "管理员 Token" "是否自动生成一个强随机管理员 Token？\n（选“否”可手动输入自定义 Token）"; then
+        admin_token=$(rand_hex 24)
+        log_success "已自动生成管理员 Token：$admin_token"
+        log_warn "请妥善保存此 Token，首次登录后台时需要使用"
+    else
+        admin_token=$(ui_password "管理员 Token" "请输入管理员 Token（用于后台管理，必填，请使用强随机串）:") || return 1
+        while [ -z "$admin_token" ]; do
+            admin_token=$(ui_password "管理员 Token" "Token 不能为空，请重新输入:") || return 1
+        done
+    fi
 
     # 会话签名密钥（自动生成建议，可改）
     local session_secret; session_secret=$(rand_hex 32)
