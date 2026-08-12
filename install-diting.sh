@@ -401,11 +401,13 @@ main_menu() {
             *) ui_msgbox "错误" "无效选项：$choice" ;;
         esac
 
-        # 纯文本模式跑完一次即退出，避免 clear 覆盖输出
-        if ! tui_enabled; then
+        # 操作后暂停，避免结果一闪而过：
+        # whiptail/dialog 模式弹「完成」确认框；纯文本模式等待回车
+        if tui_enabled; then
+            ui_msgbox "完成" "操作已完成，点击确定返回菜单。"
+        else
             echo
             read -r -p "按回车返回菜单..." _ || true
-            # 文本模式仍循环，但用 read 暂停；whiptail 模式自带循环
         fi
     done
 }
