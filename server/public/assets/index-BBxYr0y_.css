@@ -1943,6 +1943,7 @@ body {
   transition: background-color .18s, box-shadow .18s, border-color .18s;
   box-shadow: 0 2px 12px #0000000f;
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
+  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   border: 1px solid #ffffff0f !important;
 }
