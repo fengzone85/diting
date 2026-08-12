@@ -847,20 +847,18 @@ SQL
 
 # ── 数据库管理子菜单（交互模式）─────────────────────────────────────────────────
 db_manage_menu() {
-    echo ""
-    echo -e "${BLUE}$(msg "db_menu.header")${NC}"
-    echo ""
-    echo "  $(msg "db_menu.backup")"
-    echo "  $(msg "db_menu.restore")"
-    echo "  $(msg "db_menu.list")"
-    echo "  $(msg "db_menu.stats")"
-    echo "  $(msg "db_menu.back")"
-    echo ""
-    read -r -p "$(msg "db_menu.prompt")" c || exit 0
+    local c
+    c="$(ui_menu "$(msg "db_menu.header")" "$(msg "db_menu.prompt")" \
+        "1" "$(msg "db_menu.backup")" \
+        "2" "$(msg "db_menu.restore")" \
+        "3" "$(msg "db_menu.list")" \
+        "4" "$(msg "db_menu.stats")" \
+        "0" "$(msg "db_menu.back")" )"
+    [[ -z "$c" ]] && return
     case "$c" in
         1) do_backup "" ;;
         2)
-            local bkp; read -r -p "$(msg "db_menu.restore_prompt")" bkp || return
+            local bkp; bkp="$(ui_prompt "$(msg "db_menu.header")" "$(msg "db_menu.restore_prompt")")" || return
             [[ -n "$bkp" ]] && do_restore "$bkp" || msg "cancelled"
             ;;
         3) do_backup_list ;;
@@ -874,8 +872,9 @@ do_reset_admin_token() {
     echo "$(msg "reset.header")"
     echo ""
     echo -e "${YELLOW}$(msg "reset.warn")${NC}"
-    read -r -p "$(msg "reset.confirm_prompt")" confirm || { msg "cancelled"; return 0; }
-    [[ "$confirm" == "yes" ]] || { msg "cancelled"; return 0; }
+    if ! ui_confirm "$(msg "reset.header")" "$(msg "reset.warn")\n\n$(msg "reset.confirm_prompt")"; then
+        msg "cancelled"; return 0
+    fi
 
     ensure_deps || return 1
     ensure_docker || return 1
@@ -964,6 +963,9 @@ declare -A I18N_ZH=(
     [menu.exit]="0) 退出"
     [menu.prompt]="请选择 [0-8]: "
     [menu.exit_msg]="退出"
+    [tui.title]="谛听轻量探针 一键部署"
+    [tui.available]="检测到图形终端 (whiptail/dialog)，已启用交互界面"
+    [tui.fallback]="未检测到 whiptail/dialog，使用文字菜单"
     [db_menu.header]="━━━ 数据库管理 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     [db_menu.backup]="1) 备份数据库"
     [db_menu.restore]="2) 从备份恢复"
@@ -1005,6 +1007,9 @@ declare -A I18N_EN=(
     [menu.exit]="0) Exit"
     [menu.prompt]="Select [0-8]: "
     [menu.exit_msg]="Exit"
+    [tui.title]="Diting Deploy"
+    [tui.available]="Graphical terminal detected (whiptail/dialog), TUI enabled"
+    [tui.fallback]="whiptail/dialog not found, using text menu"
     [db_menu.header]="━━━ Database ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     [db_menu.backup]="1) Backup Database"
     [db_menu.restore]="2) Restore from Backup"
@@ -1029,32 +1034,123 @@ declare -A I18N_EN=(
     [reset.warn]="[Warning] This will generate a new admin token. Old token will be invalid!"
 )
 
+# ── 图形交互层（TUI）────────────────────────────────────────────────────────────
+# 优先使用 whiptail / dialog 渲染交互菜单；两者均不可用时回退到纯文本 read 菜单。
+# 设计原则：不破坏任何现有功能函数，仅在「交互菜单」与「用户输入」处叠加 TUI。
+UI_BIN=""
+detect_ui() {
+    if command -v whiptail >/dev/null 2>&1; then
+        UI_BIN="whiptail"
+    elif command -v dialog >/dev/null 2>&1; then
+        UI_BIN="dialog"
+    else
+        UI_BIN=""
+    fi
+}
+detect_ui
+
+# ui_menu <标题> <prompt> <"tag item" 列表...>
+# 输出所选 tag 到 stdout。无 TUI 时回退到纯文本编号菜单（与旧行为一致）。
+# 调用方需把选项文本里的前导编号（如 "1) xxx"）作为展示，tag 用纯数字。
+ui_menu() {
+    local title="$1"; shift
+    local prompt="$1"; shift
+    # 剩余参数：成对的 "tag" "item"
+    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+        # 回退：纯文本
+        echo "" >&2
+        echo -e "${BLUE}${title}${NC}" >&2
+        local i
+        for ((i=1; i<=$#; i+=2)); do
+            echo "  ${!i} ${@:i+1:1}" >&2
+        done
+        echo "" >&2
+        read -r -p "$prompt" c || exit 0
+        echo "$c"
+        return
+    fi
+    local height width menuheight=$(( ( $# + 1 ) / 2 + 1 ))
+    height=$(( menuheight + 7 )); width=70
+    if [[ "$UI_BIN" == "whiptail" ]]; then
+        whiptail --title "$title" --menu "$prompt" "$height" "$width" "$menuheight" "$@" 3>&1 1>&2 2>&3
+    else
+        dialog --clear --title "$title" --menu "$prompt" "$height" "$width" "$menuheight" "$@" 3>&1 1>&2 2>&3
+    fi
+}
+
+# ui_prompt <标题> <提示> [默认值] → 输出到 stdout（回车用默认值）
+ui_prompt() {
+    local title="$1" text="$2" def="${3:-}"
+    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+        read -r -p "$text${def:+ [$def]}: " v || return 1
+        echo "${v:-$def}"
+        return
+    fi
+    if [[ "$UI_BIN" == "whiptail" ]]; then
+        whiptail --title "$title" --inputbox "$text" 10 70 "$def" 3>&1 1>&2 2>&3
+    else
+        dialog --title "$title" --inputbox "$text" 10 70 "$def" 3>&1 1>&2 2>&3
+    fi
+}
+
+# ui_confirm <标题> <提示> → 0=yes 1=no
+ui_confirm() {
+    local title="$1" text="$2"
+    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+        read -r -p "$text (yes/no): " v || return 1
+        [[ "$v" == "yes" || "$v" == "y" || "$v" == "Y" ]]
+        return
+    fi
+    if [[ "$UI_BIN" == "whiptail" ]]; then
+        whiptail --title "$title" --yesno "$text" 10 70
+    else
+        dialog --title "$title" --yesno "$text" 10 70
+    fi
+}
+
+# ui_msg <标题> <消息> → 展示信息框（回退时直接 echo）
+ui_msg() {
+    local title="$1" text="$2"
+    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+        echo -e "${BLUE}${title}${NC}" >&2
+        echo "$text" >&2
+        return
+    fi
+    if [[ "$UI_BIN" == "whiptail" ]]; then
+        whiptail --title "$title" --msgbox "$text" 14 70
+    else
+        dialog --title "$title" --msgbox "$text" 14 70
+    fi
+}
+
 # ── 菜单 ───────────────────────────────────────────────────────────────────────
 show_menu() {
-    echo ""
-    printf "${BLUE}$(msg "menu.header")${NC}\n" "$SCRIPT_VERSION" "$SCRIPT_DATE"
-    echo -e "  $(msg "menu.os") ${GREEN}$(detect_os)${NC}  $(msg "menu.arch") ${GREEN}$(detect_arch)${NC}"
-    echo -e "  $(msg "menu.notes") ${SCRIPT_NOTES}"
-    # 静默检查远端是否有新版（超时即跳过，不影响离线/弱网使用）
-    local _rv; _rv="$(remote_script_version)"
-    if version_gt "$_rv" "$SCRIPT_VERSION"; then
-        echo -e "  ${YELLOW}$(msg "menu.new_version" "$_rv" "$SCRIPT_VERSION")${NC}"
-    elif [[ -n "$_rv" ]]; then
-        echo -e "  ${GREEN}$(msg "menu.up_to_date" "$SCRIPT_VERSION")${NC}"
+    # 顶部信息（TUI 下用 msgbox 会打断流程，故信息仅回退文本模式展示；TUI 标题已含版本）
+    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+        echo ""
+        printf "${BLUE}$(msg "menu.header")${NC}\n" "$SCRIPT_VERSION" "$SCRIPT_DATE"
+        echo -e "  $(msg "menu.os") ${GREEN}$(detect_os)${NC}  $(msg "menu.arch") ${GREEN}$(detect_arch)${NC}"
+        echo -e "  $(msg "menu.notes") ${SCRIPT_NOTES}"
+        local _rv; _rv="$(remote_script_version)"
+        if version_gt "$_rv" "$SCRIPT_VERSION"; then
+            echo -e "  ${YELLOW}$(msg "menu.new_version" "$_rv" "$SCRIPT_VERSION")${NC}"
+        elif [[ -n "$_rv" ]]; then
+            echo -e "  ${GREEN}$(msg "menu.up_to_date" "$SCRIPT_VERSION")${NC}"
+        fi
     fi
-    echo ""
-    echo "  $(msg "menu.install_server")"
-    echo "  $(msg "menu.install_agent")"
-    echo "  $(msg "menu.update_agent")"
-    echo "  $(msg "menu.update_script")"
-    echo "  $(msg "menu.update_server")"
-    echo "  $(msg "menu.status")"
-    echo "  $(msg "menu.uninstall")"
-    echo "  $(msg "menu.db_manage")"
-    echo "  $(msg "menu.exit")"
-    echo ""
-    # L-3 修复：read 遇 EOF（Ctrl+D / 管道关闭）时返回非零，set -euo pipefail 会异常退出；加 || exit 0 让 EOF 优雅退出
-    read -r -p "$(msg "menu.prompt")" c || exit 0
+    local title; title="$(msg "tui.title") v${SCRIPT_VERSION}"
+    local c
+    c="$(ui_menu "$title" "$(msg "menu.prompt")" \
+        "1" "$(msg "menu.install_server")" \
+        "2" "$(msg "menu.install_agent")" \
+        "3" "$(msg "menu.update_agent")" \
+        "4" "$(msg "menu.update_script")" \
+        "5" "$(msg "menu.update_server")" \
+        "6" "$(msg "menu.status")" \
+        "7" "$(msg "menu.uninstall")" \
+        "8" "$(msg "menu.db_manage")" \
+        "0" "$(msg "menu.exit")" )"
+    [[ -z "$c" ]] && exit 0
     case "$c" in
         1) install_server ;;
         2) install_agent ;;
