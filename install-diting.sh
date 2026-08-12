@@ -142,6 +142,10 @@ ui_msgbox() {
     else
         echo "=== $title ===" >&2
         echo "$text" >&2
+        # 纯文本模式也等待用户确认，避免结果一闪而过
+        # 非交互环境（read 读 EOF）用 3 秒超时兜底
+        read -r -t 3 -p "按回车返回菜单..." _ 2>/dev/null || true
+        echo >&2
     fi
 }
 
@@ -401,14 +405,8 @@ main_menu() {
             *) ui_msgbox "错误" "无效选项：$choice" ;;
         esac
 
-        # 操作后暂停，避免结果一闪而过：
-        # whiptail/dialog 模式弹「完成」确认框；纯文本模式等待回车
-        if tui_enabled; then
-            ui_msgbox "完成" "操作已完成，点击确定返回菜单。"
-        else
-            echo
-            read -r -p "按回车返回菜单..." _ || true
-        fi
+        # 操作后统一暂停，避免结果一闪而过（whiptail 弹框 / 纯文本等回车）
+        ui_msgbox "完成" "操作已完成，点击确定返回菜单。"
     done
 }
 
