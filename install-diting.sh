@@ -271,6 +271,50 @@ generate_env() {
     log_success "已生成 $ENV_FILE（权限 600）"
 }
 
+# ============ 依赖检查 / 访问信息 ============
+# B) check_deps：检测运行所需命令，缺失则友好提示
+check_deps() {
+    local missing=()
+    for c in docker git curl openssl; do
+        command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+    done
+    # docker compose（插件或独立）
+    if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+        missing+=("docker-compose")
+    fi
+    if [ "${#missing[@]}" -gt 0 ]; then
+        log_error "缺少必要依赖：${missing[*]}"
+        log_info "安装方法（Debian/Ubuntu）："
+        log_info "  apt update && apt install -y git curl openssl"
+        log_info "  curl -fsSL https://get.docker.com | bash"
+        log_info "  docker compose 插件随 docker 一起安装；旧版用 apt install -y docker-compose-plugin"
+        return 1
+    fi
+    return 0
+}
+
+# A) show_access_info：安装完成后展示真实访问地址与管理命令
+show_access_info() {
+    local port; port=$(grep -E '^PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo 8081)
+    port="${port:-8081}"
+    local ip
+    ip=$(timeout 5 ip -4 addr show scope global 2>/dev/null | grep -oE 'inet [0-9.]+' | head -1 | awk '{print $2}')
+    [ -z "$ip" ] && ip=$(timeout 5 hostname -I 2>/dev/null | awk '{print $1}')
+    [ -z "$ip" ] && ip="<本机IP>"
+    echo
+    log_success "========== 安装完成 =========="
+    log_info "Web 管理后台:  http://${ip}:${port}"
+    log_info "受控端上报地址: http://${ip}:${port}  （或 https 反代后地址）"
+    log_info "管理命令（本脚本）:"
+    log_info "  bash $(basename "$0")            # 打开管理菜单"
+    log_info "  bash $(basename "$0") status     # 查看状态"
+    log_info "  bash $(basename "$0") upgrade    # 升级"
+    log_info "  bash $(basename "$0") logs       # 查看日志"
+    log_warn "当前为明文快速测试版（端口 ${port}，ADMIN_ALLOW_HTTP=1）。"
+    log_warn "生产环境请在前面加 Nginx + TLS（参考 nginx/monitor.conf.example）。"
+    echo
+}
+
 # ============ 业务：安装 / 升级 / 卸载 / 状态 ============
 install_diting() {
     log_step "安装 diting"
@@ -294,7 +338,7 @@ install_diting() {
 
     log_step "启动服务（docker compose up -d --build）"
     docker_compose up -d --build
-    log_success "diting 已启动，访问 http://<本机IP>:${PORT:-8081}"
+    show_access_info
 }
 
 upgrade_diting() {
@@ -366,6 +410,125 @@ stop_diting() {
     log_success "已停止"
 }
 
+# ============ 数据库备份 / 恢复 / 统计 / Token 重置 ============
+DB_BACKUP_DIR="${INSTALL_DIR}/backups"
+# 定位运行中的 diting server 容器 ID（按卷或 compose 服务名反查）
+db_container_id() {
+    local vol
+    vol=$(basename "$DATA_DIR")
+    # 优先：正在运行且挂载了该数据卷的容器
+    docker ps -q --filter "volume=${vol}" 2>/dev/null | head -n1
+}
+# 容器内数据库路径（docker-compose 挂载 /data）
+DB_IN_CONTAINER="/data/monitor.db"
+
+backup_diting() {
+    log_step "备份数据库"
+    need_root
+    check_docker || return 1
+    local cid; cid=$(db_container_id)
+    [ -n "$cid" ] || { log_error "未找到运行中的 diting 容器，请先启动服务"; return 1; }
+    mkdir -p "$DB_BACKUP_DIR"
+    local ts; ts=$(date +%Y%m%d_%H%M%S)
+    local out="${DB_BACKUP_DIR}/monitor_${ts}.db"
+    # 优先 sqlite3 .backup（一致性最好）；无则 docker cp 直接拷
+    if timeout 180 docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
+        log_info "通过 sqlite3 .backup 热备份（不中断服务）…"
+        timeout 180 docker exec "$cid" sqlite3 "$DB_IN_CONTAINER" ".backup '$DB_IN_CONTAINER.bak'" >/dev/null 2>&1 \
+          || timeout 180 docker exec "$cid" cp "$DB_IN_CONTAINER" "$DB_IN_CONTAINER.bak" 2>/dev/null || true
+        timeout 180 docker cp "${cid}:${DB_IN_CONTAINER}.bak" "$out"
+        timeout 180 docker exec "$cid" rm -f "${DB_IN_CONTAINER}.bak" 2>/dev/null || true
+    else
+        log_info "容器无 sqlite3，直接 docker cp 拷贝（建议短暂停服以保证一致性）…"
+        timeout 180 docker cp "${cid}:${DB_IN_CONTAINER}" "$out"
+    fi
+    if [ -f "$out" ]; then
+        local sz; sz=$(du -h "$out" | cut -f1)
+        log_success "备份完成: $out ($sz)"
+    else
+        log_error "备份失败，请检查磁盘空间与权限"; return 1
+    fi
+}
+
+restore_diting() {
+    log_step "从备份恢复数据库"
+    need_root
+    check_docker || return 1
+    local in
+    in=$(ui_input "备份文件路径" "请输入备份 .db 文件路径:" "") || return 1
+    [ -f "$in" ] || { log_error "文件不存在: $in"; return 1; }
+    # 校验 SQLite 魔数
+    local magic; magic=$(head -c 16 "$in" 2>/dev/null)
+    if [ "$magic" != "SQLite format 3"* ]; then
+        log_error "不是合法的 SQLite 数据库文件"; return 1
+    fi
+    if command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$in" "PRAGMA integrity_check;" 2>/dev/null | grep -qx "ok" \
+          && log_success "完整性校验通过" \
+          || { log_error "完整性校验未通过，已放弃恢复"; return 1; }
+    else
+        log_warn "宿主机无 sqlite3，跳过完整性校验（仅校验魔数）"
+    fi
+    local cid; cid=$(db_container_id)
+    [ -n "$cid" ] || { log_error "未找到运行中的 diting 容器"; return 1; }
+    if ! ui_yesno "确认恢复" "恢复将覆盖当前全部数据！\n恢复前会自动备份当前状态。\n确定继续吗？"; then
+        log_info "已取消"; return 0
+    fi
+    # 先自动备份当前
+    backup_diting || true
+    # 拷贝进容器并原子替换
+    timeout 180 docker cp "$in" "${cid}:${DB_IN_CONTAINER}.restore" 2>/dev/null || { log_error "拷贝失败"; return 1; }
+    timeout 180 docker exec "$cid" mv -f "${DB_IN_CONTAINER}.restore" "$DB_IN_CONTAINER" 2>/dev/null || { log_error "替换失败"; return 1; }
+    log_info "重启服务使数据生效…"
+    docker_compose restart >/dev/null 2>&1 || true
+    log_success "恢复完成"
+}
+
+db_stats_diting() {
+    log_step "数据库统计"
+    need_root
+    check_docker || return 1
+    local cid; cid=$(db_container_id)
+    [ -n "$cid" ] || { log_error "未找到运行中的 diting 容器"; return 1; }
+    if ! timeout 180 docker exec "$cid" sh -c 'command -v sqlite3 >/dev/null 2>&1' 2>/dev/null; then
+        log_warn "容器无 sqlite3，无法统计"; return 0
+    fi
+    echo "--- 数据库文件大小 ---"
+    timeout 180 docker exec "$cid" sh -c "ls -lh $DB_IN_CONTAINER | awk '{print \$5}'"
+    echo "--- 各表记录数 ---"
+    timeout 180 docker exec "$cid" sqlite3 "$DB_IN_CONTAINER" \
+      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;" 2>/dev/null | while read -r t; do
+        local c; c=$(timeout 180 docker exec "$cid" sqlite3 "$DB_IN_CONTAINER" "SELECT COUNT(*) FROM \"$t\";" 2>/dev/null)
+        printf "  %-20s %s\n" "$t" "$c"
+    done
+    echo "--- 数据时间范围（metrics）---"
+    timeout 180 docker exec "$cid" sqlite3 "$DB_IN_CONTAINER" \
+      "SELECT MIN(ts), MAX(ts) FROM metrics;" 2>/dev/null | sed 's/^/  /'
+}
+
+reset_admin_token_diting() {
+    log_step "重置管理员 Token"
+    need_root
+    check_docker || return 1
+    local new_token; new_token=$(rand_hex 24)
+    if ! ui_yesno "确认重置" "将生成新管理员 Token，旧 Token 立即失效。\n新 Token 为:\n$new_token\n确定写入吗？"; then
+        log_info "已取消"; return 0
+    fi
+    # 写入 .env 的 ADMIN_TOKEN 字段（保留其他配置）
+    if [ -f "$ENV_FILE" ]; then
+        if grep -q '^ADMIN_TOKEN=' "$ENV_FILE"; then
+            sed -i "s/^ADMIN_TOKEN=.*/ADMIN_TOKEN=${new_token}/" "$ENV_FILE"
+        else
+            echo "ADMIN_TOKEN=${new_token}" >> "$ENV_FILE"
+        fi
+        chmod 600 "$ENV_FILE"
+    fi
+    log_info "重启服务使新 Token 生效…"
+    cd "$INSTALL_DIR" && docker_compose restart >/dev/null 2>&1 || true
+    log_success "新管理员 Token 已生成: $new_token"
+    log_warn "请妥善保存，首次登录后台需使用此 Token"
+}
+
 # 操作后暂停：固定 sleep 等待（不依赖 stdin，避免非交互环境 read 秒过）
 # 若 stdin 是真实 TTY，则允许按回车提前跳过；否则纯等待 PAUSE_SECONDS 秒
 PAUSE_SECONDS=4
@@ -404,7 +567,11 @@ main_menu() {
             "5" "查看日志（实时 tail）" \
             "6" "重启服务" \
             "7" "停止服务" \
-            "8" "退出" ) || choice="8"
+            "8" "备份数据库" \
+            "9" "从备份恢复数据库" \
+            "10" "数据库统计（表/记录数/时间范围）" \
+            "11" "重置管理员 Token" \
+            "12" "退出" ) || choice="12"
 
         case "$choice" in
             1) install_diting ;;
@@ -414,7 +581,11 @@ main_menu() {
             5) logs_diting ;;
             6) restart_diting ;;
             7) stop_diting ;;
-            8) log_info "再见"; exit 0 ;;
+            8) backup_diting ;;
+            9) restore_diting ;;
+            10) db_stats_diting ;;
+            11) reset_admin_token_diting ;;
+            12) log_info "再见"; exit 0 ;;
             *) ui_msgbox "错误" "无效选项：$choice" ;;
         esac
 
@@ -424,6 +595,13 @@ main_menu() {
 }
 
 # ============ 入口 ============
+# B) 依赖检查（菜单与所有 docker 子命令前执行；纯展示类失败不阻断菜单进入）
+case "${1:-menu}" in
+    install|upgrade|uninstall|status|logs|restart|stop|menu|"")
+        check_deps || { log_error "依赖检查未通过，请先安装缺失组件"; exit 1; }
+        ;;
+esac
+
 case "${1:-menu}" in
     install)  install_diting ;;
     upgrade)  upgrade_diting ;;
