@@ -366,6 +366,17 @@ stop_diting() {
     log_success "已停止"
 }
 
+# 操作后暂停：whiptail/dialog 退出后终端回到普通模式，统一用 read 等待
+# 5 秒超时兜底（非交互 EOF 时也不会真卡死）
+press_any_key() {
+    if tui_enabled; then
+        echo "操作已完成。按回车（或等待 5 秒）返回菜单..." >&2
+    else
+        echo "操作已完成。按回车（或等待 5 秒）返回菜单..." >&2
+    fi
+    read -r -t 5 _ 2>/dev/null || true
+}
+
 # ============ 横幅 + 主菜单 ============
 show_banner() {
     if tui_enabled; then clear; fi
@@ -405,8 +416,8 @@ main_menu() {
             *) ui_msgbox "错误" "无效选项：$choice" ;;
         esac
 
-        # 操作后统一暂停，避免结果一闪而过（whiptail 弹框 / 纯文本等回车）
-        ui_msgbox "完成" "操作已完成，点击确定返回菜单。"
+        # 操作后统一暂停，避免结果一闪而过（回车立即返回，5 秒兜底）
+        press_any_key
     done
 }
 
