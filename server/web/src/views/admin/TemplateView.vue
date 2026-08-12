@@ -44,16 +44,16 @@ const dirty = ref(false);
 const defaultDark = ['#0a0e16cc', '145%', '14px', '#ffffff2e', '0 8px 30px #0000007a'];
 const defaultLight = ['#f1f5f9cc', '145%', '14px', '#e2e8f0ad', '0 8px 28px #0f172a2e'];
 
-// 内置默认背景：暗色深蓝黑径向渐变、亮色柔和浅蓝对角渐变。
+// 内置默认背景：暗色深蓝紫渐变、亮色蓝紫渐变，让毛玻璃卡片透出色彩更明显。
 // 均为 SVG data URI（isSafeImageUrl 白名单允许），配合 80% 不透明卡片可在透明态下清晰阅读。
 const BG_DARK =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
-    "<defs><radialGradient id='g' cx='30%' cy='20%' r='120%'>" +
-    "<stop offset='0' stop-color='#16243a'/>" +
-    "<stop offset='55%' stop-color='#0b1220'/>" +
-    "<stop offset='100%' stop-color='#05080f'/>" +
+    "<defs><radialGradient id='g' cx='25%' cy='15%' r='130%'>" +
+    "<stop offset='0' stop-color='#3b2a6b'/>" +
+    "<stop offset='45%' stop-color='#1b1640'/>" +
+    "<stop offset='100%' stop-color='#0a0a1a'/>" +
     "</radialGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
   );
 const BG_LIGHT =
@@ -61,9 +61,9 @@ const BG_LIGHT =
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
     "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>" +
-    "<stop offset='0' stop-color='#f4f8fc'/>" +
-    "<stop offset='55%' stop-color='#e6eef6'/>" +
-    "<stop offset='100%' stop-color='#d7e3ef'/>" +
+    "<stop offset='0' stop-color='#c9d6ff'/>" +
+    "<stop offset='50%' stop-color='#e0c3fc'/>" +
+    "<stop offset='100%' stop-color='#f5d9ff'/>" +
     "</linearGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
   );
 
@@ -104,8 +104,8 @@ const form = ref<UiSettings>({
   glass_preset: 'custom',
   glass_custom: { dark: [...defaultDark], light: [...defaultLight] },
   // 内置默认背景：暗色深蓝黑渐变、亮色柔和浅蓝渐变，overlay 适中以衬托 80% 不透明卡片
-  background_dark: { enabled: true, type: 'image', url: BG_DARK, blur: 8, overlay: 35 },
-  background_light: { enabled: true, type: 'image', url: BG_LIGHT, blur: 8, overlay: 45 },
+  background_dark: { enabled: true, type: 'image', url: BG_DARK, blur: 8, overlay: 28 },
+  background_light: { enabled: true, type: 'image', url: BG_LIGHT, blur: 8, overlay: 32 },
   color_vision: 'normal',
   card_scheme: 'official',
   card_size: 'comfortable',
