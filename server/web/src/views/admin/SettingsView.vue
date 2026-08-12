@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
@@ -70,6 +70,9 @@ const { state } = useAdmin();
 const saving = ref(false);
 const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
+// 用户是否已修改但未保存；编辑期间禁止自动刷新覆盖输入（避免 10s 轮询清空）
+const dirty = ref(false);
+watch(local, () => { dirty.value = true; }, { deep: true });
 
 function resetLocal() {
   local.value = {
@@ -122,6 +125,8 @@ function cloneSettings(src: Settings): SettingsForm {
 
 
 watch(() => state.settings, (s) => {
+  // 用户有未保存的编辑时，不覆盖输入框（10s 自动刷新会触发本 watch）
+  if (dirty.value) return;
   if (s) local.value = cloneSettings(s);
 }, { immediate: true });
 
@@ -132,6 +137,7 @@ async function save() {
     await adminApi.saveSettings(local.value as Record<string, unknown>);
     message.value = t('settings.saved');
     await loadAdmin();
+    dirty.value = false;
   } catch (e) {
     message.value = (e as Error).message || t('settings.saveFailed');
   } finally {

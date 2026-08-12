@@ -22,6 +22,7 @@ interface UiSettings {
   glass_custom?: { dark?: string[]; light?: string[] };
   background_dark?: BgCfg;
   background_light?: BgCfg;
+  background?: any; // 旧版单背景字段兼容
   color_vision?: string;
   card_scheme?: string;
   card_size?: string;
@@ -34,6 +35,8 @@ interface UiSettings {
 const { state } = useAdmin();
 const saving = ref(false);
 const message = ref('');
+// 用户是否已修改但未保存；编辑期间禁止自动刷新覆盖输入（避免 10s 轮询清空）
+const dirty = ref(false);
 
 // 暗/亮各自的 5 色调色板（对齐 useTheme 的 glass_custom 顺序）：
 // [0] tint(卡片底色 rgba) [1] saturate [2] blur [3] border [4] shadow
@@ -177,6 +180,8 @@ function normalizeBg(b: any): BgCfg {
 
 watch(() => state.settings, (s) => {
   if (!s || !s.ui) return;
+  // 用户有未保存的编辑时，不覆盖输入框（10s 自动刷新会触发本 watch）
+  if (dirty.value) return;
   const ui = s.ui as UiSettings;
   form.value = {
     glass_preset: ui.glass_preset || 'custom',
@@ -200,6 +205,9 @@ watch(() => state.settings, (s) => {
   };
 }, { immediate: true });
 
+// 监听表单任意改动，标记未保存（编辑期间禁止自动刷新覆盖）
+watch(form, () => { dirty.value = true; }, { deep: true });
+
 onMounted(() => {
   if (!state.settings) loadAdmin();
 });
@@ -216,6 +224,7 @@ async function save() {
     await adminApi.saveSettings({ ui: merged } as Record<string, unknown>);
     message.value = t('settings.saved');
     await loadAdmin();
+    dirty.value = false;
     refreshGlass();
   } catch (e) {
     message.value = (e as Error).message || t('settings.saveFailed');
