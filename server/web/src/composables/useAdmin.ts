@@ -4,6 +4,9 @@ import type { Agent, Settings } from '../services/types';
 
 const REFRESH_INTERVAL_MS = 10000;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+// 暂停意图：设置页打开时置 true，无论 AdminLayout 何时 startAutoRefresh 都不真正轮询，
+// 避免父组件 onMounted 的 start 覆盖子组件的 stop（子组件 onMounted 先于父执行）。
+let paused = false;
 
 export interface AdminState {
   initialized: boolean;
@@ -44,8 +47,9 @@ export async function loadAdmin() {
 }
 
 export function startAutoRefresh() {
-  if (refreshTimer) return;
+  if (refreshTimer || paused) return;
   refreshTimer = setInterval(() => {
+    if (paused) return;
     loadAdmin().catch(() => {});
   }, REFRESH_INTERVAL_MS);
 }
@@ -57,11 +61,24 @@ export function stopAutoRefresh() {
   }
 }
 
+// 设置页进入/离开时调用：暂停/恢复自动刷新。
+// 用 paused 标志而非直接 stop/start，避免父组件(AdminLayout) onMounted 的 start 覆盖子组件的 stop
+// （Vue 中子组件 onMounted 先于父组件执行）。
+export function setAutoRefreshPaused(p: boolean) {
+  paused = p;
+  if (p) {
+    stopAutoRefresh();
+  } else {
+    startAutoRefresh();
+  }
+}
+
 export function useAdmin() {
   return {
     state: readonly(state) as AdminState,
     refresh: loadAdmin,
     startAutoRefresh,
     stopAutoRefresh,
+    setAutoRefreshPaused,
   };
 }
