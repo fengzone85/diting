@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { useAdmin, loadAdmin } from '../../composables/useAdmin';
+import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
 import { refreshGlass } from '../../composables/useTheme';
@@ -32,7 +32,7 @@ interface UiSettings {
   custom_tags?: Record<string, string[]>;
 }
 
-const { state, stopAutoRefresh, startAutoRefresh } = useAdmin();
+const { state } = useAdmin();
 const saving = ref(false);
 const message = ref('');
 // 用户是否已修改但未保存；编辑期间禁止自动刷新覆盖输入（避免 10s 轮询清空）
@@ -234,13 +234,14 @@ watch(() => state.settings, (s) => {
 watch(form, () => { dirty.value = true; }, { deep: true });
 
 onMounted(() => {
-  // 进入设置页暂停全局 10s 自动刷新，避免轮询重写 form 清空用户未保存的输入
-  stopAutoRefresh();
+  // 进入设置页暂停全局 10s 自动刷新（用 paused 标志，避免被父组件 start 覆盖），
+  // 防止轮询重写 form 清空用户未保存的输入
+  setAutoRefreshPaused(true);
   if (!state.settings) loadAdmin();
 });
 onUnmounted(() => {
   // 离开设置页恢复自动刷新（不影响其他页面）
-  startAutoRefresh();
+  setAutoRefreshPaused(false);
 });
 
 async function save() {

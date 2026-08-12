@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue';
-import { useAdmin, loadAdmin } from '../../composables/useAdmin';
+import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
 import type { Settings } from '../../services/types';
@@ -66,7 +66,7 @@ interface SettingsForm {
   notify: NotifySettings;
 }
 
-const { state, stopAutoRefresh, startAutoRefresh } = useAdmin();
+const { state } = useAdmin();
 const saving = ref(false);
 const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
@@ -94,8 +94,9 @@ resetLocal();
 const themes = ref<ThemeOption[]>([{ id: 'default', name: t('settings.builtinTheme') }]);
 
 onMounted(async () => {
-  // 进入设置页暂停全局 10s 自动刷新，避免轮询重写表单清空未保存输入
-  stopAutoRefresh();
+  // 进入设置页暂停全局 10s 自动刷新（paused 标志，避免被父组件 start 覆盖），
+  // 防止轮询重写表单清空未保存输入
+  setAutoRefreshPaused(true);
   try {
     const list = await adminApi.listThemes();
     themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
@@ -106,7 +107,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   // 离开设置页恢复自动刷新
-  startAutoRefresh();
+  setAutoRefreshPaused(false);
 });
 
 function cloneSettings(src: Settings): SettingsForm {
