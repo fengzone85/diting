@@ -61,5 +61,7 @@ export function useAdmin() {
   return {
     state: readonly(state) as AdminState,
     refresh: loadAdmin,
+    startAutoRefresh,
+    stopAutoRefresh,
   };
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
@@ -66,7 +66,7 @@ interface SettingsForm {
   notify: NotifySettings;
 }
 
-const { state } = useAdmin();
+const { state, stopAutoRefresh, startAutoRefresh } = useAdmin();
 const saving = ref(false);
 const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
@@ -94,12 +94,19 @@ resetLocal();
 const themes = ref<ThemeOption[]>([{ id: 'default', name: t('settings.builtinTheme') }]);
 
 onMounted(async () => {
+  // 进入设置页暂停全局 10s 自动刷新，避免轮询重写表单清空未保存输入
+  stopAutoRefresh();
   try {
     const list = await adminApi.listThemes();
     themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
   } catch {
     // ignore
   }
+});
+
+onUnmounted(() => {
+  // 离开设置页恢复自动刷新
+  startAutoRefresh();
 });
 
 function cloneSettings(src: Settings): SettingsForm {
