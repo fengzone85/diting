@@ -83,7 +83,7 @@ function toRealtime(m) {
 
 function publicOpen() {
   const ui = db.getUiSettings();
-  return !!(ui && ui.public_enabled);
+  return ui.public_enabled !== false;
 }
 
 // 实时状态映射（供 JSON-RPC /api/rpc2 的 common:getNodesLatestStatus 使用）

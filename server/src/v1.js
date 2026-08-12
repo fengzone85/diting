@@ -81,7 +81,7 @@ function toRealtime(m) {
 
 function publicOpen() {
   const ui = db.getUiSettings();
-  return !!(ui && ui.public_enabled);
+  return ui.public_enabled !== false;
 }
 
 // 通用门控中间件：所有 /api/v1 只读接口均要求公开页开启

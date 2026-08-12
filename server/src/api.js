@@ -378,7 +378,7 @@ router.get('/billing', adminOrReadonly, (req, res) => {
 function publicDisabled(res) { return res.status(403).json({ error: 'public view disabled' }); }
 router.get('/public/overview', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const agents = db.getAgents();
@@ -410,7 +410,7 @@ router.get('/public/overview', (req, res) => {
 // 返回脱敏的公开 agent 列表（不含 token / note / 商家 / 到期 / 配额等敏感字段）。
 router.get('/public/agents', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const list = db.getAgents().map((a) => {
@@ -459,7 +459,7 @@ router.get('/public/agents', (req, res) => {
 // 供「视觉版」首页卡片渲染 sparkline。受 ui.public_enabled 控制。
 router.get('/public/agents/sparklines', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const sec = RANGES[req.query.range] || 21600;
   const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
   // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
@@ -483,7 +483,7 @@ router.get('/public/agents/sparklines', (req, res) => {
 // 受 ui.public_enabled 控制；range 支持 1h/6h/24h/7d。
 router.get('/public/agents/:id/probes', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'agent not found' });
   const sec = RANGES[req.query.range] || 21600;
@@ -529,7 +529,9 @@ router.get('/public/meta', (req, res) => {
     color_vision: ui.color_vision || 'normal',
     card_scheme: ui.card_scheme || 'official',
     card_size: ui.card_size || 'comfortable',
-    background: ui.background || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
+    // 暗/亮两套背景配置（兼容旧版单 background 字段作为暗色回退）
+    background_dark: ui.background_dark || ui.background || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
+    background_light: ui.background_light || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
     announcement: ui.announcement || { enabled: false, title: '', content: '' },
     provider_aliases: ui.provider_aliases || {},
     custom_tags: ui.custom_tags || {},

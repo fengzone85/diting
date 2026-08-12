@@ -16,48 +16,29 @@
   --danger: #fb7185;
   --border: rgb(255 255 255 / 0.10);
 
-  /* 毛玻璃预设（data-glass 控制），默认 emerald — 对齐 komari */
-  --glass-tint: rgb(10 14 22 / 0.82);               /* 暗色卡片底色 */
-  --glass-tint-hover: rgb(10 14 22 / 0.90);          /* hover 时提亮 */
+  /* 毛玻璃预设（data-glass 控制），默认 emerald。
+     设计意图：卡片默认几乎全透明（仅留极淡底色+模糊），鼠标悬停才显出 82% 不透明度。 */
+  --glass-tint: #0a0e160d;                            /* 暗色卡片 默认 ~5% 几乎全透 */
+  --glass-tint-hover: #0a0e16d1;                      /* 悬停 82% 深半透 */
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: rgb(255 255 255 / 0.18);
-  --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
+  --glass-border: #ffffff2e;                          /* komari --glass-dark-border */
+  --glass-shadow: 0 8px 30px #0000007a;               /* komari --glass-dark-shadow */
+  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透） */
+  --glass-inner-tint: rgb(255 255 255 / 0.06);
+  --glass-inner-border: rgb(255 255 255 / 0.12);
   --radius: 0.625rem;
 }
 
-/* 毛玻璃预设：data-glass 由 useTheme 写入 <html> */
+/* 毛玻璃预设：data-glass 由 useTheme 写入 <html>
+   默认 emerald 预设完全对齐 komari-theme-Glassmorphism 暗色配方 */
 [data-glass="emerald"] {
-  --glass-tint: rgb(10 14 22 / 0.82);
-  --glass-tint-hover: rgb(10 14 22 / 0.90);
+  --glass-tint: #0a0e160d;
+  --glass-tint-hover: #0a0e16d1;
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: rgb(255 255 255 / 0.18);
-  --glass-shadow: 0 8px 30px rgb(0 0 0 / 0.48);
-}
-[data-glass="soft"] {
-  --glass-tint: rgb(10 14 22 / 0.78);
-  --glass-tint-hover: rgb(10 14 22 / 0.86);
-  --glass-saturate: 120%;
-  --glass-blur: 18px;
-  --glass-border: rgb(255 255 255 / 0.14);
-  --glass-shadow: 0 8px 28px rgb(0 0 0 / 0.42);
-}
-[data-glass="high-contrast"] {
-  --glass-tint: rgb(10 14 22 / 0.88);
-  --glass-tint-hover: rgb(10 14 22 / 0.95);
-  --glass-saturate: 180%;
-  --glass-blur: 10px;
-  --glass-border: rgb(255 255 255 / 0.28);
-  --glass-shadow: 0 6px 22px rgb(0 0 0 / 0.55);
-}
-[data-glass="midnight"] {
-  --glass-tint: rgb(15 20 38 / 0.84);
-  --glass-tint-hover: rgb(15 20 38 / 0.92);
-  --glass-saturate: 135%;
-  --glass-blur: 16px;
-  --glass-border: rgb(129 140 248 / 0.22);
-  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.50);
+  --glass-border: #ffffff2e;
+  --glass-shadow: 0 8px 30px #0000007a;
 }
 [data-glass="custom"] {
   /* --glass-tint 等由 useTheme 内联覆盖 */
@@ -78,24 +59,34 @@
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgb(68 83 94 / 0.22);
-  --glass-tint: rgb(241 245 249 / 0.74);
-  --glass-tint-hover: rgb(248 250 252 / 0.80);
-  --glass-border: rgb(226 232 240 / 0.68);
-  --glass-shadow: 0 8px 28px rgb(15 23 42 / 0.18);
+  --glass-tint: #f1f5f914;                            /* 亮色卡片 默认 ~8% 几乎全透 */
+  --glass-tint-hover: #f1f5f9bd;                      /* 悬停 74% 浅半透 */
+  --glass-border: #e2e8f0ad;                          /* komari --glass-light-border */
+  --glass-shadow: 0 8px 28px #0f172a2e;               /* komari --glass-light-shadow */
+  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透） */
+  --glass-inner-tint: rgb(255 255 255 / 0.45);
+  --glass-inner-border: rgb(100 116 139 / 0.25);
 }
 
 [data-theme="light"] body {
-  background: var(--bg-primary);
+  /* 基于 vps.zhreed.com / komari Glassmorphism 亮色配方，适度增强背景光斑 */
+  background:
+    radial-gradient(circle at 50% 0%, rgb(16 185 129 / .12), transparent 36%),
+    radial-gradient(circle at 18% 85%, rgb(59 130 246 / .10), transparent 40%),
+    radial-gradient(circle at 85% 80%, rgb(236 72 153 / .08), transparent 36%),
+    linear-gradient(180deg, #cbd5e1, #94a3b8);
+  background-attachment: fixed;
   color: var(--text-primary);
 }
 
 [data-theme="light"] .glass {
   background-color: var(--glass-tint) !important;
-  border-color: var(--glass-border) !important;
-  box-shadow: var(--glass-shadow);
+  border-color: rgb(100 116 139 / 0.10) !important;   /* 默认几乎不可见边框 */
+  box-shadow: 0 2px 10px rgb(15 23 42 / 0.04);
 }
 [data-theme="light"] .glass:hover {
   background-color: var(--glass-tint-hover) !important;
+  border-color: var(--glass-border) !important;
   box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
 }
 
@@ -136,7 +127,14 @@ html, body, #app {
 }
 
 body {
-  background: var(--bg-primary);
+  /* 基于 vps.zhreed.com / komari Glassmorphism 暗色配方，适度增强背景光斑，
+     让 82% 不透明度的玻璃卡片也能透出层次 */
+  background:
+    radial-gradient(circle at 50% 20%, rgb(148 163 184 / .18), transparent 42%),
+    radial-gradient(circle at 82% 78%, rgb(99 102 241 / .16), transparent 38%),
+    radial-gradient(circle at 18% 88%, rgb(20 184 166 / .10), transparent 34%),
+    #0f172ab8;
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -164,21 +162,24 @@ body {
   pointer-events: none;
 }
 
-/* 毛玻璃卡片：对齐 komari-theme-Glassmorphism */
+/* 毛玻璃卡片：默认几乎全透明，hover 才显出玻璃质感 */
 .glass {
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
   backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
-  border: 1px solid var(--glass-border, var(--border)) !important;
+  border: 1px solid rgb(255 255 255 / 0.06) !important;   /* 默认极淡边框，几乎隐形 */
   border-radius: var(--radius, 0.625rem);
-  box-shadow: var(--glass-shadow, 0 8px 30px rgb(0 0 0 / 0.48));
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.06);
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 .glass:hover {
   background-color: var(--glass-tint-hover, var(--bg-secondary)) !important;
+  border-color: var(--glass-border, var(--border)) !important;
   box-shadow: 0 12px 38px var(--glass-shadow, rgb(0 0 0 / 0.55));
 }
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
   .glass { background-color: var(--bg-secondary) !important; }
+  .card-metric { background: var(--bg-surface) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 }
 
 /* komari 风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */
@@ -236,7 +237,22 @@ body {
 .card-meta { color: var(--text-muted); font-size: 11px; padding: 5px 15px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-note { font-size: 11px; color: var(--text-muted); padding: 4px 15px 0; font-style: italic; }
 .card-metrics { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; padding: 11px 15px 6px; }
-.card-metric { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 0; row-gap: 0; margin: 0; min-width: 0; }
+.card-metric {
+  background: var(--glass-inner-tint);
+  border: 1px solid var(--glass-inner-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 0;
+  row-gap: 0;
+  margin: 0;
+  min-width: 0;
+  backdrop-filter: blur(14px) saturate(145%);
+  -webkit-backdrop-filter: blur(14px) saturate(145%);
+}
 .card-metric-wide { grid-column: span 3; }
 .m-spark { flex-shrink: 0; width: 100%; margin: 0; line-height: 0; }
 .m-spark .spark { width: 100%; height: 22px; margin: 0; display: block; }

@@ -8,6 +8,7 @@ import DashboardView from '../views/admin/DashboardView.vue';
 import AgentsView from '../views/admin/AgentsView.vue';
 import AgentDetailView from '../views/admin/AgentDetailView.vue';
 import SettingsView from '../views/admin/SettingsView.vue';
+import TemplateView from '../views/admin/TemplateView.vue';
 import BillingView from '../views/admin/BillingView.vue';
 import AiView from '../views/admin/AiView.vue';
 import AuditLogView from '../views/admin/AuditLogView.vue';
@@ -27,6 +28,7 @@ const routes = [
       { path: 'billing', component: BillingView },
       { path: 'ai', component: AiView },
       { path: 'settings', component: SettingsView },
+      { path: 'template', component: TemplateView },
       { path: 'audit-logs', component: AuditLogView },
     ],
   },
