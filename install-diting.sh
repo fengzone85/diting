@@ -17,6 +17,9 @@ COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 ENV_FILE="${INSTALL_DIR}/server/.env"
 ENV_EXAMPLE="${INSTALL_DIR}/server/.env.example"
 DATA_DIR="${INSTALL_DIR}/server-data"
+# 默认部署分支（新 Vue SPA 管理端）；如需稳定旧版改为 master
+DEFAULT_BRANCH="feature/vue-spa-admin-rewrite"
+DEFAULT_REPO="https://github.com/fengzone85/diting.git"
 
 # ============ 日志层 ============
 RED='\033[0;31m'
@@ -265,10 +268,10 @@ install_diting() {
     check_docker || return 1
 
     if [ ! -d "$INSTALL_DIR" ]; then
-        log_step "克隆仓库到 $INSTALL_DIR"
+        log_step "克隆仓库到 $INSTALL_DIR（分支: $DEFAULT_BRANCH）"
         local repo
-        repo=$(ui_input "仓库地址" "请输入 diting 仓库地址:" "https://github.com/fengzone85/diting.git") || return 1
-        git clone "$repo" "$INSTALL_DIR" || { log_error "克隆失败"; return 1; }
+        repo=$(ui_input "仓库地址" "请输入 diting 仓库地址:" "$DEFAULT_REPO") || return 1
+        git clone -b "$DEFAULT_BRANCH" "$repo" "$INSTALL_DIR" || { log_error "克隆失败"; return 1; }
     fi
     cd "$INSTALL_DIR"
 
@@ -290,6 +293,8 @@ upgrade_diting() {
     check_docker || return 1
     [ -d "$INSTALL_DIR" ] || { log_error "未找到 $INSTALL_DIR，请先安装"; return 1; }
     cd "$INSTALL_DIR"
+    log_step "切换到部署分支 $DEFAULT_BRANCH"
+    git checkout "$DEFAULT_BRANCH" 2>/dev/null || git checkout -b "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH" 2>/dev/null || true
     log_step "拉取最新代码"
     git pull --ff-only || { log_warn "git pull 失败，可能本地有改动，跳过"; }
     log_step "重建并重启（保留 server-data 卷）"
