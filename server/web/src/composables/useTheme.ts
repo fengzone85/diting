@@ -4,6 +4,28 @@ import { state, loadMeta } from '../composables/useApp';
 type Theme = 'auto' | 'light' | 'dark';
 const STORAGE_KEY = 'diting-theme';
 
+// 内置兜底背景（未配置任何背景时启用），随主题切换让毛玻璃更明显
+const BG_DARK_FALLBACK =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
+    "<defs><radialGradient id='g' cx='25%' cy='15%' r='130%'>" +
+    "<stop offset='0' stop-color='#3b2a6b'/>" +
+    "<stop offset='45%' stop-color='#1b1640'/>" +
+    "<stop offset='100%' stop-color='#0a0a1a'/>" +
+    "</radialGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+  );
+const BG_LIGHT_FALLBACK =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
+    "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>" +
+    "<stop offset='0' stop-color='#c9d6ff'/>" +
+    "<stop offset='50%' stop-color='#e0c3fc'/>" +
+    "<stop offset='100%' stop-color='#f5d9ff'/>" +
+    "</linearGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+  );
+
 function getInitialTheme(): Theme {
   // B4: ?theme= 预览优先于本地存储（用于分享/预览链接）
   const q = new URLSearchParams(window.location.search).get('theme');
@@ -67,7 +89,13 @@ function applyBackground() {
   const isLight = root.getAttribute('data-theme') === 'light';
   const bgDark = (m && m.background_dark) || (m && m.background) || null;
   const bgLight = (m && m.background_light) || null;
-  const bg = isLight ? (bgLight || bgDark) : bgDark;
+  let bg = isLight ? (bgLight || bgDark) : bgDark;
+  // 兜底：未配置背景时，按主题注入内置蓝紫渐变，使毛玻璃卡片始终有色彩衬托
+  if (!bg || !bg.enabled || !bg.url) {
+    bg = isLight
+      ? { enabled: true, type: 'image', url: BG_LIGHT_FALLBACK, blur: 0, overlay: 22 }
+      : { enabled: true, type: 'image', url: BG_DARK_FALLBACK, blur: 0, overlay: 20 };
+  }
   if (bg && bg.enabled && bg.url) {
     if (!layer) {
       layer = document.createElement('div');
