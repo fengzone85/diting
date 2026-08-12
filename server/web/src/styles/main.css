@@ -17,9 +17,10 @@
   --border: rgb(255 255 255 / 0.10);
 
   /* 毛玻璃预设（data-glass 控制），默认 emerald。
-     设计意图：卡片默认几乎全透明（仅留极淡底色+模糊），鼠标悬停才显出 82% 不透明度。 */
-  --glass-tint: #0a0e160d;                            /* 暗色卡片 默认 ~5% 几乎全透 */
-  --glass-tint-hover: #0a0e16d1;                      /* 悬停 82% 深半透 */
+     设计意图：卡片默认 80% 不透明（仅透出 20% 背景，配合内置背景可在透明态下清晰阅读），
+     鼠标悬停再加深至 90%。 */
+  --glass-tint: #0a0e16cc;                            /* 暗色卡片 默认 80% 不透明 */
+  --glass-tint-hover: #0a0e16e6;                      /* 悬停 90% 深半透 */
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: #ffffff2e;                          /* komari --glass-dark-border */
@@ -33,8 +34,8 @@
 /* 毛玻璃预设：data-glass 由 useTheme 写入 <html>
    默认 emerald 预设完全对齐 komari-theme-Glassmorphism 暗色配方 */
 [data-glass="emerald"] {
-  --glass-tint: #0a0e160d;
-  --glass-tint-hover: #0a0e16d1;
+  --glass-tint: #0a0e16cc;
+  --glass-tint-hover: #0a0e16e6;
   --glass-saturate: 145%;
   --glass-blur: 14px;
   --glass-border: #ffffff2e;
@@ -59,8 +60,8 @@
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgb(68 83 94 / 0.22);
-  --glass-tint: #f1f5f914;                            /* 亮色卡片 默认 ~8% 几乎全透 */
-  --glass-tint-hover: #f1f5f9bd;                      /* 悬停 74% 浅半透 */
+  --glass-tint: #f1f5f9cc;                            /* 亮色卡片 默认 80% 不透明 */
+  --glass-tint-hover: #f1f5f9e6;                      /* 悬停 90% 浅半透 */
   --glass-border: #e2e8f0ad;                          /* komari --glass-light-border */
   --glass-shadow: 0 8px 28px #0f172a2e;               /* komari --glass-light-shadow */
   /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透） */

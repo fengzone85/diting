@@ -103,7 +103,9 @@ function applyBackground() {
       layer.style.filter = blur;
     }
     const op = Math.max(0, Math.min(100, bg.overlay ?? 50)) / 100;
-    overlay.style.background = `rgba(15,23,42,${op})`;
+    // 遮罩色随主题：暗色用深蓝压暗，亮色用浅灰保持明亮，避免亮色背景被深遮罩压灰
+    const ovColor = isLight ? '226,232,240' : '15,23,42';
+    overlay.style.background = `rgba(${ovColor},${op})`;
     overlay.style.opacity = '1';
     root.classList.add('has-bg');
   } else {
