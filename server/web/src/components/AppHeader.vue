@@ -18,6 +18,8 @@ onUnmounted(() => window.removeEventListener('scroll', onScroll));
 
 const themeMenu = ref(false);
 const displayTitle = computed(() => props.meta?.site_title || 'DiTing');
+// 默认始终显示 logo：后台未配置或清空 logo_url 时回退到内置谛听头像
+const logoSrc = computed(() => props.meta?.logo_url || '/logo.png');
 
 const themeOptions = computed(() => [
   { id: 'auto' as const, label: t('theme.auto') },
@@ -49,8 +51,7 @@ const themeIcon = computed(() => {
   >
     <div class="mx-auto flex h-14 max-w-[1280px] items-center px-4">
       <RouterLink to="/" class="flex cursor-pointer items-center gap-3">
-        <img v-if="meta?.logo_url" :src="meta.logo_url" class="size-8 rounded" :alt="displayTitle" />
-        <span v-else class="status-dot status-online flex-shrink-0" />
+        <img :src="logoSrc" class="size-8 rounded" :alt="displayTitle" />
         <h3 class="m-0 text-lg font-semibold text-content">{{ displayTitle }}</h3>
       </RouterLink>
 
