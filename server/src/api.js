@@ -516,6 +516,7 @@ router.get('/public/meta', (req, res) => {
   res.json({
     site_title: ui.site_title || '',
     site_url: ui.site_url || '',
+    logo_url: ui.logo_url || '/logo.png',
     public_enabled: !!ui.public_enabled,
     home_layout: ui.home_layout || 'grid',
     agent_order: Array.isArray(agentOrder) ? agentOrder : [],
