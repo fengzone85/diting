@@ -173,17 +173,50 @@ const THEME_NEEDS_NONCE = new Set(['glassmorphism']);
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
 // 规避前置 Nginx / Docker 部署时静态目录未被代理 / 未打进镜像导致的 404。
 // 主题目录名与路径均经白名单校验，杜绝路径穿越；按官方文档 /themes/{short}/... 映射主题包根目录。
-app.get('/themes/:id/*path', (req, res) => {
-  const id = req.params.id;
-  const subPath = req.params.path || '';
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) return res.status(404).end();
-  const fp = path.join(THEMES_DIR, id, subPath);
-  if (!fp.startsWith(path.join(THEMES_DIR, id) + path.sep)) return res.status(404).end();
-  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return res.status(404).end();
+// 注意：Express 4.22 的 ':id/*path' 星号通配不匹配多级路径，故用正则路由
+// 精确捕获 id 与剩余子路径，支持社区主题的 SPA history 深链（如 /instance/<uuid>）。
+app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
+  const id = req.params[0];
+  const subPath = req.params[1] || '';
+  const baseDir = path.join(THEMES_DIR, id);
+  const fp = path.join(baseDir, subPath);
+  if (!fp.startsWith(baseDir + path.sep)) return res.status(404).end();
+  // 真实静态资源（带后缀）：存在则返回，否则 404 交给后续处理链。
+  if (path.extname(req.path)) {
+    if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    const ext = path.extname(fp).toLowerCase();
+    res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
+    return fs.createReadStream(fp).pipe(res);
+  }
+  // 无后缀深链（如 /themes/<id>/instance/<uuid>）：社区主题 SPA history 路由，
+  // 回退到主题根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
+  const indexPath = path.join(baseDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return next();
+  if (THEME_NEEDS_NONCE.has(id)) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+  }
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  const ext = path.extname(fp).toLowerCase();
-  res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
-  fs.createReadStream(fp).pipe(res);
+  return res.sendFile(indexPath);
+});
+
+// 裸主题根路径（如 /themes/glassmorphism）：返回主题 index.html。
+app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
+  const id = req.params[0];
+  const baseDir = path.join(THEMES_DIR, id);
+  const indexPath = path.join(baseDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return next();
+  if (THEME_NEEDS_NONCE.has(id)) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+  }
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  return res.sendFile(indexPath);
 });
 
 // 版本信息端点（公开）：供前端页脚显示版本号与构建时间
