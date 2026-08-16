@@ -172,9 +172,9 @@ router.get('/nodes/:uuid/records', (req, res) => {
   const hours = clamp(Math.floor(Number(req.query.hours) || 0), 0, 720);
   const maxCount = clamp(Math.floor(Number(req.query.max_points) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  const rows = db.prepare(
-    'SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? AND probes IS NOT NULL ORDER BY ts ASC LIMIT ?'
-  ).all(a.id, since, maxCount * 10);
+  const rows = (db.getMetrics(a.id, since) || [])
+    .filter(r => r.probes != null)
+    .slice(0, maxCount * 10);
   const records = [];
   rows.forEach(r => {
     try {

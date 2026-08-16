@@ -52,9 +52,9 @@ function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxCount = clamp(Math.floor(Number(maxCount) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  const rows = db.prepare(
-    'SELECT agent_id, ts, probes FROM metrics WHERE ts >= ? AND probes IS NOT NULL ORDER BY ts ASC LIMIT ?'
-  ).all(since, maxCount * 10);
+  const rows = (db.getMetricsAll(since) || [])
+    .filter(r => r.probes != null)
+    .slice(0, maxCount * 10);
 
   const records = [];
   rows.forEach(r => {
