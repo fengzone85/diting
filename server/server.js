@@ -134,7 +134,8 @@ app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/public/') || req.path === '/report' ||
       req.path.startsWith('/v1/') ||
       req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
-      req.path === '/version' || req.path === '/rpc2') return next();
+      req.path === '/records/load' || req.path === '/records/ping' ||
+      req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse') return next();
   ipWhitelist(req, res, next);
 });
 app.use('/api', api);
@@ -418,4 +419,30 @@ try {
   console.log('[monitor] theme-compat WebSocket /api/rpc2 enabled');
 } catch (e) {
   console.warn('[monitor] theme-compat WebSocket 未启用（缺少 ws 包，仅 REST 兼容可用）：', e.message);
+}
+
+// SSE 端点 /api/clients/sse：覆盖仅支持 SSE（不支持 WebSocket）的社区主题。
+// 与 WebSocket /api/clients 同构：受 public_enabled 约束，每 5s 推送一次 compat.snapshot()，
+// 事件格式为「data: <json>\n\n」（浏览器 EventSource 原生消费）。
+try {
+  app.get('/api/clients/sse', (req, res) => {
+    if (!db.getUiSettings().public_enabled) {
+      return res.status(403).json({ status: 'error', message: 'public page disabled' });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no' // 禁用 Nginx 缓冲，确保实时推送
+    });
+    const send = () => {
+      try { res.write('data: ' + JSON.stringify(compat.snapshot()) + '\n\n'); } catch (_) {}
+    };
+    send();
+    const timer = setInterval(send, 5000);
+    req.on('close', () => clearInterval(timer));
+  });
+  console.log('[monitor] theme-compat SSE /api/clients/sse enabled');
+} catch (e) {
+  console.warn('[monitor] theme-compat SSE 未启用：', e.message);
 }
