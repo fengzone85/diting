@@ -436,12 +436,21 @@ try {
     const timer = setInterval(pushStatus, 5000);
 
     ws.on('message', (data) => {
+      let msg = null;
       try {
-        const msg = JSON.parse(data.toString());
+        msg = JSON.parse(data.toString());
+      } catch (err) {
+        // 非法 JSON：msg 未解析成功，用 null id 回复，不抛出以免崩进程。
+        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
+        return;
+      }
+      try {
         const result = handleRpc(msg.method, msg.params);
         ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id }));
       } catch (err) {
-        ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg?.id ?? null }));
+        try {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg ? msg.id : null }));
+        } catch (_) {}
       }
     });
 
