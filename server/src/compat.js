@@ -196,7 +196,17 @@ router.get('/public', guard, (req, res) => {
       record_enabled: false, record_preserve_time: 720,
       sitename: ui.site_title || 'diting',
       theme: ui.public_theme || 'Mochi',
-      theme_settings: {}
+      theme_settings: {},
+      // 注意：前端 LoadChart/PingChart 的 Y()/Pe()/Qe() 期望 cards 为【短名字符串数组】
+      // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
+      // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
+      chartDashboardTemplate: {
+        cards: [
+          'cpu', 'load', 'memory', 'disk', 'network',
+          'gpu', 'gpuMemory', 'temperature', 'connections', 'process',
+          'traffic', 'ping', 'pingLoss'
+        ]
+      }
     }
   });
 });

@@ -73,12 +73,42 @@ function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
   return records.slice(0, maxCount);
 }
 
-function getRecords(params = {}) {
-  const { uuid, type = 'load', hours = 1, maxPoints = 100 } = params;
-  const nowIso = new Date().toISOString();
-  const fromIso = new Date(Date.now() - clamp(Math.floor(Number(hours) || 0), 0, 720) * 3600 * 1000).toISOString();
+// diting 内部字段名 → Komari 点分命名（用于 getRecords 字段映射）
+const RECORD_FIELD_MAP = {
+  'cpu.usage': 'cpu',
+  'load.average': 'load1',
+  'load.5': 'load5',
+  'load.15': 'load15',
+  'memory.used': 'mem_used',
+  'memory.total': 'mem_total',
+  'ram.used': 'mem_used',
+  'ram.total': 'mem_total',
+  'swap.used': 'mem_used',
+  'swap.total': 'mem_total',
+  'disk.used': 'disk_used',
+  'disk.total': 'disk_total',
+  'net.in.rate': 'net_rx_rate',
+  'net.out.rate': 'net_tx_rate',
+  'net.total.up': 'net_tx_month',
+  'net.total.down': 'net_rx_month',
+  'traffic.up': 'net_tx_month',
+  'traffic.down': 'net_rx_month',
+  'uptime': 'uptime',
+  'temperature': 'temp'
+};
 
-  if (type === 'ping') {
+function getRecords(params = {}) {
+  // 兼容前端 LoadChart 实际传参：entity_id + metric_keys + hours + max_points
+  // 也兼容旧调用：uuid + type + hours + maxPoints
+  const entityId = params.entity_id || params.uuid || (Array.isArray(params.entity_ids) ? params.entity_ids[0] : undefined);
+  const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
+  const maxPoints = clamp(Math.floor(Number(params.max_points || params.maxPoints || 100) || 0), 0, 5000);
+  const metricKeys = Array.isArray(params.metric_keys) ? params.metric_keys : null;
+  const nowIso = new Date().toISOString();
+  const fromIso = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
+  // ping 类型：从 probes 抽延迟
+  if (params.type === 'ping' || (metricKeys && metricKeys.some(k => k.startsWith('ping')))) {
     const records = getProbeRecords({ hours, maxCount: maxPoints });
     const byClient = {};
     records.forEach(r => {
@@ -86,6 +116,7 @@ function getRecords(params = {}) {
     });
     return {
       count: records.length,
+      records,
       recordsByClient: byClient,
       basic_info: [],
       tasks: [],
@@ -94,33 +125,24 @@ function getRecords(params = {}) {
     };
   }
 
-  if (!uuid) return { count: 0, recordsByClient: {}, from: fromIso, to: nowIso };
-  const rows = getMetricsRange(uuid, { hours, maxPoints });
-  // 转译为 Komari 官方社区主题的扁平 record 字段（memory/disk/swap/net_* 标量 + load1/5/15）
-  const mapped = rows.map(m => ({
-    time: new Date(m.ts).toISOString(),
-    cpu: Number(m.cpu) || 0,
-    memory: Number(m.mem_used) || 0,
-    memory_total: Number(m.mem_total) || 0,
-    ram: Number(m.mem_used) || 0,
-    ram_total: Number(m.mem_total) || 0,
-    swap: Number(m.swap_used) || 0,
-    swap_total: Number(m.swap_total) || 0,
-    disk: Number(m.disk_used) || 0,
-    disk_total: Number(m.disk_total) || 0,
-    net_in: Number(m.net_rx_rate) || 0,
-    net_out: Number(m.net_tx_rate) || 0,
-    net_total_up: Number(m.net_tx_month) || 0,
-    net_total_down: Number(m.net_rx_month) || 0,
-    load1: Number(m.load1) || 0,
-    load5: Number(m.load5) || 0,
-    load15: Number(m.load15) || 0,
-    uptime: Number(m.uptime) || 0,
-    temp: Number(m.temp) || 0
-  }));
+  if (!entityId) return { count: 0, recordsByClient: {}, from: fromIso, to: nowIso };
+  const rows = getMetricsRange(entityId, { hours, maxPoints });
+
+  // 若指定了 metric_keys，只返回这些字段（点分命名）；否则返回全部已映射字段
+  const wantKeys = metricKeys && metricKeys.length ? metricKeys : Object.keys(RECORD_FIELD_MAP);
+  const mapped = rows.map(m => {
+    const rec = { time: new Date(m.ts).toISOString() };
+    for (const k of wantKeys) {
+      const col = RECORD_FIELD_MAP[k];
+      if (col != null) rec[k] = Number(m[col]) || 0;
+    }
+    return rec;
+  });
+
   return {
     count: mapped.length,
-    recordsByClient: { [uuid]: mapped },
+    records: mapped,
+    recordsByClient: { [entityId]: mapped },
     from: fromIso,
     to: nowIso
   };
@@ -167,6 +189,26 @@ registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
 registerMethod('public:queryMetrics', queryMetrics);
 registerMethod('public:getPingMetricStats', getPingMetricStats);
+
+// Komari 官方社区主题（Glassmorphism）底层 MetricsService 调用的原生方法名
+// metrics:query 使用【位置参数数组】而非对象：
+//   [metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty, ...]
+// metrics:definitions / metrics:ping 为普通对象参数。
+registerMethod('metrics:definitions', () => METRIC_DEFINITIONS);
+registerMethod('metrics:query', (params) => {
+  // 兼容数组与对象两种参数形态
+  let p = params;
+  if (Array.isArray(params)) {
+    const [metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty] = params;
+    p = { metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty };
+  }
+  return queryMetrics(p);
+});
+registerMethod('metrics:ping', (params = {}) => {
+  const p = Array.isArray(params) ? (params[0] || {}) : params;
+  return getRecords({ ...p, type: 'ping' });
+});
+registerMethod('metrics:ping-stats', () => getPingMetricStats());
 
 // 别名注册：第三方社区主题（如 Komari 官方 Glassmorphism）常以「无命名空间」形式
 // 调用方法（getNodes / getNodesLatestStatus / ping / getVersion 等），而非 common:* / rpc.* 前缀。
