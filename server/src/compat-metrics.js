@@ -43,7 +43,10 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(v, max));
 }
 
-function queryMetrics({ metric_keys = [], entity_ids = [], hours = 1, maxPoints = 100 } = {}) {
+function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1, maxPoints = 100, max_points } = {}) {
+  // 兼容 Komari 官方社区主题参数命名（entity_id 单数 + max_points 下划线）
+  if (entity_id != null) entity_ids = [entity_id];
+  if (max_points != null) maxPoints = max_points;
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxPoints = clamp(Math.floor(Number(maxPoints) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
