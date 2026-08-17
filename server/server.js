@@ -314,6 +314,29 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Komari 社区主题兼容兜底：第三方主题（如 glassmorphism）硬编码以根路径
+// /images/logo/* 与 /images/flags/* 取 OS logo / 国旗，而 diting 原生将其平铺在
+// public/ 根（os-*.svg、flags/），目录层级不同会 404。此处仅在静态资源未命中时，
+// 按当前启用主题回退到 themes/<id>/images/ 目录（那里本就含完整 logo/flags 集），
+// 既满足 Komari 主题约定，又不复制/改动 diting 原生 public/ 布局。
+const KOMARI_IMAGE_PREFIXES = ['/images/logo/', '/images/flags/'];
+app.use((req, res, next) => {
+  const p = req.path;
+  if (!KOMARI_IMAGE_PREFIXES.some(pre => p.startsWith(pre))) return next();
+  const ui = db.getUiSettings();
+  const theme = ui.public_theme;
+  if (!theme || theme === 'default' || !/^[A-Za-z0-9_-]+$/.test(theme)) return next();
+  const sub = p.slice('/images/'.length); // logo/os-x.svg 或 flags/CN.svg
+  const baseDir = path.join(THEMES_DIR, theme, 'images');
+  const fp = path.join(baseDir, sub);
+  if (!fp.startsWith(baseDir + path.sep)) return next(); // 防路径穿越
+  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();
+  const ext = path.extname(fp).toLowerCase();
+  res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  return fs.createReadStream(fp).pipe(res);
+});
+
 // periodic prune of old metrics
 // 保留天数从后台设置动态读取（db.getRetentionDays），设置变更后下次清理自动生效。
 let pruneFails = 0;
