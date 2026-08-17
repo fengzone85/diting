@@ -80,9 +80,13 @@ function getRecords(params = {}) {
 
   if (type === 'ping') {
     const records = getProbeRecords({ hours, maxCount: maxPoints });
+    const byClient = {};
+    records.forEach(r => {
+      (byClient[r.client] = byClient[r.client] || []).push(r);
+    });
     return {
       count: records.length,
-      records,
+      recordsByClient: byClient,
       basic_info: [],
       tasks: [],
       from: fromIso,
@@ -90,11 +94,33 @@ function getRecords(params = {}) {
     };
   }
 
-  if (!uuid) return { count: 0, records: {}, from: fromIso, to: nowIso };
+  if (!uuid) return { count: 0, recordsByClient: {}, from: fromIso, to: nowIso };
   const rows = getMetricsRange(uuid, { hours, maxPoints });
+  // 转译为 Komari 官方社区主题的扁平 record 字段（memory/disk/swap/net_* 标量 + load1/5/15）
+  const mapped = rows.map(m => ({
+    time: new Date(m.ts).toISOString(),
+    cpu: Number(m.cpu) || 0,
+    memory: Number(m.mem_used) || 0,
+    memory_total: Number(m.mem_total) || 0,
+    ram: Number(m.mem_used) || 0,
+    ram_total: Number(m.mem_total) || 0,
+    swap: Number(m.swap_used) || 0,
+    swap_total: Number(m.swap_total) || 0,
+    disk: Number(m.disk_used) || 0,
+    disk_total: Number(m.disk_total) || 0,
+    net_in: Number(m.net_rx_rate) || 0,
+    net_out: Number(m.net_tx_rate) || 0,
+    net_total_up: Number(m.net_tx_month) || 0,
+    net_total_down: Number(m.net_rx_month) || 0,
+    load1: Number(m.load1) || 0,
+    load5: Number(m.load5) || 0,
+    load15: Number(m.load15) || 0,
+    uptime: Number(m.uptime) || 0,
+    temp: Number(m.temp) || 0
+  }));
   return {
-    count: rows.length,
-    records: { [uuid]: rows },
+    count: mapped.length,
+    recordsByClient: { [uuid]: mapped },
     from: fromIso,
     to: nowIso
   };
@@ -141,6 +167,19 @@ registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
 registerMethod('public:queryMetrics', queryMetrics);
 registerMethod('public:getPingMetricStats', getPingMetricStats);
+
+// 别名注册：第三方社区主题（如 Komari 官方 Glassmorphism）常以「无命名空间」形式
+// 调用方法（getNodes / getNodesLatestStatus / ping / getVersion 等），而非 common:* / rpc.* 前缀。
+// 为兼容不同主题实现，此处为每个已注册方法补一个「去掉前缀」的别名（同时处理冒号与点分隔）。
+(function registerAliases() {
+  for (const full of Array.from(METHODS.keys())) {
+    const idx = full.search(/[:.]/);
+    if (idx > 0) {
+      const short = full.slice(idx + 1);
+      if (short && !METHODS.has(short)) METHODS.set(short, METHODS.get(full));
+    }
+  }
+})();
 
 function handleRpc(method, params) {
   if (method.startsWith('admin:')) throw { code: -32000, message: 'admin not supported' };

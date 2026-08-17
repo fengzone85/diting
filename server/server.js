@@ -384,9 +384,13 @@ function wsRateLimit(ip) {
 try {
   const { WebSocketServer } = require('ws');
 
-  const wss = new WebSocketServer({ server, path: '/api/clients' });
-  wss.on('connection', (ws, req) => {
-    // 仅公开状态页开启时开放（数据为脱敏的公开视图）
+  // 单一 WebSocketServer（noServer 模式），在 upgrade 事件中按 path 分发给不同主题协议。
+  // 注意：不可为 /api/clients 与 /api/rpc2 各建一个非 noServer 的 WSS 共享同一 server——
+  // 那样 path 不匹配的 upgrade 会被第一个 WSS 以 HTTP 400 拒绝（ws 库默认行为），
+  // 导致主题连接 /api/rpc2 失败、实时/负载数据全部拉不到。
+  const wss = new WebSocketServer({ noServer: true });
+
+  function attachCommon(ws, req) {
     if (!db.getUiSettings().public_enabled) {
       try { ws.close(1008, 'public disabled'); } catch (_) {}
       return;
@@ -398,32 +402,30 @@ try {
       return;
     }
     set.add(ws);
+    return set;
+  }
+
+  // /api/clients：社区主题公开快照（发送 "get" 触发刷新）
+  wss.on('connection', (ws, req, pathname) => {
+    if (pathname !== '/api/clients') return;
+    const set = attachCommon(ws, req);
+    if (!set) return;
     const send = () => { try { ws.send(JSON.stringify(compat.snapshot())); } catch (_) {} };
     send();
-    ws.on('message', () => send()); // 社区主题客户端发送 "get" 触发刷新
+    ws.on('message', () => send());
     const timer = setInterval(send, 5000);
     ws.on('close', () => {
       clearInterval(timer);
       set.delete(ws);
-      if (set.size === 0) wsConns.delete(ip);
+      if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
   });
-  console.log('[monitor] theme-compat WebSocket /api/clients enabled');
 
-  // JSON-RPC WebSocket 端点：社区主题通过 /api/rpc2 拉实时状态
-  const wssRpc = new WebSocketServer({ server, path: '/api/rpc2' });
-  wssRpc.on('connection', (ws, req) => {
-    if (!db.getUiSettings().public_enabled) {
-      try { ws.close(1008, 'public disabled'); } catch (_) {}
-      return;
-    }
-    const ip = wsClientIp(req);
-    const set = wsRateLimit(ip);
-    if (!set) {
-      try { ws.close(1008, 'rate limited'); } catch (_) {}
-      return;
-    }
-    set.add(ws);
+  // /api/rpc2：社区主题 JSON-RPC 网关
+  wss.on('connection', (ws, req, pathname) => {
+    if (pathname !== '/api/rpc2') return;
+    const set = attachCommon(ws, req);
+    if (!set) return;
 
     const pushStatus = () => {
       try {
@@ -446,10 +448,24 @@ try {
     ws.on('close', () => {
       clearInterval(timer);
       set.delete(ws);
-      if (set.size === 0) wsConns.delete(ip);
+      if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
   });
-  console.log('[monitor] theme-compat WebSocket /api/rpc2 enabled');
+
+  server.on('upgrade', (req, socket, head) => {
+    let pathname = req.url || '/';
+    const q = pathname.indexOf('?');
+    if (q >= 0) pathname = pathname.slice(0, q);
+    if (pathname !== '/api/clients' && pathname !== '/api/rpc2') {
+      // 非主题 WS 路径：交由其他 handler（若有），否则关闭避免悬挂。
+      try { socket.destroy(); } catch (_) {}
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req, pathname);
+    });
+  });
+  console.log('[monitor] theme-compat WebSocket (/api/clients, /api/rpc2) enabled');
 } catch (e) {
   console.warn('[monitor] theme-compat WebSocket 未启用（缺少 ws 包，仅 REST 兼容可用）：', e.message);
 }
