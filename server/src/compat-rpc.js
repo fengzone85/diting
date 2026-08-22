@@ -114,12 +114,48 @@ function getRecords(params = {}) {
     records.forEach(r => {
       (byClient[r.client] = byClient[r.client] || []).push(r);
     });
+    // 按 (client, task_id) 聚合统计，对齐 Komari 社区主题 PingChart 期望的 stats 结构。
+    // 前端 Ae() 读 o.value.stats，且只保留 total>0 && !loss_approximate && isFinite(loss) 的 task。
+    const agg = {};
+    records.forEach(r => {
+      const k = r.client + ' ' + r.task_id;
+      if (!agg[k]) agg[k] = { entity_id: r.client, task_id: r.task_id, name: r.task_id, values: [] };
+      const a = agg[k];
+      a.total = (a.total || 0) + 1;
+      if (typeof r.value === 'number' && r.value >= 0) a.values.push(r.value);
+    });
+    const stats = Object.values(agg).map(a => {
+      const vals = a.values.slice().sort((x, y) => x - y);
+      const sum = vals.reduce((s, v) => s + v, 0);
+      const avg = vals.length ? sum / vals.length : 0;
+      const min = vals.length ? vals[0] : 0;
+      const max = vals.length ? vals[vals.length - 1] : 0;
+      const p50 = vals.length ? vals[Math.floor(vals.length * 0.5)] : 0;
+      const p99 = vals.length ? vals[Math.floor(vals.length * 0.99)] : 0;
+      const stddev = vals.length ? Math.sqrt(vals.reduce((s, v) => s + (v - avg) ** 2, 0) / vals.length) : 0;
+      const p99_p50_ratio = p50 ? p99 / p50 : 0;
+      return {
+        entity_id: a.entity_id,
+        task_id: a.task_id,
+        name: a.name,
+        total: a.total,
+        valid: vals.length,
+        loss: 0,
+        loss_approximate: false,
+        interval: 0,
+        interval_seconds: 0,
+        type: 'icmp',
+        avg, min, max, p50, p99, p99_p50_ratio, stddev,
+        latest: vals.length ? vals[vals.length - 1] : 0
+      };
+    });
     return {
       count: records.length,
       records,
       recordsByClient: byClient,
-      basic_info: [],
+      stats,
       tasks: [],
+      basic_info: [],
       from: fromIso,
       to: nowIso
     };
@@ -155,8 +191,75 @@ function getPublicPingTasks() {
   }));
 }
 
-function getPingMetricStats() {
-  return { count: 0, tasks: [], basic_info: [] };
+function getPublicPingTasks(params = {}) {
+  // Komari 社区主题 PingChart 调用，返回某个 entity 的全部探针任务列表。
+  const entityId = params.entity_id || params.uuid;
+  const since = Date.now() - 24 * 3600 * 1000; // 最近 24h 内出现的 task
+  const rows = (db.getMetricsAll(since) || [])
+    .filter(r => r.probes != null && (!entityId || r.agent_id === entityId));
+  const taskMap = new Map();
+  rows.forEach(r => {
+    try {
+      const probes = JSON.parse(r.probes || '{}');
+      Object.keys(probes).forEach(name => {
+        if (!taskMap.has(name)) {
+          taskMap.set(name, {
+            entity_id: r.agent_id,
+            client: r.agent_id,
+            task_id: name,
+            name: name,
+            type: 'icmp',
+            interval_seconds: 0,
+            interval: 0
+          });
+        }
+      });
+    } catch (_) {}
+  });
+  return { count: taskMap.size, tasks: Array.from(taskMap.values()) };
+}
+
+function getPingMetricStats(params = {}) {
+  // Komari 社区主题 PingChart 调用 public:getPingMetricStats，期望返回 stats 数组。
+  // 结构与 metrics:ping 里的 stats 一致：按 (client,task_id) 聚合延迟统计。
+  const entityId = params.entity_id || params.uuid;
+  const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
+  const records = getProbeRecords({ hours, maxCount: clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000 });
+  const agg = {};
+  records.forEach(r => {
+    if (entityId && r.client !== entityId) return;
+    const k = r.client + '\x00' + r.task_id;
+    if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_id, values: [] };
+    if (typeof r.value === 'number' && r.value >= 0) agg[k].values.push(r.value);
+  });
+  const stats = Object.values(agg).map(a => {
+    const vals = a.values.slice().sort((x, y) => x - y);
+    const sum = vals.reduce((s, v) => s + v, 0);
+    const avg = vals.length ? sum / vals.length : 0;
+    const min = vals.length ? vals[0] : 0;
+    const max = vals.length ? vals[vals.length - 1] : 0;
+    const p50 = vals.length ? vals[Math.floor(vals.length * 0.5)] : 0;
+    const p99 = vals.length ? vals[Math.floor(vals.length * 0.99)] : 0;
+    const stddev = vals.length ? Math.sqrt(vals.reduce((s, v) => s + (v - avg) ** 2, 0) / vals.length) : 0;
+    return {
+      entity_id: a.entity_id,
+      client: a.client,
+      task_id: a.task_id,
+      name: a.name,
+      total: a.values.length,
+      valid: vals.length,
+      loss: 0,
+      loss_approximate: false,
+      interval: 0,
+      interval_seconds: 0,
+      type: 'icmp',
+      avg, min, max, p50, p99,
+      p99_p50_ratio: p50 ? p99 / p50 : 0,
+      stddev,
+      latest: vals.length ? vals[vals.length - 1] : 0
+    };
+  });
+  return { count: stats.length, stats, tasks: [], basic_info: [] };
 }
 
 // ===== 方法表注册 =====
@@ -208,7 +311,6 @@ registerMethod('metrics:ping', (params = {}) => {
   const p = Array.isArray(params) ? (params[0] || {}) : params;
   return getRecords({ ...p, type: 'ping' });
 });
-registerMethod('metrics:ping-stats', () => getPingMetricStats());
 
 // 别名注册：第三方社区主题（如 Komari 官方 Glassmorphism）常以「无命名空间」形式
 // 调用方法（getNodes / getNodesLatestStatus / ping / getVersion 等），而非 common:* / rpc.* 前缀。

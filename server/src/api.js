@@ -435,6 +435,8 @@ router.get('/public/agents', (req, res) => {
       load15: m ? m.load15 : null,
       temp: m ? m.temp : null,
       swap_pct: m ? m.swap_pct : null,
+      swap_used: m ? m.swap_used : 0,
+      swap_total: m ? m.swap_total : 0,
       net_rx_rate: m ? m.net_rx_rate : 0,
       net_tx_rate: m ? m.net_tx_rate : 0,
       net_rx_month: m ? m.net_rx_month : 0,

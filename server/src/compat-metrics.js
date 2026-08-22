@@ -94,36 +94,46 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   const pingKeys = metric_keys.filter(k => k === 'ping.latency_ms' || k === 'ping.loss');
   const normalKeys = metric_keys.filter(k => k !== 'ping.latency_ms' && k !== 'ping.loss');
 
-  // ping.latency_ms / ping.loss：从 metrics.probes 抽延迟，按 entity_id 过滤
+  // ping.latency_ms / ping.loss：从 metrics.probes 抽延迟，【按探针任务(task)拆分】多条 series，
+  // 以对齐 Komari 社区主题 PingChart 的期望结构（series 每项需含 task_id + points:[{time,value}]）。
+  // diting 的 probes JSON 形如 { "移动": {ms, ok, loss}, "联通": {...}, ... }，每个 key 即一个 task。
   for (const entityId of entity_ids) {
+    const rows = (db.getMetricsAll(since) || [])
+      .filter(r => r.agent_id === entityId && r.probes != null)
+      .slice(0, maxPoints * 10);
+    // 收集该 entity 所有 task 名称
+    const taskNames = new Set();
+    rows.forEach(r => {
+      try { Object.keys(JSON.parse(r.probes || '{}')).forEach(n => taskNames.add(n)); } catch (_) {}
+    });
     for (const pk of pingKeys) {
-      const rows = (db.getMetricsAll(since) || [])
-        .filter(r => r.agent_id === entityId && r.probes != null)
-        .slice(0, maxPoints * 10);
-      const points = [];
-      for (const r of rows) {
-        try {
-          const probes = JSON.parse(r.probes || '{}');
-          const vals = Object.values(probes);
-          if (!vals.length) continue;
-          // latency_ms 取所有探针平均延迟；loss 取丢失率（此处探针无丢包字段，默认 0）
-          if (pk === 'ping.latency_ms') {
-            const msVals = vals.map(v => (v && typeof v.ms === 'number') ? v.ms : null).filter(v => v != null);
-            if (msVals.length) points.push({ time: new Date(r.ts).toISOString(), value: msVals.reduce((a, b) => a + b, 0) / msVals.length, count: msVals.length });
-          } else if (pk === 'ping.loss') {
-            points.push({ time: new Date(r.ts).toISOString(), value: 0, count: vals.length });
-          }
-        } catch (_) {}
+      for (const taskName of taskNames) {
+        const points = [];
+        for (const r of rows) {
+          try {
+            const probes = JSON.parse(r.probes || '{}');
+            const v = probes[taskName];
+            if (!v) continue;
+            if (pk === 'ping.latency_ms') {
+              if (typeof v.ms === 'number') points.push({ time: new Date(r.ts).toISOString(), value: v.ms, count: 1 });
+            } else if (pk === 'ping.loss') {
+              points.push({ time: new Date(r.ts).toISOString(), value: Number(v.loss) || 0, count: 1 });
+            }
+          } catch (_) {}
+        }
+        if (!points.length) continue;
+        series.push({
+          metric_key: pk,
+          entity_id: entityId,
+          task_id: taskName,
+          name: taskName,
+          unit: pk === 'ping.latency_ms' ? 'ms' : '%',
+          retention_days: 30,
+          downsampled: false,
+          count: points.length,
+          points
+        });
       }
-      series.push({
-        metric_key: pk,
-        entity_id: entityId,
-        unit: pk === 'ping.latency_ms' ? 'ms' : '%',
-        retention_days: 30,
-        downsampled: false,
-        count: points.length,
-        points
-      });
     }
   }
 
