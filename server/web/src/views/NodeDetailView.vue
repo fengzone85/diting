@@ -32,6 +32,15 @@ const currentRange = ref('1h');
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
 
+// 网络卡背景进度层宽度：月流量已用 / 配额占用率
+const netUsagePct = computed(() => {
+  const a = agent.value;
+  if (!a || a.monthly_quota_gb == null || a.monthly_quota_gb <= 0) return 0;
+  const used = (a.net_rx_month || 0) + (a.net_tx_month || 0);
+  const quota = a.monthly_quota_gb * 1024 ** 3;
+  return Math.min((used / quota) * 100, 100);
+});
+
 const neighborIds = computed(() => {
   const list = visibleAgents.value.length ? visibleAgents.value : state.agents;
   const idx = list.findIndex(a => a.id === agentId.value);
@@ -184,147 +193,109 @@ onMounted(load);
         </div>
 
         <div class="space-y-6">
-          <!-- 核心占比指标（图标 + 标签 + 大数值 + 迷你进度条） -->
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" fill="currentColor" stroke="none"/></svg>
-                {{ t('node.metric.cpu') }}
-              </div>
-              <div class="text-xl font-semibold text-content">{{ formatPercent(agent.cpu) }}</div>
-              <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                <div class="h-full rounded-full bg-sky-500" :style="{ width: `${Math.min(agent.cpu || 0, 100)}%` }" />
-              </div>
+          <!-- 顶部信息条：对齐 glassmorphism 节点页顶部水平指标条 -->
+          <div class="flex flex-wrap gap-3">
+            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
+              <svg class="h-4 w-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              <span class="text-xs text-muted">{{ t('node.metric.traffic') }}</span>
+              <span class="text-sm font-semibold text-cyan-300">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
             </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
-                {{ t('node.metric.mem') }}
-              </div>
-              <div class="text-xl font-semibold text-content">{{ formatPercent(agent.mem_pct) }}</div>
-              <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                <div class="h-full rounded-full bg-violet-500" :style="{ width: `${Math.min(agent.mem_pct || 0, 100)}%` }" />
-              </div>
-              <div class="mt-1 text-[10px] text-muted">{{ formatBytes(agent.mem_used) }} / {{ formatBytes(agent.mem_total) }}</div>
+            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
+              <svg class="h-4 w-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
+              <span class="text-xs text-muted">{{ t('node.metric.quota') }}</span>
+              <span class="text-sm font-semibold text-emerald-300">{{ agent.monthly_quota_gb != null ? formatBytes(agent.monthly_quota_gb * 1024 ** 3) : '∞' }}</span>
             </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/></svg>
-                {{ t('node.metric.disk') }}
-              </div>
-              <div class="text-xl font-semibold text-content">{{ formatPercent(agent.disk_pct) }}</div>
-              <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                <div class="h-full rounded-full bg-emerald-500" :style="{ width: `${Math.min(agent.disk_pct || 0, 100)}%` }" />
-              </div>
-              <div class="mt-1 text-[10px] text-muted">{{ formatBytes(agent.disk_used) }} / {{ formatBytes(agent.disk_total) }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-                {{ t('node.metric.swap') }}
-              </div>
-              <div class="text-xl font-semibold text-content">{{ formatPercent(agent.swap_pct) }}</div>
-              <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                <div class="h-full rounded-full bg-amber-500" :style="{ width: `${Math.min(agent.swap_pct || 0, 100)}%` }" />
-              </div>
+            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
+              <svg class="h-4 w-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span class="text-xs text-muted">{{ t('node.metric.uptime') }}</span>
+              <span class="text-sm font-semibold text-indigo-300">{{ formatDuration(agent.uptime) }}</span>
             </div>
           </div>
-
-          <!-- 状态 / 流量 / 负载（图标 + 标签 + 数值，紧凑网格） -->
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                {{ t('node.metric.uptime') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ formatDuration(agent.uptime) }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/></svg>
-                {{ t('node.metric.temp') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—' }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
-                {{ t('node.metric.load') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ formatNumber(agent.load1 || 0) }}</div>
-              <div class="mt-0.5 text-[10px] text-muted">5m {{ formatNumber(agent.load5 || 0) }} · 15m {{ formatNumber(agent.load15 || 0) }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M7 8l5-5 5 5"/></svg>
-                {{ t('node.metric.rxRate') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ formatBitsPerSecond(agent.net_rx_rate) }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V3"/><path d="M7 16l5 5 5-5"/></svg>
-                {{ t('node.metric.txRate') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ formatBitsPerSecond(agent.net_tx_rate) }}</div>
-            </div>
-            <div class="rounded-xl bg-slate-500/5 p-3">
-              <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
-                {{ t('node.metric.traffic') }}
-              </div>
-              <div class="text-lg font-semibold text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</div>
-            </div>
-          </div>
-
-          <!-- 分组信息卡（系统 / 存储 / 网络） -->
-          <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div class="glass p-4">
-              <h3 class="mb-3 text-sm font-semibold text-secondary">{{ t('node.sec.system') }}</h3>
-              <div class="space-y-1 text-sm">
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.hostname') }}</span><span class="text-content">{{ agent.hostname || '—' }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.os') }}</span><span class="text-content">{{ agent.os || '—' }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.agentVersion') }}</span><span class="text-content">{{ agent.version || '—' }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.agentId') }}</span><span class="text-content">{{ agent.id }}</span></div>
-              </div>
-            </div>
-
-            <div class="glass p-4">
-              <h3 class="mb-3 text-sm font-semibold text-secondary">{{ t('node.sec.storage') }}</h3>
-              <div v-if="agent.disks?.length" class="space-y-2">
-                <div v-for="disk in agent.disks" :key="disk.mount" class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between text-sm">
-                    <span class="text-content">{{ disk.mount }}</span>
-                    <span class="text-muted">{{ formatPercent(disk.pct) }}</span>
-                  </div>
-                  <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                    <div class="h-full rounded-full bg-emerald-500" :style="{ width: `${Math.min(disk.pct || 0, 100)}%` }" />
-                  </div>
-                  <div class="text-[10px] text-muted">{{ formatBytes(disk.used) }} / {{ formatBytes(disk.total) }}</div>
+          <!-- 顶部四卡：严格对齐 Komari Glassmorphism 节点详情页（lg 以上 2 列，不强制等高） -->
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <!-- 硬件信息：glass 毛玻璃卡 + 纵向条目 -->
+            <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
+              <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.hardware') }}</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.cpu') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ formatPercent(agent.cpu) }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.load') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-emerald-300">{{ formatNumber(agent.load1 || 0) }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.temp') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-amber-300">{{ agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—' }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.mem') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-violet-300">{{ formatPercent(agent.mem_pct) }}</span>
                 </div>
               </div>
-              <div v-else class="text-sm text-muted">{{ formatPercent(agent.disk_pct) }} · {{ formatBytes(agent.disk_used) }} / {{ formatBytes(agent.disk_total) }}</div>
             </div>
 
-            <div class="glass p-4">
-              <h3 class="mb-3 text-sm font-semibold text-secondary">{{ t('node.sec.network') }}</h3>
-              <div class="space-y-1 text-sm">
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.metric.rxRate') }}</span><span class="text-content">{{ formatBitsPerSecond(agent.net_rx_rate) }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.metric.txRate') }}</span><span class="text-content">{{ formatBitsPerSecond(agent.net_tx_rate) }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.metric.rxMonth') }}</span><span class="text-content">{{ formatBytes(agent.net_rx_month) }}</span></div>
-                <div class="flex justify-between gap-4 py-1"><span class="text-muted">{{ t('node.metric.txMonth') }}</span><span class="text-content">{{ formatBytes(agent.net_tx_month) }}</span></div>
-              </div>
-              <div v-if="agent.monthly_quota_gb != null" class="mt-3">
-                <div class="mb-1 flex items-center justify-between text-xs text-muted">
-                  <span>{{ t('node.metric.quota') }}</span>
-                  <span>{{ formatBytes(((agent.net_rx_month || 0) + (agent.net_tx_month || 0))) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
+            <!-- 系统信息 -->
+            <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
+              <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.system') }}</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.os') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.os || '—' }}</span>
                 </div>
-                <div class="h-2 w-full overflow-hidden rounded-full bg-slate-500/20">
-                  <div
-                    class="h-full rounded-full"
-                    :class="(((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) / (agent.monthly_quota_gb * 1024 ** 3) * 100) > 80 ? 'bg-rose-500' : (((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) / (agent.monthly_quota_gb * 1024 ** 3) * 100) > 50 ? 'bg-amber-500' : 'bg-sky-500'"
-                    :style="{ width: `${Math.min(((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) / (agent.monthly_quota_gb * 1024 ** 3) * 100, 100)}%` }"
-                  />
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.hostname') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.hostname || '—' }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.group') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.group || '—' }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.agentId') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.id }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 存储信息：glass 毛玻璃卡 + 纵向紧凑条目 -->
+            <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
+              <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.storage') }}</h3>
+              <div class="grid grid-cols-3 gap-3">
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.mem') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.swap') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatPercent(agent.swap_pct) }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.disk') }}</span>
+                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 网络信息：glass 毛玻璃卡 + 纵向紧凑条目 + 进度条背景 -->
+            <div class="glass group relative flex flex-col overflow-hidden rounded-md border-none p-3 transition-all">
+              <div
+                v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
+                class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
+                :class="netUsagePct >= 80 ? 'bg-red-500/20' : netUsagePct >= 60 ? 'bg-amber-500/15' : 'bg-emerald-500/12'"
+                :style="{ width: Math.min(netUsagePct, 100) + '%' }"
+              ></div>
+              <h3 class="relative z-10 mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
+              <div class="relative z-10 grid grid-cols-2 gap-3">
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('public.traffic') }}</span>
+                  <span v-if="agent.monthly_quota_gb != null" class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
+                  <span v-else class="truncate text-sm font-semibold leading-tight text-content">{{ t('node.unlimitedTraffic') }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
+                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.netRate') }}</span>
+                  <span class="truncate whitespace-nowrap text-sm font-semibold leading-tight text-content">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }} ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</span>
                 </div>
               </div>
             </div>
@@ -372,36 +343,34 @@ onMounted(load);
             </div>
           </div>
 
-          <div v-if="diskPredict" class="glass relative overflow-hidden p-5">
-            <!-- 进度条作为卡片背景（对齐 glassmorphism 网络信息卡：absolute inset-y-0 left-0 实色+透明度，宽度=占用率） -->
-            <div
-              class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-              :class="diskPredict.pct >= 80 ? 'bg-red-500/20' : diskPredict.pct >= 50 ? 'bg-amber-500/20' : 'bg-emerald-500/20'"
-              :style="{ width: Math.min(diskPredict.pct, 100) + '%' }"
-            ></div>
-            <div class="relative z-10">
-              <div class="mb-4 flex items-center justify-between">
-                <h3 class="flex items-center gap-2 text-base font-semibold text-content">
-                  <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
-                  {{ t('node.diskEta') }}
-                </h3>
-                <span
-                  class="rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  :class="diskPredict.pct >= 80 ? 'bg-rose-400/15 text-rose-300' : diskPredict.pct >= 50 ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
-                >{{ formatPercent(diskPredict.pct) }}</span>
-              </div>
-              <div class="mb-4 flex items-baseline justify-between">
-                <span class="text-2xl font-bold text-content">{{ formatBytes(diskPredict.used) }}</span>
-                <span class="text-sm text-muted">/ {{ formatBytes(diskPredict.total) }}</span>
-              </div>
-              <div class="flex items-center justify-between rounded-xl bg-surface/60 px-4 py-3">
-                <span class="flex items-center gap-2 text-sm text-muted">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                  {{ t('node.etaLabel') }}
-                </span>
-                <span v-if="diskPredict.eta" class="text-sm font-semibold text-sky-300">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</span>
-                <span v-else class="rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-xs font-medium text-emerald-300">{{ t('node.growthFlat') }}</span>
-              </div>
+          <div v-if="diskPredict" class="glass p-5">
+            <div class="mb-4 flex items-center justify-between">
+              <h3 class="flex items-center gap-2 text-base font-semibold text-content">
+                <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
+                {{ t('node.diskEta') }}
+              </h3>
+              <span
+                class="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                :class="diskPredict.pct >= 80 ? 'bg-rose-400/15 text-rose-300' : diskPredict.pct >= 50 ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
+              >{{ formatPercent(diskPredict.pct) }}</span>
+            </div>
+            <!-- 占用率进度条：铺满「已用/总容量」内层胶囊的高度（背景层，半透明实色，宽度=占用率） -->
+            <div class="relative mb-4 flex items-baseline justify-between overflow-hidden rounded-xl bg-surface/40 px-4 py-3">
+              <div
+                class="pointer-events-none absolute inset-y-0 left-0 rounded-xl transition-[width,background-color] duration-300 ease-out"
+                :class="diskPredict.pct >= 80 ? 'bg-red-500/20' : diskPredict.pct >= 50 ? 'bg-amber-500/20' : 'bg-emerald-500/20'"
+                :style="{ width: Math.min(diskPredict.pct, 100) + '%' }"
+              ></div>
+              <span class="relative z-10 text-2xl font-bold text-content">{{ formatBytes(diskPredict.used) }}</span>
+              <span class="relative z-10 text-sm text-muted">/ {{ formatBytes(diskPredict.total) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-xl bg-surface/60 px-4 py-3">
+              <span class="flex items-center gap-2 text-sm text-muted">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {{ t('node.etaLabel') }}
+              </span>
+              <span v-if="diskPredict.eta" class="text-sm font-semibold text-sky-300">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</span>
+              <span v-else class="rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-xs font-medium text-emerald-300">{{ t('node.growthFlat') }}</span>
             </div>
           </div>
         </div>
