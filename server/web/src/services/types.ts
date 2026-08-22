@@ -24,6 +24,8 @@ export interface Agent {
   load_avg?: number[];
   temp?: number;
   swap_pct?: number;
+  swap_used?: number;
+  swap_total?: number;
   uptime?: number;
   os?: string;
   hostname?: string;

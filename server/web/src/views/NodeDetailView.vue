@@ -217,20 +217,20 @@ onMounted(load);
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.hardware') }}</h3>
               <div class="grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.cpu') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.cpu') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ formatPercent(agent.cpu) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.load') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.load') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-emerald-300">{{ formatNumber(agent.load1 || 0) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.temp') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.temp') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-amber-300">{{ agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.mem') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.mem') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-violet-300">{{ formatPercent(agent.mem_pct) }}</span>
                 </div>
               </div>
@@ -240,20 +240,20 @@ onMounted(load);
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.system') }}</h3>
               <div class="grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.os') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.os') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.os || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.hostname') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.hostname') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.hostname || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.group') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.group') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.group || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.agentId') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.agentId') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.id }}</span>
                 </div>
               </div>
@@ -263,16 +263,16 @@ onMounted(load);
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.storage') }}</h3>
               <div class="grid grid-cols-3 gap-3">
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.mem') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.mem') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.swap') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.swap') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatPercent(agent.swap_pct) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.storage.disk') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.disk') }}</span>
                   <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
                 </div>
               </div>
@@ -283,18 +283,18 @@ onMounted(load);
               <div
                 v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
                 class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                :class="netUsagePct >= 80 ? 'bg-red-500/20' : netUsagePct >= 60 ? 'bg-amber-500/15' : 'bg-emerald-500/12'"
+                :class="netUsagePct >= 80 ? 'bg-red-500/30' : netUsagePct >= 60 ? 'bg-amber-500/25' : 'bg-emerald-500/20'"
                 :style="{ width: Math.min(netUsagePct, 100) + '%' }"
               ></div>
               <h3 class="relative z-10 mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
               <div class="relative z-10 grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('public.traffic') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('public.traffic') }}</span>
                   <span v-if="agent.monthly_quota_gb != null" class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
                   <span v-else class="truncate text-sm font-semibold leading-tight text-content">{{ t('node.unlimitedTraffic') }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-0.5 rounded-sm bg-surface/40 p-1.5">
-                  <span class="truncate text-[11px] leading-tight text-secondary">{{ t('node.metric.netRate') }}</span>
+                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
+                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.netRate') }}</span>
                   <span class="truncate whitespace-nowrap text-sm font-semibold leading-tight text-content">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }} ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</span>
                 </div>
               </div>
