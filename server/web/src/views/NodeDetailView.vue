@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, watch, ref, nextTick } from 'vue';
+import { onMounted, computed, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import ChartLatency from '../components/ChartLatency.vue';
@@ -108,9 +108,6 @@ async function switchRange(range: string) {
   await load();
 }
 
-// 分区 Tab（对齐 komari 分区 概览/负载/延迟）
-const detailTab = ref<'overview' | 'load' | 'latency'>('overview');
-
 // 磁盘耗尽预测：基于最近 sparkline 的日增量线性外推（对齐 komari 磁盘耗尽预测）
 const diskPredict = computed(() => {
   const sl = sparkline.value;
@@ -131,10 +128,6 @@ const diskPredict = computed(() => {
 });
 
 onMounted(load);
-
-// 切换分区 Tab 时，延迟图若由隐藏变显示需 resize 铺满
-const latencyChart = ref<InstanceType<typeof ChartLatencyMulti> | null>(null);
-watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.value?.resize()); });
 </script>
 
 <template>
@@ -173,18 +166,7 @@ watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.v
           <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
         </div>
 
-        <!-- 分区 Tab（对齐 komari 概览/负载/延迟分区） -->
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-for="tab in ['overview', 'load', 'latency']"
-            :key="tab"
-            class="rounded-lg border px-3 py-1.5 text-sm"
-            :class="detailTab === tab ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-            @click="detailTab = tab as any"
-          >{{ t('node.tab.' + tab) }}</button>
-        </div>
-
-        <div v-show="detailTab === 'overview' || detailTab === 'load'" class="space-y-6">
+        <div class="space-y-6">
           <!-- 核心占比指标（图标 + 标签 + 大数值 + 迷你进度条） -->
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-xl bg-slate-500/5 p-3">
@@ -252,8 +234,8 @@ watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.v
                 <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>
                 {{ t('node.metric.load') }}
               </div>
-              <div class="text-lg font-semibold text-content">{{ formatNumber(agent.load1) }}</div>
-              <div class="mt-0.5 text-[10px] text-muted">5m {{ formatNumber(agent.load5) }} · 15m {{ formatNumber(agent.load15) }}</div>
+              <div class="text-lg font-semibold text-content">{{ formatNumber(agent.load1 || 0) }}</div>
+              <div class="mt-0.5 text-[10px] text-muted">5m {{ formatNumber(agent.load5 || 0) }} · 15m {{ formatNumber(agent.load15 || 0) }}</div>
             </div>
             <div class="rounded-xl bg-slate-500/5 p-3">
               <div class="mb-1 flex items-center gap-1.5 text-xs text-secondary">
@@ -275,7 +257,6 @@ watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.v
                 {{ t('node.metric.traffic') }}
               </div>
               <div class="text-lg font-semibold text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</div>
-              <div class="mt-0.5 text-[10px] text-muted">{{ t('node.metric.rxMonth') }} {{ formatBytes(agent.net_rx_month) }} · {{ t('node.metric.txMonth') }} {{ formatBytes(agent.net_tx_month) }}</div>
             </div>
           </div>
 
@@ -385,7 +366,7 @@ watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.v
           </div>
         </div>
 
-        <div v-show="detailTab === 'latency'" class="glass p-4">
+        <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">{{ t('node.netQuality') }}</h3>
           <div class="mb-3 flex flex-wrap items-center gap-2">
             <span
@@ -410,7 +391,7 @@ watch(detailTab, (tab) => { if (tab === 'latency') nextTick(() => latencyChart.v
               <span class="ml-2 text-muted">{{ t('node.loss', { pct: formatNumber(lossPercent(points), 1) }) }}</span>
             </span>
           </div>
-          <ChartLatencyMulti ref="latencyChart" :title="t('node.chart.latency')" :series="probeSeriesList" />
+          <ChartLatencyMulti :title="t('node.chart.latency')" :series="probeSeriesList" />
         </div>
       </div>
     </main>
