@@ -372,36 +372,36 @@ onMounted(load);
             </div>
           </div>
 
-          <div v-if="diskPredict" class="glass relative overflow-hidden p-5">
-            <!-- 进度条作为背景：按占用率从左向右的渐变填充（对齐 glassmorphism 网络信息卡） -->
-            <div
-              class="pointer-events-none absolute inset-y-0 left-0 opacity-15"
-              :class="diskPredict.pct >= 80 ? 'bg-gradient-to-r from-rose-500 to-rose-400' : diskPredict.pct >= 50 ? 'bg-gradient-to-r from-amber-500 to-amber-400' : 'bg-gradient-to-r from-sky-500 to-sky-400'"
-              :style="{ width: Math.min(diskPredict.pct, 100) + '%' }"
-            ></div>
-            <div class="relative z-10">
-              <div class="mb-4 flex items-center justify-between">
-                <h3 class="flex items-center gap-2 text-base font-semibold text-content">
-                  <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
-                  {{ t('node.diskEta') }}
-                </h3>
-                <span
-                  class="rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  :class="diskPredict.pct >= 80 ? 'bg-rose-400/15 text-rose-300' : diskPredict.pct >= 50 ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
-                >{{ formatPercent(diskPredict.pct) }}</span>
-              </div>
-              <div class="mb-4 flex items-baseline justify-between">
-                <span class="text-2xl font-bold text-content">{{ formatBytes(diskPredict.used) }}</span>
-                <span class="text-sm text-muted">/ {{ formatBytes(diskPredict.total) }}</span>
-              </div>
-              <div class="flex items-center justify-between rounded-xl bg-surface/60 px-4 py-3">
-                <span class="flex items-center gap-2 text-sm text-muted">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                  {{ t('node.etaLabel') }}
-                </span>
-                <span v-if="diskPredict.eta" class="text-sm font-semibold text-sky-300">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</span>
-                <span v-else class="rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-xs font-medium text-emerald-300">{{ t('node.growthFlat') }}</span>
-              </div>
+          <div v-if="diskPredict" class="glass p-5">
+            <div class="mb-4 flex items-center justify-between">
+              <h3 class="flex items-center gap-2 text-base font-semibold text-content">
+                <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
+                {{ t('node.diskEta') }}
+              </h3>
+              <span
+                class="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                :class="diskPredict.pct >= 80 ? 'bg-rose-400/15 text-rose-300' : diskPredict.pct >= 50 ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
+              >{{ formatPercent(diskPredict.pct) }}</span>
+            </div>
+            <div class="mb-3 flex items-baseline justify-between">
+              <span class="text-2xl font-bold text-content">{{ formatBytes(diskPredict.used) }}</span>
+              <span class="text-sm text-muted">/ {{ formatBytes(diskPredict.total) }}</span>
+            </div>
+            <!-- 进度条（对齐 glassmorphism 网络信息卡：8px 高、5px 圆角、轨道弱色、填充实色阈值配色） -->
+            <div class="mb-4 flex h-2 w-full overflow-hidden rounded-[5px] bg-surface">
+              <div
+                class="h-full rounded-r-[5px] transition-all"
+                :class="diskPredict.pct >= 80 ? 'bg-rose-600' : diskPredict.pct >= 50 ? 'bg-amber-600' : 'bg-sky-600'"
+                :style="{ width: Math.min(diskPredict.pct, 100) + '%' }"
+              ></div>
+            </div>
+            <div class="flex items-center justify-between rounded-xl bg-surface/60 px-4 py-3">
+              <span class="flex items-center gap-2 text-sm text-muted">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {{ t('node.etaLabel') }}
+              </span>
+              <span v-if="diskPredict.eta" class="text-sm font-semibold text-sky-300">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</span>
+              <span v-else class="rounded-full bg-emerald-400/15 px-2.5 py-0.5 text-xs font-medium text-emerald-300">{{ t('node.growthFlat') }}</span>
             </div>
           </div>
         </div>
