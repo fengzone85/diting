@@ -19,6 +19,8 @@ export interface Agent {
   net_rx_month?: number;
   net_tx_month?: number;
   load1?: number;
+  load5?: number;
+  load15?: number;
   load_avg?: number[];
   temp?: number;
   swap_pct?: number;

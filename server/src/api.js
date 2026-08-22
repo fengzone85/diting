@@ -431,6 +431,8 @@ router.get('/public/agents', (req, res) => {
       disk_r_rate: m ? m.disk_r_rate : 0,
       disk_w_rate: m ? m.disk_w_rate : 0,
       load1: m ? m.load1 : null,
+      load5: m ? m.load5 : null,
+      load15: m ? m.load15 : null,
       temp: m ? m.temp : null,
       swap_pct: m ? m.swap_pct : null,
       net_rx_rate: m ? m.net_rx_rate : 0,
