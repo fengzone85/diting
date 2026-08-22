@@ -419,12 +419,20 @@
     inset-inline: 0;
   }
 
+  .inset-y-0 {
+    inset-block: 0;
+  }
+
   .top-0 {
     top: 0;
   }
 
   .right-0 {
     right: 0;
+  }
+
+  .left-0 {
+    left: 0;
   }
 
   .z-10 {
@@ -1576,6 +1584,10 @@
 
   .text-white {
     color: var(--color-white);
+  }
+
+  .opacity-15 {
+    opacity: .15;
   }
 
   .opacity-50 {
