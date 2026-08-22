@@ -474,7 +474,9 @@ router.get('/public/agents/sparklines', (req, res) => {
       ts: r.ts, cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
       net_rx_rate: r.net_rx_rate, net_tx_rate: r.net_tx_rate,
       load1: r.load1, temp: r.temp, swap_pct: r.swap_pct, uptime: r.uptime,
-      disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate
+      disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate,
+      // 磁盘耗尽预测用：整机已用/总字节时序（对齐 komari MetricDisk 口径）
+      disk_used: r.disk_used, disk_total: r.disk_total
     });
   }
   res.json(byAgent);
