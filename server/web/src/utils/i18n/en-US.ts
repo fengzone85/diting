@@ -305,6 +305,8 @@ export const enUS: Record<string, string> = {
   'node.daysCycle': '{n} days',
   'node.disks': 'Disks',
   'node.diskEta': 'Disk Exhaustion Forecast',
+  'node.used': 'Disk Used',
+  'node.etaLabel': 'Exhausts',
   'node.etaIn': 'Exhausts on {eta} (~{days} days)',
   'node.growthFlat': 'Growth stable, no action needed',
   'node.netQuality': 'Network Quality',

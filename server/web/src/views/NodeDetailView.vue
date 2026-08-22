@@ -347,30 +347,59 @@ onMounted(load);
         </div>
 
         <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">{{ t('node.notePlan') }}</h3>
-          <div v-if="agent.note" class="mb-3 rounded-lg bg-surface px-4 py-3 text-sm text-content">{{ agent.note }}</div>
-          <div class="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            <div v-if="agent.monthly_quota_gb != null" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">{{ t('node.quotaMonthly') }}</span><span class="text-content">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
+          <h3 class="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+            {{ t('node.notePlan') }}
+          </h3>
+          <div v-if="agent.note" class="mb-3 rounded-lg bg-surface px-4 py-3 text-sm leading-relaxed text-content">{{ agent.note }}</div>
+          <div class="divide-y divide-divider/60">
+            <div v-if="agent.monthly_quota_gb != null" class="flex items-center justify-between gap-4 py-2 text-sm">
+              <span class="flex items-center gap-2 text-muted">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 5-4 7-8 8-4-1-8-3-8-8V7z"/></svg>
+                {{ t('node.quotaMonthly') }}
+              </span>
+              <span class="text-content">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
             </div>
-            <div v-if="agent.expire_at" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">{{ t('node.expireAt') }}</span><span class="text-content">{{ formatDate(agent.expire_at) }}</span>
+            <div v-if="agent.expire_at" class="flex items-center justify-between gap-4 py-2 text-sm">
+              <span class="flex items-center gap-2 text-muted">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+                {{ t('node.expireAt') }}
+              </span>
+              <span class="text-content">{{ formatDate(agent.expire_at) }}</span>
             </div>
-            <div v-if="agent.price != null" class="flex justify-between gap-4 border-b border-divider py-1">
-              <span class="text-muted">{{ t('node.price') }}</span>
+            <div v-if="agent.price != null" class="flex items-center justify-between gap-4 py-2 text-sm">
+              <span class="flex items-center gap-2 text-muted">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h4.5a2 2 0 0 1 0 4H9"/></svg>
+                {{ t('node.price') }}
+              </span>
               <span class="text-content">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ t('node.daysCycle', { n: agent.billing_cycle }) }}</span></span>
             </div>
           </div>
         </div>
 
         <div v-if="diskPredict" class="glass p-4">
-          <h3 class="mb-3 text-lg font-semibold">{{ t('node.diskEta') }}</h3>
-          <div class="flex items-center justify-between rounded-lg bg-surface px-4 py-3 text-sm">
-            <span class="text-content">{{ formatBytes(diskPredict.used) }} / {{ formatBytes(diskPredict.total) }} ({{ formatPercent(diskPredict.pct) }})</span>
-            <span class="text-muted">
-              <template v-if="diskPredict.eta">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</template>
-              <template v-else>{{ t('node.growthFlat') }}</template>
-            </span>
+          <h3 class="mb-3 flex items-center gap-2 text-lg font-semibold">
+            <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
+            {{ t('node.diskEta') }}
+          </h3>
+          <div class="divide-y divide-divider/60">
+            <div class="flex items-center justify-between gap-4 py-2 text-sm">
+              <span class="flex items-center gap-2 text-muted">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+                {{ t('node.used') }}
+              </span>
+              <span class="text-content">{{ formatBytes(diskPredict.used) }} / {{ formatBytes(diskPredict.total) }} ({{ formatPercent(diskPredict.pct) }})</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 py-2 text-sm">
+              <span class="flex items-center gap-2 text-muted">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {{ t('node.etaLabel') }}
+              </span>
+              <span class="text-muted">
+                <template v-if="diskPredict.eta">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</template>
+                <template v-else>{{ t('node.growthFlat') }}</template>
+              </span>
+            </div>
           </div>
         </div>
 

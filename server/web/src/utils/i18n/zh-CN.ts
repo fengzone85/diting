@@ -305,6 +305,8 @@ export const zhCN: Record<string, string> = {
   'node.daysCycle': '{n} 天',
   'node.disks': '磁盘',
   'node.diskEta': '磁盘耗尽预测',
+  'node.used': '磁盘用量',
+  'node.etaLabel': '预计耗尽',
   'node.etaIn': '预计 {eta} 耗尽（约 {days} 天）',
   'node.growthFlat': '增长平缓，暂无需关注',
   'node.netQuality': '网络质量',
