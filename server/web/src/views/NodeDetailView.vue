@@ -92,6 +92,12 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
+    // 详情页可能未被视觉模板预载 sparkline，单独补拉本节点历史（含 disk_used 字节序列，供耗尽预测）
+    if (!state.sparklines[agentId.value]) {
+      // 用 30d 长窗口取真实磁盘增量，避免短窗口噪声导致 ETA 剧烈抖动（komari 仅 1d 留存，diting 有完整历史）
+      const sl = await publicApi.sparklines(agentId.value, '30d');
+      state.sparklines = { ...state.sparklines, ...sl };
+    }
     probes.value = await publicApi.probes(agentId.value, currentRange.value);
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
@@ -106,23 +112,36 @@ async function switchRange(range: string) {
   await load();
 }
 
-// 磁盘耗尽预测：基于最近 sparkline 的日增量线性外推（对齐 komari 磁盘耗尽预测）
+// 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推（对齐 komari 整机口径）
 const diskPredict = computed(() => {
   const sl = sparkline.value;
-  if (!sl.length || !agent.value?.disks?.length) return [];
+  if (!sl || sl.length < 2) return null;
   const dayMs = 86400000;
   const first = sl[0], last = sl[sl.length - 1];
   const spanDays = Math.max((last.ts - first.ts) / dayMs, 0.01);
-  return agent.value.disks.map((d) => {
-    // 用净使用趋势估算：取当前 pct，按区间增长斜率外推到 100%
-    const growthPct = (d.pct ?? 0) - 0; // 无历史 pct 序列时退化为静态
-    const dailyGrowth = growthPct / spanDays / 100 * d.total;
-    if (dailyGrowth <= 0) return { mount: d.mount, eta: null as string | null, pct: d.pct };
-    const remain = d.total * (1 - (d.pct ?? 0) / 100);
-    const days = remain / dailyGrowth;
-    const eta = new Date(Date.now() + days * dayMs);
-    return { mount: d.mount, eta: eta.toISOString().slice(0, 10), pct: d.pct, days: Math.floor(days) };
-  });
+  const startUsed = first.disk_used ?? 0;
+  const endUsed = last.disk_used ?? 0;
+  const total = last.disk_total ?? 0;
+  if (!total) return null;
+  // 真实增量字节：末值 - 首值（komari 取 MetricDisk 历史差值，而非当前使用率）
+  const delta = endUsed - startUsed;
+  const dailyGrowth = delta / spanDays; // 字节/天
+  const pct = total > 0 ? (endUsed / total) * 100 : 0;
+  if (dailyGrowth <= 0) {
+    // 无增长或下降：趋势平稳，无法预测耗尽
+    return { eta: null as string | null, pct, days: null as number | null, total, used: endUsed, stable: true };
+  }
+  const remain = Math.max(total - endUsed, 0);
+  const days = remain / dailyGrowth;
+  const eta = new Date(Date.now() + days * dayMs);
+  return {
+    eta: eta.toISOString().slice(0, 10),
+    pct,
+    days: Math.floor(days),
+    total,
+    used: endUsed,
+    stable: false,
+  };
 });
 
 onMounted(load);
@@ -344,16 +363,14 @@ onMounted(load);
           </div>
         </div>
 
-        <div v-if="diskPredict.length" class="glass p-4">
+        <div v-if="diskPredict" class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">{{ t('node.diskEta') }}</h3>
-          <div class="space-y-2 text-sm">
-            <div v-for="d in diskPredict" :key="d.mount" class="flex items-center justify-between rounded-lg bg-surface px-4 py-2">
-              <span class="text-content">{{ d.mount }}</span>
-              <span class="text-muted">
-                <template v-if="d.eta">{{ t('node.etaIn', { eta: d.eta, days: d.days ?? 0 }) }}</template>
-                <template v-else>{{ t('node.growthFlat') }}</template>
-              </span>
-            </div>
+          <div class="flex items-center justify-between rounded-lg bg-surface px-4 py-3 text-sm">
+            <span class="text-content">{{ formatBytes(diskPredict.used) }} / {{ formatBytes(diskPredict.total) }} ({{ formatPercent(diskPredict.pct) }})</span>
+            <span class="text-muted">
+              <template v-if="diskPredict.eta">{{ t('node.etaIn', { eta: diskPredict.eta, days: diskPredict.days ?? 0 }) }}</template>
+              <template v-else>{{ t('node.growthFlat') }}</template>
+            </span>
           </div>
         </div>
 

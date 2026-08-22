@@ -82,6 +82,8 @@ export interface SparklinePoint {
   disk_pct?: number;
   disk_r_rate?: number;
   disk_w_rate?: number;
+  disk_used?: number;
+  disk_total?: number;
   net_rx_rate?: number;
   net_tx_rate?: number;
   load1?: number;
