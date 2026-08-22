@@ -117,6 +117,7 @@
 
 /* 语义化颜色（在亮/暗主题下自适应） */
 .text-content { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
 .text-muted { color: var(--text-muted); }
 .text-accent { color: var(--accent); }
 .hover\:text-accent:hover { color: var(--accent); }

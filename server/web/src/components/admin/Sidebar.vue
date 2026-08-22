@@ -58,7 +58,7 @@ function isActive(to: string) {
         :key="link.to"
         :to="link.to"
         class="block rounded-lg px-4 py-2 text-sm transition-colors"
-        :class="isActive(link.to) ? 'bg-sky-500/20 text-sky-300' : 'text-slate-300 hover:bg-slate-700/30'"
+        :class="isActive(link.to) ? 'bg-sky-500/20 text-sky-300' : 'text-content hover:bg-slate-700/30'"
         @click="emit('close')"
       >
         {{ link.label }}
