@@ -45,8 +45,6 @@ const neighborIds = computed(() => {
 const sparkline = computed(() => state.sparklines[agentId.value] || []);
 const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? d.cpu_percent ?? 0 })));
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
-const rxSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.net_rx_rate ?? 0 })));
-const txSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.net_tx_rate ?? 0 })));
 const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
 const diskReadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_r_rate ?? 0 })));
 const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_w_rate ?? 0 })));
@@ -316,13 +314,6 @@ onMounted(load);
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <ChartLatency :title="t('node.chart.cpu')" :data="cpuSeries" color="#38bdf8" />
           <ChartLatency :title="t('node.chart.mem')" :data="memSeries" color="#a78bfa" />
-          <ChartLatencyDual
-            :title="t('node.chart.net')"
-            :series="[
-              { name: t('node.down'), data: rxSeries, color: '#4ade80' },
-              { name: t('node.up'), data: txSeries, color: '#facc15' },
-            ]"
-          />
           <ChartLatencyDual
             :title="t('node.chart.diskIo')"
             :series="[
