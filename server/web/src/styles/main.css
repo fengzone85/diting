@@ -47,35 +47,33 @@
 
 /* 明亮风格模板 — 对齐 komari glass-admin light */
 [data-theme="light"] {
-  --bg-primary: #eef2f5;
-  --bg-secondary: rgb(255 255 255 / 0.68);
-  --text-primary: #1a1c22;                           /* komari --foreground oklch(0.11) */
-  --text-secondary: #4a4f56;                          /* komari --muted-foreground oklch(0.34) */
-  --text-muted: #7a8a94;
-  --bg-surface: #eeeff1;                              /* komari --accent oklch(0.967) — hover 背景 */
+  --bg-primary: #eef2f5;                              /* komari --background */
+  --bg-secondary: rgb(255 255 255 / 0.68);            /* komari --card 68% */
+  --text-primary: #0f1b24;                            /* komari --foreground 更深 */
+  --text-secondary: #2b3942;                          /* 更深更清晰 */
+  --text-muted: #46555f;                              /* 原 #5b6b75 偏淡易糊，加深 */
+  --bg-surface: #eef1f4;                              /* hover 背景 */
   --border-divider: rgb(68 83 94 / 0.22);
-  --accent: #087f5b;
+  --accent: #087f5b;                                 /* komari --primary */
   --accent-hover: #0b8f68;
-  --success: #079b75;
+  --success: #079b75;                                /* komari --accent-9 */
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgb(68 83 94 / 0.22);
-  --glass-tint: #f1f5f9cc;                            /* 亮色卡片 默认 80% 不透明 */
-  --glass-tint-hover: #f1f5f9e6;                      /* 悬停 90% 浅半透 */
+  --glass-tint: #ffffffad;                            /* komari 亮色卡片 68% 不透明白 */
+  --glass-tint-hover: #ffffffe6;                      /* 悬停 90% 浅半透 */
   --glass-border: #e2e8f0ad;                          /* komari --glass-light-border */
   --glass-shadow: 0 8px 28px #0f172a2e;               /* komari --glass-light-shadow */
-  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透） */
-  --glass-inner-tint: rgb(255 255 255 / 0.45);
-  --glass-inner-border: rgb(100 116 139 / 0.25);
+  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透，对齐 komari --card 68%） */
+  --glass-inner-tint: rgb(255 255 255 / 0.55);
+  --glass-inner-border: rgb(100 116 139 / 0.30);
 }
 
 [data-theme="light"] body {
-  /* 基于 vps.zhreed.com / komari Glassmorphism 亮色配方，适度增强背景光斑 */
+  /* 对齐 komari glassmorphism 亮色配方：干净浅灰蓝底 + 顶部极淡青光晕 */
   background:
-    radial-gradient(circle at 50% 0%, rgb(16 185 129 / .12), transparent 36%),
-    radial-gradient(circle at 18% 85%, rgb(59 130 246 / .10), transparent 40%),
-    radial-gradient(circle at 85% 80%, rgb(236 72 153 / .08), transparent 36%),
-    linear-gradient(180deg, #cbd5e1, #94a3b8);
+    radial-gradient(circle at 50% 0%, rgb(16 185 129 / .06), transparent 40%),
+    #eef2f5;
   background-attachment: fixed;
   color: var(--text-primary);
 }
@@ -94,6 +92,51 @@
 [data-theme="light"] .card-hover:hover {
   box-shadow: 0 12px 38px rgb(15 23 42 / 0.20);
 }
+
+/* 旧版卡片在亮色下：进度条/徽章/探针底色需加深，避免白底白边看不清 */
+[data-theme="light"] .bar { background: rgb(100 116 139 / 0.22); }
+[data-theme="light"] .probe { background: rgb(255 255 255 / 0.6); border-color: rgb(100 116 139 / 0.25); }
+[data-theme="light"] .badge { background: rgb(255 255 255 / 0.65); border-color: rgb(100 116 139 / 0.28); color: #334155 !important; }
+[data-theme="light"] .card-metric { background: rgb(255 255 255 / 0.72) !important; border-color: rgb(100 116 139 / 0.22) !important; }
+[data-theme="light"] .card-top { border-bottom-color: rgb(100 116 139 / 0.18); }
+[data-theme="light"] .m-lbl { color: #475569 !important; }
+[data-theme="light"] .m-val { color: #0f172a !important; }
+[data-theme="light"] .card-meta, [data-theme="light"] .card-note, [data-theme="light"] .uptime { color: #475569 !important; }
+[data-theme="light"] .card-top h3 { color: #0f172a !important; }
+
+/* 亮色下：把暗色专用的 slate-/sky- 工具类整体提亮，避免灰字/灰边/暗底看不清 */
+[data-theme="light"] [class*="text-slate-400"] { color: #475569 !important; }
+[data-theme="light"] [class*="text-slate-500"] { color: #475569 !important; }
+[data-theme="light"] [class*="text-slate-300"] { color: var(--text-primary) !important; }
+[data-theme="light"] [class*="text-slate-200"] { color: #1e293b !important; }
+[data-theme="light"] [class*="border-slate-700"] { border-color: rgb(100 116 139 / 0.30) !important; }
+[data-theme="light"] [class*="border-slate-600"] { border-color: rgb(100 116 139 / 0.35) !important; }
+[data-theme="light"] [class*="bg-slate-900"] { background-color: rgb(15 23 42 / 0.06) !important; }
+[data-theme="light"] [class*="text-sky-300"] { color: #0284c7 !important; }
+[data-theme="light"] [class*="bg-sky-500"] { background-color: rgb(2 132 199 / 0.15) !important; }
+[data-theme="light"] [class*="border-sky-500"] { border-color: #0284c7 !important; }
+[data-theme="light"] [class*="text-white"] { color: var(--text-primary) !important; }
+[data-theme="light"] input[class*="bg-slate-900"] { color: var(--text-primary) !important; }
+[data-theme="light"] .text-muted-foreground { color: var(--text-secondary) !important; }
+[data-theme="light"] [class*="text-content/60"] { color: var(--text-secondary) !important; }
+[data-theme="light"] [class*="bg-slate-500"] { background-color: rgb(100 116 139 / 0.08) !important; }
+/* 亮色下：存储卡/网络卡的分级进度条再淡一点，避免在白底上太抢眼 */
+[data-theme="light"] [class*="bg-emerald-500/18"] { background-color: rgb(16 185 129 / 0.12) !important; }
+[data-theme="light"] [class*="bg-amber-500/22"] { background-color: rgb(245 158 11 / 0.15) !important; }
+[data-theme="light"] [class*="bg-red-500/28"] { background-color: rgb(239 68 68 / 0.18) !important; }
+[data-theme="light"] [class*="bg-gray-400"] { background-color: rgb(148 163 184 / 0.45) !important; }
+[data-theme="light"] [class*="bg-emerald-100"] { background-color: rgb(16 185 129 / 0.14) !important; color: #047857 !important; }
+[data-theme="light"] [class*="bg-amber-100"] { background-color: rgb(245 158 11 / 0.16) !important; color: #b45309 !important; }
+[data-theme="light"] [class*="bg-sky-100"] { background-color: rgb(14 165 233 / 0.14) !important; color: #0369a1 !important; }
+[data-theme="light"] [class*="bg-indigo-100"] { background-color: rgb(99 102 241 / 0.14) !important; color: #4338ca !important; }
+/* 亮色下：状态 badge / 强调文字用的 -300/-400/15 暗色类，整体加深为可读深色 */
+[data-theme="light"] [class*="text-emerald-300"] { color: #047857 !important; }
+[data-theme="light"] [class*="text-amber-300"] { color: #b45309 !important; }
+[data-theme="light"] [class*="text-rose-300"] { color: #be123c !important; }
+[data-theme="light"] [class*="bg-sky-400"] { background-color: rgb(2 132 199 / 0.14) !important; }
+[data-theme="light"] [class*="bg-emerald-400"] { background-color: rgb(16 185 129 / 0.14) !important; }
+[data-theme="light"] [class*="bg-amber-400"] { background-color: rgb(245 158 11 / 0.16) !important; }
+[data-theme="light"] [class*="bg-rose-400"] { background-color: rgb(225 29 72 / 0.14) !important; }
 
 [data-theme="light"] .node-card:hover,
 [data-theme="light"] .bg-card:hover,
@@ -125,7 +168,10 @@
 .border-divider { border-color: var(--border-divider); }
 
 html, body, #app {
-  height: 100%;
+  min-height: 100%;
+}
+body {
+  min-height: 100vh;
 }
 
 body {

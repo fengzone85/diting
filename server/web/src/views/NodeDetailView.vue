@@ -313,20 +313,20 @@ onMounted(load);
         <div class="space-y-6">
           <!-- 顶部信息条：对齐 glassmorphism 节点页顶部水平指标条 -->
           <div class="flex flex-wrap gap-3">
-            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
-              <svg class="h-4 w-4 text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+              <svg class="h-4 w-4 text-cyan-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.traffic') }}</span>
-              <span class="text-sm font-semibold text-cyan-300">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
+              <span class="text-sm font-semibold text-cyan-700">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
             </div>
-            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
-              <svg class="h-4 w-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
+            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+              <svg class="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.quota') }}</span>
-              <span class="text-sm font-semibold text-emerald-300">{{ agent.monthly_quota_gb != null ? formatBytes(agent.monthly_quota_gb * 1024 ** 3) : '∞' }}</span>
+              <span class="text-sm font-semibold text-emerald-700">{{ agent.monthly_quota_gb != null ? formatBytes(agent.monthly_quota_gb * 1024 ** 3) : '∞' }}</span>
             </div>
-            <div class="flex items-center gap-2 rounded-xl bg-surface/40 px-3 py-2">
-              <svg class="h-4 w-4 text-indigo-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+              <svg class="h-4 w-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.uptime') }}</span>
-              <span class="text-sm font-semibold text-indigo-300">{{ formatDuration(agent.uptime) }}</span>
+              <span class="text-sm font-semibold text-indigo-700">{{ formatDuration(agent.uptime) }}</span>
             </div>
           </div>
 

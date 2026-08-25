@@ -19,11 +19,13 @@ const BG_LIGHT_FALLBACK =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
-    "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>" +
-    "<stop offset='0' stop-color='#c9d6ff'/>" +
-    "<stop offset='50%' stop-color='#e0c3fc'/>" +
-    "<stop offset='100%' stop-color='#f5d9ff'/>" +
-    "</linearGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+    "<defs>" +
+    "<radialGradient id='g' cx='22%' cy='12%' r='40%'>" +
+    "<stop offset='0' stop-color='#dff3f0'/>" +
+    "<stop offset='100%' stop-color='#eef2f5'/>" +
+    "</radialGradient></defs>" +
+    "<rect width='1920' height='1080' fill='#eef2f5'/>" +
+    "<rect width='1920' height='1080' fill='url(#g)'/></svg>"
   );
 
 function getInitialTheme(): Theme {
