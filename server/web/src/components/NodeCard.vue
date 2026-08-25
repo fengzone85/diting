@@ -51,6 +51,19 @@ function pctClass(v: number | null | undefined) {
   return 'text-emerald-400';
 }
 
+// 多物理硬盘聚合：所有盘 used/total 求和，pct 取加权；无 disks 时回退单盘
+const diskAgg = computed(() => {
+  const a = props.agent;
+  const list = Array.isArray(a.disks) ? a.disks : [];
+  if (list.length === 0) {
+    return { used: a.disk_used || 0, total: a.disk_total || 0, pct: a.disk_pct || 0 };
+  }
+  let used = 0, total = 0;
+  for (const d of list) { used += Number(d.used) || 0; total += Number(d.total) || 0; }
+  const pct = total > 0 ? (used / total) * 100 : 0;
+  return { used, total, pct };
+});
+
 const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('windows'));
 
 // ---- sparkline ----
@@ -155,8 +168,8 @@ const trafficPct = computed(() => {
     <!-- ===== 磁盘条 + 月流量条（旧版 disk-row / traffic-row） ===== -->
     <div class="card-disk-row">
       <span class="m-lbl">{{ t('card.disk') }}</span>
-      <div class="bar"><div class="bar-fill" :class="pctClass(agent.disk_pct)" :style="{ width: `${Math.min(agent.disk_pct||0,100)}%` }"></div></div>
-      <span class="m-val">{{ formatBytes(agent.disk_used) }}/{{ formatBytes(agent.disk_total) }}</span>
+      <div class="bar"><div class="bar-fill" :class="pctClass(diskAgg.pct)" :style="{ width: `${Math.min(diskAgg.pct||0,100)}%` }"></div></div>
+      <span class="m-val">{{ formatBytes(diskAgg.used) }}/{{ formatBytes(diskAgg.total) }}</span>
     </div>
     <div class="card-disk-row">
       <span class="m-lbl">{{ t('public.traffic') }}</span>
