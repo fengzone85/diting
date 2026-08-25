@@ -30,6 +30,8 @@ export interface Agent {
   os?: string;
   hostname?: string;
   version?: string;
+  cpu_name?: string;
+  kernel_version?: string;
   last_seen?: number;
   status?: 'online' | 'offline' | 'warn';
   // 后端 agent 快照的 probes 是 JSON 字符串（`{"目标":{ts,ms,ok,loss}}`），NodeCard 内部 parse
