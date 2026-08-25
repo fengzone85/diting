@@ -317,7 +317,7 @@ onMounted(load);
               </div>
             </div>
 
-            <!-- 网络信息：glass 毛玻璃卡 + 纵列两块 + 进度条背景 -->
+            <!-- 网络信息：glass 毛玻璃卡 + 横排两块 + 进度条背景 -->
             <div class="glass group relative flex flex-col overflow-hidden rounded-md border-none p-3 transition-all">
               <div
                 v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
@@ -325,7 +325,7 @@ onMounted(load);
                 :style="{ width: Math.min(netUsagePct, 100) + '%' }"
               ></div>
               <h3 class="relative z-10 mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
-              <div class="relative z-10 flex flex-col gap-1">
+              <div class="relative z-10 grid grid-cols-2 gap-1">
                 <!-- 总流量块 -->
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
