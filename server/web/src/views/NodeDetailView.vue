@@ -399,20 +399,20 @@ onMounted(load);
               </div>
             </div>
 
-            <!-- 网络信息：glass 毛玻璃卡 + 横排两块 + 进度条背景 -->
-            <div class="glass group relative flex flex-col overflow-hidden rounded-md border-none p-3 transition-all">
-              <div
-                v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
-                class="pointer-events-none absolute inset-y-0 left-0 rounded-sm bg-gradient-to-r from-transparent to-slate-500/10 transition-[width] duration-300 ease-out"
-                :style="{ width: Math.min(netUsagePct, 100) + '%' }"
-              ></div>
-              <h3 class="relative z-10 mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
-              <div class="relative z-10 grid grid-cols-2 gap-1">
-                <!-- 总流量块 -->
-                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
-                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
-                  <span v-if="agent.monthly_quota_gb != null" class="truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
-                  <span v-else class="truncate text-xs sm:text-sm text-content">{{ t('node.unlimitedTraffic') }}</span>
+            <!-- 网络信息：glass 毛玻璃卡 + 横排两块 -->
+            <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
+              <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
+              <div class="grid grid-cols-2 gap-1">
+                <!-- 总流量块（进度条铺在本块内部背景） -->
+                <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
+                  <div
+                    v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
+                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm bg-gradient-to-r from-transparent to-slate-500/10 transition-[width] duration-300 ease-out"
+                    :style="{ width: Math.min(netUsagePct, 100) + '%' }"
+                  ></div>
+                  <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
+                  <span v-if="agent.monthly_quota_gb != null" class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
+                  <span v-else class="relative z-10 truncate text-xs sm:text-sm text-content">{{ t('node.unlimitedTraffic') }}</span>
                 </div>
                 <!-- 网络速率块 -->
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
