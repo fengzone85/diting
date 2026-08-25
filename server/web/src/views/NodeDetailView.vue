@@ -197,7 +197,7 @@ function probeSeries(points: { ts: number; ms: number; ok: boolean; loss: number
   if (!points) return [];
   return points
     .filter(p => p.ok)
-    .map(p => ({ t: p.ts * 1000, v: p.ms }))
+    .map(p => ({ t: p.ts, v: p.ms })) // metrics.ts 已是毫秒，勿再 *1000
     .sort((a, b) => a.t - b.t);
 }
 

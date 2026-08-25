@@ -155,9 +155,9 @@ const netTrend = ref<ChartPoint[]>([]);
 const chartError = ref('');
 
 function toPoints(rows: { ts: number; cpu?: number; mem_pct?: number; net_rx_rate?: number; net_tx_rate?: number }[]): void {
-  cpuTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: r.cpu ?? 0 }));
-  memTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: r.mem_pct ?? 0 }));
-  netTrend.value = rows.map((r) => ({ t: r.ts * 1000, v: ((r.net_rx_rate || 0) + (r.net_tx_rate || 0)) / 1024 / 1024 }));
+  cpuTrend.value = rows.map((r) => ({ t: r.ts, v: r.cpu ?? 0 }));
+  memTrend.value = rows.map((r) => ({ t: r.ts, v: r.mem_pct ?? 0 }));
+  netTrend.value = rows.map((r) => ({ t: r.ts, v: ((r.net_rx_rate || 0) + (r.net_tx_rate || 0)) / 1024 / 1024 }));
 }
 
 async function loadMetrics() {

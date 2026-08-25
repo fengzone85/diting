@@ -511,6 +511,33 @@ router.get('/public/agents/:id/probes', (req, res) => {
       });
     }
   }
+  // 降采样（对齐 Komari 时间桶聚合）：按探测间隔动态桶宽，最小 800ms / 最大 6000ms，
+  // 避免长区间（如 30d）返回数万点拖垮前端渲染。
+  let interval = 30000;
+  const allTs = rows.map(r => r.ts).sort((x, y) => x - y);
+  for (let i = 1; i < allTs.length; i++) {
+    const dt = allTs[i] - allTs[i - 1];
+    if (dt > 0) { interval = dt; break; }
+  }
+  const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
+  for (const label of Object.keys(series)) {
+    const arr = series[label];
+    if (arr.length <= 1) continue;
+    const map = new Map();
+    const order = [];
+    for (const pt of arr) {
+      const key = Math.floor(pt.ts / bucket) * bucket;
+      if (!map.has(key)) { map.set(key, { ts: pt.ts, ms: pt.ms, ok: pt.ok, loss: pt.loss }); order.push(key); }
+      else {
+        const cur = map.get(key);
+        cur.ts = pt.ts;
+        if (pt.ms != null) cur.ms = pt.ms;
+        if (pt.ok === false) cur.ok = false;
+        if (pt.loss != null) cur.loss = pt.loss;
+      }
+    }
+    series[label] = order.map(k => map.get(k));
+  }
   res.json(series);
 });
 

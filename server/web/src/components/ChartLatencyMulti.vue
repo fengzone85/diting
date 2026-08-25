@@ -31,13 +31,48 @@ const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 
+// 探测数据上报间隔（ms）：从首个 series 的时间戳推断
+function detectInterval(series: LatencySeries[]): number {
+  for (const s of series) {
+    const d = s.data;
+    for (let i = 1; i < d.length; i++) {
+      const dt = d[i].t - d[i - 1].t;
+      if (dt > 0) return dt;
+    }
+  }
+  return 30000; // 默认 30s
+}
+
+// 对齐 Komari：按探测间隔做时间桶聚合（最小 800ms / 最大 6000ms 桶宽）
+// 同一桶内取最后一个有效点（null 跳过），把点数压到 ~区间长度/桶宽
+function bucketDownsample(series: LatencySeries[]): LatencySeries[] {
+  const interval = detectInterval(series);
+  const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
+  return series.map((s) => {
+    const map = new Map<number, { t: number; v: number | null }>();
+    const order: number[] = [];
+    for (const p of s.data) {
+      const key = Math.floor(p.t / bucket) * bucket;
+      if (!map.has(key)) { map.set(key, { t: p.t, v: p.v }); order.push(key); }
+      else { map.get(key)!.t = p.t; if (p.v != null) map.get(key)!.v = p.v; }
+    }
+    const data = order
+      .map(k => map.get(k)!)
+      .sort((a, b) => a.t - b.t)
+      .map(o => ({ t: o.t, v: o.v }));
+    return { name: s.name, color: s.color, data };
+  });
+}
+
 function buildSeries() {
-  return props.series.map((s, i) => ({
+  const ds = bucketDownsample(props.series);
+  return ds.map((s, i) => ({
     name: s.name,
     type: 'line' as const,
     showSymbol: false,
-    smooth: true,
-    lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 2 },
+    smooth: 0.1,
+    connectNulls: false,
+    lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 1.5 },
     data: s.data.map(d => [d.t, d.v]),
   }));
 }
@@ -46,6 +81,7 @@ function baseOption(): any {
   const c = colors.value;
   return {
     backgroundColor: 'transparent',
+    animation: false,
     legend: {
       top: 2,
       textStyle: { color: c.text, fontSize: 11 },
