@@ -77,19 +77,36 @@ function capSeries(series: LatencySeries[], max = 2000): LatencySeries[] {
 
 function buildSeries() {
   const ds = capSeries(bucketDownsample(props.series));
-  return ds.map((s, i) => ({
-    name: s.name,
-    type: 'line' as const,
-    showSymbol: false,
-    smooth: 0.1,
-    connectNulls: false,
-    lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 1.5 },
-    data: s.data.map(d => [d.t, d.v]),
-  }));
+  // 类目轴：所有 series 共享同一时间戳序列（桶聚合后已对齐），data 为纯值数组
+  const labels = ds[0] ? ds[0].data.map(d => d.t) : [];
+  return {
+    labels,
+    series: ds.map((s, i) => ({
+      name: s.name,
+      type: 'line' as const,
+      showSymbol: false,
+      smooth: 0.1,
+      connectNulls: false,
+      lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 1.5 },
+      data: s.data.map(d => d.v),
+    })),
+  };
+}
+
+function fmtTime(t: number, showDate: boolean): string {
+  const d = new Date(t);
+  const p = (n: number) => String(n).padStart(2, '0');
+  if (showDate) return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function baseOption(): any {
   const c = colors.value;
+  const built = buildSeries();
+  const labels = built.labels;
+  let span = 0;
+  if (labels.length > 1) span = (labels[labels.length - 1] - labels[0]) / 3600000; // hours
+  const showDate = span > 24;
   return {
     backgroundColor: 'transparent',
     animation: false,
@@ -107,9 +124,12 @@ function baseOption(): any {
       axisPointer: { type: 'cross', label: { backgroundColor: c.splitLine } },
     },
     xAxis: {
-      type: 'time',
+      type: 'category',
+      data: labels.map(t => fmtTime(t, showDate)),
+      boundaryGap: false,
       axisLine: { lineStyle: { color: c.axisLine } },
-      axisLabel: { color: c.text },
+      axisLabel: { color: c.text, fontSize: 11, hideOverlap: true },
+      axisTick: { show: false },
       splitLine: { show: true, lineStyle: { color: c.splitLine } },
     },
     yAxis: {
@@ -120,7 +140,7 @@ function baseOption(): any {
       axisLabel: { color: c.text },
       axisLine: { show: true, lineStyle: { color: c.axisLine } },
     },
-    series: buildSeries(),
+    series: built.series,
   };
 }
 
@@ -137,7 +157,11 @@ function resize() { nextTick(() => chart?.resize()); }
 watch(colors, () => chart?.setOption(baseOption(), true));
 
 watch(() => props.series, () => {
-  chart?.setOption({ series: buildSeries() });
+  const built = buildSeries();
+  chart?.setOption({
+    xAxis: { data: built.labels.map(t => fmtTime(t, (built.labels.length > 1 ? (built.labels[built.labels.length - 1] - built.labels[0]) / 3600000 : 0) > 24)) },
+    series: built.series,
+  });
 }, { deep: true });
 
 onMounted(init);
