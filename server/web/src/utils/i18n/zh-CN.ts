@@ -335,6 +335,10 @@ export const zhCN: Record<string, string> = {
   'node.netTotal': '总流量',
   'node.netRate': '网络速率',
   'node.unknown': '未知',
+  'node.billing.nodePrice': '节点价格',
+  'node.billing.monthlyCost': '月均支出',
+  'node.billing.remainingTime': '剩余时间',
+  'node.billing.remainingValue': '剩余价值',
 
   // 主题切换
   'theme.auto': '跟随系统',

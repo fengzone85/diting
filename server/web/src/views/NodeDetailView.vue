@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue';
+import { onMounted, computed, ref, markRaw } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import ChartLatency from '../components/ChartLatency.vue';
@@ -12,7 +12,7 @@ import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
 import type { Probes, ChartPoint } from '../services/types';
-import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber } from '../utils/format';
+import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber, formatCurrency, formatRemaining } from '../utils/format';
 import {
   Cpu,
   Computer,
@@ -26,6 +26,10 @@ import {
   DashboardOne,
   ApplicationTwo,
   VideoOne,
+  Ticket,
+  ShoppingBag,
+  Time,
+  Wallet,
 } from '@icon-park/vue-next';
 
 function formatDate(s: string | undefined): string {
@@ -54,6 +58,65 @@ const netUsagePct = computed(() => {
   const quota = a.monthly_quota_gb * 1024 ** 3;
   return Math.min((used / quota) * 100, 100);
 });
+
+// 顶部计费卡片：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡）
+const billingCards = computed(() => {
+  const a = agent.value;
+  if (!a) return [];
+  const price = typeof a.price === 'number' ? a.price : null;
+  const cycle = typeof a.billing_cycle === 'number' && a.billing_cycle > 0 ? a.billing_cycle : null;
+  const currency = a.currency || '¥';
+  const monthly = price != null && cycle != null ? price / cycle : null;
+  const rem = formatRemaining(a.expire_at);
+  // 剩余价值 = 剩余月数 × 月均支出
+  let remainingValue: number | null = null;
+  if (monthly != null && a.expire_at) {
+    const exp = new Date(a.expire_at).getTime();
+    if (!Number.isNaN(exp)) {
+      const months = (exp - Date.now()) / (86400000 * 30);
+      if (months > 0) remainingValue = monthly * months;
+    }
+  }
+  return [
+    {
+      key: 'nodePrice',
+      label: t('node.billing.nodePrice'),
+      icon: markRaw(Ticket),
+      value: price != null ? formatCurrency(price, currency) : '—',
+      status: 'normal' as const,
+    },
+    {
+      key: 'monthlyCost',
+      label: t('node.billing.monthlyCost'),
+      icon: markRaw(ShoppingBag),
+      value: monthly != null ? `${formatCurrency(monthly, currency)} / 月` : '—',
+      status: 'normal' as const,
+    },
+    {
+      key: 'remainingTime',
+      label: t('node.billing.remainingTime'),
+      icon: markRaw(Time),
+      value: rem.text,
+      status: rem.status,
+    },
+    {
+      key: 'remainingValue',
+      label: t('node.billing.remainingValue'),
+      icon: markRaw(Wallet),
+      value: remainingValue != null ? formatCurrency(remainingValue, currency) : '—',
+      status: 'normal' as const,
+    },
+  ];
+});
+
+// 剩余时间状态对应的文字颜色（对齐 Komari：过期/紧急红、警告橙、长期灰、正常绿）
+const remainingStatusClass: Record<string, string> = {
+  expired: 'text-rose-400',
+  critical: 'text-rose-400',
+  warning: 'text-orange-400',
+  long_term: 'text-muted-foreground',
+  normal: 'text-emerald-400',
+};
 
 // 硬件卡动态条目：架构/虚拟化/GPU/物理核心（无字段则显示 -；不对指纹字段扩展采集）
 const hwDynamic = computed(() => {
@@ -245,6 +308,25 @@ onMounted(load);
               <span class="text-sm font-semibold text-indigo-300">{{ formatDuration(agent.uptime) }}</span>
             </div>
           </div>
+
+          <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡） -->
+          <div v-if="agent.price != null || agent.expire_at" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <div
+              v-for="card in billingCards"
+              :key="card.key"
+              class="flex flex-col gap-1 rounded-xl bg-surface/40 px-4 py-3"
+            >
+              <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <component :is="card.icon" :size="14" />
+                <span>{{ card.label }}</span>
+              </div>
+              <span
+                class="text-lg font-semibold"
+                :class="card.key === 'remainingTime' ? remainingStatusClass[card.status] : 'text-content'"
+              >{{ card.value }}</span>
+            </div>
+          </div>
+
           <!-- 顶部四卡：严格对齐 Komari Glassmorphism 节点详情页（lg 以上 2 列，不强制等高） -->
           <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <!-- 硬件信息：glass 毛玻璃卡 + 纵向条目 -->

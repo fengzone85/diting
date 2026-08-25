@@ -335,6 +335,10 @@ export const enUS: Record<string, string> = {
   'node.netTotal': 'Total Traffic',
   'node.netRate': 'Network Rate',
   'node.unknown': 'Unknown',
+  'node.billing.nodePrice': 'Node Price',
+  'node.billing.monthlyCost': 'Monthly Cost',
+  'node.billing.remainingTime': 'Remaining Time',
+  'node.billing.remainingValue': 'Remaining Value',
 
   // theme toggle
   'theme.auto': 'Auto',
