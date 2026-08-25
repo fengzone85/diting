@@ -1,3 +1,13 @@
-web/
+# 依赖与构建产物：必须排除 node_modules（含本地编译的原生模块如 better-sqlite3，
+# 若带入镜像会与容器内 npm install 的产物冲突，导致 libnode 加载失败）
+node_modules/
+web/node_modules/
+web/dist/
+web/*.timestamp-*.mjs
+web/vite.config.js
+web/vite.config.d.ts
+# 本地运行时数据（数据库、日志等）不入镜像
+data/
 public.bak-*/
 *.log
+*.db
