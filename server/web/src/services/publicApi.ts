@@ -21,8 +21,8 @@ export const publicApi = {
   },
   sparklines: (id?: string, range?: string) =>
     api.get<Sparklines>(`/api/public/agents/sparklines${id ? `?id=${encodeURIComponent(id)}` : ''}${id && range ? `&range=${encodeURIComponent(range)}` : ''}`),
-  probes: (id: string, range?: string) =>
-    api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}`),
+  probes: (id: string, range?: string, maxPoints?: number) =>
+    api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}${maxPoints ? `&max_points=${maxPoints}` : ''}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
   visitor: () => api.get<{ ip: string; browser: string; ua: string }>('/api/public/visitor'),
   saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),

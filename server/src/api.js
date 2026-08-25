@@ -494,6 +494,14 @@ const PROBES_MAX_POINTS = (() => {
   const n = Number(process.env.PROBES_MAX_POINTS);
   return Number.isFinite(n) && n > 0 ? Math.min(50000, Math.floor(n)) : 5000;
 })();
+// 将任意输入钳为正整数，非法/越界返回 null
+function clampInt(v, min = 1, max = 50000) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < min) return min;
+  if (n > max) return max;
+  return Math.floor(n);
+}
 
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
 // 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。
@@ -524,42 +532,52 @@ router.get('/public/agents/:id/probes', (req, res) => {
     }
   }
   if (PROBES_DOWNSAMPLE) {
-    // 降采样（对齐 Komari 时间桶聚合）：按探测间隔动态桶宽，最小 800ms / 最大 6000ms，
-    // 避免长区间（如 30d）返回数万点拖垮前端渲染。
-    let interval = 30000;
-    const allTs = rows.map(r => r.ts).sort((x, y) => x - y);
-    for (let i = 1; i < allTs.length; i++) {
-      const dt = allTs[i] - allTs[i - 1];
-      if (dt > 0) { interval = dt; break; }
-    }
-    const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
+    // 请求参数化降采样（对齐 Komari downsample/max_points/aggregation 契约）：
+    //   max_points=N：每 label 目标点数上限（缺省用 PROBES_MAX_POINTS）。以该值反推动态桶宽做时间桶聚合。
+    //   aggregation=avg|last：avg（默认，对齐 Komari）取桶内延迟平均；last 取桶内最后一个点。
+    const maxPoints = clampInt(req.query.max_points) || PROBES_MAX_POINTS;
+    const agg = req.query.aggregation === 'last' ? 'last' : 'avg';
     for (const label of Object.keys(series)) {
       const arr = series[label];
-      if (arr.length <= 1) continue;
+      if (arr.length <= maxPoints) continue; // 点数本就不多，无需聚合
+      const span = arr[arr.length - 1].ts - arr[0].ts;
+      const bucket = Math.max(1, Math.ceil(span / maxPoints)); // 以 max_points 为目标反推桶宽
       const map = new Map();
       const order = [];
       for (const pt of arr) {
         const key = Math.floor(pt.ts / bucket) * bucket;
-        if (!map.has(key)) { map.set(key, { ts: pt.ts, ms: pt.ms, ok: pt.ok, loss: pt.loss }); order.push(key); }
-        else {
+        if (!map.has(key)) {
+          map.set(key, {
+            ts: pt.ts,
+            ms: pt.ms, // last 模式用桶内第一个点
+            ok: pt.ok, loss: pt.loss,
+            // avg 累加器
+            sumMs: pt.ms != null ? pt.ms : 0, cntMs: pt.ms != null ? 1 : 0,
+            okCnt: pt.ok ? 1 : 0, sumLoss: pt.loss != null ? pt.loss : 0, cnt: 1
+          });
+          order.push(key);
+        } else {
           const cur = map.get(key);
           cur.ts = pt.ts;
-          if (pt.ms != null) cur.ms = pt.ms;
-          if (pt.ok === false) cur.ok = false;
-          if (pt.loss != null) cur.loss = pt.loss;
+          if (pt.ms != null) { cur.sumMs += pt.ms; cur.cntMs++; }
+          if (pt.ok) cur.okCnt++;
+          if (pt.loss != null) cur.sumLoss += pt.loss;
+          cur.cnt++;
+          if (agg === 'last' && pt.ms != null) cur.ms = pt.ms; // last 模式覆盖为桶内最后一个有效点
         }
       }
-      series[label] = order.map(k => map.get(k));
-    }
-    // 总点数硬上限（对齐 Komari maxCount）：桶聚合后单目标仍可能过多（密集上报的长区间），
-    // 超出则按时间均匀抽稀，彻底避免前端渲染卡顿。
-    for (const label of Object.keys(series)) {
-      const arr = series[label];
-      if (arr.length <= PROBES_MAX_POINTS) continue;
-      const step = arr.length / PROBES_MAX_POINTS;
-      const out = [];
-      for (let i = 0; i < PROBES_MAX_POINTS; i++) out.push(arr[Math.floor(i * step)]);
-      series[label] = out;
+      series[label] = order.map(k => {
+        const b = map.get(k);
+        if (agg === 'avg') {
+          return {
+            ts: b.ts,
+            ms: b.cntMs ? Math.round(b.sumMs / b.cntMs) : null,
+            ok: b.okCnt > 0,
+            loss: Math.round(b.sumLoss / b.cnt)
+          };
+        }
+        return { ts: b.ts, ms: b.ms, ok: b.ok, loss: b.loss };
+      });
     }
   }
   res.json(series);

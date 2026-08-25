@@ -40,27 +40,16 @@ function formatDate(s: string | undefined): string {
 const route = useRoute();
 const { state, visibleAgents } = useApp();
 const agentId = computed(() => route.params.id as string);
-// allProbes：详情页仅拉取一次的全量（30d）原始数据，切范围不打网络，纯前端按窗口截取（对齐 Komari）
-const allProbes = ref<Probes>({});
+// 对齐 Komari：切 range 打后端，后端按 max_points 降采样返回（避免短 range 从 30d 全量截取导致点过稀）
+const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
 const RANGES = ['1h', '6h', '24h', '7d', '30d'];
-const currentRange = ref('30d'); // 默认 30d 全量，切范围仅前端过滤
-const RANGE_SECONDS: Record<string, number> = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
-
-// probes：按当前范围从全量数据本地截取（不触发网络请求，切标签秒切）
-const probes = computed<Probes>(() => {
-  const sec = RANGE_SECONDS[currentRange.value] ?? 2592000;
-  const cutoff = Date.now() - sec * 1000;
-  const out: Probes = {};
-  for (const [target, points] of Object.entries(allProbes.value)) {
-    const filtered = points.filter(p => p.ts >= cutoff);
-    if (filtered.length) out[target] = filtered;
-  }
-  return out;
-});
+const currentRange = ref('30d'); // 默认 30d
+// 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
+const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '6h': 1000, '24h': 1500, '7d': 2000, '30d': 3000 };
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
 
@@ -235,8 +224,9 @@ async function load() {
       const sl = await publicApi.sparklines(agentId.value, '30d');
       state.sparklines = { ...state.sparklines, ...sl };
     }
-    // 一次性拉取 30d 全量探针数据，切范围时纯前端按窗口截取，避免每次切标签都打网络（对齐 Komari）
-    allProbes.value = await publicApi.probes(agentId.value, '30d');
+    // 对齐 Komari：初始拉当前 range（默认 30d），后端按 max_points 降采样返回。
+    // 不再一次拉 30d 全量 + 前端 filter（那会导致切短 range 时点数被长窗口挤占而过稀）。
+    await loadProbes(currentRange.value);
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
   } finally {
@@ -244,10 +234,24 @@ async function load() {
   }
 }
 
-// 切范围：仅切换 currentRange，probes 为 computed 本地截取，不打网络（对齐 Komari 秒切体验）
+// 对齐 Komari 的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
+// 每段 range 各自保证点数合适（1h→600, 6h→1000, 24h→1500, 7d→2000, 30d→3000）。
+async function loadProbes(range: string) {
+  const mp = RANGE_MAX_POINTS[range] ?? 3000;
+  const data = await publicApi.probes(agentId.value, range, mp);
+  probes.value = data || {};
+}
+
+// 切范围：对齐 Komari，置 loading → 打后端 → 取消 loading（loading 反馈掩盖网络延迟，体验丝滑）
 function switchRange(range: string) {
   if (range === currentRange.value) return;
   currentRange.value = range;
+  loading.value = true;
+  loadProbes(range).catch((e) => {
+    error.value = (e as Error).message || t('common.error');
+  }).finally(() => {
+    loading.value = false;
+  });
 }
 
 // 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推
