@@ -34,3 +34,4 @@ server/public.bak-*/
 
 # 前端构建产物（Vite 输出，部署端 npm run build 重新生成，非源码）
 server/public/assets/
+server/public/index.html
