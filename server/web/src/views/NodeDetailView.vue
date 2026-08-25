@@ -235,26 +235,30 @@ async function switchRange(range: string) {
   await load();
 }
 
-// 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推（对齐 komari 整机口径）
+// 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推
+// 展示层（已用/总容量/占用率）与 ETA 的剩余空间统一用 diskAgg（所有物理盘聚合），避免只统计单盘
 const diskPredict = computed(() => {
   const sl = sparkline.value;
-  if (!sl || sl.length < 2) return null;
+  // diskAgg 为所有物理盘聚合值（无 disks 时回退单盘），保证进度条/百分比/已用容量均为整机口径
+  const agg = diskAgg.value;
+  const total = agg.total;
+  const used = agg.used;
+  const pct = agg.pct;
+  if (!total) return null;
+  if (!sl || sl.length < 2) {
+    return { eta: null as string | null, pct, days: null as number | null, total, used, stable: true };
+  }
   const dayMs = 86400000;
   const first = sl[0], last = sl[sl.length - 1];
   const spanDays = Math.max((last.ts - first.ts) / dayMs, 0.01);
-  const startUsed = first.disk_used ?? 0;
-  const endUsed = last.disk_used ?? 0;
-  const total = last.disk_total ?? 0;
-  if (!total) return null;
-  // 真实增量字节：末值 - 首值（komari 取 MetricDisk 历史差值，而非当前使用率）
-  const delta = endUsed - startUsed;
+  // 历史增量取自 sparkline 单盘 disk_used 序列（metrics 仅存单盘口径），作为增速近似
+  const delta = (last.disk_used ?? 0) - (first.disk_used ?? 0);
   const dailyGrowth = delta / spanDays; // 字节/天
-  const pct = total > 0 ? (endUsed / total) * 100 : 0;
   if (dailyGrowth <= 0) {
-    // 无增长或下降：趋势平稳，无法预测耗尽
-    return { eta: null as string | null, pct, days: null as number | null, total, used: endUsed, stable: true };
+    return { eta: null as string | null, pct, days: null as number | null, total, used, stable: true };
   }
-  const remain = Math.max(total - endUsed, 0);
+  // 剩余空间用整机聚合口径
+  const remain = Math.max(total - used, 0);
   const days = remain / dailyGrowth;
   const eta = new Date(Date.now() + days * dayMs);
   return {
@@ -262,7 +266,7 @@ const diskPredict = computed(() => {
     pct,
     days: Math.floor(days),
     total,
-    used: endUsed,
+    used,
     stable: false,
   };
 });
@@ -527,7 +531,7 @@ onMounted(load);
             <div class="relative mb-4 flex items-baseline justify-between overflow-hidden rounded-xl bg-surface/40 px-4 py-3">
               <div
                 class="pointer-events-none absolute inset-y-0 left-0 rounded-xl transition-[width,background-color] duration-300 ease-out"
-                :class="diskPredict.pct >= 80 ? 'bg-red-500/20' : diskPredict.pct >= 50 ? 'bg-amber-500/20' : 'bg-emerald-500/20'"
+                :class="diskPredict.pct >= 80 ? 'bg-red-500/28' : diskPredict.pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
                 :style="{ width: Math.min(diskPredict.pct, 100) + '%' }"
               ></div>
               <span class="relative z-10 text-2xl font-bold text-content">{{ formatBytes(diskPredict.used) }}</span>
