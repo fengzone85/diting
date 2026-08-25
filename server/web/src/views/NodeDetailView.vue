@@ -407,7 +407,8 @@ onMounted(load);
                 <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
                   <div
                     v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
-                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm bg-gradient-to-r from-transparent to-slate-500/10 transition-[width] duration-300 ease-out"
+                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
+                    :class="netUsagePct >= 80 ? 'bg-red-500/35' : netUsagePct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
                     :style="{ width: Math.min(netUsagePct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
