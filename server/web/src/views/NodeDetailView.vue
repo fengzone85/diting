@@ -394,7 +394,6 @@ onMounted(load);
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
                   <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
-                  <span class="relative z-10 text-[10px] text-muted-foreground">{{ formatPercent(agent.mem_pct) }}</span>
                 </div>
                 <!-- 交换 -->
                 <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
@@ -417,7 +416,6 @@ onMounted(load);
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
                   <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
-                  <span class="relative z-10 text-[10px] text-muted-foreground">{{ formatPercent(agent.disk_pct) }}</span>
                 </div>
               </div>
             </div>
