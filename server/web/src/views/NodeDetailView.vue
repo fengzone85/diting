@@ -389,7 +389,7 @@ onMounted(load);
                   <div
                     v-if="agent.mem_pct != null && agent.mem_pct > 0"
                     class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                    :class="agent.mem_pct >= 80 ? 'bg-red-500/35' : agent.mem_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :class="agent.mem_pct >= 80 ? 'bg-red-500/28' : agent.mem_pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
                     :style="{ width: Math.min(agent.mem_pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
@@ -400,7 +400,7 @@ onMounted(load);
                   <div
                     v-if="agent.swap_pct != null && agent.swap_pct > 0"
                     class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                    :class="agent.swap_pct >= 80 ? 'bg-red-500/35' : agent.swap_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :class="agent.swap_pct >= 80 ? 'bg-red-500/28' : agent.swap_pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
                     :style="{ width: Math.min(agent.swap_pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Switch :size="14" /><span>{{ t('node.storage.swap') }}</span></span>
@@ -411,7 +411,7 @@ onMounted(load);
                   <div
                     v-if="agent.disk_pct != null && agent.disk_pct > 0"
                     class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                    :class="agent.disk_pct >= 80 ? 'bg-red-500/35' : agent.disk_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :class="agent.disk_pct >= 80 ? 'bg-red-500/28' : agent.disk_pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
                     :style="{ width: Math.min(agent.disk_pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
@@ -429,7 +429,7 @@ onMounted(load);
                   <div
                     v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
                     class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                    :class="netUsagePct >= 80 ? 'bg-red-500/35' : netUsagePct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :class="netUsagePct >= 80 ? 'bg-red-500/28' : netUsagePct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
                     :style="{ width: Math.min(netUsagePct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
