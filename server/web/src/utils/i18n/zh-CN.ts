@@ -334,9 +334,6 @@ export const zhCN: Record<string, string> = {
   'node.merchant': '厂商',
   'node.netTotal': '总流量',
   'node.netRate': '网络速率',
-  'node.peak1d': '近一天峰值',
-  'node.quotaIpv4': 'IPv4',
-  'node.quotaIpv6': 'IPv6',
   'node.unknown': '未知',
 
   // 主题切换

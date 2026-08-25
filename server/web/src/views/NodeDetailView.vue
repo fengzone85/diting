@@ -331,11 +331,6 @@ onMounted(load);
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
                   <span v-if="agent.monthly_quota_gb != null" class="truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
                   <span v-else class="truncate text-xs sm:text-sm text-content">{{ t('node.unlimitedTraffic') }}</span>
-                  <div class="mt-1 flex items-center gap-1.5">
-                    <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-300">{{ t('node.quotaIpv4') }}</span>
-                    <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-300">{{ t('node.quotaIpv6') }}</span>
-                    <span class="ml-auto text-[10px] text-muted-foreground">{{ t('node.peak1d') }}: —</span>
-                  </div>
                 </div>
                 <!-- 网络速率块 -->
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
