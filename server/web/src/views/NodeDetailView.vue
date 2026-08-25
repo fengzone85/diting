@@ -384,17 +384,40 @@ onMounted(load);
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.storage') }}</h3>
               <div class="grid grid-cols-3 gap-1">
-                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
-                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
-                  <span class="truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
+                <!-- 内存 -->
+                <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
+                  <div
+                    v-if="agent.mem_pct != null && agent.mem_pct > 0"
+                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
+                    :class="agent.mem_pct >= 80 ? 'bg-red-500/35' : agent.mem_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :style="{ width: Math.min(agent.mem_pct, 100) + '%' }"
+                  ></div>
+                  <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
+                  <span class="relative z-10 text-[10px] text-muted-foreground">{{ formatPercent(agent.mem_pct) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
-                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Switch :size="14" /><span>{{ t('node.storage.swap') }}</span></span>
-                  <span class="truncate text-xs sm:text-sm text-content">{{ formatPercent(agent.swap_pct) }}</span>
+                <!-- 交换 -->
+                <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
+                  <div
+                    v-if="agent.swap_pct != null && agent.swap_pct > 0"
+                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
+                    :class="agent.swap_pct >= 80 ? 'bg-red-500/35' : agent.swap_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :style="{ width: Math.min(agent.swap_pct, 100) + '%' }"
+                  ></div>
+                  <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Switch :size="14" /><span>{{ t('node.storage.swap') }}</span></span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatPercent(agent.swap_pct) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
-                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
-                  <span class="truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
+                <!-- 硬盘 -->
+                <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
+                  <div
+                    v-if="agent.disk_pct != null && agent.disk_pct > 0"
+                    class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
+                    :class="agent.disk_pct >= 80 ? 'bg-red-500/35' : agent.disk_pct >= 60 ? 'bg-amber-500/30' : 'bg-emerald-500/28'"
+                    :style="{ width: Math.min(agent.disk_pct, 100) + '%' }"
+                  ></div>
+                  <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
+                  <span class="relative z-10 text-[10px] text-muted-foreground">{{ formatPercent(agent.disk_pct) }}</span>
                 </div>
               </div>
             </div>
