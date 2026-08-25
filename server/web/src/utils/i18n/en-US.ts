@@ -212,7 +212,7 @@ export const enUS: Record<string, string> = {
   'public.diskUsage': 'Disk usage',
   'public.netRate': 'Net rate',
   'public.swap': 'Swap',
-  'public.traffic': 'Total Traffic',
+  'public.traffic': 'TFC',
   'public.trafficTotal': 'Total Traffic',
   'public.rxMonth': 'Monthly RX',
   'public.txMonth': 'Monthly TX',

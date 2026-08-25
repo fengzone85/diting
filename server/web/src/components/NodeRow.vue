@@ -10,6 +10,15 @@ const status = computed(() => (props.agent.online ? 'online' : 'offline'));
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
 const tag = computed(() => customTag(props.agent.id));
+// 多物理硬盘聚合：所有盘求和，pct 加权；无 disks 时回退单盘
+const diskAgg = computed(() => {
+  const a = props.agent;
+  const list = Array.isArray(a.disks) ? a.disks : [];
+  if (list.length === 0) return { used: a.disk_used || 0, total: a.disk_total || 0, pct: a.disk_pct || 0 };
+  let used = 0, total = 0;
+  for (const d of list) { used += Number(d.used) || 0; total += Number(d.total) || 0; }
+  return { used, total, pct: total > 0 ? (used / total) * 100 : 0 };
+});
 </script>
 
 <template>
@@ -41,7 +50,7 @@ const tag = computed(() => customTag(props.agent.id));
     <div class="hidden w-20 text-right md:block">
       <span :class="agent.mem_pct && agent.mem_pct >= 90 ? 'text-rose-400' : agent.mem_pct && agent.mem_pct >= 75 ? 'text-amber-400' : 'text-slate-300'">{{ formatPercent(agent.mem_pct) }}</span>
     </div>
-    <div class="hidden w-20 text-right lg:block">{{ formatPercent(agent.disk_pct) }}</div>
+    <div class="hidden w-20 text-right lg:block">{{ formatPercent(diskAgg.pct) }}</div>
     <div class="hidden w-28 text-right lg:block">{{ formatDuration(agent.uptime) }}</div>
     <div class="hidden w-40 text-right xl:block">↓{{ formatBitsPerSecond(agent.net_rx_rate) }} ↑{{ formatBitsPerSecond(agent.net_tx_rate) }}</div>
   </RouterLink>

@@ -201,7 +201,7 @@ export const zhCN: Record<string, string> = {
   'public.diskUsage': '磁盘占用',
   'public.netRate': '实时速率',
   'public.swap': '交换分区',
-  'public.traffic': '总流量',
+  'public.traffic': 'TFC',
   'public.trafficTotal': '累计流量',
   'public.rxMonth': '月下载',
   'public.txMonth': '月上传',
