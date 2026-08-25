@@ -467,9 +467,10 @@ router.get('/public/agents/sparklines', (req, res) => {
   const sec = RANGES[req.query.range] || 21600;
   const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
   // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
+  // 用只含指标列（不含 probes 大字段）的轻量查询，避免 SELECT * 物化全行（30d 5.3s -> 2.3s）
   const rows = onlyId
-    ? db.getMetrics(onlyId, Date.now() - sec * 1000)
-    : db.getMetricsAll(Date.now() - sec * 1000);
+    ? db.getMetricsSparklines(onlyId, Date.now() - sec * 1000)
+    : db.getMetricsSparklinesAll(Date.now() - sec * 1000);
   const byAgent = {};
   for (const r of rows) {
     (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push({
@@ -483,6 +484,16 @@ router.get('/public/agents/sparklines', (req, res) => {
   }
   res.json(byAgent);
 });
+
+// 后端降采样开关（对齐 Komari downsample/max_points 契约）：
+//   PROBES_DOWNSAMPLE=1（默认）启用后端时间桶聚合 + 每 label 点数上限；
+//   =0 关闭则原样返回桶内原始点（点数可能很大，供前端自行处理）。
+//   PROBES_MAX_POINTS：每 label 点数硬上限，默认 5000，可调（上限钳到 50000）。
+const PROBES_DOWNSAMPLE = process.env.PROBES_DOWNSAMPLE !== '0';
+const PROBES_MAX_POINTS = (() => {
+  const n = Number(process.env.PROBES_MAX_POINTS);
+  return Number.isFinite(n) && n > 0 ? Math.min(50000, Math.floor(n)) : 5000;
+})();
 
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
 // 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。
@@ -512,43 +523,44 @@ router.get('/public/agents/:id/probes', (req, res) => {
       });
     }
   }
-  // 降采样（对齐 Komari 时间桶聚合）：按探测间隔动态桶宽，最小 800ms / 最大 6000ms，
-  // 避免长区间（如 30d）返回数万点拖垮前端渲染。
-  let interval = 30000;
-  const allTs = rows.map(r => r.ts).sort((x, y) => x - y);
-  for (let i = 1; i < allTs.length; i++) {
-    const dt = allTs[i] - allTs[i - 1];
-    if (dt > 0) { interval = dt; break; }
-  }
-  const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
-  for (const label of Object.keys(series)) {
-    const arr = series[label];
-    if (arr.length <= 1) continue;
-    const map = new Map();
-    const order = [];
-    for (const pt of arr) {
-      const key = Math.floor(pt.ts / bucket) * bucket;
-      if (!map.has(key)) { map.set(key, { ts: pt.ts, ms: pt.ms, ok: pt.ok, loss: pt.loss }); order.push(key); }
-      else {
-        const cur = map.get(key);
-        cur.ts = pt.ts;
-        if (pt.ms != null) cur.ms = pt.ms;
-        if (pt.ok === false) cur.ok = false;
-        if (pt.loss != null) cur.loss = pt.loss;
-      }
+  if (PROBES_DOWNSAMPLE) {
+    // 降采样（对齐 Komari 时间桶聚合）：按探测间隔动态桶宽，最小 800ms / 最大 6000ms，
+    // 避免长区间（如 30d）返回数万点拖垮前端渲染。
+    let interval = 30000;
+    const allTs = rows.map(r => r.ts).sort((x, y) => x - y);
+    for (let i = 1; i < allTs.length; i++) {
+      const dt = allTs[i] - allTs[i - 1];
+      if (dt > 0) { interval = dt; break; }
     }
-    series[label] = order.map(k => map.get(k));
-  }
-  // 总点数硬上限（对齐 Komari maxCount）：桶聚合后单目标仍可能过多（密集上报的长区间），
-  // 超出则按时间均匀抽稀，彻底避免前端渲染卡顿。
-  const MAX_PER_LABEL = 5000;
-  for (const label of Object.keys(series)) {
-    const arr = series[label];
-    if (arr.length <= MAX_PER_LABEL) continue;
-    const step = arr.length / MAX_PER_LABEL;
-    const out = [];
-    for (let i = 0; i < MAX_PER_LABEL; i++) out.push(arr[Math.floor(i * step)]);
-    series[label] = out;
+    const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
+    for (const label of Object.keys(series)) {
+      const arr = series[label];
+      if (arr.length <= 1) continue;
+      const map = new Map();
+      const order = [];
+      for (const pt of arr) {
+        const key = Math.floor(pt.ts / bucket) * bucket;
+        if (!map.has(key)) { map.set(key, { ts: pt.ts, ms: pt.ms, ok: pt.ok, loss: pt.loss }); order.push(key); }
+        else {
+          const cur = map.get(key);
+          cur.ts = pt.ts;
+          if (pt.ms != null) cur.ms = pt.ms;
+          if (pt.ok === false) cur.ok = false;
+          if (pt.loss != null) cur.loss = pt.loss;
+        }
+      }
+      series[label] = order.map(k => map.get(k));
+    }
+    // 总点数硬上限（对齐 Komari maxCount）：桶聚合后单目标仍可能过多（密集上报的长区间），
+    // 超出则按时间均匀抽稀，彻底避免前端渲染卡顿。
+    for (const label of Object.keys(series)) {
+      const arr = series[label];
+      if (arr.length <= PROBES_MAX_POINTS) continue;
+      const step = arr.length / PROBES_MAX_POINTS;
+      const out = [];
+      for (let i = 0; i < PROBES_MAX_POINTS; i++) out.push(arr[Math.floor(i * step)]);
+      series[label] = out;
+    }
   }
   res.json(series);
 });

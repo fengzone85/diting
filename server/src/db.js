@@ -173,6 +173,9 @@ const stmts = {
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
+  metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
     (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
@@ -222,6 +225,10 @@ const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
 
 // 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
 const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
+
+// sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
+const getMetricsSparklines = (agentId, sinceTs) => stmts.metricsSparklines.all(agentId, sinceTs);
+const getMetricsSparklinesAll = (sinceTs) => stmts.metricsSparklinesAll.all(sinceTs);
 
 const updateAgent = (id, f) => stmts.updateAgent.run({
   id,
@@ -443,7 +450,8 @@ function pruneAudit(retentionDays) {
 module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsAll,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
+  getMetricsSparklines, getMetricsSparklinesAll, getMetricsAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
