@@ -100,7 +100,7 @@ export type Sparklines = Record<string, SparklinePoint[]>;
 
 export interface ChartPoint {
   t: number;
-  v: number;
+  v: number | null;
 }
 
 export interface ProbePoint {

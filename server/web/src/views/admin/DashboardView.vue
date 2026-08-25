@@ -45,12 +45,12 @@ function aggregate(rowsByAgent: Record<string, { ts: number; cpu?: number; mem_p
   const cpu = tsList.map(ts => {
     const arr = byTs.get(ts)!.cpu;
     const v = arr.length ? +(arr.reduce((s, x) => s + x, 0) / arr.length).toFixed(2) : 0;
-    return { t: ts * 1000, v };
+    return { t: ts, v }; // metrics.ts 已是毫秒，勿再 *1000
   });
   const mem = tsList.map(ts => {
     const arr = byTs.get(ts)!.mem;
     const v = arr.length ? +(arr.reduce((s, x) => s + x, 0) / arr.length).toFixed(2) : 0;
-    return { t: ts * 1000, v };
+    return { t: ts, v }; // metrics.ts 已是毫秒，勿再 *1000
   });
   return { cpu, mem };
 }
