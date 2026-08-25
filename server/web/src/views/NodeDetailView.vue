@@ -309,14 +309,14 @@ onMounted(load);
             </div>
           </div>
 
-          <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡） -->
-          <div v-if="agent.price != null || agent.expire_at" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡，统一毛玻璃） -->
+          <div v-if="agent.price != null || agent.expire_at" class="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div
               v-for="card in billingCards"
               :key="card.key"
-              class="flex flex-col gap-1 rounded-xl bg-surface/40 px-4 py-3"
+              class="glass group flex flex-col gap-1 rounded-md border-none p-3 transition-all"
             >
-              <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <div class="flex items-center gap-1.5 text-xs text-secondary">
                 <component :is="card.icon" :size="14" />
                 <span>{{ card.label }}</span>
               </div>
