@@ -538,6 +538,17 @@ router.get('/public/agents/:id/probes', (req, res) => {
     }
     series[label] = order.map(k => map.get(k));
   }
+  // 总点数硬上限（对齐 Komari maxCount）：桶聚合后单目标仍可能过多（密集上报的长区间），
+  // 超出则按时间均匀抽稀，彻底避免前端渲染卡顿。
+  const MAX_PER_LABEL = 5000;
+  for (const label of Object.keys(series)) {
+    const arr = series[label];
+    if (arr.length <= MAX_PER_LABEL) continue;
+    const step = arr.length / MAX_PER_LABEL;
+    const out = [];
+    for (let i = 0; i < MAX_PER_LABEL; i++) out.push(arr[Math.floor(i * step)]);
+    series[label] = out;
+  }
   res.json(series);
 });
 

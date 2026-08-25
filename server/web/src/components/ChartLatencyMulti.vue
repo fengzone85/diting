@@ -64,8 +64,19 @@ function bucketDownsample(series: LatencySeries[]): LatencySeries[] {
   });
 }
 
+// 次级保护：桶聚合后若仍过多（如后端未限流），均匀抽稀到上限，避免 ECharts 卡顿
+function capSeries(series: LatencySeries[], max = 2000): LatencySeries[] {
+  return series.map((s) => {
+    if (s.data.length <= max) return s;
+    const step = s.data.length / max;
+    const data = [];
+    for (let i = 0; i < max; i++) data.push(s.data[Math.floor(i * step)]);
+    return { name: s.name, color: s.color, data };
+  });
+}
+
 function buildSeries() {
-  const ds = bucketDownsample(props.series);
+  const ds = capSeries(bucketDownsample(props.series));
   return ds.map((s, i) => ({
     name: s.name,
     type: 'line' as const,
