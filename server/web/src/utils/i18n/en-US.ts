@@ -334,9 +334,6 @@ export const enUS: Record<string, string> = {
   'node.merchant': 'Provider',
   'node.netTotal': 'Total Traffic',
   'node.netRate': 'Network Rate',
-  'node.peak1d': '1d Peak',
-  'node.quotaIpv4': 'IPv4',
-  'node.quotaIpv6': 'IPv6',
   'node.unknown': 'Unknown',
 
   // theme toggle
