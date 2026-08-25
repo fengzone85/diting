@@ -493,7 +493,8 @@ router.get('/public/agents/:id/probes', (req, res) => {
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'agent not found' });
   const sec = RANGES[req.query.range] || 21600;
-  const rows = db.getMetrics(a.id, Date.now() - sec * 1000);
+  // 仅取 ts+probes 两列：30d 近 9.5 万行，SELECT * 物化全行开销大（实测 5.4s vs 0.56s）
+  const rows = db.getMetricsProbes(a.id, Date.now() - sec * 1000);
   const series = {}; // label -> [{ts, ms}]
   for (const r of rows) {
     if (!r.probes) continue;
