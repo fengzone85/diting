@@ -138,6 +138,23 @@ const hwDynamic = computed(() => {
   return items;
 });
 
+// 多物理硬盘聚合：所有盘 used/total 求和，pct 取加权平均
+const diskAgg = computed(() => {
+  const a = agent.value;
+  if (!a) return { used: 0, total: 0, pct: 0 };
+  const list = Array.isArray(a.disks) ? a.disks : [];
+  if (list.length === 0) {
+    return { used: a.disk_used || 0, total: a.disk_total || 0, pct: a.disk_pct || 0 };
+  }
+  let used = 0, total = 0;
+  for (const d of list) {
+    used += Number(d.used) || 0;
+    total += Number(d.total) || 0;
+  }
+  const pct = total > 0 ? (used / total) * 100 : 0;
+  return { used, total, pct };
+});
+
 const neighborIds = computed(() => {
   const list = visibleAgents.value.length ? visibleAgents.value : state.agents;
   const idx = list.findIndex(a => a.id === agentId.value);
@@ -406,16 +423,16 @@ onMounted(load);
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Switch :size="14" /><span>{{ t('node.storage.swap') }}</span></span>
                   <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatPercent(agent.swap_pct) }}</span>
                 </div>
-                <!-- 硬盘 -->
+                <!-- 硬盘（所有物理盘总和） -->
                 <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
                   <div
-                    v-if="agent.disk_pct != null && agent.disk_pct > 0"
+                    v-if="diskAgg.pct > 0"
                     class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                    :class="agent.disk_pct >= 80 ? 'bg-red-500/28' : agent.disk_pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
-                    :style="{ width: Math.min(agent.disk_pct, 100) + '%' }"
+                    :class="diskAgg.pct >= 80 ? 'bg-red-500/28' : diskAgg.pct >= 60 ? 'bg-amber-500/22' : 'bg-emerald-500/18'"
+                    :style="{ width: Math.min(diskAgg.pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
-                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(diskAgg.total, 1) }}</span>
                 </div>
               </div>
             </div>
