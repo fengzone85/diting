@@ -100,7 +100,7 @@ defineExpose({ resize });
 </script>
 
 <template>
-  <div class="glass p-4">
+  <div>
     <h4 v-if="title" class="mb-2 text-sm font-medium text-content">{{ title }}</h4>
     <div ref="chartRef" class="h-56 w-full" />
   </div>
