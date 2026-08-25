@@ -164,6 +164,8 @@ const stmts = {
      @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
+  metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   prune: db.prepare('DELETE FROM metrics WHERE ts < ?'),
   getAlertState: db.prepare('SELECT * FROM alert_state WHERE agent_id=? AND type=?'),
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
@@ -217,6 +219,9 @@ const resetAgentToken = (id) => {
 };
 // 批量取所有 Agent 的时序指标（sparkline 用），按 agent_id 升序返回原始行。
 const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
+
+// 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
+const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
 
 const updateAgent = (id, f) => stmts.updateAgent.run({
   id,
@@ -438,7 +443,7 @@ function pruneAudit(retentionDays) {
 module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsAll,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
