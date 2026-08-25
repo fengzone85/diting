@@ -13,6 +13,20 @@ import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
 import type { Probes, ChartPoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber } from '../utils/format';
+import {
+  Cpu,
+  Computer,
+  Code,
+  Timer,
+  Server,
+  Memory,
+  Switch,
+  HardDisk,
+  TransferData,
+  DashboardOne,
+  ApplicationTwo,
+  VideoOne,
+} from '@icon-park/vue-next';
 
 function formatDate(s: string | undefined): string {
   if (!s) return '—';
@@ -39,6 +53,26 @@ const netUsagePct = computed(() => {
   const used = (a.net_rx_month || 0) + (a.net_tx_month || 0);
   const quota = a.monthly_quota_gb * 1024 ** 3;
   return Math.min((used / quota) * 100, 100);
+});
+
+// 硬件卡动态条目：架构/虚拟化/GPU/物理核心（无字段则显示 -；不对指纹字段扩展采集）
+const hwDynamic = computed(() => {
+  const a = agent.value;
+  if (!a) return [];
+  const items: { label: string; value: string; icon: any }[] = [];
+  // 架构（无 IP 时显示，diting 当前未上报 arch → -）
+  items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
+  // 虚拟化
+  items.push({ label: t('node.virtualization'), value: (a as any).virtualization || '—', icon: Server });
+  // GPU（仅当存在时渲染，否则跳过）
+  if ((a as any).gpu_name) {
+    items.push({ label: t('node.gpu'), value: (a as any).gpu_name, icon: VideoOne });
+  }
+  // 物理核心（仅当为有效数字时渲染）
+  if (typeof (a as any).cpu_physical_cores === 'number' && (a as any).cpu_physical_cores > 0) {
+    items.push({ label: t('node.physicalCores'), value: String((a as any).cpu_physical_cores), icon: Cpu });
+  }
+  return items;
 });
 
 const neighborIds = computed(() => {
@@ -189,7 +223,7 @@ onMounted(load);
             >{{ agent.online ? t('common.online') : t('common.offline') }}</span>
             <span v-if="agent.version" class="ml-auto rounded-full bg-surface px-3 py-1 text-xs text-secondary">v{{ agent.version }}</span>
           </div>
-          <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.hostname }} · {{ agent.id }}</p>
+          <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.id }}</p>
         </div>
 
         <div class="space-y-6">
@@ -216,22 +250,27 @@ onMounted(load);
             <!-- 硬件信息：glass 毛玻璃卡 + 纵向条目 -->
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.hardware') }}</h3>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.cpu') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ formatPercent(agent.cpu) }}</span>
+              <!-- CPU 型号块（对齐 Komari 硬件卡顶部大块） -->
+              <div class="mb-3 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                <div class="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Cpu :size="14" />
+                  <span>{{ t('node.cpuModel') }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.load') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-emerald-300">{{ formatNumber(agent.load1 || 0) }}</span>
+                <span class="text-xs sm:text-sm text-content">{{ agent.cpu_name || t('node.unknown') }}</span>
+                <!-- 芯片天梯评分条：无型号则显示灰色未知占位条 -->
+                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
+                  <div class="h-full rounded-full bg-gray-400" style="width: 0%"></div>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.temp') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-amber-300">{{ agent.temp != null ? `${formatNumber(agent.temp, 1)}°C` : '—' }}</span>
-                </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.mem') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-violet-300">{{ formatPercent(agent.mem_pct) }}</span>
+                <span class="text-[10px] text-content/60">{{ t('node.unknown') }}</span>
+              </div>
+              <!-- 动态条目：架构/虚拟化/GPU/物理核心（按需渲染，无则显 -） -->
+              <div class="grid grid-cols-2 gap-1">
+                <div v-for="item in hwDynamic" :key="item.label" class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground">
+                    <component :is="item.icon" :size="14" />
+                    <span>{{ item.label }}</span>
+                  </span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ item.value }}</span>
                 </div>
               </div>
             </div>
@@ -239,22 +278,22 @@ onMounted(load);
             <!-- 系统信息 -->
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.system') }}</h3>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.os') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.os || '—' }}</span>
+              <div class="grid grid-cols-2 gap-1">
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Computer :size="14" /><span>{{ t('node.os') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ agent.os || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.hostname') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.hostname || '—' }}</span>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Code :size="14" /><span>{{ t('node.kernel') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ agent.kernel_version || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.group') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.group || '—' }}</span>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Timer :size="14" /><span>{{ t('node.metric.uptime') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ formatDuration(agent.uptime) || '—' }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.agentId') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-sky-300">{{ agent.id }}</span>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Server :size="14" /><span>{{ t('node.merchant') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ agent.merchant || '—' }}</span>
                 </div>
               </div>
             </div>
@@ -262,40 +301,46 @@ onMounted(load);
             <!-- 存储信息：glass 毛玻璃卡 + 纵向紧凑条目 -->
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.storage') }}</h3>
-              <div class="grid grid-cols-3 gap-3">
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.mem') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
+              <div class="grid grid-cols-3 gap-1">
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.swap') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatPercent(agent.swap_pct) }}</span>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Switch :size="14" /><span>{{ t('node.storage.swap') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ formatPercent(agent.swap_pct) }}</span>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.storage.disk') }}</span>
-                  <span class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.disk_total, 1) }}</span>
                 </div>
               </div>
             </div>
 
-            <!-- 网络信息：glass 毛玻璃卡 + 纵向紧凑条目 + 进度条背景 -->
+            <!-- 网络信息：glass 毛玻璃卡 + 纵列两块 + 进度条背景 -->
             <div class="glass group relative flex flex-col overflow-hidden rounded-md border-none p-3 transition-all">
               <div
                 v-if="agent.monthly_quota_gb != null && netUsagePct > 0"
-                class="pointer-events-none absolute inset-y-0 left-0 rounded-sm transition-[width,background-color] duration-300 ease-out"
-                :class="netUsagePct >= 80 ? 'bg-red-500/30' : netUsagePct >= 60 ? 'bg-amber-500/25' : 'bg-emerald-500/20'"
+                class="pointer-events-none absolute inset-y-0 left-0 rounded-sm bg-gradient-to-r from-transparent to-slate-500/10 transition-[width] duration-300 ease-out"
                 :style="{ width: Math.min(netUsagePct, 100) + '%' }"
               ></div>
               <h3 class="relative z-10 mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.network') }}</h3>
-              <div class="relative z-10 grid grid-cols-2 gap-3">
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('public.traffic') }}</span>
-                  <span v-if="agent.monthly_quota_gb != null" class="truncate text-sm font-semibold leading-tight text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
-                  <span v-else class="truncate text-sm font-semibold leading-tight text-content">{{ t('node.unlimitedTraffic') }}</span>
+              <div class="relative z-10 flex flex-col gap-1">
+                <!-- 总流量块 -->
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
+                  <span v-if="agent.monthly_quota_gb != null" class="truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
+                  <span v-else class="truncate text-xs sm:text-sm text-content">{{ t('node.unlimitedTraffic') }}</span>
+                  <div class="mt-1 flex items-center gap-1.5">
+                    <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-300">{{ t('node.quotaIpv4') }}</span>
+                    <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-300">{{ t('node.quotaIpv6') }}</span>
+                    <span class="ml-auto text-[10px] text-muted-foreground">{{ t('node.peak1d') }}: —</span>
+                  </div>
                 </div>
-                <div class="flex min-w-0 flex-col gap-2 rounded-sm bg-surface/40 p-2">
-                  <span class="truncate text-xs leading-tight text-secondary">{{ t('node.metric.netRate') }}</span>
-                  <span class="truncate whitespace-nowrap text-sm font-semibold leading-tight text-content">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }} ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</span>
+                <!-- 网络速率块 -->
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><DashboardOne :size="14" /><span>{{ t('node.netRate') }}</span></span>
+                  <span class="truncate whitespace-nowrap text-xs sm:text-sm text-content">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }} ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</span>
                 </div>
               </div>
             </div>
@@ -317,14 +362,22 @@ onMounted(load);
         </div>
         </div>
 
-        <div v-if="(agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null) || diskPredict" class="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null" class="glass p-5">
+        <div v-if="(agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null || agent.hostname || agent.group) || diskPredict" class="grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null || agent.hostname || agent.group" class="glass p-5">
             <h3 class="mb-4 flex items-center gap-2 text-base font-semibold text-content">
               <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
               {{ t('node.notePlan') }}
             </h3>
             <div v-if="agent.note" class="mb-4 rounded-xl border-l-2 border-sky-400/70 bg-surface/60 px-4 py-3 text-sm leading-relaxed text-content">{{ agent.note }}</div>
             <div class="flex flex-wrap gap-2">
+              <span v-if="agent.hostname" class="inline-flex items-center gap-1.5 rounded-full border border-slate-400/30 bg-slate-400/10 px-3 py-1.5 text-xs">
+                <span class="text-muted">{{ t('node.hostname') }}</span>
+                <span class="font-semibold text-slate-200">{{ agent.hostname }}</span>
+              </span>
+              <span v-if="agent.group" class="inline-flex items-center gap-1.5 rounded-full border border-slate-400/30 bg-slate-400/10 px-3 py-1.5 text-xs">
+                <span class="text-muted">{{ t('node.group') }}</span>
+                <span class="font-semibold text-slate-200">{{ agent.group }}</span>
+              </span>
               <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-xs">
                 <svg class="h-3.5 w-3.5 text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 5-4 7-8 8-4-1-8-3-8-8V7z"/></svg>
                 <span class="text-muted">{{ t('node.quotaMonthly') }}</span>

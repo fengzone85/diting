@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@icon-park/vue-next": "^1.4.2",
     "echarts": "^5.5.1",
     "qrcode": "^1.5.4",
     "vue": "^3.4.38",
