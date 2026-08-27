@@ -486,8 +486,18 @@ function pruneAudit(retentionDays) {
   return pruneAuditLogs.run(cutoff).changes;
 }
 
+// 数据库文件大小（字节）。含主库文件 + rollback-journal（写入中暂存的 -journal），不含 WAL/SHM
+//（本应用刻意不用 WAL 模式）。用于后台仪表盘展示数据库占用监控。
+function getDbFileSize() {
+  let size = 0;
+  for (const p of [DB_PATH, `${DB_PATH}-journal`]) {
+    try { size += fs.statSync(p).size; } catch (_) { /* 文件不存在则忽略 */ }
+  }
+  return size;
+}
+
 module.exports = {
-  db, hashToken, genToken,
+  db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
   getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll,

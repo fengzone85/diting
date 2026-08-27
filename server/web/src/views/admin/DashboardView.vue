@@ -7,7 +7,7 @@ import { useApp } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 import { adminApi } from '../../services/adminApi';
 import type { Billing, ChartPoint } from '../../services/types';
-import { formatDuration, formatPercent } from '../../utils/format';
+import { formatBytes, formatDuration, formatPercent } from '../../utils/format';
 
 const admin = useAdmin();
 const app = useApp();
@@ -113,8 +113,8 @@ async function testAlert() {
     <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard :label="t('dashboard.avgCpu')" :value="formatPercent(avgCpu)" />
       <StatCard :label="t('dashboard.avgMem')" :value="formatPercent(avgMem)" />
+      <StatCard :label="t('dashboard.dbSize')" :value="formatBytes(admin.state.overview?.db_size_bytes as number | undefined)" />
       <StatCard :label="t('public.nodes')" :value="app.state.meta?.public_enabled ? 'ON' : 'OFF'" />
-      <StatCard :label="t('settings.title')" :value="app.state.meta?.public_theme || 'default'" />
     </div>
     <div class="mt-6">
       <div class="mb-3 flex items-center justify-between">
