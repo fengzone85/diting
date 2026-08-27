@@ -580,16 +580,17 @@ onMounted(load);
           </div>
           <div class="mb-3 flex flex-wrap gap-4 text-xs">
             <span
-              v-for="(points, target) in probes"
+              v-for="(points, target, i) in probes"
               :key="`stat-${target}`"
-              class="rounded-lg bg-surface px-3 py-1.5"
+              class="flex items-center rounded-lg bg-surface px-3 py-1.5"
             >
-              <span class="text-content">{{ target }}</span>
-              <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'" class="ml-2">
+              <span class="inline-block h-2 w-2 rounded-full" :style="{ backgroundColor: PALETTE[i % PALETTE.length] }"></span>
+              <span class="ml-1.5" :style="{ color: PALETTE[i % PALETTE.length] }">{{ target }}</span>
+              <span :class="avgProbe(points) != null ? 'text-emerald-400' : 'text-rose-400'" class="ml-1.5">
                 avg {{ avgProbe(points) != null ? `${avgProbe(points)?.toFixed(1)} ms` : t('card.timeout') }}
               </span>
-              <span class="ml-2 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
-              <span class="ml-2 text-muted">{{ t('node.loss', { pct: formatNumber(lossPercent(points), 1) }) }}</span>
+              <span class="ml-1.5 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
+              <span class="ml-1.5 text-muted">{{ t('node.loss', { pct: formatNumber(lossPercent(points), 1) }) }}</span>
             </span>
           </div>
           <ChartLatencyMulti :title="t('node.chart.latency')" :series="probeSeriesList" />
