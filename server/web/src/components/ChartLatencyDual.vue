@@ -32,7 +32,7 @@ let chart: echarts.ECharts | null = null;
 // Komari 风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-    { offset: 0, color: hexToRgba(color, 0.35) },
+    { offset: 0, color: hexToRgba(color, 0.2) },
     { offset: 1, color: hexToRgba(color, 0) },
   ]);
 }
