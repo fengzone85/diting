@@ -52,7 +52,9 @@ function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxCount = clamp(Math.floor(Number(maxCount) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  const rows = (db.getMetricsAll(since) || [])
+  // 只取 ts+agent_id+probes 三列并按 agent 时间桶降采样（每 agent 最多 maxCount 点），
+  // 规避 SELECT * 全表物化 + 330 万行读进内存触发 OOM。probes 周期采样不丢"出现过哪些 task"语义。
+  const rows = (db.metricsProbesAll(since, Math.max(200, maxCount)) || [])
     .filter(r => r.probes != null)
     .slice(0, maxCount * 10);
 
@@ -195,7 +197,8 @@ function getPublicPingTasks(params = {}) {
   // Komari 社区主题 PingChart 调用，返回某个 entity 的全部探针任务列表。
   const entityId = params.entity_id || params.uuid;
   const since = Date.now() - 24 * 3600 * 1000; // 最近 24h 内出现的 task
-  const rows = (db.getMetricsAll(since) || [])
+  // 只取探针三列并降采样（每 agent 最多 2000 点），规避 SELECT * 全表 OOM；task 名收集不依赖全量。
+  const rows = (db.metricsProbesAll(since, 2000) || [])
     .filter(r => r.probes != null && (!entityId || r.agent_id === entityId));
   const taskMap = new Map();
   rows.forEach(r => {

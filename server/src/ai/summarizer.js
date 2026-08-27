@@ -140,7 +140,11 @@ function summarize(options) {
 
   const agents = db.getAgents();
   // 一次拉全量再分组，避免逐台查询（同 /agents/sparklines 模式，api.js:258）
-  const rows = db.getMetricsAll(sinceTs);
+  // 注意：62 台 × 30d 下 metrics 表超 330 万行，直接 getMetricsAll(SELECT *) 会把整表物化进内存触发 OOM。
+  // 改用 SQL 层按 agent 时间桶降采样（每 agent 最多 AI_SAMPLE_POINTS 点，仅指标列不含 probes 大字段），
+  // avg/p95/峰值统计对日报足够准确，内存下降 50x+。
+  const AI_SAMPLE_POINTS = 1000;
+  const rows = db.metricsSparklinesAllSampled(sinceTs, AI_SAMPLE_POINTS);
   const byAgent = {};
   for (const r of rows) {
     (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);

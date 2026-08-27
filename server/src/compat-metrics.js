@@ -98,7 +98,8 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   // 以对齐 Komari 社区主题 PingChart 的期望结构（series 每项需含 task_id + points:[{time,value}]）。
   // diting 的 probes JSON 形如 { "移动": {ms, ok, loss}, "联通": {...}, ... }，每个 key 即一个 task。
   for (const entityId of entity_ids) {
-    const rows = (db.getMetricsAll(since) || [])
+    // 只取探针三列并按 agent 时间桶降采样（每 agent 最多 maxPoints*10 点），规避 SELECT * 全表 OOM。
+    const rows = (db.metricsProbesAll(since, Math.max(200, maxPoints * 10)) || [])
       .filter(r => r.agent_id === entityId && r.probes != null)
       .slice(0, maxPoints * 10);
     // 收集该 entity 所有 task 名称

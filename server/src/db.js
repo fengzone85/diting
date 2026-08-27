@@ -248,6 +248,23 @@ const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
 // 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
 const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
 
+// 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
+// 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
+const metricsProbesAll = (sinceTs, maxPoints) => {
+  const step = Math.max(1, Math.floor(maxPoints || 1));
+  return db.prepare(`
+    WITH numbered AS (
+      SELECT ts, agent_id, probes,
+             ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
+             COUNT(*) OVER (PARTITION BY agent_id) AS cnt
+      FROM metrics WHERE ts>=? AND probes IS NOT NULL
+    )
+    SELECT ts, agent_id, probes
+    FROM numbered
+    WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+    ORDER BY agent_id, ts ASC`).all(sinceTs);
+};
+
 // sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
 const getMetricsSparklines = (agentId, sinceTs) => stmts.metricsSparklines.all(agentId, sinceTs);
 const getMetricsSparklinesAll = (sinceTs) => stmts.metricsSparklinesAll.all(sinceTs);
@@ -473,7 +490,7 @@ module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
-  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
