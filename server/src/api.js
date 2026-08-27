@@ -292,6 +292,23 @@ router.get('/agents/sparklines', adminOrReadonly, (req, res) => {
   res.json(downsampleSparklines(rows, mp));
 });
 
+// ---- Admin: 集群平均 CPU/内存趋势（仪表盘专用）----
+// 与 /agents/sparklines 不同：不做「每 agent 原始点」，而是由 SQL 引擎跨所有 agent 按时间桶
+// 直接聚合出集群平均曲线，只返回 ≤maxPoints 行（几十~几百个点）。彻底消除前端拉 62 台全量
+// 再逐点聚合的主线程卡顿。max_points 缺省用 sparkMaxPoints，与右侧趋势图桶粒度一致。
+router.get('/agents/sparklines/overview', adminOrReadonly, (req, res) => {
+  const range = req.query.range;
+  const sec = RANGES[range] || 21600;
+  const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
+  const rows = db.metricsClusterAvg(Date.now() - sec * 1000, sec * 1000, mp);
+  // rows: [{ts, cpu, mem_pct}]，桶内已有集群平均，直接返回
+  res.json(rows.map(r => ({
+    ts: r.ts,
+    cpu: r.cpu == null ? null : +r.cpu.toFixed(2),
+    mem_pct: r.mem_pct == null ? null : +r.mem_pct.toFixed(2)
+  })));
+});
+
 // ---- Admin: single agent info ----
 router.get('/agents/:id', adminOrReadonly, (req, res) => {
   const a = db.getAgent(req.params.id);

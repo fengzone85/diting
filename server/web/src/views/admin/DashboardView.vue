@@ -27,33 +27,10 @@ const avgMem = computed(() => {
 });
 
 // B5: 集群平均 CPU/内存趋势（聚合所有受控端时序）
+// 后端 /agents/sparklines/overview 已按时间桶跨所有 agent 在 SQL 层聚合出平均曲线，
+// 前端只渲染最终点数（几十~几百点），彻底规避「62 台 × 每 agent 2000 点全量拉取再逐点聚合」的卡顿。
 const chartRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('6h');
 const sparkError = ref('');
-
-function aggregate(rowsByAgent: Record<string, { ts: number; cpu?: number; mem_pct?: number }[]>): { cpu: ChartPoint[]; mem: ChartPoint[] } {
-  const byTs = new Map<number, { cpu: number[]; mem: number[] }>();
-  for (const rows of Object.values(rowsByAgent)) {
-    for (const r of rows) {
-      if (!r.ts) continue;
-      const bucket = byTs.get(r.ts) || { cpu: [], mem: [] };
-      if (typeof r.cpu === 'number') bucket.cpu.push(r.cpu);
-      if (typeof r.mem_pct === 'number') bucket.mem.push(r.mem_pct);
-      byTs.set(r.ts, bucket);
-    }
-  }
-  const tsList = [...byTs.keys()].sort((a, b) => a - b);
-  const cpu = tsList.map(ts => {
-    const arr = byTs.get(ts)!.cpu;
-    const v = arr.length ? +(arr.reduce((s, x) => s + x, 0) / arr.length).toFixed(2) : 0;
-    return { t: ts, v }; // metrics.ts 已是毫秒，勿再 *1000
-  });
-  const mem = tsList.map(ts => {
-    const arr = byTs.get(ts)!.mem;
-    const v = arr.length ? +(arr.reduce((s, x) => s + x, 0) / arr.length).toFixed(2) : 0;
-    return { t: ts, v }; // metrics.ts 已是毫秒，勿再 *1000
-  });
-  return { cpu, mem };
-}
 
 const cpuTrend = ref<ChartPoint[]>([]);
 const memTrend = ref<ChartPoint[]>([]);
@@ -61,10 +38,9 @@ const memTrend = ref<ChartPoint[]>([]);
 async function loadSparklines() {
   sparkError.value = '';
   try {
-    const data = await adminApi.sparklines(chartRange.value);
-    const agg = aggregate(data as Record<string, { ts: number; cpu?: number; mem_pct?: number }[]>);
-    cpuTrend.value = agg.cpu;
-    memTrend.value = agg.mem;
+    const rows = await adminApi.clusterTrend(chartRange.value);
+    cpuTrend.value = rows.filter(r => r.cpu != null).map(r => ({ t: r.ts, v: r.cpu as number }));
+    memTrend.value = rows.filter(r => r.mem_pct != null).map(r => ({ t: r.ts, v: r.mem_pct as number }));
   } catch (e) {
     sparkError.value = t('dashboard.trendFailed', { msg: (e as Error).message || t('common.unknownError') });
   }
