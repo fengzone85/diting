@@ -76,6 +76,7 @@ export interface Overview {
   cpu_avg?: number;
   mem_avg?: number;
   groups?: { name: string; total: number; online: number }[];
+  db_size_bytes?: number;
 }
 
 export interface SparklinePoint {

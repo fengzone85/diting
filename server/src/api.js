@@ -343,7 +343,9 @@ router.get('/overview', adminOrReadonly, (req, res) => {
     avg_mem: cnt ? +(memSum / cnt).toFixed(1) : 0,
     traffic_used_bytes: Math.round(trafficUsedBytes),
     total_quota_gb: totalQuotaGB,
-    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
+    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online })),
+    // 数据库大小监控：SQLite 文件实际占用的磁盘字节数（含 journal）
+    db_size_bytes: db.getDbFileSize()
   });
 });
 

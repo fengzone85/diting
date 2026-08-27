@@ -78,6 +78,7 @@ export const zhCN: Record<string, string> = {
   'dashboard.offline': '离线',
   'dashboard.avgCpu': '平均 CPU',
   'dashboard.avgMem': '平均内存',
+  'dashboard.dbSize': '数据库大小',
   'dashboard.monthlyCost': '本月费用',
   'dashboard.testAlert': '发送测试告警',
   'dashboard.quickLinks': '快捷入口',

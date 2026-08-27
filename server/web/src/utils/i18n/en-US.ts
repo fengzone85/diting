@@ -78,6 +78,7 @@ export const enUS: Record<string, string> = {
   'dashboard.offline': 'Offline',
   'dashboard.avgCpu': 'Avg CPU',
   'dashboard.avgMem': 'Avg memory',
+  'dashboard.dbSize': 'Database size',
   'dashboard.monthlyCost': 'Monthly cost',
   'dashboard.testAlert': 'Send test alert',
   'dashboard.quickLinks': 'Quick links',
