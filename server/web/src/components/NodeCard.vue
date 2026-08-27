@@ -128,33 +128,33 @@ const trafficPct = computed(() => {
     <!-- ===== 旧版 .metrics：3 列 grid ===== -->
     <div class="card-metrics">
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkCpuPts" :points="sparkCpuPts" fill="none" stroke="#5cb6a5" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">{{ t('card.cpu') }}</span><span class="m-val" :class="pctClass(cpu)">{{ formatPercent(cpu) }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">{{ isWindows ? t('card.process') : t('card.load') }}</span><span class="m-val">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="0.75" stroke-opacity="0.6" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">IO</span><span class="m-val">{{ ((agent.disk_r_rate||0)/1048576).toFixed(2) }}/{{ ((agent.disk_w_rate||0)/1048576).toFixed(2) }}</span></div>
       </div>
       <!-- 内存/温度/swap 独立胶囊，图形在上、文字紧贴图形下方 -->
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkMemPts" :points="sparkMemPts" fill="none" stroke="#6c9eff" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">RAM</span><span class="m-val" :class="pctClass(agent.mem_pct)">{{ formatPercent(agent.mem_pct) }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkTempPts" :points="sparkTempPts" fill="none" stroke="#ff7a59" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">{{ t('node.temp') }}</span><span class="m-val">{{ agent.temp != null ? agent.temp.toFixed(1)+'°C' : '—' }}</span></div>
       </div>
       <div class="card-metric">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkSwapPts" :points="sparkSwapPts" fill="none" stroke="#a06bff" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info"><span class="m-lbl">Swap</span><span class="m-val" :class="pctClass(agent.swap_pct)">{{ formatPercent(agent.swap_pct) }}</span></div>
       </div>
       <!-- 网络+探针 跨3列（置于内存胶囊下方） -->
       <div class="card-metric card-metric-wide">
-        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="0.75" stroke-opacity="0.6" /></svg></div>
+        <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkNetPts" :points="sparkNetPts" fill="none" stroke="#4dd591" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
         <div class="m-info">
           <span class="m-lbl">{{ t('public.network') }}</span>
           <span class="m-val">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} &nbsp;↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</span>
