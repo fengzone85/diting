@@ -196,6 +196,24 @@ const stmts = {
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
       ORDER BY agent_id, ts ASC`).all(sinceTs);
   },
+  // 集群级时间桶聚合（仪表盘平均 CPU/内存趋势专用）：跨所有 agent 按固定时间桶 GROUP BY，
+  // 直接算出每个桶的 cpu/mem 平均值。返回行数=桶数（≤maxPoints），彻底规避「62 台 × 每 agent 2000 点
+  // 全量拉到前端再逐点聚合」的主线程卡顿。SQL 引擎做聚合，只传输最终曲线。
+  // spanMs: 窗口总时长（毫秒），用于按目标点数反推桶宽 = spanMs/maxPoints。
+  // 注意：better-sqlite3 对绑定对象里的 number 默认绑成 REAL，导致 (ts-@since)/@bucket 变浮点除法、
+  // 每个浮点值自成一组。故用 CAST(... AS INTEGER) 强制整数地板除法，保证分组数≈maxPoints。
+  metricsClusterAvg: (sinceTs, spanMs, maxPoints) => {
+    const bucket = Math.max(1, Math.ceil(spanMs / Math.max(1, maxPoints)));
+    return db.prepare(`
+      WITH agg AS (
+        SELECT CAST((ts - @since) / @bucket AS INTEGER) AS b,
+               AVG(cpu) AS cpu, AVG(mem_pct) AS mem_pct
+        FROM metrics WHERE ts>=@since AND cpu IS NOT NULL
+        GROUP BY b
+      )
+      SELECT (@since + CAST(b AS INTEGER) * @bucket) AS ts, cpu, mem_pct
+      FROM agg ORDER BY b ASC`).all({ since: sinceTs, bucket });
+  },
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
     (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
@@ -233,6 +251,9 @@ const getAgent = (id) => stmts.getAgent.get(id);
 const getAgents = () => stmts.getAgents.all();
 // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点。
 const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparklinesAllSampled(sinceTs, maxPoints);
+
+// 集群级时间桶聚合（仪表盘平均曲线）：跨所有 agent 按时间桶求 cpu/mem 平均，返回行数≤maxPoints。
+const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAvg(sinceTs, spanMs, maxPoints);
 
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {
@@ -500,7 +521,7 @@ module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
-  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,

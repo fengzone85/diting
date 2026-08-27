@@ -67,6 +67,9 @@ export const adminApi = {
   // 批量时序（所有受控端），避免前端 N+1
   sparklines: (range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
     api.get<Record<string, MetricRow[]>>(`/api/agents/sparklines?range=${range}`),
+  // 集群平均 CPU/内存趋势（仪表盘专用）：后端 SQL 层按时间桶聚合，只返回最终曲线，避免前端拉全量卡顿。
+  clusterTrend: (range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
+    api.get<{ ts: number; cpu: number | null; mem_pct: number | null }[]>(`/api/agents/sparklines/overview?range=${range}`),
   // 单受控端时序
   metrics: (id: string, range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
     api.get<MetricRow[]>(`/api/agents/${encodeURIComponent(id)}/metrics?range=${range}`),
