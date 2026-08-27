@@ -10,7 +10,7 @@ const { t } = useI18n();
 
 const props = defineProps<{
   agent: Agent;
-  template?: 'simple' | 'visual';
+  template?: 'simple' | 'full';
   draggable?: boolean;
   size?: 'mini' | 'compact' | 'comfortable' | 'large';
   tag?: string;
@@ -113,8 +113,8 @@ const trafficPct = computed(() => {
     <div class="card-top">
       <span class="status-dot flex-shrink-0" :class="`status-${status}`" />
       <h3 class="min-w-0 flex-1 truncate font-bold text-content">{{ agent.name }}</h3>
-      <img v-if="agent.country || agent.country_code"
-        :src="`/flags/${(agent.country_code || agent.country || '').toLowerCase()}.svg`"
+      <img v-if="agent.country"
+        :src="`/flags/${(agent.country || '').toLowerCase()}.svg`"
         class="flag-icon" :alt="agent.country" />
       <span v-if="agent.group && !merchantName" class="badge">{{ agent.group }}</span>
       <span v-if="merchantName" class="badge">{{ merchantName }}</span>
