@@ -189,6 +189,8 @@ export const zhCN: Record<string, string> = {
   'public.nodeCount': '{n} 个节点',
   'public.layout': '布局',
   'public.card': '卡片',
+  'public.card_simple': '简约',
+  'public.card_full': '完整',
   'public.grid': '网格',
   'public.list': '列表',
   'public.compact': '紧凑',
@@ -249,6 +251,8 @@ export const zhCN: Record<string, string> = {
   'card.quota': '配额',
   'card.process': '进程',
   'card.load': '负载',
+  'card.latency': '延迟',
+  'card.loss': '丢包',
   'card.expired': '已过期',
   'card.remainingDays': '剩余 {n} 天',
 

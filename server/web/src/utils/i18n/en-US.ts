@@ -200,6 +200,8 @@ export const enUS: Record<string, string> = {
   'public.nodeCount': '{n} nodes',
   'public.layout': 'Layout',
   'public.card': 'Card',
+  'public.card_simple': 'Simple',
+  'public.card_full': 'Full',
   'public.grid': 'Grid',
   'public.list': 'List',
   'public.compact': 'Compact',
@@ -249,6 +251,8 @@ export const enUS: Record<string, string> = {
   'card.quota': 'Quota',
   'card.process': 'Process',
   'card.load': 'Load',
+  'card.latency': 'Latency',
+  'card.loss': 'Loss',
   'card.expired': 'Expired',
   'card.remainingDays': '{n} days left',
 

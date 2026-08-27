@@ -284,11 +284,12 @@ router.get('/agents', adminOrReadonly, (req, res) => {
 
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----
 router.get('/agents/sparklines', adminOrReadonly, (req, res) => {
-  const sec = RANGES[req.query.range] || 21600;
-  const rows = db.getMetricsAll(Date.now() - sec * 1000);
-  const byAgent = {};
-  for (const r of rows) (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);
-  res.json(byAgent);
+  const range = req.query.range;
+  const sec = RANGES[range] || 21600;
+  // 管理端 sparklines：用轻量列查询（不含 probes 大字段）+ SQL 层采样，避免 SELECT * 物化全行。
+  const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
+  const rows = db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+  res.json(downsampleSparklines(rows, mp));
 });
 
 // ---- Admin: single agent info ----
@@ -461,27 +462,48 @@ router.get('/public/agents', (req, res) => {
 
 // 公开历史曲线（脱敏，仅指标时序，无 token / 备注 / 商家等敏感字段）。
 // 供「视觉版」首页卡片渲染 sparkline。受 ui.public_enabled 控制。
+// 注意：无 id 的全量查询在 100 台规模下数据量巨大，后端做时间桶降采样（见 downsampleSparklines）
+// 并把结果按 range+id 缓存 30s，避免前端并发刷新时重复跑大查询把服务端打挂（DoS 级瓶颈）。
+const sparkCache = new Map(); // key: `${range}|${onlyId}` -> { ts, data }
+const SPARK_CACHE_TTL = 30000;
+// 无 id 全量请求（首页卡片迷你图）每 agent 点数上限：100 台规模下控制传输量
+const SPARK_ALL_MAX_POINTS = 120;
 router.get('/public/agents/sparklines', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
-  const sec = RANGES[req.query.range] || 21600;
+  const range = RANGES[req.query.range] ? req.query.range : '7d'; // 无效 range 兜底 7d
+  const sec = RANGES[range];
   const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
+  const cacheKey = `${range}|${onlyId || '*'}`;
+  const cached = sparkCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SPARK_CACHE_TTL) {
+    return res.json(cached.data);
+  }
   // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
   // 用只含指标列（不含 probes 大字段）的轻量查询，避免 SELECT * 物化全行（30d 5.3s -> 2.3s）
+  // 无 id 全量请求：SQL 层窗口函数采样（757K 行→~7200 行，减少 100x 传输+JS 处理）。
+  const mp = clampInt(req.query.max_points, 60, 20000)
+    || (onlyId ? sparkMaxPoints(range) : SPARK_ALL_MAX_POINTS);
+  const t0 = Date.now();
   const rows = onlyId
     ? db.getMetricsSparklines(onlyId, Date.now() - sec * 1000)
-    : db.getMetricsSparklinesAll(Date.now() - sec * 1000);
-  const byAgent = {};
-  for (const r of rows) {
-    (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push({
+    : db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+  // 后端降采样（对齐 Komari max_points 契约）。
+  // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
+  // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
+  // 有 id 的单节点请求（详情页磁盘耗尽预测）：用 range 对应上限（30d→2000 足够线性外推）。
+  const byAgent = downsampleSparklines(rows, mp);
+  for (const id of Object.keys(byAgent)) {
+    byAgent[id] = byAgent[id].map(r => ({
       ts: r.ts, cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
       net_rx_rate: r.net_rx_rate, net_tx_rate: r.net_tx_rate,
       load1: r.load1, temp: r.temp, swap_pct: r.swap_pct, uptime: r.uptime,
       disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate,
       // 磁盘耗尽预测用：整机已用/总字节时序（对齐 komari MetricDisk 口径）
       disk_used: r.disk_used, disk_total: r.disk_total
-    });
+    }));
   }
+  sparkCache.set(cacheKey, { ts: Date.now(), data: byAgent });
   res.json(byAgent);
 });
 
@@ -501,6 +523,43 @@ function clampInt(v, min = 1, max = 50000) {
   if (n < min) return min;
   if (n > max) return max;
   return Math.floor(n);
+}
+
+// ---- sparklines 后端降采样（对齐 Komari max_points 契约）----
+// 卡片迷你图只需 ~60 点，磁盘耗尽预测需较长序列（~2000 点足够）。
+// 全量 30d 单节点 9.5 万点，100 台规模下公开 sparklines 无 id 全量查询会雪崩（DoS 级）。
+// 故按 range 给每 agent 设定点数上限，做时间桶聚合，避免传输/序列化灾难。
+const SPARK_MAX_POINTS = {
+  '1h': 300, '6h': 600, '24h': 1000, '7d': 1500, '30d': 2000
+};
+function sparkMaxPoints(range) {
+  return SPARK_MAX_POINTS[range] || 2000;
+}
+// rows: [{ts, agent_id, ...metrics}]，按 agent_id 分组后组内时间桶降采样到 maxPoints。
+// 桶内取最后一个点（时序曲线降采样用 last 即可，磁盘预测线性外推同样适用）。
+function downsampleSparklines(rows, maxPoints) {
+  const byAgent = {};
+  for (const r of rows) {
+    (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);
+  }
+  const out = {};
+  for (const [agentId, arr] of Object.entries(byAgent)) {
+    if (arr.length <= maxPoints) {
+      out[agentId] = arr;
+      continue;
+    }
+    const span = arr[arr.length - 1].ts - arr[0].ts;
+    const bucket = Math.max(1, Math.ceil(span / maxPoints)); // 以 maxPoints 反推桶宽
+    const map = new Map();
+    const order = [];
+    for (const r of arr) {
+      const key = Math.floor(r.ts / bucket) * bucket;
+      if (!map.has(key)) { map.set(key, r); order.push(key); }
+      else map.set(key, r); // 同桶取最后一个点
+    }
+    out[agentId] = order.map(k => map.get(k));
+  }
+  return out;
 }
 
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。

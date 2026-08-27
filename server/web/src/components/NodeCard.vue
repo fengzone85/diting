@@ -158,9 +158,9 @@ const trafficPct = computed(() => {
         <div class="m-info">
           <span class="m-lbl">{{ t('public.network') }}</span>
           <span class="m-val">↓ {{ formatBitsPerSecond(agent.net_rx_rate) }} &nbsp;↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}</span>
-          <div v-if="probeTargets().length" class="card-probes">
-            <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok!==false&&pt.ms!=null?'probe-ok':'probe-timeout'">{{ pt.target }} {{ pt.ok!==false&&pt.ms!=null?formatNumber(pt.ms as number,1):t('card.timeout') }}</span>
-          </div>
+        </div>
+        <div v-if="probeTargets().length" class="card-probes">
+          <span v-for="pt in probeTargets()" :key="pt.target" class="probe" :class="pt.ok!==false&&pt.ms!=null?'probe-ok':'probe-timeout'">{{ pt.target }} {{ pt.ok!==false&&pt.ms!=null?formatNumber(pt.ms as number,1):t('card.timeout') }}</span>
         </div>
       </div>
     </div>
@@ -169,12 +169,13 @@ const trafficPct = computed(() => {
     <div class="card-disk-row">
       <span class="m-lbl">{{ t('card.disk') }}</span>
       <div class="bar"><div class="bar-fill" :class="pctClass(diskAgg.pct)" :style="{ width: `${Math.min(diskAgg.pct||0,100)}%` }"></div></div>
-      <span class="m-val">{{ formatBytes(diskAgg.used) }}/{{ formatBytes(diskAgg.total) }}</span>
+      <span class="m-val" :title="`${formatBytes(diskAgg.used)} / ${formatBytes(diskAgg.total)}`">{{ (diskAgg.pct||0).toFixed(1) }}%</span>
     </div>
     <div class="card-disk-row">
       <span class="m-lbl">{{ t('public.traffic') }}</span>
       <div v-if="trafficPct != null" class="bar"><div class="bar-fill" :class="pctClass(trafficPct)" :style="{ width: `${trafficPct}%` }"></div></div>
-      <span class="m-val">{{ formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0)) }}<span v-if="agent.monthly_quota_gb"> /{{ agent.monthly_quota_gb }} GB</span></span>
+      <span v-if="trafficPct != null" class="m-val" :title="`${formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0))} / ${agent.monthly_quota_gb} GB`">{{ trafficPct.toFixed(1) }}%</span>
+      <span v-else class="m-val">{{ formatBytes((agent.net_rx_month||0)+(agent.net_tx_month||0)) }}</span>
     </div>
 
     <!-- ===== 旧版 .foot ===== -->
