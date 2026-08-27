@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS metrics (
   FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_agent_ts ON metrics(agent_id, ts);
+-- 全量 sparklines 查询（WHERE ts>=? 无 agent_id 条件）需要单列 ts 索引，避免 7d 窗口全表扫描
+CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts);
 
 CREATE TABLE IF NOT EXISTS alert_state (
   agent_id   TEXT NOT NULL,
@@ -176,6 +178,24 @@ const stmts = {
   // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
   metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
+  // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
+  metricsSparklinesAllSampled: (sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER (PARTITION BY agent_id) AS cnt
+        FROM metrics WHERE ts>=?
+      )
+      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY agent_id, ts ASC`).all(sinceTs);
+  },
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
     (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
@@ -211,6 +231,8 @@ const createAgent = (fields) => {
 
 const getAgent = (id) => stmts.getAgent.get(id);
 const getAgents = () => stmts.getAgents.all();
+// 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点。
+const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparklinesAllSampled(sinceTs, maxPoints);
 
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {
@@ -451,7 +473,7 @@ module.exports = {
   db, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
-  getMetricsSparklines, getMetricsSparklinesAll, getMetricsAll,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,

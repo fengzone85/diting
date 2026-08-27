@@ -2,6 +2,7 @@
 import { ref, watch, computed } from 'vue';
 import AppHeader from '../components/AppHeader.vue';
 import NodeCard from '../components/NodeCard.vue';
+import NodeCardSimple from '../components/NodeCardSimple.vue';
 import NodeRow from '../components/NodeRow.vue';
 import StatCard from '../components/ui/StatCard.vue';
 import Loading from '../components/ui/Loading.vue';
@@ -58,8 +59,8 @@ function groupOrder(groups: Record<string, Agent[]>) {
 const cardSizeClass = computed(() => {
   const size = (state.meta?.card_size as string) || 'comfortable';
   return {
-    'grid-cols-1 md:grid-cols-3 xl:grid-cols-4': size === 'large',
-    'grid-cols-1 md:grid-cols-2 xl:grid-cols-3': size === 'comfortable',
+    'grid-cols-1 md:grid-cols-3 lg:grid-cols-4': size === 'large',
+    'grid-cols-1 md:grid-cols-2 xl:grid-cols-4': size === 'comfortable',
     'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4': size === 'compact',
     'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6': size === 'mini',
   };
@@ -187,13 +188,13 @@ const filteredAgents = computed(() => {
           </button>
           <span class="ml-2 text-xs text-slate-500">{{ t('public.card') }}</span>
           <button
-            v-for="tpl in ['simple', 'visual'] as const"
+            v-for="tpl in ['simple', 'full'] as const"
             :key="tpl"
             class="rounded-lg border px-2 py-1 text-xs"
             :class="state.template === tpl ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
             @click="setTemplate(tpl)"
           >
-            {{ t(`public.${tpl}`) }}
+            {{ t(`public.card_${tpl}`) }}
           </button>
         </div>
       </div>
@@ -209,12 +210,28 @@ const filteredAgents = computed(() => {
         <template v-else>
           <div v-for="group in groupOrder(groupedAgents)" :key="group" class="mb-6">
             <h3 class="mb-3 text-sm font-semibold text-slate-400">{{ group }}</h3>
-            <div class="grid gap-4" :class="cardSizeClass">
+            <!-- 简约卡片（默认） -->
+            <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass">
+              <NodeCardSimple
+                v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
+                :key="agent.id"
+                :agent="agent"
+                :tag="customTag(agent.id)"
+                :draggable="true"
+                :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
+                @dragstart="onDragStart(agent, $event)"
+                @dragend="onDragEnd"
+                @dragover="onDragOver(agent, $event)"
+                @drop="onDrop(agent, $event)"
+              />
+            </div>
+            <!-- 完整卡片 -->
+            <div v-else class="grid gap-3" :class="cardSizeClass">
               <NodeCard
                 v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
                 :key="agent.id"
                 :agent="agent"
-                :template="state.template"
+                :template="'full'"
                 :size="(state.meta?.card_size as any) || 'comfortable'"
                 :tag="customTag(agent.id)"
                 :sparklines="state.sparklines"

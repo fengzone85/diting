@@ -19,8 +19,13 @@ export const publicApi = {
     const list = await api.get<Agent[]>('/api/public/agents');
     return list.map((a) => ({ ...a, probes: parseProbes(a.probes) }));
   },
-  sparklines: (id?: string, range?: string) =>
-    api.get<Sparklines>(`/api/public/agents/sparklines${id ? `?id=${encodeURIComponent(id)}` : ''}${id && range ? `&range=${encodeURIComponent(range)}` : ''}`),
+  sparklines: (id?: string, range?: string) => {
+    const params = new URLSearchParams();
+    if (id) params.set('id', id);
+    if (range) params.set('range', range);
+    const qs = params.toString();
+    return api.get<Sparklines>(`/api/public/agents/sparklines${qs ? `?${qs}` : ''}`);
+  },
   probes: (id: string, range?: string, maxPoints?: number) =>
     api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}${maxPoints ? `&max_points=${maxPoints}` : ''}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),

@@ -3,7 +3,7 @@ import { publicApi } from '../services/publicApi';
 import type { Agent, Overview, Sparklines, PublicMeta } from '../services/types';
 
 export type PublicLayout = 'grid' | 'list' | 'compact';
-export type CardTemplate = 'simple' | 'visual';
+export type CardTemplate = 'simple' | 'full';
 
 export interface AppState {
   initialized: boolean;
@@ -27,7 +27,9 @@ function getStoredLayout(): PublicLayout | null {
 
 function getStoredTemplate(): CardTemplate | null {
   const v = localStorage.getItem('diting-template');
-  if (v === 'simple' || v === 'visual') return v;
+  if (v === 'simple' || v === 'full') return v;
+  // 兼容旧值 'visual' → 'full'
+  if (v === 'visual') return 'full';
   return null;
 }
 
@@ -35,7 +37,7 @@ function defaultLayout(): PublicLayout {
   return 'grid';
 }
 function defaultTemplate(): CardTemplate {
-  return 'visual';
+  return 'simple';
 }
 
 function getStoredOrder(): string[] {
@@ -139,12 +141,12 @@ async function refresh() {
   state.loading = true;
   state.error = null;
   try {
-    const needsSparklines = state.template === 'visual';
+    const needsSparklines = state.template === 'full';
     const [overview, agents, meta, sparklines] = await Promise.all([
       publicApi.overview(),
       publicApi.agents(),
       publicApi.meta(),
-      needsSparklines ? publicApi.sparklines() : Promise.resolve({}),
+      needsSparklines ? publicApi.sparklines(undefined, '24h') : Promise.resolve({}),
     ]);
     state.overview = overview;
     state.agents = agents;
