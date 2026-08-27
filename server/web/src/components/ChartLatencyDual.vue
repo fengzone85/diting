@@ -29,14 +29,31 @@ const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 
+// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+function areaGradient(color: string): any {
+  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: hexToRgba(color, 0.35) },
+    { offset: 1, color: hexToRgba(color, 0) },
+  ]);
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const r = parseInt(n.slice(0, 2), 16);
+  const g = parseInt(n.slice(2, 4), 16);
+  const b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function buildSeries() {
   return props.series.map(s => ({
     name: s.name,
     type: 'line' as const,
     showSymbol: false,
     smooth: true,
-    lineStyle: { color: s.color, width: 2 },
-    areaStyle: { color: s.color, opacity: 0.12 },
+    lineStyle: { color: s.color, width: 1.5 },
+    areaStyle: { color: areaGradient(s.color) },
     data: s.data.map(d => [d.t, d.v]),
   }));
 }
