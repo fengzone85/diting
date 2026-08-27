@@ -31,6 +31,23 @@ const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 
+// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+function areaGradient(color: string): any {
+  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: hexToRgba(color, 0.3) },
+    { offset: 1, color: hexToRgba(color, 0) },
+  ]);
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const r = parseInt(n.slice(0, 2), 16);
+  const g = parseInt(n.slice(2, 4), 16);
+  const b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 // 探测数据上报间隔（ms）：从首个 series 的时间戳推断
 function detectInterval(series: LatencySeries[]): number {
   for (const s of series) {
@@ -88,6 +105,7 @@ function buildSeries() {
       smooth: 0.1,
       connectNulls: false,
       lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 1.5 },
+      areaStyle: { color: areaGradient(s.color || PALETTE[i % PALETTE.length]) },
       data: s.data.map(d => d.v),
     })),
   };

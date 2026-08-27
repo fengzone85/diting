@@ -23,8 +23,26 @@ const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 
+// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+function areaGradient(color: string): any {
+  return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+    { offset: 0, color: hexToRgba(color, 0.35) },
+    { offset: 1, color: hexToRgba(color, 0) },
+  ]);
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const r = parseInt(n.slice(0, 2), 16);
+  const g = parseInt(n.slice(2, 4), 16);
+  const b = parseInt(n.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function baseOption(): any {
   const c = colors.value;
+  const color = props.color || '#38bdf8';
   return {
     backgroundColor: 'transparent',
     grid: { top: 30, right: 20, bottom: 30, left: 50 },
@@ -48,8 +66,8 @@ function baseOption(): any {
       type: 'line',
       showSymbol: false,
       smooth: true,
-      lineStyle: { color: props.color || '#38bdf8', width: 2 },
-      areaStyle: { color: props.color || '#38bdf8', opacity: 0.15 },
+      lineStyle: { color, width: 1.5 },
+      areaStyle: { color: areaGradient(color) },
       data: props.data.map(d => [d.t, d.v]),
     }],
   };
