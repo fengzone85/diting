@@ -130,8 +130,9 @@ function baseOption(): any {
     animation: false,
     legend: {
       top: 2,
-      textStyle: { color: c.text, fontSize: 11 },
+      textStyle: { fontSize: 11 },
       icon: 'roundRect',
+      data: built.series.map(s => ({ name: s.name, textStyle: { color: s.lineStyle.color } })),
     },
     grid: { top: 34, right: 20, bottom: 30, left: 52 },
     tooltip: {
@@ -179,6 +180,7 @@ watch(() => props.series, () => {
   chart?.setOption({
     xAxis: { data: built.labels.map(t => fmtTime(t, (built.labels.length > 1 ? (built.labels[built.labels.length - 1] - built.labels[0]) / 3600000 : 0) > 24)) },
     series: built.series,
+    legend: { data: built.series.map(s => ({ name: s.name, textStyle: { color: s.lineStyle.color } })) },
   });
 }, { deep: true });
 
