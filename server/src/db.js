@@ -168,6 +168,23 @@ const stmts = {
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
   metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // 单节点探针 SQL 层采样（详情页延迟波形专用）：只返回 maxPoints 行，保留首尾点。
+  // 此前全量拉 9.5 万行并逐行 JSON.parse(probes)（9.5 万次解析），是详情页"慢/有时无法显示"的
+  // 另一半原因。SQL 层采样后只需解析 maxPoints 次，JS 层再做 avg 桶聚合（对 2000 点做聚合极轻）。
+  metricsProbesOne: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, probes,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=? AND ts>=? AND probes IS NOT NULL
+      )
+      SELECT ts, probes
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY ts ASC`).all(agentId, sinceTs);
+  },
   prune: db.prepare('DELETE FROM metrics WHERE ts < ?'),
   getAlertState: db.prepare('SELECT * FROM alert_state WHERE agent_id=? AND type=?'),
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
@@ -195,6 +212,26 @@ const stmts = {
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
       ORDER BY agent_id, ts ASC`).all(sinceTs);
+  },
+  // 单节点 sparklines SQL 层采样（节点详情页专用）：与全量版同构，但按 agent_id 过滤。
+  // 此前详情页单节点走「全量拉取 10.8 万行 → Node 侧 downsampleSparklines 降到 2000 点」，
+  // 每次请求 2.77s + 220MB 峰值，30s 缓存一过就卡/偶发超时。SQL 层直接只返回 maxPoints 行。
+  // 必须保留首尾点（rn=1 OR rn=cnt）：详情页磁盘耗尽预测依赖 disk_used 首末值做线性外推。
+  metricsSparklinesOne: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=? AND ts>=?
+      )
+      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY ts ASC`).all(agentId, sinceTs);
   },
   // 集群级时间桶聚合（仪表盘平均 CPU/内存趋势专用）：跨所有 agent 按固定时间桶 GROUP BY，
   // 直接算出每个桶的 cpu/mem 平均值。返回行数=桶数（≤maxPoints），彻底规避「62 台 × 每 agent 2000 点
@@ -255,6 +292,9 @@ const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparkli
 // 集群级时间桶聚合（仪表盘平均曲线）：跨所有 agent 按时间桶求 cpu/mem 平均，返回行数≤maxPoints。
 const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAvg(sinceTs, spanMs, maxPoints);
 
+// 单节点 sparklines SQL 层采样（节点详情页）：只返回 maxPoints 行，保留首尾点供磁盘耗尽预测。
+const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints);
+
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {
   const a = stmts.getAgent.get(id);
@@ -268,6 +308,9 @@ const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
 
 // 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
 const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
+
+// 单节点探针 SQL 层采样（详情页延迟波形）：只返回 maxPoints 行，规避 9.5 万次 JSON.parse。
+const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbesOne(agentId, sinceTs, maxPoints);
 
 // 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
 // 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
@@ -520,8 +563,8 @@ function getDbFileSize() {
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes,
-  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsProbesOne,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
