@@ -216,6 +216,17 @@ export function stopAutoRefresh() {
   if (intervalId) { clearInterval(intervalId); intervalId = null; }
 }
 
+// 暂停意图标志（与 useAdmin 同模式）：后台管理页不需要公开页的实时数据，
+// 但 DashboardView 等仍会 useApp() 读 meta，其 onMounted 会启动轮询。
+// 用 paused 标志而非直接 stop，避免子组件 onMounted 的 start 覆盖父组件的 stop。
+let publicPaused = false;
+
+// 进入/离开后台管理页时调用：暂停/恢复公开数据轮询。
+export function setAutoRefreshPaused(p: boolean) {
+  publicPaused = p;
+  if (p) stopAutoRefresh();
+}
+
 // 轮询间隔：受控端上报间隔本身是 15s+，5s 刷新无实际收益却让 62 台规模下每 5s 拉一次
 // overview+agents+meta（agents 列表不小），故放宽到 10s。
 const REFRESH_INTERVAL_MS = 10000;
@@ -223,7 +234,8 @@ const REFRESH_INTERVAL_MS = 10000;
 export function useApp() {
   onMounted(() => {
     if (!state.initialized) refresh();
-    if (!intervalId) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
+    // 后台管理页（publicPaused=true）不轮询公开数据
+    if (!intervalId && !publicPaused) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
     // 页面切到后台/最小化时不轮询：用户看不见，请求纯属浪费（服务端也要为 62 台反复查库）。
     // 回到前台立刻补一次，保证数据是最新的。
     if (typeof document !== 'undefined' && !visibilityBound) {
@@ -231,7 +243,8 @@ export function useApp() {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           refresh();
-          if (!intervalId) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
+          // 后台管理页不重启轮询
+          if (!intervalId && !publicPaused) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
         } else if (intervalId) {
           clearInterval(intervalId);
           intervalId = null;
@@ -253,5 +266,6 @@ export function useApp() {
     customTag,
     cardSchemeKeys,
     stopAutoRefresh,
+    setAutoRefreshPaused,
   };
 }

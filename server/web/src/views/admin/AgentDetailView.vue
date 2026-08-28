@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { adminApi } from '../../services/adminApi';
-import { useAdmin, loadAdmin } from '../../composables/useAdmin';
+import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
 import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
@@ -41,29 +41,53 @@ const billingCycles = [
 
 const currencies = ['¥', '$', '€', '£'];
 
+// 用户是否已修改过表单（脏标志）。为 true 时不再用轮询回来的数据覆盖表单，
+// 避免 10s 自动刷新把正在编辑的输入清空（双保险，第一道是 onMounted 的 setAutoRefreshPaused）。
+const formDirty = ref(false);
+
+// 回填中标志：resetForm 自身会改写 form，需屏蔽它触发的 watch，否则刚回填就被判为"已编辑"
+let backfilling = false;
+
 function resetForm(src?: Agent) {
-  if (!src) {
-    form.value = {};
-    return;
+  backfilling = true;
+  try {
+    if (!src) {
+      form.value = {};
+    } else {
+      form.value = {
+        name: src.name,
+        merchant: src.merchant,
+        note: src.note,
+        expire_at: src.expire_at,
+        monthly_quota_gb: src.monthly_quota_gb,
+        price: src.price,
+        billing_cycle: src.billing_cycle ?? 30,
+        currency: src.currency || '¥',
+        auto_renewal: src.auto_renewal ?? false,
+        group: src.group || src.grp || '',
+        country: src.country || '',
+        probe_targets: src.probe_targets || '',
+      };
+      commandProbeTargets.value = src.probe_targets || '';
+    }
+    formDirty.value = false; // 回填后视为"未编辑"
+  } finally {
+    backfilling = false;
   }
-  form.value = {
-    name: src.name,
-    merchant: src.merchant,
-    note: src.note,
-    expire_at: src.expire_at,
-    monthly_quota_gb: src.monthly_quota_gb,
-    price: src.price,
-    billing_cycle: src.billing_cycle ?? 30,
-    currency: src.currency || '¥',
-    auto_renewal: src.auto_renewal ?? false,
-    group: src.group || src.grp || '',
-    country: src.country || '',
-    probe_targets: src.probe_targets || '',
-  };
-  commandProbeTargets.value = src.probe_targets || '';
 }
 
-watch(agent, (a) => resetForm(a), { immediate: true });
+// agent 变化（含 10s 轮询替换 state.agents 产生的新对象引用）时回填表单。
+// 若用户已编辑过则跳过，保护未保存的输入。
+watch(agent, (a) => {
+  if (formDirty.value) return;
+  resetForm(a);
+}, { immediate: true });
+
+// 深度监听表单：任何用户输入都置脏（无需在每个 v-model 上挂事件，避免遗漏）
+watch(form, () => {
+  if (backfilling) return;
+  formDirty.value = true;
+}, { deep: true });
 
 async function fetchCommands() {
   try {
@@ -73,18 +97,6 @@ async function fetchCommands() {
     error.value = (e as Error).message || t('agent.loadCmdsFailed');
   }
 }
-
-onMounted(async () => {
-  loading.value = true;
-  try {
-    await loadAdmin();
-    await fetchCommands();
-  } catch (e) {
-    error.value = (e as Error).message || t('common.error');
-  } finally {
-    loading.value = false;
-  }
-});
 
 async function save() {
   saving.value = true;
@@ -176,6 +188,10 @@ async function changeRange(r: '1h' | '6h' | '24h' | '7d' | '30d') {
 }
 
 onMounted(async () => {
+  // 本页是编辑表单：进入时暂停全局 10s 自动刷新（与 SettingsView/TemplateView 一致）。
+  // 否则 loadAdmin() 每 10s 把 state.agents 整数组替换为新对象引用，watch(agent) 会触发
+  // resetForm()，把用户正在编辑但未保存的输入全部覆盖掉（数据丢失）。
+  setAutoRefreshPaused(true);
   loading.value = true;
   try {
     await loadAdmin();
@@ -186,6 +202,11 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+});
+
+onUnmounted(() => {
+  // 离开本页恢复自动刷新
+  setAutoRefreshPaused(false);
 });
 
 function formatDate(ts?: number) {

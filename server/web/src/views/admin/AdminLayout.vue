@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import Sidebar from '../../components/admin/Sidebar.vue';
 import { loadAdmin, startAutoRefresh, stopAutoRefresh } from '../../composables/useAdmin';
+import { setAutoRefreshPaused as setPublicAutoRefreshPaused } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 
 const menuOpen = ref(false);
@@ -10,8 +11,15 @@ const { t } = useI18n();
 onMounted(() => {
   loadAdmin();
   startAutoRefresh();
+  // 后台管理页不需要公开页实时数据（DashboardView 等仍 useApp() 读 meta，
+  // 其 onMounted 会启动 10s 轮询，这里暂停掉，避免后台无谓拉 public/agents+meta+overview）。
+  setPublicAutoRefreshPaused(true);
 });
-onUnmounted(stopAutoRefresh);
+onUnmounted(() => {
+  stopAutoRefresh();
+  // 离开后台恢复公开页轮询
+  setPublicAutoRefreshPaused(false);
+});
 </script>
 
 <template>
