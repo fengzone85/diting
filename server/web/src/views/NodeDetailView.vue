@@ -45,17 +45,23 @@ const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-// 本节点时序历史（CPU/内存/磁盘 IO/负载/温度/swap 六图 + 磁盘耗尽预测）。
+// 本节点时序历史（CPU/内存/磁盘 IO/负载/温度/swap 六图）。
 // 刻意【不复用 useApp 的全局 state.sparklines】：首页 full 模板会按 5s 轮询刷新该全局对象，
-// 且 template!=='full' 时会被置为 {}，把详情页补拉的 30d 数据清空 → 六张图全空白。
+// 且 template!=='full' 时会被置为 {}，把详情页补拉的数据清空 → 六张图全空白。
 // 详情页数据生命周期与首页不同，故用组件内独立 ref 彻底解耦。
 const sparkRows = ref<SparklinePoint[]>([]);
+// 磁盘耗尽预测专用：固定 30d。切 range 时图表数据会变，但 ETA 必须基于 30d 长窗口，
+// 否则短窗口噪声会让「剩余天数」剧烈抖动，故与图表数据分开维护。
+const sparkRows30d = ref<SparklinePoint[]>([]);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
 const RANGES = ['1h', '6h', '24h', '7d', '30d'];
 // 默认 24h：跨度 ≤24 小时时 ChartLatencyMulti 的 X 轴走 showDate=false 分支，
 // 标签显示为纯小时（HH:mm），符合「默认看小时级曲线」的预期；30d 会显示 MM/DD HH:mm。
 const currentRange = ref('24h');
+// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）的时间范围，默认 30d。
+const CHART_RANGES = ['1h', '6h', '24h', '7d', '30d'];
+const chartRange = ref('30d');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '6h': 1000, '24h': 1500, '7d': 2000, '30d': 3000 };
 
@@ -222,18 +228,38 @@ const probeSeriesList = computed(() =>
   }))
 );
 
+async function loadSpark(range: string) {
+  const sl = await publicApi.sparklines(agentId.value, range);
+  sparkRows.value = sl?.[agentId.value] || [];
+}
+
 async function load() {
   loading.value = true;
   error.value = null;
   try {
-    // 拉取本节点 30d 历史（含 disk_used 字节序列，供磁盘耗尽预测）。
-    // 写入组件内 sparkRows，不用全局 state.sparklines（会被首页 5s 轮询清空，见 sparkRows 注释）。
-    // 用 30d 长窗口取真实磁盘增量，避免短窗口噪声导致 ETA 剧烈抖动（komari 仅 1d 留存，diting 有完整历史）
-    const sl = await publicApi.sparklines(agentId.value, '30d');
-    sparkRows.value = sl?.[agentId.value] || [];
-    // 对齐 Komari：初始拉当前 range（默认 30d），后端按 max_points 降采样返回。
-    // 不再一次拉 30d 全量 + 前端 filter（那会导致切短 range 时点数被长窗口挤占而过稀）。
+    // 图表数据按当前 chartRange 拉取；写入组件内 sparkRows，不用全局 state.sparklines
+    //（会被首页 5s 轮询清空，见 sparkRows 注释）。
+    await loadSpark(chartRange.value);
+    // 磁盘耗尽预测固定用 30d 长窗口，避免短窗口噪声导致 ETA 剧烈抖动
+    //（komari 仅 1d 留存，diting 有完整历史）。切 range 时不重拉这份。
+    const sl30 = await publicApi.sparklines(agentId.value, '30d');
+    sparkRows30d.value = sl30?.[agentId.value] || [];
+    // 对齐 Komari：初始拉当前 range，后端按 max_points 降采样返回。
     await loadProbes(currentRange.value);
+  } catch (e) {
+    error.value = (e as Error).message || t('common.error');
+  } finally {
+    loading.value = false;
+  }
+}
+
+// 六图时间范围切换（1h/6h/24h/7d/30d）：只重拉图表数据，不影响磁盘预测的 30d 基线。
+async function switchChartRange(range: string) {
+  if (range === chartRange.value) return;
+  chartRange.value = range;
+  loading.value = true;
+  try {
+    await loadSpark(range);
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
   } finally {
@@ -264,7 +290,9 @@ function switchRange(range: string) {
 // 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推
 // 展示层（已用/总容量/占用率）与 ETA 的剩余空间统一用 diskAgg（所有物理盘聚合），避免只统计单盘
 const diskPredict = computed(() => {
-  const sl = sparkline.value;
+  // 用固定 30d 基线（sparkRows30d）的 disk_used（B）做首末点线性外推：
+  // 与图表显示范围解耦，避免切到 1h/6h 等短 range 时 ETA 剧烈抖动。
+  const sl = sparkRows30d.value.length ? sparkRows30d.value : sparkline.value;
   // diskAgg 为所有物理盘聚合值（无 disks 时回退单盘），保证进度条/百分比/已用容量均为整机口径
   const agg = diskAgg.value;
   const total = agg.total;
@@ -489,6 +517,24 @@ onMounted(load);
                   <span class="truncate whitespace-nowrap text-xs sm:text-sm text-content">↑ {{ formatBitsPerSecond(agent.net_tx_rate) }} ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}</span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- 六图时间范围切换：只影响 CPU/内存/磁盘IO/负载/温度/swap 的显示范围；
+               磁盘耗尽预测固定用 30d 基线，不随此切换变化，避免 ETA 抖动。 -->
+          <div class="mb-2 flex flex-wrap items-center gap-1">
+            <span class="mr-1 text-xs text-secondary">{{ t('node.chart.range') }}</span>
+            <div class="flex gap-1">
+              <button
+                v-for="r in CHART_RANGES"
+                :key="r"
+                @click="switchChartRange(r)"
+                class="rounded-lg px-2 py-1 text-xs transition-colors"
+                :class="[
+                  chartRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-secondary hover:bg-hover',
+                  loading ? 'opacity-60 pointer-events-none' : '',
+                ]"
+              >{{ r }}</button>
             </div>
           </div>
 

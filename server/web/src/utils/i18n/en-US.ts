@@ -299,6 +299,7 @@ export const enUS: Record<string, string> = {
   'node.metric.quota': 'Traffic Quota',
   'node.metric.netRate': 'Network Rate',
   'node.unlimitedTraffic': 'Unlimited',
+  'node.chart.range': 'Range',
   'node.chart.cpu': 'CPU %',
   'node.chart.mem': 'Memory %',
   'node.chart.net': 'Network I/O (bps)',
