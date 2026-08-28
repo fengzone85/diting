@@ -56,12 +56,13 @@ const sparkRows30d = ref<SparklinePoint[]>([]);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
 const RANGES = ['1h', '6h', '24h', '7d', '30d'];
-// 默认 24h：跨度 ≤24 小时时 ChartLatencyMulti 的 X 轴走 showDate=false 分支，
-// 标签显示为纯小时（HH:mm），符合「默认看小时级曲线」的预期；30d 会显示 MM/DD HH:mm。
-const currentRange = ref('24h');
-// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）的时间范围，默认 30d。
+// 默认 1h：跨度 ≤24h 时 ChartLatencyMulti 的 X 轴走 showDate=false 分支，
+// 标签显示为纯小时（HH:mm）；30d 会显示 MM/DD HH:mm。1h 同样是小时标签且更聚焦于近期。
+const currentRange = ref('1h');
+// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）的时间范围，默认 1h。
+// 注意：磁盘耗尽预测不走这里，它固定用 sparkRows30d 的 30d 基线，故默认改 1h 不影响 ETA。
 const CHART_RANGES = ['1h', '6h', '24h', '7d', '30d'];
-const chartRange = ref('30d');
+const chartRange = ref('1h');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '6h': 1000, '24h': 1500, '7d': 2000, '30d': 3000 };
 
