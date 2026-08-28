@@ -11,7 +11,7 @@ import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
-import type { Probes, ChartPoint } from '../services/types';
+import type { Probes, ChartPoint, SparklinePoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber, formatCurrency, formatRemaining } from '../utils/format';
 import {
   Cpu,
@@ -44,6 +44,12 @@ const agentId = computed(() => route.params.id as string);
 const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+// 本节点时序历史（CPU/内存/磁盘 IO/负载/温度/swap 六图 + 磁盘耗尽预测）。
+// 刻意【不复用 useApp 的全局 state.sparklines】：首页 full 模板会按 5s 轮询刷新该全局对象，
+// 且 template!=='full' 时会被置为 {}，把详情页补拉的 30d 数据清空 → 六张图全空白。
+// 详情页数据生命周期与首页不同，故用组件内独立 ref 彻底解耦。
+const sparkRows = ref<SparklinePoint[]>([]);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
 const RANGES = ['1h', '6h', '24h', '7d', '30d'];
@@ -168,7 +174,7 @@ const neighborIds = computed(() => {
   };
 });
 
-const sparkline = computed(() => state.sparklines[agentId.value] || []);
+const sparkline = computed(() => sparkRows.value);
 const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? d.cpu_percent ?? 0 })));
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
 const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
@@ -218,12 +224,11 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    // 详情页可能未被视觉模板预载 sparkline，单独补拉本节点历史（含 disk_used 字节序列，供耗尽预测）
-    if (!state.sparklines[agentId.value]) {
-      // 用 30d 长窗口取真实磁盘增量，避免短窗口噪声导致 ETA 剧烈抖动（komari 仅 1d 留存，diting 有完整历史）
-      const sl = await publicApi.sparklines(agentId.value, '30d');
-      state.sparklines = { ...state.sparklines, ...sl };
-    }
+    // 拉取本节点 30d 历史（含 disk_used 字节序列，供磁盘耗尽预测）。
+    // 写入组件内 sparkRows，不用全局 state.sparklines（会被首页 5s 轮询清空，见 sparkRows 注释）。
+    // 用 30d 长窗口取真实磁盘增量，避免短窗口噪声导致 ETA 剧烈抖动（komari 仅 1d 留存，diting 有完整历史）
+    const sl = await publicApi.sparklines(agentId.value, '30d');
+    sparkRows.value = sl?.[agentId.value] || [];
     // 对齐 Komari：初始拉当前 range（默认 30d），后端按 max_points 降采样返回。
     // 不再一次拉 30d 全量 + 前端 filter（那会导致切短 range 时点数被长窗口挤占而过稀）。
     await loadProbes(currentRange.value);
