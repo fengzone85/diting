@@ -125,9 +125,15 @@ function baseOption(): any {
   let span = 0;
   if (labels.length > 1) span = (labels[labels.length - 1] - labels[0]) / 3600000; // hours
   const showDate = span > 24;
+  // legend 的图标颜色取自 ECharts 的【全局调色板 option.color】，而非 series 的 lineStyle.color。
+  // 若只设 series.lineStyle.color 而不设顶层 color，legend 会退回默认调色板
+  // (#5470c6/#91cc75/#fac858/#ee6666)，导致图例与曲线颜色不一致（实测图例像素即默认色）。
+  // 故这里显式给出与 series 完全一致的颜色序列。
+  const seriesColors = built.series.map(s => s.lineStyle.color);
   return {
     backgroundColor: 'transparent',
     animation: false,
+    color: seriesColors,
     legend: {
       top: 2,
       textStyle: { fontSize: 11 },
@@ -178,6 +184,8 @@ watch(colors, () => chart?.setOption(baseOption(), true));
 watch(() => props.series, () => {
   const built = buildSeries();
   chart?.setOption({
+    // 同步更新调色板，保证 legend 图标/文字与曲线颜色始终一致（见 baseOption 注释）
+    color: built.series.map(s => s.lineStyle.color),
     xAxis: { data: built.labels.map(t => fmtTime(t, (built.labels.length > 1 ? (built.labels[built.labels.length - 1] - built.labels[0]) / 3600000 : 0) > 24)) },
     series: built.series,
     legend: { data: built.series.map(s => ({ name: s.name, textStyle: { color: s.lineStyle.color } })) },
