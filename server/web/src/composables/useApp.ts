@@ -75,6 +75,8 @@ export const state = reactive<AppState>({
 });
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
+// visibilitychange 监听只绑一次（useApp 会被多个组件调用）
+let visibilityBound = false;
 let serverOrder: string[] = [];
 let localOrder: string[] = getStoredOrder();
 // 用户是否在本地主动选择过布局（优先于服务端默认配置）
@@ -137,7 +139,13 @@ export const groupedAgents = computed<Record<string, Agent[]>>(() => {
   return groups;
 });
 
+// 并发保护：慢网络/大数据量下上一次 refresh 可能尚未完成，若不加锁，5s 轮询会不断叠加请求
+//（实测页面停留期间累积 188 条请求）。进行中直接跳过本次，避免请求雪崩。
+let refreshing = false;
+
 async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
   state.loading = true;
   state.error = null;
   try {
@@ -162,6 +170,7 @@ async function refresh() {
     state.error = (e as Error).message || '加载失败';
   } finally {
     state.loading = false;
+    refreshing = false;
   }
 }
 
@@ -207,10 +216,28 @@ export function stopAutoRefresh() {
   if (intervalId) { clearInterval(intervalId); intervalId = null; }
 }
 
+// 轮询间隔：受控端上报间隔本身是 15s+，5s 刷新无实际收益却让 62 台规模下每 5s 拉一次
+// overview+agents+meta（agents 列表不小），故放宽到 10s。
+const REFRESH_INTERVAL_MS = 10000;
+
 export function useApp() {
   onMounted(() => {
     if (!state.initialized) refresh();
-    if (!intervalId) intervalId = setInterval(refresh, 5000);
+    if (!intervalId) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
+    // 页面切到后台/最小化时不轮询：用户看不见，请求纯属浪费（服务端也要为 62 台反复查库）。
+    // 回到前台立刻补一次，保证数据是最新的。
+    if (typeof document !== 'undefined' && !visibilityBound) {
+      visibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refresh();
+          if (!intervalId) intervalId = setInterval(refresh, REFRESH_INTERVAL_MS);
+        } else if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      });
+    }
   });
 
   return {
