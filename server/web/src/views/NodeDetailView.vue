@@ -53,7 +53,9 @@ const sparkRows = ref<SparklinePoint[]>([]);
 
 // 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
 const RANGES = ['1h', '6h', '24h', '7d', '30d'];
-const currentRange = ref('30d'); // 默认 30d
+// 默认 24h：跨度 ≤24 小时时 ChartLatencyMulti 的 X 轴走 showDate=false 分支，
+// 标签显示为纯小时（HH:mm），符合「默认看小时级曲线」的预期；30d 会显示 MM/DD HH:mm。
+const currentRange = ref('24h');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '6h': 1000, '24h': 1500, '7d': 2000, '30d': 3000 };
 
