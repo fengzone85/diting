@@ -160,15 +160,34 @@ const diskAgg = computed(() => {
   const a = agent.value;
   if (!a) return { used: 0, total: 0, pct: 0 };
   const list = Array.isArray(a.disks) ? a.disks : [];
-  if (list.length === 0) {
-    return { used: a.disk_used || 0, total: a.disk_total || 0, pct: a.disk_pct || 0 };
+  let used = 0, total = 0, pct = 0;
+  if (list.length > 0) {
+    for (const d of list) {
+      used += Number(d.used) || 0;
+      total += Number(d.total) || 0;
+    }
+    pct = total > 0 ? (used / total) * 100 : 0;
+  } else {
+    used = a.disk_used || 0;
+    total = a.disk_total || 0;
+    pct = a.disk_pct || (total > 0 ? (used / total) * 100 : 0);
   }
-  let used = 0, total = 0;
-  for (const d of list) {
-    used += Number(d.used) || 0;
-    total += Number(d.total) || 0;
+  // 离线回退：agent 实时接口对离线节点不返回 disks/disk_total（实测均为 0/空数组），
+  // 会导致 diskPredict 因 total=0 返回 null、磁盘卡片正文整块消失。
+  // 历史时序每行都带 disk_total/disk_used，这里取最后一个有效采样点补上，
+  // 使离线节点仍能显示其最后已知容量与耗尽预测。
+  if (!total) {
+    const src = sparkRows30d.value.length ? sparkRows30d.value : sparkRows.value;
+    for (let i = src.length - 1; i >= 0; i--) {
+      const r = src[i];
+      if (r && Number(r.disk_total) > 0) {
+        total = Number(r.disk_total) || 0;
+        used = Number(r.disk_used) || 0;
+        break;
+      }
+    }
+    pct = total > 0 ? (used / total) * 100 : 0;
   }
-  const pct = total > 0 ? (used / total) * 100 : 0;
   return { used, total, pct };
 });
 
