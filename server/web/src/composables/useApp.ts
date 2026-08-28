@@ -143,6 +143,18 @@ export const groupedAgents = computed<Record<string, Agent[]>>(() => {
 //（实测页面停留期间累积 188 条请求）。进行中直接跳过本次，避免请求雪崩。
 let refreshing = false;
 
+// sparklines 拉取（in-flight 去重）：切到完整卡片时的预热与 refresh 内部共用同一个请求，
+// 既消除空窗又不产生重复请求。
+let sparkInflight: Promise<Sparklines> | null = null;
+function fetchSparklines(): Promise<Sparklines> {
+  if (!sparkInflight) {
+    sparkInflight = publicApi.sparklines(undefined, '24h').finally(() => {
+      sparkInflight = null;
+    });
+  }
+  return sparkInflight;
+}
+
 async function refresh() {
   if (refreshing) return;
   refreshing = true;
@@ -154,7 +166,7 @@ async function refresh() {
       publicApi.overview(),
       publicApi.agents(),
       publicApi.meta(),
-      needsSparklines ? publicApi.sparklines(undefined, '24h') : Promise.resolve({}),
+      needsSparklines ? fetchSparklines() : Promise.resolve({} as Sparklines),
     ]);
     state.overview = overview;
     state.agents = agents;
@@ -180,9 +192,20 @@ export function setLayout(v: PublicLayout) {
 }
 
 export function setTemplate(v: CardTemplate) {
+  const prev = state.template;
   state.template = v;
   localStorage.setItem('diting-template', v);
   refresh().catch(() => {});
+  // 切到「完整卡片」时预热 sparklines，消除曲线空窗：
+  // state.template 改了会立刻重渲染完整卡片，但 refresh() 要等 overview/agents/meta 三个接口
+  // 都返回才写 state.sparklines，这期间 sparklines 还是上一轮 simple 模式写入的 {}，
+  // 所有卡片首帧曲线为空（一个 RTT，62 台下可达数百 ms~数秒）。
+  // 这里单独提前拉（与 refresh 共用 in-flight 请求，不重复），回来立即填充。
+  if (v === 'full' && prev !== 'full' && Object.keys(state.sparklines).length === 0) {
+    fetchSparklines()
+      .then((sl) => { state.sparklines = sl; })
+      .catch(() => {});
+  }
 }
 
 export function setSearch(v: string) {
