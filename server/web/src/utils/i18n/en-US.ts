@@ -303,7 +303,8 @@ export const enUS: Record<string, string> = {
   'node.chart.cpu': 'CPU %',
   'node.chart.mem': 'Memory %',
   'node.chart.net': 'Network I/O (bps)',
-  'node.chart.diskIo': 'Disk I/O (B/s)',
+  // Y 轴已按数值自动换算，标题不再写死单位
+  'node.chart.diskIo': 'Disk I/O Rate',
   'node.chart.load': 'Load 1m',
   'node.chart.temp': 'temp (°C)',
   'node.chart.swap': 'Swap %',
