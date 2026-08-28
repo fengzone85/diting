@@ -299,6 +299,7 @@ export const zhCN: Record<string, string> = {
   'node.metric.quota': '流量配额',
   'node.metric.netRate': '网络速率',
   'node.unlimitedTraffic': '无限流量',
+  'node.chart.range': '范围',
   'node.chart.cpu': 'CPU %',
   'node.chart.mem': '内存 %',
   'node.chart.net': '网络上下行 (bps)',
