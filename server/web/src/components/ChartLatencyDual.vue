@@ -10,9 +10,16 @@ import {
   DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { formatBytesPerSecond } from '../utils/format';
 import type { ChartPoint } from '../services/types';
 
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer]);
+
+// Y 轴标签：磁盘速率原始值为 B/s，数值常达十亿量级（如 5346138861），
+// 直接显示会占满坐标宽度。这里自动换算为 KB/s、MB/s、GB/s。
+function fmtRate(v: number): string {
+  return formatBytesPerSecond(v, 1);
+}
 
 interface SeriesSpec {
   name: string;
@@ -68,6 +75,9 @@ function baseOption(): any {
       backgroundColor: c.tooltipBg,
       borderColor: c.tooltipBorder,
       textStyle: { color: c.text },
+      // 悬停数值同样换算单位，避免 tooltip 里出现 5346138861 这类长数字
+      valueFormatter: (v: unknown) =>
+        typeof v === 'number' ? formatBytesPerSecond(v, 2) : String(v ?? '-'),
     },
     legend: {
       top: 0,
@@ -82,7 +92,7 @@ function baseOption(): any {
     yAxis: {
       type: 'value',
       splitLine: { lineStyle: { color: c.splitLine, type: 'dashed' } },
-      axisLabel: { color: c.text },
+      axisLabel: { color: c.text, formatter: fmtRate },
     },
     series: buildSeries(),
   };

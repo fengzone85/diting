@@ -303,7 +303,8 @@ export const zhCN: Record<string, string> = {
   'node.chart.cpu': 'CPU %',
   'node.chart.mem': '内存 %',
   'node.chart.net': '网络上下行 (bps)',
-  'node.chart.diskIo': '磁盘读写 (B/s)',
+  // Y 轴已按数值自动换算 B/s / KB/s / MB/s / GB/s，标题不再写死单位
+  'node.chart.diskIo': '磁盘读写速率',
   'node.chart.load': 'Load 1m',
   'node.chart.temp': '温度 (°C)',
   'node.chart.swap': 'Swap %',

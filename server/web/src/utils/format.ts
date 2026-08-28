@@ -18,6 +18,18 @@ export function formatBitsPerSecond(bps: number | undefined, decimals = 2): stri
   return `${parseFloat((bps / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
+// 磁盘读写速率（受控端采集为 B/s）。坐标轴标签用 decimals=1 更紧凑，
+// 基准 1024 与 formatBytes 保持一致（存储容量同惯例）；后缀带 /s 与容量单位区分。
+export function formatBytesPerSecond(bps: number | undefined, decimals = 2): string {
+  if (bps === undefined || bps === null || Number.isNaN(bps)) return '-';
+  if (bps === 0) return '0 B/s';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+  const i = Math.min(Math.floor(Math.log(bps) / Math.log(k)), sizes.length - 1);
+  return `${parseFloat((bps / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
 export function formatDuration(seconds: number | undefined): string {
   if (seconds === undefined || seconds === null || Number.isNaN(seconds)) return '-';
   const d = Math.floor(seconds / 86400);
