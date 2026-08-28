@@ -501,16 +501,20 @@ router.get('/public/agents/sparklines', (req, res) => {
   // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
   // 用只含指标列（不含 probes 大字段）的轻量查询，避免 SELECT * 物化全行（30d 5.3s -> 2.3s）
   // 无 id 全量请求：SQL 层窗口函数采样（757K 行→~7200 行，减少 100x 传输+JS 处理）。
+  // 有 id 单节点请求（详情页）：同样走 SQL 层采样 metricsSparklinesOne。
+  //   此前单节点是「全量拉 10.8 万行 → Node 侧降采样」，每次 2.77s + 220MB 峰值，
+  //   30s 缓存一过就慢/偶发超时（详情页图表"慢/有时无法显示"）。SQL 层直接只返回 maxPoints 行。
   const mp = clampInt(req.query.max_points, 60, 20000)
     || (onlyId ? sparkMaxPoints(range) : SPARK_ALL_MAX_POINTS);
   const t0 = Date.now();
   const rows = onlyId
-    ? db.getMetricsSparklines(onlyId, Date.now() - sec * 1000)
+    ? db.getMetricsSparklinesOne(onlyId, Date.now() - sec * 1000, mp)
     : db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
   // 后端降采样（对齐 Komari max_points 契约）。
   // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
   // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
-  // 有 id 的单节点请求（详情页磁盘耗尽预测）：用 range 对应上限（30d→2000 足够线性外推）。
+  // 有 id 的单节点请求（详情页磁盘耗尽预测）：SQL 层已按 range 上限采样（30d→2000 足够线性外推），
+  // 此处 downsampleSparklines 仅作幂等兜底（SQL 采样已保留首尾点，若点数已≤mp 会原样返回）。
   const byAgent = downsampleSparklines(rows, mp);
   for (const id of Object.keys(byAgent)) {
     byAgent[id] = byAgent[id].map(r => ({
@@ -590,8 +594,12 @@ router.get('/public/agents/:id/probes', (req, res) => {
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'agent not found' });
   const sec = RANGES[req.query.range] || 21600;
+  // 提前算出本请求的每 label 点数上限（供 SQL 层采样 + 后续桶聚合共用）。
+  const reqMaxPoints = clampInt(req.query.max_points) || PROBES_MAX_POINTS;
   // 仅取 ts+probes 两列：30d 近 9.5 万行，SELECT * 物化全行开销大（实测 5.4s vs 0.56s）
-  const rows = db.getMetricsProbes(a.id, Date.now() - sec * 1000);
+  // 再叠加 SQL 层采样：全量 9.5 万行 → maxPoints 行，逐行 JSON.parse 次数同比骤降。
+  // 采样点数取 max(上限, 5000) 的 3 倍冗余，保证后续 avg 桶聚合仍有足够样本、统计不失真。
+  const rows = db.getMetricsProbesOne(a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
   const series = {}; // label -> [{ts, ms}]
   for (const r of rows) {
     if (!r.probes) continue;
@@ -613,7 +621,7 @@ router.get('/public/agents/:id/probes', (req, res) => {
     // 请求参数化降采样（对齐 Komari downsample/max_points/aggregation 契约）：
     //   max_points=N：每 label 目标点数上限（缺省用 PROBES_MAX_POINTS）。以该值反推动态桶宽做时间桶聚合。
     //   aggregation=avg|last：avg（默认，对齐 Komari）取桶内延迟平均；last 取桶内最后一个点。
-    const maxPoints = clampInt(req.query.max_points) || PROBES_MAX_POINTS;
+    const maxPoints = reqMaxPoints;
     const agg = req.query.aggregation === 'last' ? 'last' : 'avg';
     for (const label of Object.keys(series)) {
       const arr = series[label];
