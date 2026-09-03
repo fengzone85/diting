@@ -12,7 +12,7 @@ description: 无 Docker 的原生 systemd 部署方式
 | 部署形态 | 内存基线 | 前置依赖 | 镜像大小 |
 |---|---|---|---|
 | Docker 容器 | 65-150MB | Docker Engine (~120MB) | ~80MB |
-| **原生 systemd** | **12-25MB** | **Python 3.6+** | **~50KB** |
+| **原生 systemd** | **12-25MB** | **Python 3.8+** | **~50KB** |
 | 差值 | **~125MB** | — | — |
 
 > 同一套代码（`agent.py` + `collector.py`），零改动，全在部署层。
@@ -20,7 +20,7 @@ description: 无 Docker 的原生 systemd 部署方式
 ## 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
 ```
 
 支持交互模式和非交互模式：
@@ -45,7 +45,7 @@ curl -fsSL ... | bash -s -- --token "YOUR_TOKEN" --url "https://monitor.example.
 
 ```ini
 [Unit]
-Description=DiTing Lite Agent
+Description=DiTing Agent
 After=network-online.target
 Wants=network-online.target
 
@@ -93,7 +93,7 @@ systemctl restart diting-agent
 systemctl stop diting-agent
 
 # 卸载（幂等）
-curl -fsSL .../unditing.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/uninstall.sh | bash
 ```
 
 ## 与 Docker 形态共存

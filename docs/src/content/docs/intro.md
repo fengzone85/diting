@@ -1,15 +1,15 @@
 ---
 title: 简介
-description: DiTing Lite — 轻量、安全、自托管的服务器监控系统
+description: DiTing — 轻量、安全、自托管的服务器监控系统
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-# DiTing Lite
+# DiTing
 
 **轻量、安全、自托管的服务器监控系统。**
 
-DiTing Lite 是一个纯状态监控方案，专注于「在线/负载/CPU/内存/硬盘/流量」等核心指标，
+DiTing 是一个纯状态监控方案，专注于「在线/负载/CPU/内存/硬盘/流量」等核心指标，
 不带远程控制、不带指令通道，从架构层面消除 RCE 风险。
 
 ## 核心特性
@@ -19,7 +19,7 @@ DiTing Lite 是一个纯状态监控方案，专注于「在线/负载/CPU/内�
     受控端仅出站上报，服务端无法向 Agent 下发任何指令。从架构层面杜绝 RCE。
   </Card>
   <Card title="🪶 轻量低耗" icon="seti:rocket">
-    原生 Linux 部署内存占用 12-25MB；Python 受控端仅 ~200 行，零外部依赖。
+    原生 Linux 部署内存占用 12-25MB；受控端纯标准库、零外部依赖。
   </Card>
   <Card title="🛡️ 安全优先" icon="seti:shield">
     TOTP 2FA、CSP、HTTPS 白名单、恒定时间比较、RBAC 只读账号、Prometheus /metrics。
@@ -46,13 +46,13 @@ DiTing Lite 是一个纯状态监控方案，专注于「在线/负载/CPU/内�
 - 🔐 安全偏执型运维 — 不接受任何远程控制能力
 - 💾 小内存机器用户（256-512MB）— 资源占用极低
 - 🕵️ 隐私优先者 — 数据完全自主，不经过第三方
-- 📋 代码审计/合规需求 — 全量代码 < 800 行，可人工审计
+- 📋 代码审计/合规需求 — 核心受控端纯标准库、零依赖，服务端结构清晰可审计
 
 ## 不适用于
 
-- 需要 Web 终端 / SSH 远程控制（推荐哪吒 / Komari）
-- 需要 SSL 证书 / 网站监控（推荐哪吒）
-- 需要花哨 UI / 零运维部署（推荐 cf-vps-monitor）
+- 需要 Web 终端 / SSH 远程控制（可考虑哪吒 / Komari 等指令通道型监控）
+- 需要 SSL 证书到期 / 网站拨测监控
+- 需要开箱即用的零运维 SaaS 监控
 
 ## 下一步
 

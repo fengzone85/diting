@@ -5,12 +5,12 @@ description: Windows 受控端部署
 
 # Windows 部署
 
-DiTing Lite 受控端支持 Windows，使用 psutil 采集系统指标。
+DiTing 受控端支持 Windows，使用 psutil 采集系统指标。
 
 ## 前置条件
 
 - Windows 10 / Server 2016 及以上
-- Python 3.6+（[下载](https://www.python.org/downloads/)）
+- Python 3.8+（[下载](https://www.python.org/downloads/)）
 
 ## 安装
 
@@ -20,12 +20,14 @@ DiTing Lite 受控端支持 Windows，使用 psutil 采集系统指标。
 cd C:\
 git clone https://github.com/fengzone85/diting.git
 cd diting\agent\windows
-.\install.ps1
+.\install.ps1 -RegisterTask -ServerUrl "https://monitor.example.com" -AgentId "win-pc-01" -AgentToken "<Token>"
 ```
 
-按提示输入：
-- Server URL（如 `https://monitor.example.com`）
-- Agent Token
+参数说明：
+- `-RegisterTask`：注册「登录即启动」的计划任务，使 agent 后台常驻
+- `-ServerUrl`：服务端 URL（如 `https://monitor.example.com`）
+- `-AgentId`：节点标识
+- `-AgentToken`：节点 Token
 
 ## 采集支持
 
@@ -45,25 +47,28 @@ Windows 版受控端通过 psutil 采集：
 
 ## 服务管理
 
-安装后注册为 Windows 服务，随系统自启。
+安装后注册为「登录即启动」的计划任务（任务名 `HostMonitorAgent-<AgentId>`），随系统登录自启。
 
 ```powershell
-# 查看状态
-Get-Service SimpleProbeAgent
+# 查看任务状态
+Get-ScheduledTask -TaskName "HostMonitorAgent-<AgentId>"
 
-# 启动/停止
-Start-Service SimpleProbeAgent
-Stop-Service SimpleProbeAgent
+# 手动运行 / 停止
+Start-ScheduledTask -TaskName "HostMonitorAgent-<AgentId>"
+Stop-ScheduledTask -TaskName "HostMonitorAgent-<AgentId>"
 
-# 查看日志
-Get-EventLog -LogName Application -Source SimpleProbeAgent -Newest 50
+# 查看最近运行结果
+Get-ScheduledTaskInfo -TaskName "HostMonitorAgent-<AgentId>"
 ```
 
 ## 卸载
 
-以管理员身份运行：
+删除计划任务并移除安装目录：
 
 ```powershell
-cd C:\diting\agent\windows
-.\uninstall.ps1
+# 删除计划任务
+Unregister-ScheduledTask -TaskName "HostMonitorAgent-<AgentId>" -Confirm:$false
+
+# 删除安装目录
+Remove-Item -Recurse -Force "C:\diting-agent"
 ```

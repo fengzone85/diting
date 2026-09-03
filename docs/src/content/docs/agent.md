@@ -5,14 +5,14 @@ description: Agent 部署指南
 
 # 受控端部署
 
-DiTing Lite 受控端支持三种部署形态，数据格式与上报契约完全相同，仅实现语言与部署方式不同。
+DiTing 受控端支持三种部署形态，数据格式与上报契约完全相同，仅实现语言与部署方式不同。
 
 ## 形态对比
 
 | | Docker (Python) | 原生 systemd (Python) | Go 二进制 |
 |---|---|---|---|
 | 内存占用 | 65-150MB | 12-25MB | <10MB |
-| 前置依赖 | Docker Engine | Python 3.6+ | Go 工具链（仅构建期） |
+| 前置依赖 | Docker Engine | Python 3.8+ | Go 工具链（仅构建期） |
 | 安全隔离 | 容器 + diting 用户 + cap-drop(仅NET_RAW) + 只读挂载 | systemd 14 项加固 | scratch + USER 1000 + cap-drop（规划中） |
 | 部署复杂度 | 一条命令 | 交互脚本 | 编译二进制 / 待发布镜像 |
 | 适用场景 | 已有 Docker 环境 | 精简系统 / 小内存 | 极小体积 / 纯 Go 工具链 |
@@ -24,19 +24,23 @@ DiTing Lite 受控端支持三种部署形态，数据格式与上报契约完�
 docker run -d \
   --name diting-agent \
   --restart unless-stopped \
+  --network host \
+  -e AGENT_ID="<ID>" \
   -e AGENT_TOKEN="<Token>" \
   -e SERVER_URL="https://monitor.example.com" \
-  -v /proc:/host/proc:ro \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges \
+  -e DISK_PATH=/host \
+  -v /:/host:ro \
+  -v /proc:/hostproc:ro \
+  -v diting-state:/data \
   ghcr.io/fengzone85/diting-agent:latest
 ```
+
+> `--network host` 让容器共享宿主网络命名空间，`/proc/net/dev` 才能反映真实流量；`-v /:/host:ro` + `DISK_PATH=/host` 让磁盘统计针对 VPS 真实根盘而非容器 overlay。
 
 ## 原生 systemd 部署
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
 ```
 
 脚本会：
@@ -189,7 +193,7 @@ SERVER_URL=https://1.2.3.4:4443
 ## 卸载
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/unditing.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/uninstall.sh | bash
 ```
 
 完全幂等，可重复执行。

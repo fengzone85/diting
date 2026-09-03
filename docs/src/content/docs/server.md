@@ -9,11 +9,15 @@ description: 服务端配置与管理
 
 | 变量 | 必填 | 说明 | 默认值 |
 |---|---|---|---|
-| `PORT` | 否 | 监听端口 | `3000` |
-| `SETUP_TOKEN` | 首次 | 初始化管理员 Token | — |
-| `DB_PATH` | 否 | SQLite 数据库路径 | `./data/probe.db` |
-| `SESSION_SECRET` | 推荐 | Session 签名密钥 | 随机生成 |
-| `ALERT_INTERVAL` | 否 | 告警间隔（秒） | `300` |
+| `PORT` | 否 | 监听端口 | `8081` |
+| `ADMIN_TOKEN` | 首次 | 管理员 Token（≥16 位，弱口令启动即拦截） | — |
+| `SETUP_TOKEN` | 否 | 受控端自助注册令牌 | — |
+| `DB_PATH` | 否 | SQLite 数据库路径 | `/data/monitor.db` |
+| `SESSION_SECRET` | 推荐 | Session 签名密钥（固定则重启不失效） | 随机生成 |
+| `OFFLINE_THRESHOLD_SEC` | 否 | 离线判定阈值（秒） | `60` |
+| `RETENTION_DAYS` | 否 | 指标保留天数 | `30` |
+| `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | CPU/内存告警阈值（%） | `90` |
+| `ALERT_COOLDOWN_SEC` | 否 | 告警冷却（秒） | `1800` |
 
 ## Docker Compose 配置
 
@@ -23,18 +27,20 @@ services:
   server:
     image: ghcr.io/fengzone85/diting:latest
     ports:
-      - "3000:3000"
+      - "127.0.0.1:8081:8081"   # 仅回环，由 Nginx + TLS 反代对外
     volumes:
-      - ./data:/app/data
+      - server-data:/data
     environment:
-      - SETUP_TOKEN=your-setup-token
+      - ADMIN_TOKEN=your-admin-token   # 管理员 Token（≥16 位）
       - SESSION_SECRET=your-session-secret
     restart: unless-stopped
+volumes:
+  server-data:
 ```
 
 ## 数据库
 
-服务端使用 SQLite 单文件数据库，Docker 部署位于命名卷 `server-data` 内（容器内 `/data/monitor.db`），原生部署位于 `$SRC_DIR/server/data/monitor.db`。
+服务端使用 SQLite 单文件数据库，默认路径 `/data/monitor.db`（可用 `DB_PATH` 覆盖）。Docker 部署建议挂到命名卷 `server-data` 持久化。
 
 ### 备份与恢复
 
@@ -90,13 +96,13 @@ sudo bash diting.sh --restore /path/to/monitor_backup.db
 
 ```ini
 [Unit]
-Description=DiTing Lite Server
+Description=DiTing Server
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/diting/server
-ExecStart=/usr/bin/node app.js
+ExecStart=/usr/bin/node server.js
 Environment=NODE_ENV=production
 Restart=always
 User=diting
@@ -113,15 +119,15 @@ WantedBy=multi-user.target
 
 ```
 monitor.example.com {
-    reverse_proxy 127.0.0.1:3000
+    reverse_proxy 127.0.0.1:8081
 }
 ```
 
 ## 安全加固清单
 
-- [ ] 修改默认 `SETUP_TOKEN`
+- [ ] 设置强随机 `ADMIN_TOKEN`（弱口令启动即拦截）
 - [ ] 启用 TOTP 2FA
-- [ ] 配置 HTTPS
+- [ ] 配置 HTTPS（受控端强制 HTTPS）
 - [ ] 设置 CSP 头
 - [ ] 限制访问 IP（可选）
-- [ ] 定期备份 `data/` 目录
+- [ ] 定期备份数据库（`diting.sh --backup`）
