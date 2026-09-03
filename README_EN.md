@@ -39,7 +39,7 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 - Standard **Prometheus `/metrics`** export (Bearer auth) for Grafana; offline / CPU·memory threshold alerts push to **QQ Mail and Telegram** in parallel (one channel failing does not affect the other), with monthly-traffic-quota and expiry-countdown reminders.
 
 **⚡ Lightweight, low-dependency, easy to deploy**
-- Zero-dependency TOTP implementation; ECharts vendored locally (no CDN); agents are stdlib-only and run as non-root; application-layer rate limiting plus Nginx security headers; weak-token startup guard, input validation, and build-context isolation all included.
+- Zero-dependency TOTP implementation; ECharts bundled locally from npm (no CDN); agents are stdlib-only and run as non-root; application-layer rate limiting plus Nginx security headers; weak-token startup guard, input validation, and build-context isolation all included.
 
 ## Architecture
 
@@ -252,7 +252,7 @@ Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in 
 > Note: GPU model (from `nvidia-smi` / `lspci`) is a host fingerprint and conflicts with our "no kernel/GPU/public-IP" rule, so we do not implement GPU monitoring either.
 
 ## Third-party dependencies & privacy
-- **Zero external front-end requests**: ECharts is vendored locally at `server/public/vendor/echarts.min.js`; the dashboard loads no CDN scripts. The server sets a strict `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; ...` with **no `unsafe-inline`**; all front-end interactions use `addEventListener` event delegation, which closes the XSS path that could steal the admin token.
+- **Zero external front-end requests**: ECharts is installed from npm and bundled into the local build output (`server/public/assets/`); the dashboard loads no CDN scripts. The server sets a strict `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; ...` with **no `unsafe-inline`**; all front-end interactions use `addEventListener` event delegation, which closes the XSS path that could steal the admin token.
 - **Mail dependency**: alerts use `nodemailer` v9 (QQ Mail SMTP). After a major-version upgrade the transport is validated via `transporter.verify()`; just configure a real `SMTP_PASS` at deploy time.
 
 ## Deployment

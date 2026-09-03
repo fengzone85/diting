@@ -125,13 +125,13 @@ diting/
 │   │   ├── totp.js         # RFC 6238 TOTP（零依赖）
 │   │   ├── validate.js     # 输入校验 + CSS 清洗
 │   │   └── komari.js       # Komari 兼容 API 层
-│   ├── public/             # 前端（仪表盘 + 公开页 + i18n）
+│   ├── public/             # 静态资源（SPA 构建产物 + setup 向导 + 主题）
 │   └── test/security.test.js  # 安全单元测试
 ├── agent/                  # 受控端
 │   ├── agent.py / collector.py  # Linux（Docker，纯标准库）
 │   ├── windows/            # Windows 原生（psutil）
 │   └── diting.sh          # 受控端独立安装脚本
-├── docs/                   # 用户技术文档（14 篇）
+├── docs/                   # 用户技术文档（13 篇）
 └── nginx/monitor.conf.example  # TLS 反代 + 限流示例
 ```
 
