@@ -13,7 +13,14 @@ RUN npm run build
 FROM node:22.21.1-slim
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev
+# npm ci 严格按 package-lock.json 复现依赖树（npm install 可能漂移到更新的次版本）。
+# better-sqlite3 为原生模块：优先从 GitHub 下载预编译二进制；若构建机访问 GitHub 受限，
+# 则回退 node-gyp 本地编译，需要 python3/make/g++。工具在本层内装/删，不残留在镜像。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 make g++ \
+    && npm ci --omit=dev \
+    && apt-get purge -y --auto-remove python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 COPY . .
 COPY --from=web-builder /app/public/index.html ./public/index.html
 COPY --from=web-builder /app/public/assets ./public/assets
