@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const { daysUntil } = require('./util');
@@ -29,7 +29,10 @@ function parseDisks(s) {
 // 应用层限流（兜底，不依赖 Nginx）：每 IP 每 10s 最多 20 次。
 // /report 已由 Nginx 单独限流，此处放行。trust proxy 已在 server.js 启用，req.ip 为真实客户端。
 // MAP_CAP：限流 Map 最大条目数，超出则提前清空，防分布式攻击用大量不同 IP 撑爆内存。
-const RATE_WINDOW = 10000, RATE_MAX = 20, MAP_CAP = 10000;
+// 放宽到每 IP 每 10s 60 次：单标签页前端每 5s 约 4 请求(8/10s)，
+// 多标签页/多设备共享同一源 IP 时极易超过 20 次阈值而误伤正常浏览。
+// 应用层限流仅为兜底，真实安全边界仍由 Nginx limit_req 承担。
+const RATE_WINDOW = 10000, RATE_MAX = 60, MAP_CAP = 10000;
 const rateHits = new Map();
 setInterval(() => rateHits.clear(), RATE_WINDOW).unref?.();
 const rateLimit = (req, res, next) => {
@@ -281,11 +284,29 @@ router.get('/agents', adminOrReadonly, (req, res) => {
 
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----
 router.get('/agents/sparklines', adminOrReadonly, (req, res) => {
-  const sec = RANGES[req.query.range] || 21600;
-  const rows = db.getMetricsAll(Date.now() - sec * 1000);
-  const byAgent = {};
-  for (const r of rows) (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);
-  res.json(byAgent);
+  const range = req.query.range;
+  const sec = RANGES[range] || 21600;
+  // 管理端 sparklines：用轻量列查询（不含 probes 大字段）+ SQL 层采样，避免 SELECT * 物化全行。
+  const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
+  const rows = db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+  res.json(downsampleSparklines(rows, mp));
+});
+
+// ---- Admin: 集群平均 CPU/内存趋势（仪表盘专用）----
+// 与 /agents/sparklines 不同：不做「每 agent 原始点」，而是由 SQL 引擎跨所有 agent 按时间桶
+// 直接聚合出集群平均曲线，只返回 ≤maxPoints 行（几十~几百个点）。彻底消除前端拉 62 台全量
+// 再逐点聚合的主线程卡顿。max_points 缺省用 sparkMaxPoints，与右侧趋势图桶粒度一致。
+router.get('/agents/sparklines/overview', adminOrReadonly, (req, res) => {
+  const range = req.query.range;
+  const sec = RANGES[range] || 21600;
+  const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
+  const rows = db.metricsClusterAvg(Date.now() - sec * 1000, sec * 1000, mp);
+  // rows: [{ts, cpu, mem_pct}]，桶内已有集群平均，直接返回
+  res.json(rows.map(r => ({
+    ts: r.ts,
+    cpu: r.cpu == null ? null : +r.cpu.toFixed(2),
+    mem_pct: r.mem_pct == null ? null : +r.mem_pct.toFixed(2)
+  })));
 });
 
 // ---- Admin: single agent info ----
@@ -339,7 +360,9 @@ router.get('/overview', adminOrReadonly, (req, res) => {
     avg_mem: cnt ? +(memSum / cnt).toFixed(1) : 0,
     traffic_used_bytes: Math.round(trafficUsedBytes),
     total_quota_gb: totalQuotaGB,
-    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
+    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online })),
+    // 数据库大小监控：SQLite 文件实际占用的磁盘字节数（含 journal）
+    db_size_bytes: db.getDbFileSize()
   });
 });
 
@@ -375,21 +398,31 @@ router.get('/billing', adminOrReadonly, (req, res) => {
 function publicDisabled(res) { return res.status(403).json({ error: 'public view disabled' }); }
 router.get('/public/overview', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const agents = db.getAgents();
   let online = 0;
+  let cpuSum = 0, memSum = 0, cpuCount = 0, memCount = 0;
   const groups = {};
   for (const a of agents) {
     const isOn = a.last_seen && now - a.last_seen < offlineSec * 1000;
-    if (isOn) online++;
+    if (isOn) {
+      online++;
+      const m = db.getLatestMetric(a.id);
+      if (m) {
+        if (typeof m.cpu === 'number') { cpuSum += m.cpu; cpuCount++; }
+        if (typeof m.mem_pct === 'number') { memSum += m.mem_pct; memCount++; }
+      }
+    }
     const g = (a.grp || '').trim() || '未分组';
     const ge = groups[g] || (groups[g] = { total: 0, online: 0 });
     ge.total++; if (isOn) ge.online++;
   }
   res.json({
     total: agents.length, online, offline: agents.length - online,
+    cpu_avg: cpuCount > 0 ? +(cpuSum / cpuCount).toFixed(1) : null,
+    mem_avg: memCount > 0 ? +(memSum / memCount).toFixed(1) : null,
     groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
   });
 });
@@ -397,7 +430,7 @@ router.get('/public/overview', (req, res) => {
 // 返回脱敏的公开 agent 列表（不含 token / note / 商家 / 到期 / 配额等敏感字段）。
 router.get('/public/agents', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const list = db.getAgents().map((a) => {
@@ -418,8 +451,12 @@ router.get('/public/agents', (req, res) => {
       disk_r_rate: m ? m.disk_r_rate : 0,
       disk_w_rate: m ? m.disk_w_rate : 0,
       load1: m ? m.load1 : null,
+      load5: m ? m.load5 : null,
+      load15: m ? m.load15 : null,
       temp: m ? m.temp : null,
       swap_pct: m ? m.swap_pct : null,
+      swap_used: m ? m.swap_used : 0,
+      swap_total: m ? m.swap_total : 0,
       net_rx_rate: m ? m.net_rx_rate : 0,
       net_tx_rate: m ? m.net_tx_rate : 0,
       net_rx_month: m ? m.net_rx_month : 0,
@@ -444,37 +481,125 @@ router.get('/public/agents', (req, res) => {
 
 // 公开历史曲线（脱敏，仅指标时序，无 token / 备注 / 商家等敏感字段）。
 // 供「视觉版」首页卡片渲染 sparkline。受 ui.public_enabled 控制。
+// 注意：无 id 的全量查询在 100 台规模下数据量巨大，后端做时间桶降采样（见 downsampleSparklines）
+// 并把结果按 range+id 缓存 30s，避免前端并发刷新时重复跑大查询把服务端打挂（DoS 级瓶颈）。
+const sparkCache = new Map(); // key: `${range}|${onlyId}` -> { ts, data }
+const SPARK_CACHE_TTL = 30000;
+// 无 id 全量请求（首页卡片迷你图）每 agent 点数上限：100 台规模下控制传输量
+const SPARK_ALL_MAX_POINTS = 120;
 router.get('/public/agents/sparklines', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
-  const sec = RANGES[req.query.range] || 21600;
+  if (ui.public_enabled === false) return publicDisabled(res);
+  const range = RANGES[req.query.range] ? req.query.range : '7d'; // 无效 range 兜底 7d
+  const sec = RANGES[range];
   const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
+  const cacheKey = `${range}|${onlyId || '*'}`;
+  const cached = sparkCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < SPARK_CACHE_TTL) {
+    return res.json(cached.data);
+  }
   // 游客详情页只需单节点历史，避免拉全量；缺省行为保持全量兼容。
+  // 用只含指标列（不含 probes 大字段）的轻量查询，避免 SELECT * 物化全行（30d 5.3s -> 2.3s）
+  // 无 id 全量请求：SQL 层窗口函数采样（757K 行→~7200 行，减少 100x 传输+JS 处理）。
+  // 有 id 单节点请求（详情页）：同样走 SQL 层采样 metricsSparklinesOne。
+  //   此前单节点是「全量拉 10.8 万行 → Node 侧降采样」，每次 2.77s + 220MB 峰值，
+  //   30s 缓存一过就慢/偶发超时（详情页图表"慢/有时无法显示"）。SQL 层直接只返回 maxPoints 行。
+  const mp = clampInt(req.query.max_points, 60, 20000)
+    || (onlyId ? sparkMaxPoints(range) : SPARK_ALL_MAX_POINTS);
+  const t0 = Date.now();
   const rows = onlyId
-    ? db.getMetrics(onlyId, Date.now() - sec * 1000)
-    : db.getMetricsAll(Date.now() - sec * 1000);
-  const byAgent = {};
-  for (const r of rows) {
-    (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push({
+    ? db.getMetricsSparklinesOne(onlyId, Date.now() - sec * 1000, mp)
+    : db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+  // 后端降采样（对齐 Komari max_points 契约）。
+  // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
+  // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
+  // 有 id 的单节点请求（详情页磁盘耗尽预测）：SQL 层已按 range 上限采样（30d→2000 足够线性外推），
+  // 此处 downsampleSparklines 仅作幂等兜底（SQL 采样已保留首尾点，若点数已≤mp 会原样返回）。
+  const byAgent = downsampleSparklines(rows, mp);
+  for (const id of Object.keys(byAgent)) {
+    byAgent[id] = byAgent[id].map(r => ({
       ts: r.ts, cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
       net_rx_rate: r.net_rx_rate, net_tx_rate: r.net_tx_rate,
       load1: r.load1, temp: r.temp, swap_pct: r.swap_pct, uptime: r.uptime,
-      disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate
-    });
+      disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate,
+      // 磁盘耗尽预测用：整机已用/总字节时序（对齐 komari MetricDisk 口径）
+      disk_used: r.disk_used, disk_total: r.disk_total
+    }));
   }
+  sparkCache.set(cacheKey, { ts: Date.now(), data: byAgent });
   res.json(byAgent);
 });
+
+// 后端降采样开关（对齐 Komari downsample/max_points 契约）：
+//   PROBES_DOWNSAMPLE=1（默认）启用后端时间桶聚合 + 每 label 点数上限；
+//   =0 关闭则原样返回桶内原始点（点数可能很大，供前端自行处理）。
+//   PROBES_MAX_POINTS：每 label 点数硬上限，默认 5000，可调（上限钳到 50000）。
+const PROBES_DOWNSAMPLE = process.env.PROBES_DOWNSAMPLE !== '0';
+const PROBES_MAX_POINTS = (() => {
+  const n = Number(process.env.PROBES_MAX_POINTS);
+  return Number.isFinite(n) && n > 0 ? Math.min(50000, Math.floor(n)) : 5000;
+})();
+// 将任意输入钳为正整数，非法/越界返回 null
+function clampInt(v, min = 1, max = 50000) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (n < min) return min;
+  if (n > max) return max;
+  return Math.floor(n);
+}
+
+// ---- sparklines 后端降采样（对齐 Komari max_points 契约）----
+// 卡片迷你图只需 ~60 点，磁盘耗尽预测需较长序列（~2000 点足够）。
+// 全量 30d 单节点 9.5 万点，100 台规模下公开 sparklines 无 id 全量查询会雪崩（DoS 级）。
+// 故按 range 给每 agent 设定点数上限，做时间桶聚合，避免传输/序列化灾难。
+const SPARK_MAX_POINTS = {
+  '1h': 300, '6h': 600, '24h': 1000, '7d': 1500, '30d': 2000
+};
+function sparkMaxPoints(range) {
+  return SPARK_MAX_POINTS[range] || 2000;
+}
+// rows: [{ts, agent_id, ...metrics}]，按 agent_id 分组后组内时间桶降采样到 maxPoints。
+// 桶内取最后一个点（时序曲线降采样用 last 即可，磁盘预测线性外推同样适用）。
+function downsampleSparklines(rows, maxPoints) {
+  const byAgent = {};
+  for (const r of rows) {
+    (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);
+  }
+  const out = {};
+  for (const [agentId, arr] of Object.entries(byAgent)) {
+    if (arr.length <= maxPoints) {
+      out[agentId] = arr;
+      continue;
+    }
+    const span = arr[arr.length - 1].ts - arr[0].ts;
+    const bucket = Math.max(1, Math.ceil(span / maxPoints)); // 以 maxPoints 反推桶宽
+    const map = new Map();
+    const order = [];
+    for (const r of arr) {
+      const key = Math.floor(r.ts / bucket) * bucket;
+      if (!map.has(key)) { map.set(key, r); order.push(key); }
+      else map.set(key, r); // 同桶取最后一个点
+    }
+    out[agentId] = order.map(k => map.get(k));
+  }
+  return out;
+}
 
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
 // 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。
 // 受 ui.public_enabled 控制；range 支持 1h/6h/24h/7d。
 router.get('/public/agents/:id/probes', (req, res) => {
   const ui = db.getUiSettings();
-  if (!ui.public_enabled) return publicDisabled(res);
+  if (ui.public_enabled === false) return publicDisabled(res);
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'agent not found' });
   const sec = RANGES[req.query.range] || 21600;
-  const rows = db.getMetrics(a.id, Date.now() - sec * 1000);
+  // 提前算出本请求的每 label 点数上限（供 SQL 层采样 + 后续桶聚合共用）。
+  const reqMaxPoints = clampInt(req.query.max_points) || PROBES_MAX_POINTS;
+  // 仅取 ts+probes 两列：30d 近 9.5 万行，SELECT * 物化全行开销大（实测 5.4s vs 0.56s）
+  // 再叠加 SQL 层采样：全量 9.5 万行 → maxPoints 行，逐行 JSON.parse 次数同比骤降。
+  // 采样点数取 max(上限, 5000) 的 3 倍冗余，保证后续 avg 桶聚合仍有足够样本、统计不失真。
+  const rows = db.getMetricsProbesOne(a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
   const series = {}; // label -> [{ts, ms}]
   for (const r of rows) {
     if (!r.probes) continue;
@@ -492,6 +617,55 @@ router.get('/public/agents/:id/probes', (req, res) => {
       });
     }
   }
+  if (PROBES_DOWNSAMPLE) {
+    // 请求参数化降采样（对齐 Komari downsample/max_points/aggregation 契约）：
+    //   max_points=N：每 label 目标点数上限（缺省用 PROBES_MAX_POINTS）。以该值反推动态桶宽做时间桶聚合。
+    //   aggregation=avg|last：avg（默认，对齐 Komari）取桶内延迟平均；last 取桶内最后一个点。
+    const maxPoints = reqMaxPoints;
+    const agg = req.query.aggregation === 'last' ? 'last' : 'avg';
+    for (const label of Object.keys(series)) {
+      const arr = series[label];
+      if (arr.length <= maxPoints) continue; // 点数本就不多，无需聚合
+      const span = arr[arr.length - 1].ts - arr[0].ts;
+      const bucket = Math.max(1, Math.ceil(span / maxPoints)); // 以 max_points 为目标反推桶宽
+      const map = new Map();
+      const order = [];
+      for (const pt of arr) {
+        const key = Math.floor(pt.ts / bucket) * bucket;
+        if (!map.has(key)) {
+          map.set(key, {
+            ts: pt.ts,
+            ms: pt.ms, // last 模式用桶内第一个点
+            ok: pt.ok, loss: pt.loss,
+            // avg 累加器
+            sumMs: pt.ms != null ? pt.ms : 0, cntMs: pt.ms != null ? 1 : 0,
+            okCnt: pt.ok ? 1 : 0, sumLoss: pt.loss != null ? pt.loss : 0, cnt: 1
+          });
+          order.push(key);
+        } else {
+          const cur = map.get(key);
+          cur.ts = pt.ts;
+          if (pt.ms != null) { cur.sumMs += pt.ms; cur.cntMs++; }
+          if (pt.ok) cur.okCnt++;
+          if (pt.loss != null) cur.sumLoss += pt.loss;
+          cur.cnt++;
+          if (agg === 'last' && pt.ms != null) cur.ms = pt.ms; // last 模式覆盖为桶内最后一个有效点
+        }
+      }
+      series[label] = order.map(k => {
+        const b = map.get(k);
+        if (agg === 'avg') {
+          return {
+            ts: b.ts,
+            ms: b.cntMs ? Math.round(b.sumMs / b.cntMs) : null,
+            ok: b.okCnt > 0,
+            loss: Math.round(b.sumLoss / b.cnt)
+          };
+        }
+        return { ts: b.ts, ms: b.ms, ok: b.ok, loss: b.loss };
+      });
+    }
+  }
   res.json(series);
 });
 
@@ -503,14 +677,42 @@ router.get('/public/meta', (req, res) => {
   res.json({
     site_title: ui.site_title || '',
     site_url: ui.site_url || '',
+    logo_url: ui.logo_url || '/logo.png',
     public_enabled: !!ui.public_enabled,
     home_layout: ui.home_layout || 'grid',
     agent_order: Array.isArray(agentOrder) ? agentOrder : [],
     social_email: ui.social_email || '',
     social_telegram: ui.social_telegram || '',
     social_qq: ui.social_qq || '',
-    social_website: ui.social_website || ''
+    social_website: ui.social_website || '',
+    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    glass_preset: ui.glass_preset || 'emerald',
+    glass_custom: ui.glass_custom || {},
+    color_vision: ui.color_vision || 'normal',
+    card_scheme: ui.card_scheme || 'official',
+    card_size: ui.card_size || 'comfortable',
+    // 暗/亮两套背景配置（兼容旧版单 background 字段作为暗色回退）
+    background_dark: ui.background_dark || ui.background || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
+    background_light: ui.background_light || { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
+    announcement: ui.announcement || { enabled: false, title: '', content: '' },
+    provider_aliases: ui.provider_aliases || {},
+    custom_tags: ui.custom_tags || {},
+    visitor_info: !!ui.visitor_info
   });
+});
+
+// 访客信息条（对齐 komari 主题的 visitorInfoEnabled）：返回访客 IP 与 UA 摘要。
+router.get('/public/visitor', (req, res) => {
+  const fwd = req.headers['x-forwarded-for'];
+  let ip = req.ip || (typeof fwd === 'string' ? fwd.split(',')[0].trim() : '') || '';
+  if (ip.startsWith('::ffff:')) ip = ip.slice(7);
+  const ua = req.headers['user-agent'] || '';
+  let browser = 'Unknown';
+  if (/Edg\//.test(ua)) browser = 'Edge';
+  else if (/Chrome\//.test(ua)) browser = 'Chrome';
+  else if (/Firefox\//.test(ua)) browser = 'Firefox';
+  else if (/Safari\//.test(ua)) browser = 'Safari';
+  res.json({ ip, browser, ua: ua.slice(0, 80) });
 });
 
 // 游客页卡片自定义排序（需管理员会话，避免游客随意更改全局顺序）。
@@ -566,6 +768,7 @@ router.post('/agents', adminOnly, (req, res) => {
   // 创建时一次性把「地址 + 该客户端令牌 + 探测目标」预填进一键命令返回（令牌仅此刻明文可用）。
   const install = buildInstallCommands(getPublicBaseUrl(req), id, token, AGENT_INTERVAL_DEFAULT, probeTargets);
   res.json({ id, token, install });
+  auditLog(req, 'create_agent', `name=${req.body.name || ''} id=${id}`);
 });
 
 // ---- Admin: update agent metadata ----
@@ -590,12 +793,14 @@ router.put('/agents/:id', adminOnly, (req, res) => {
   if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
   db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
+  auditLog(req, 'update_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: delete agent ----
 router.delete('/agents/:id', adminOnly, (req, res) => {
   db.deleteAgent(req.params.id);
   res.json({ ok: true });
+  auditLog(req, 'delete_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
@@ -607,6 +812,7 @@ router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
   const a = db.getAgent(req.params.id);
   const install = buildInstallCommands(getPublicBaseUrl(req), req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
   res.json({ ok: true, token, install });
+  auditLog(req, 'reset_token', `id=${req.params.id}`);
 });
 
 // ---- Admin: renew agent（续费一个周期）----
@@ -622,6 +828,7 @@ router.post('/agents/:id/renew', adminOnly, (req, res) => {
   const newExpire = next.toISOString().slice(0, 10);
   db.updateAgent(a.id, Object.assign({}, a, { expire_at: newExpire }));
   res.json({ ok: true, expire_at: newExpire });
+  auditLog(req, 'renew_agent', `id=${a.id} expire_at=${newExpire}`);
 });
 
 // ---- Admin: 生成某受控端的「安装命令」与「修改探测目标命令」----
@@ -654,6 +861,7 @@ router.put('/settings', adminOnly, (req, res) => {
   }
   if (b.notify && typeof b.notify === 'object') db.setNotifyConfig(b.notify);
   res.json({ ok: true });
+  auditLog(req, 'update_settings', b.ui ? 'ui updated' : '' + (b.notify ? ' notify updated' : ''));
 });
 
 
@@ -709,12 +917,14 @@ router.put('/ai/config', adminOnly, (req, res) => {
   }
   db.setAiConfig(allowed);
   res.json({ ok: true });
+  auditLog(req, 'update_ai_config', allowed.enabled != null ? `enabled=${allowed.enabled}` : '');
 });
 // 手动触发一次日报生成（不等调度时刻）。返回生成结果。
 router.post('/ai/run', adminOnly, async (req, res) => {
   try {
     const r = await ai.runNow();
     res.json(r);
+    auditLog(req, 'ai_run', '');
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
@@ -786,6 +996,7 @@ router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
   if (!code || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(true);
   res.json({ ok: true, enabled: true });
+  auditLog(req, '2fa_enable', '');
 });
 
 router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
@@ -795,6 +1006,16 @@ router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
   if (!code || !secret || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(false);
   res.json({ ok: true, enabled: false });
+  auditLog(req, '2fa_disable', '');
+});
+
+// ---- Admin: 审计日志查询 ----
+router.get('/admin/audit-logs', adminOnly, (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const logs = db.getAuditLogs(limit, offset);
+  const total = db.countAudit();
+  res.json({ logs, total, limit, offset });
 });
 
 module.exports = router;
