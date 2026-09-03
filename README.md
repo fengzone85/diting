@@ -1,10 +1,11 @@
 <h1 align="center">
-  <img src="server/public/logo.svg" width="80" alt="Diting Logo">
+  <img src="server/public/logo.png" width="120" alt="谛听 Diting">
   <br>谛听 · Diting
 </h1>
 
 <p align="center">
   <strong>自托管 Docker 监控 · 受控端零入站 · 无指令通道</strong><br>
+  <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · Komari 主题兼容 · 100 台规模设计</sub><br>
   <a href="README_EN.md">English</a> · <a href="docs/src/content/docs/install.md">文档</a> · <a href="https://github.com/fengzone85/diting/issues">反馈</a>
 </p>
 
@@ -15,6 +16,7 @@
   <img src="https://img.shields.io/badge/Node.js-22-339933?style=flat-square&logo=node.js" alt="node">
   <img src="https://img.shields.io/badge/SQLite-3-003b57?style=flat-square&logo=sqlite" alt="sqlite">
   <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python" alt="python">
+  <img src="https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go" alt="go">
   <img src="https://img.shields.io/badge/Linux-Docker-2496ED?style=flat-square&logo=docker" alt="linux">
   <img src="https://img.shields.io/badge/Windows-原生-0078D4?style=flat-square&logo=windows" alt="windows">
 </p>
@@ -30,39 +32,46 @@
 ### 🔒 安全优先
 - **受控端零入站** — 不监听任何端口，NAT/内网无影响
 - **无指令通道** — Agent → Server 单向数据流，服务端无法控制 Agent
-- **恒定时间 Token 比较** — 防时序侧信道
-- **严格 CSP** — 无 `unsafe-inline`、无外链脚本
+- **审计日志** — 管理端所有写操作全量留痕，可回溯
+- **签名 Session Cookie** — 替代前端裸存 Token，防 XSS 窃取
 - **TOTP 两步验证** — 危险操作需动态码
+- **严格 CSP** — 无 `unsafe-inline`、无外链脚本
+- **恒定时间 Token 比较** — 防时序侧信道
 - **IP 白名单** — 支持 IPv4/IPv6/CIDR</td>
 
 <td width="50%">
 
 ### 📊 监控与告警
-- **实时指标** — CPU/内存/硬盘/负载/流量/温度/Swap
-- **月流量累计** — 持久化，重启不丢
-- **网络质量探测** — 到固定公共 DNS 的延迟（着色：绿/黄/红）
+- **实时指标** — CPU/内存/硬盘/负载/流量/温度/Swap，多盘聚合
+- **网络质量探测** — 延迟 + 丢包率（loss），到固定公共 DNS
+- **AI 日报** — 服务端定时汇总昨日异常，自动投递日报
+- **月流量累计** — 持久化，跨重启、跨月不丢
+- **计费与到期** — 月/季/年费、自动续期、批量续期
 - **告警通知** — QQ 邮箱 + Telegram 并行，带冷却去重
-- **Prometheus `/metrics`** — Grafana 友好
-- **到期倒计时** — <7天变黄、已过期变红</td>
+- **Prometheus `/metrics`** — Grafana 友好（强制 HTTPS）
+- **公开状态页** — 游客脱敏视图，无需 Token</td>
 </tr>
 <tr>
 <td width="50%">
 
 ### 🌐 轻量跨平台
-- **Linux（Docker）** — 纯 Python 标准库，65-150MB
-- **Windows（原生）** — psutil，登录自启计划任务
+- **Python Agent（Linux Docker）** — 纯标准库，65–150MB
+- **Go Agent（Linux 原生）** — 单文件二进制 + systemd，无 Python 依赖
+- **Windows Agent（原生）** — psutil，登录自启计划任务
 - **Agent 零耦合** — 彼此不知互存在
 - **数据最小化** — 不采内核/GPU/公网IP/连接数
-- **多盘支持** — 自动识别物理磁盘（过滤 tmpfs/proc）</td>
+- **多盘支持** — 自动识别物理磁盘（过滤 tmpfs/proc/伪盘）</td>
 
 <td width="50%">
 
-### ⚡ 一键部署
-- **统一 diting.sh** — 服务端 + 受控端 + 更新 + 卸载 + 数据库管理
-- **自动依赖安装** — Docker / git / curl 自动补齐
-- **交互式菜单** — 引导式配置，中英文双语
-- **自助注册** — SETUP_TOKEN 一键建客户端
-- **数据库管理** — 备份/恢复/统计（`--backup` / `--restore` / `--db-stats`）</td>
+### ⚡ 管理端与生态
+- **Vue3 SPA** — Vite + Tailwind v4 + TS，玻璃拟态/明亮双主题
+- **Komari 主题兼容** — 官方社区皮肤即插即用（`/?theme=<id>`）
+- **WebSocket 实时推送** — 离线/恢复/告警实时下发
+- **仪表盘自定义** — 拖拽排序、分组、卡片/列表两种模式
+- **统一 diting.sh** — 部署+更新+卸载+数据库管理（whiptail TUI，无 GUI 回退文本菜单）
+- **自助注册** — `SETUP_TOKEN` 一键建客户端
+- **100 台规模设计** — 后端降采样 + SQL 聚合，非事后调优</td>
 </tr>
 </table>
 
@@ -96,16 +105,34 @@ sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-to
 ## 🏗️ 架构
 
 ```
-[受控VPS-A] docker agent ──HTTPS+Token──┐
-[受控VPS-B] docker agent ──HTTPS+Token──┼──> [专用VPS: server + dashboard]
-[受控VPS-N] docker agent ──HTTPS+Token──┘      (Node + SQLite + ECharts / Nginx+TLS)
+   受控端（零入站、仅出站 HTTPS + Token）
+   ├─ Python agent   (Docker, 纯标准库)
+   ├─ Go agent       (单文件二进制, systemd)
+   └─ Windows agent  (psutil, 计划任务)
+             │
+             │  POST /api/report（单向；响应仅用于错误日志，从不执行）
+             ▼
+┌────────────────────────────────────────────────────────────┐
+│  谛听 Server（Node.js 22，仅绑 127.0.0.1:8081）             │
+│  ├─ REST API        /api/report · /api/agents · /api/admin  │
+│  ├─ SPA             / · /login · /admin · /node/:id         │
+│  ├─ Komari 兼容层    /api/v1/* · /api/clients(WS) · /api/rpc2│
+│  ├─ 公开脱敏视图     /api/public/*（游客可见，字段脱敏）      │
+│  ├─ Prometheus      /metrics（强制 HTTPS）                  │
+│  └─ 能力模块         AI 日报 · 审计日志 · 计费/到期 · 告警    │
+│        SQLite（Token 存 SHA-256 哈希，非明文）               │
+└────────────────────────────────────────────────────────────┘
+             │
+             ▼  Nginx + TLS 反代（对外 443，limit_req 限流）
+   浏览器面板 / Grafana / 第三方 Komari 主题
 ```
 
 **关键设计：**
-- Agent 仅出站 POST 到 `/api/report`，响应仅用于错误日志，**从不执行**
-- 服务端绑定 `localhost:8081`，由 Nginx + TLS 反代对外暴露 443
+- Agent 仅出站 POST 到 `/api/report`，响应仅用于错误日志，**从不解析、从不执行**
+- 服务端绑定 `127.0.0.1:8081`，由 Nginx + TLS 反代对外暴露 443
 - 数据库存储 Token 哈希（SHA-256），非明文
 - 登录态用签名 `HttpOnly + Secure + SameSite=Strict` Cookie
+- 第三方 Komari 主题通过兼容层接入，无需改动本项目代码
 
 ---
 
@@ -113,26 +140,41 @@ sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-to
 
 ```
 diting/
-├── diting.sh              # 一键部署/更新/卸载/数据库管理
-├── docker-compose.yml      # 快速启动（测试用）
-├── server/                 # 服务端（Node.js + Express + SQLite）
-│   ├── server.js           # 入口 + 路由 + WebSocket
+├── diting.sh                # 一键部署/更新/卸载/数据库管理（whiptail TUI）
+├── docker-compose.yml       # 快速启动（测试用）
+├── server/                  # 服务端（Node.js 22 + Express + SQLite）
+│   ├── server.js            # 入口 + 路由 + WebSocket + SPA fallback
 │   ├── src/
-│   │   ├── api.js          # REST API（客户端/设置/告警）
-│   │   ├── auth.js         # 鉴权 + Session + IP 白名单
-│   │   ├── db.js           # SQLite + 迁移 + 配置
-│   │   ├── alerts.js       # 阈值检查 + 邮件/Telegram 通知
-│   │   ├── totp.js         # RFC 6238 TOTP（零依赖）
-│   │   ├── validate.js     # 输入校验 + CSS 清洗
-│   │   └── komari.js       # Komari 兼容 API 层
-│   ├── public/             # 静态资源（SPA 构建产物 + setup 向导 + 主题）
-│   └── test/security.test.js  # 安全单元测试
-├── agent/                  # 受控端
-│   ├── agent.py / collector.py  # Linux（Docker，纯标准库）
-│   ├── windows/            # Windows 原生（psutil）
-│   └── diting.sh          # 受控端独立安装脚本
-├── docs/                   # 用户技术文档（13 篇）
-└── nginx/monitor.conf.example  # TLS 反代 + 限流示例
+│   │   ├── api.js           # REST API（客户端/设置/告警/计费/审计）
+│   │   ├── auth.js          # 鉴权 + Session + IP 白名单
+│   │   ├── db.js            # SQLite + 迁移 + 配置
+│   │   ├── alerts.js        # 阈值检查 + 邮件/Telegram 通知
+│   │   ├── totp.js          # RFC 6238 TOTP（零依赖）
+│   │   ├── validate.js      # 输入校验 + CSS 清洗
+│   │   ├── util.js          # 通用工具（daysUntil / cycleLabel / …）
+│   │   ├── compat.js        # Komari 主题 REST 兼容层
+│   │   ├── compat-metrics.js# Komari /api/records/load|ping 适配
+│   │   ├── compat-rpc.js    # Komari /api/rpc2 适配
+│   │   ├── v1.js            # 标准 /api/v1/* 端点（与 Komari 同形）
+│   │   └── ai/              # AI 日报（provider/prompt/report/schedule/summarizer）
+│   ├── web/                 # Vue3 + Vite + Tailwind v4 + TypeScript SPA
+│   │   └── src/             # 公开页 / 管理页 / 组件 / composables / services
+│   ├── public/              # SPA 构建产物 + setup 向导 + 主题
+│   │   └── themes/          # 第三方 Komari 皮肤（如 glassmorphism）
+│   └── test/security.test.js   # 安全单元测试
+├── agent/                   # Python 受控端（Docker，纯标准库）
+│   ├── agent.py / collector.py
+│   ├── windows/             # Windows 原生（psutil）
+│   ├── install.sh / uninstall.sh / diting-agent.service
+│   └── Dockerfile / docker-compose.yml
+├── agent-go/                # Go 受控端（单文件二进制，原生部署）
+│   ├── main.go              # 主循环 + 自适应采样
+│   ├── collector/           # 采集子模块（cpu/mem/disk/diskio/network/probe/…）
+│   ├── reporter/            # 上报 + 压缩 + 重试
+│   ├── state/               # 月流量 STATE_FILE 持久化
+│   └── config/              # 环境变量解析
+├── docs/                    # 用户技术文档（13 篇）
+└── nginx/monitor.conf.example   # TLS 反代 + 限流示例
 ```
 
 ---
@@ -143,47 +185,132 @@ diting/
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
+| 变量 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
-| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位） |
+| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位，弱口令启动即拦截） |
+| `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
+| `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌 |
-| `SESSION_SECRET` | 推荐 | 随机 | Session 签名密钥（固定则重启不失效） |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
-| `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7-3650） |
+| `AGENT_INTERVAL` | 否 | `15` | 期望上报间隔（用于离线判定） |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
+| `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7-3650） |
+| `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭，交前端处理） |
+| `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
 | `ALERT_CPU_PCT` | 否 | `90` | CPU 告警阈值（%） |
 | `ALERT_MEM_PCT` | 否 | `90` | 内存告警阈值（%） |
 | `ALERT_COOLDOWN_SEC` | 否 | `1800` | 告警冷却时间（秒） |
-| `SMTP_HOST` | 否 | `smtp.qq.com` | SMTP 服务器 |
-| `SMTP_PORT` | 否 | `465` | SMTP 端口 |
-| `SMTP_USER` | 否 | — | SMTP 用户名 |
-| `SMTP_PASS` | 否 | — | SMTP 密码（QQ 邮箱用授权码） |
-| `ALERT_TO` | 否 | — | 告警收件人 |
-| `TELEGRAM_BOT_TOKEN` | 否 | — | Telegram Bot Token |
-| `TELEGRAM_CHAT_ID` | 否 | — | Telegram Chat ID |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写） |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | 否 | `smtp.qq.com` / `465` / `true` | SMTP 服务器与加密 |
+| `SMTP_USER` / `SMTP_PASS` | 否 | — | SMTP 用户名 / 密码（QQ 邮箱用授权码） |
+| `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram Bot 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
 
-### 受控端
+> AI 日报、计费、审计、Komari 主题均由后台「设置」页管理，无需环境变量。完整清单见 `server/.env.example`。
+
+### 受控端（Python 与 Go 共用）
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| `SERVER_URL` | ✅ | — | 服务端 URL（必须 HTTPS） |
+| `SERVER_URL` | ✅ | — | 服务端 URL（非 localhost 必须为 HTTPS） |
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
 | `INTERVAL` | 否 | `15` | 上报间隔（秒） |
-| `DISK_PATH` | 否 | `/` | 磁盘统计路径 |
-| `PROBE_TARGETS` | 否 | 移动/电信/联通 DNS + 8.8.8.8 | 网络质量探测目标（`label:host[:port]`，逗号分隔） |
+| `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
+| `PROBE_TARGETS` | 否 | 移动/电信/联通 DNS + 8.8.8.8 | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
+| `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
+| `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
+| `GZIP` | 否 | off | 启用 Gzip 压缩上报（需服务端支持解压） |
+| `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
+
+---
+
+## 🖥️ 管理端（Vue3 SPA）
+
+v1.0 起管理端从旧的单页脚本全面重写为 **Vue3 + Vite + Tailwind v4 + TypeScript** SPA：
+
+| 路由 | 说明 |
+|---|---|
+| `/` | 公开页：客户端卡片视图（玻璃拟态 / 明亮双主题）、分组、拖拽排序 |
+| `/node/:id` | 节点详情：指标图表 + 硬件/系统/存储/网络四张信息卡 |
+| `/login` | Admin Token + TOTP 两步验证 |
+| `/admin` | 后台：Dashboard / Agents / AgentDetail / Ai（日报）/ AuditLog / Billing / Settings / Template |
+
+- **前端分层**：`services/{api,adminApi,publicApi}.ts` + `composables/` + `components/`，类型由 `types.ts` 统一提供
+- **实时**：WebSocket 推送离线/恢复/告警，公共页 10s 轮询（后台标签暂停、并发去重）
+- **设置页**：站点信息、UI、告警阈值、通知、社交链接、主题切换（自研 + 第三方 Komari 皮肤）
+
+构建（产物直出 `server/public/`，服务端无需重启）：
+
+```bash
+cd server/web && npm install && npm run build
+```
 
 ---
 
 ## 📊 仪表盘功能
 
-- **概览**：总数 / 在线 / 离线 / 平均 CPU·内存 / 流量概览 / 分组概览
-- **客户端卡片**：状态点 / 国旗 / 商家徽章 / CPU/内存/负载/温度/Swap 迷你 sparkline / 硬盘进度条 / 到期倒计时 / 网络质量探测
-- **详情页**：CPU/内存/负载/网络速率/硬盘/温度/Swap/网络质量/本月流量 ECharts 时序图（1h/6h/24h/7d）
-- **客户端列表**：表格视图，点击行展开详情
+- **概览**：总数 / 在线 / 离线 / 平均 CPU·内存 / 流量概览 / 分组概览 / **数据库大小**
+- **客户端卡片**：状态点 / 国旗 / 商家徽章 / CPU·内存·负载·温度·Swap 迷你 sparkline / 硬盘进度条（多盘聚合）/ 到期倒计时 / 网络质量（延迟 + 丢包率小柱图）
+- **列表模式**：紧凑表格，CPU/内存/硬盘进度条 + 上下行速率双行
+- **详情页**：CPU / 内存 / 负载 / 网络速率 / 磁盘读写 / 温度 六图，时间范围 **1h / 6h / 24h / 7d / 30d**，Y 轴单位自适应（B/s → KB/s → MB/s → GB/s）
 - **拖拽排序**：管理员可自定义卡片顺序
 - **分组显示**：按分组归类，顺序可配置
+- **磁盘耗尽预测**：基于近期用量斜率预估剩余天数（聚合所有物理盘）
+
+---
+
+## 🛡️ 审计日志
+
+所有管理员写操作全量记录到 `audit_log` 表，后台 `/admin` 的「审计日志」页可查看、筛选：
+
+| 类别 | 记录的动作 |
+|---|---|
+| 客户端 | 创建 / 修改 / 删除 / 续期 / 重置 Token |
+| 设置 | 修改站点信息 / 告警阈值 / 通知 / 社交链接 |
+| 认证 | TOTP 启用 / 禁用 / 验证 |
+| 系统 | prune 连续失败告警等 |
+
+每条记录含操作者、时间、对象 ID、变更前后值（diff），谁在何时改了什么一目了然。
+
+---
+
+## 🤖 AI 日报
+
+服务端定时汇总昨日全部客户端指标异常，自动产出日报投递到「设置」里配置的渠道（邮件 / Telegram）：
+
+- 接入层 `server/src/ai/provider.js`（多 Provider 抽象），摘要策略 `summarizer.js` 基于历史与阈值去重
+- 推理超时 3 分钟（适配推理型模型），手动重试成功后清除降级状态横幅
+- 后台「Ai」页可一键手动触发；纯服务端任务，不引入任何下行指令
+
+---
+
+## 💰 计费与到期
+
+`agents` 表含 `price` / `billing_cycle` / `currency` / `auto_renewal` 四列，后台「Billing」页管理：
+
+- **计费周期**：月(30) / 季(90) / 半年(180) / 年(365) / 两年(730) / 三年(1095) / 白嫖(0)
+- **货币**：¥ / $ / € / £
+- **续费**：单节点（`POST /api/agents/:id/renew`）与批量续期
+- **到期提醒**：卡片到期倒计时（<7 天变黄、已过期变红）
+- **统计**：月度总费用、按分组统计、即将到期列表
+
+> 白嫖（`billing_cycle=0`）保持原到期日，续费仅刷新为今天、不改变到期日。
+
+---
+
+## 🎨 Komari 主题兼容
+
+`server/src/compat.js` 实现 Komari 官方社区主题兼容层，第三方皮肤可**零修改**运行：
+
+- **REST**：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
+- **实时**：`/api/clients`（WebSocket，发 `get` 取 snapshot）、`/api/clients/sse`（SSE 备选）
+- **RPC2**：`/api/rpc2`（POST / WS）
+- 本项目另暴露标准 `/api/v1/*`（与 Komari 同形，供自研 SPA 复用）
+
+主题挂载到 `server/public/themes/<id>/`，访问 `/?theme=<id>` 启用；`glassmorphism` 已在 CSP nonce 白名单。
 
 ---
 
@@ -218,12 +345,48 @@ diting/
 
 ---
 
+## 🐍 Python 受控端（Linux Docker）
+
+`agent/agent.py` + `collector.py`，纯标准库、无第三方依赖：
+
+- 采集：`/proc/stat`（CPU）、`/proc/meminfo`（内存）、`/proc/mounts`+`statvfs`（按 st_dev 去重真实盘，过滤 tmpfs/伪盘）
+- 网络流量：`/proc/net/dev`（容器内需 `--network host` 才能拿到真实流量）
+- 温度：`/sys/class/thermal`（可选）；网络质量：ICMP ping 优先、TCP 兜底、多目标并行
+- 月流量累计：`STATE_FILE=/data/state.json` 跨重启持久化、跨月清零
+- 401/403 → 10 分钟长退避（静态 Token 无法自愈）；瞬时错误指数退避（最多 3 次）
+
+---
+
+## 🐹 Go 受控端（Linux 原生）
+
+`agent-go/` 提供 Go 重写版，与 Python Agent **并行口径**、可任选其一：
+
+- **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / supervisord）
+- **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 10s ↔ 60s 自动调整（需服务端 `OFFLINE_THRESHOLD_SEC ≥ 120`）
+- **压缩上报**：可选 `GZIP=1`；**月流量**：`STATE_FILE` 与 Python 同格式可平滑切换
+- **资源占用**：常驻内存约 10MB（Python 约 80MB），不依赖 Python / Docker
+
+---
+
 ## 🖥️ Windows 受控端
 
 - 基于 `psutil`，采集 CPU/内存/磁盘/网络/开机时长
 - 上报字段与 Linux Agent 完全一致，服务端零改动
 - 安装：运行 `agent/windows/install.ps1` 自动安装依赖并注册计划任务
 - Windows 无 load average，`load1/load5/load15` 固定占位 `0.0`
+
+---
+
+## ⚡ 性能与规模
+
+**以 100 台受控端为设计前提**（不是事后调优），所有会随规模放大的接口都做了底层优化：
+
+- **后端降采样**：sparklines 默认 1000 点/标签；延迟波形 `PROBES_MAX_POINTS=5000`、长区间时间桶聚合
+- **SQL 层聚合**：首页集群平均 CPU/内存趋势在 DB 端计算，不再前端拉全量聚合
+- **字段裁剪**：metrics 全量查询只取 `ts/agent_id/probes`，避免 30d × 100 台数十 MB 雪崩
+- **轮询优化**：公共页 10s 间隔、后台标签暂停、并发去重
+- **实证**：测试库 62 台 / 336 万行 metrics、100+ 节点下页面响应 < 500ms
+- **教训**：对 metrics 表的全量 `.all()` 在 2GB 堆下曾 OOM（已修复），此后一律字段裁剪 + 时间桶降采样
 
 ---
 
@@ -236,6 +399,7 @@ diting/
 - [ ] 配置 IP 白名单（支持 IPv4/IPv6/CIDR）
 - [ ] 定期备份数据库（`sudo bash diting.sh --backup`）
 - [ ] 配置告警通知（邮件 / Telegram）
+- [ ] 定期查阅审计日志（后台 → 审计日志）
 - [ ] 使用 Cloudflare Tunnel 或 Tailscale 隐藏源站 IP（可选）
 
 ---

@@ -41,6 +41,15 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 **⚡ Lightweight, low-dependency, easy to deploy**
 - Zero-dependency TOTP implementation; ECharts bundled locally from npm (no CDN); agents are stdlib-only and run as non-root; application-layer rate limiting plus Nginx security headers; weak-token startup guard, input validation, and build-context isolation all included.
 
+**🆕 v1.0 feature set (Vue3 SPA rewrite)**
+
+- **Vue3 + Vite + Tailwind v4 admin SPA** (`/`, `/login`, `/admin`, `/node/:id`) — glassmorphism + light themes; rewritten from the old single-page scripts.
+- **Audit log**: every admin write (client CRUD, settings, token reset, TOTP toggle) is recorded to `audit_log` with operator / action / diff, viewable in the admin panel.
+- **AI daily report**: server-side scheduled summarization of yesterday's metric anomalies, delivered via the configured channel (mail / Telegram).
+- **Billing & expiry**: per-client `price` / `billing_cycle` / `currency` / `auto_renewal`; monthly / quarterly / yearly billing, batch renew, expiry countdown.
+- **Komari theme compatibility**: `server/src/compat.js` exposes the Komari community-theme contract (`/api/v1/*`, `/api/clients` WebSocket, `/api/rpc2`), so third-party skins run unmodified via `/?theme=<id>`.
+- **Designed for 100 agents**: backend downsampling + SQL-side aggregation + column-projected metrics queries, validated on a 62-agent / 3.36M-row test DB.
+
 ## Architecture
 
 ```
@@ -72,8 +81,13 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
     adaptive.go  local change-rate based adaptive interval (fast/slow)
     go.mod       no require (pure stdlib) — fast cross-compilation
   server/       # Server + dashboard
-    server.js / src/{db,auth,api,alerts}.js
-    public/     polished dashboard (ECharts)
+    server.js            entry + routes + WebSocket + SPA fallback
+    src/                 db / auth / api / alerts / totp / validate / util
+    src/compat*.js       Komari theme REST / metrics / rpc2 compatibility
+    src/v1.js            standard /api/v1/* endpoints
+    src/ai/              AI daily report (provider / prompt / schedule / summarizer)
+    web/                 Vue3 + Vite + Tailwind v4 admin SPA (TypeScript)
+    public/              SPA build output + setup wizard + themes/
     Dockerfile / docker-compose.yml / .env.example
   nginx/monitor.conf.example   # TLS reverse-proxy + rate-limit example
 ```
@@ -385,16 +399,18 @@ sudo bash diting.sh --db-stats
 
 ## Environment variables
 
-**Server `.env`**: `PORT`, `ADMIN_TOKEN`, `OFFLINE_THRESHOLD_SEC` (default 60), `RETENTION_DAYS` (default 30), `ALERT_CPU_PCT`/`ALERT_MEM_PCT` (default 90), `ALERT_COOLDOWN_SEC`, `SMTP_*` (QQ Mail alerts), `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (optional, Telegram alerts), `READONLY_TOKEN` (optional, read-only account — see below), `SESSION_SECRET`/`SESSION_TTL_MS` (2FA session — see "Two-factor authentication (TOTP)").
+**Server `.env`**: `PORT`, `ADMIN_TOKEN`, `SETUP_TOKEN` (optional self-registration), `SESSION_SECRET`/`SESSION_TTL_MS` (2FA session — see "Two-factor authentication (TOTP)"), `READONLY_TOKEN` (optional, read-only account — see below), `ADMIN_ALLOW_HTTP` (plaintext opt-in for intranet only), `AGENT_INTERVAL` (expected report interval), `OFFLINE_THRESHOLD_SEC` (default 60), `RETENTION_DAYS` (default 30), `PROBES_DOWNSAMPLE`/`PROBES_MAX_POINTS` (latency-waveform backend downsampling, default 1 / 5000), `ALERT_CPU_PCT`/`ALERT_MEM_PCT` (default 90), `ALERT_COOLDOWN_SEC`, `SMTP_*` (QQ Mail alerts), `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` (optional, Telegram alerts).
 
 **Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds, default 15 for the Python agent, 20 for the Go binary), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8`; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `STATE_FILE` (monthly-traffic state; default `/data/state.json`), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `GZIP` (off by default; needs server-side decompression middleware or reports are rejected with 400), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
 
 ## Dashboard features
 
-- Overview: total / online / offline / average CPU·memory.
-- Client cards: status dot, merchant badge, CPU/memory/load/traffic mini sparklines, disk progress bar, **expiry countdown** (<7 days yellow, expired red), notes.
-- Detail page: ECharts time-series for CPU, memory, load, network rate, disk, temperature, Swap, network quality (latency to fixed public probe targets), and this-month traffic (vs quota), over 1h/6h/24h/7d.
-- Edit / delete clients; auto-refresh every 10s.
+- **Admin SPA (Vue3)**: `/` public card grid (glassmorphism / light themes, drag sort, grouping), `/login` (Admin Token + TOTP), `/admin` (Dashboard / Agents / AgentDetail / Ai / AuditLog / Billing / Settings / Template), `/node/:id` node detail.
+- Overview: total / online / offline / average CPU·memory / traffic / group overview / **database size**.
+- Client cards: status dot, flag, merchant badge, CPU/memory/load/temperature/Swap mini sparklines, disk progress bar (multi-disk aggregated), **expiry countdown** (<7 days yellow, expired red), network quality (latency + loss mini bars), notes.
+- List mode: compact table with CPU/memory/disk progress bars + up/down rate.
+- Detail page: ECharts time-series for CPU, memory, load, network rate, disk I/O, temperature, over **1h/6h/24h/7d/30d**; Y-axis unit auto-scales (B/s → KB/s → MB/s → GB/s); disk-exhaustion forecast.
+- Edit / delete clients; auto-refresh every 10s (paused on background tabs).
 
 ## Alerts
 
