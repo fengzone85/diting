@@ -132,7 +132,10 @@ async function analyze(config, summary) {
       'Content-Length': Buffer.byteLength(body) // 显式声明，避免非标代理 411
     },
     body,
-    timeoutMs: 30000, // 超时偏保守：日报非实时，失败会降级而非丢失
+    // 超时 3 分钟：推理模型（deepseek-r*/v4 系列等）先生成 reasoning_content 再输出，
+    // 非流式请求在生成完毕前不返回任何字节，socket 空闲超时极易误伤。
+    // 实测 62 节点摘要（~20k tokens）思考+生成约 45s，30s 必超时。日报非实时，放宽以保成功。
+    timeoutMs: 180000,
     resolvedIp: resolved ? resolved.ip : null,
     resolvedFamily: resolved ? resolved.family : null
   });

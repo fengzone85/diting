@@ -73,7 +73,10 @@ function getSession(req) {
 }
 function setSessionCookie(res, payload) {
   const cookie = signSession(payload);
-  const attrs = `HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL / 1000)}`;
+  // ADMIN_ALLOW_HTTP=1（仅本地开发直连 http 时启用）下不附加 Secure，
+  // 使浏览器可在 http 上下文持有登录态；生产环境不设该变量，cookie 仍强制 Secure。
+  const secure = process.env.ADMIN_ALLOW_HTTP === '1' ? '' : 'Secure; ';
+  const attrs = `HttpOnly; ${secure}SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL / 1000)}`;
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${attrs}`);
 }
 function clearSessionCookie(res) {
@@ -253,9 +256,22 @@ function ip6ToBits(ip) {
   }
 }
 
+// ---- 审计日志：记录管理员写操作 ----
+// 从 req 提取操作者身份（session 中的 admin name 或 via 信息）和 IP。
+function auditLog(req, action, detail) {
+  try {
+    const sess = getSession(req);
+    const r = resolveRole(req);
+    const admin = sess?.role === 'admin' ? 'admin(session)' : (r?.via === 'token' ? 'admin(token)' : 'unknown');
+    const ip = String(req.ip || req.socket?.remoteAddress || '');
+    const via = r?.via || '';
+    db.addAuditLog(Date.now(), admin, ip, action, detail, via);
+  } catch { /* 审计失败不影响主流程 */ }
+}
+
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
-  verifyTotpHeader,
+  verifyTotpHeader, auditLog,
 };

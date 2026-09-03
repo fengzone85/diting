@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS metrics (
   FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_agent_ts ON metrics(agent_id, ts);
+-- 全量 sparklines 查询（WHERE ts>=? 无 agent_id 条件）需要单列 ts 索引，避免 7d 窗口全表扫描
+CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts);
 
 CREATE TABLE IF NOT EXISTS alert_state (
   agent_id   TEXT NOT NULL,
@@ -82,6 +84,17 @@ CREATE TABLE IF NOT EXISTS ai_reports (
   created_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts        INTEGER NOT NULL,
+  admin     TEXT NOT NULL,
+  ip        TEXT DEFAULT '',
+  action    TEXT NOT NULL,
+  detail    TEXT DEFAULT '',
+  via       TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 `);
 
 // ---- schema migration: add temp / swap columns if missing (existing DBs) ----
@@ -153,6 +166,25 @@ const stmts = {
      @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
+  metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // 单节点探针 SQL 层采样（详情页延迟波形专用）：只返回 maxPoints 行，保留首尾点。
+  // 此前全量拉 9.5 万行并逐行 JSON.parse(probes)（9.5 万次解析），是详情页"慢/有时无法显示"的
+  // 另一半原因。SQL 层采样后只需解析 maxPoints 次，JS 层再做 avg 桶聚合（对 2000 点做聚合极轻）。
+  metricsProbesOne: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, probes,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=? AND ts>=? AND probes IS NOT NULL
+      )
+      SELECT ts, probes
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY ts ASC`).all(agentId, sinceTs);
+  },
   prune: db.prepare('DELETE FROM metrics WHERE ts < ?'),
   getAlertState: db.prepare('SELECT * FROM alert_state WHERE agent_id=? AND type=?'),
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
@@ -160,6 +192,65 @@ const stmts = {
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
+  metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
+  // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
+  metricsSparklinesAllSampled: (sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER (PARTITION BY agent_id) AS cnt
+        FROM metrics WHERE ts>=?
+      )
+      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY agent_id, ts ASC`).all(sinceTs);
+  },
+  // 单节点 sparklines SQL 层采样（节点详情页专用）：与全量版同构，但按 agent_id 过滤。
+  // 此前详情页单节点走「全量拉取 10.8 万行 → Node 侧 downsampleSparklines 降到 2000 点」，
+  // 每次请求 2.77s + 220MB 峰值，30s 缓存一过就卡/偶发超时。SQL 层直接只返回 maxPoints 行。
+  // 必须保留首尾点（rn=1 OR rn=cnt）：详情页磁盘耗尽预测依赖 disk_used 首末值做线性外推。
+  metricsSparklinesOne: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(maxPoints));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=? AND ts>=?
+      )
+      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+      FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+      ORDER BY ts ASC`).all(agentId, sinceTs);
+  },
+  // 集群级时间桶聚合（仪表盘平均 CPU/内存趋势专用）：跨所有 agent 按固定时间桶 GROUP BY，
+  // 直接算出每个桶的 cpu/mem 平均值。返回行数=桶数（≤maxPoints），彻底规避「62 台 × 每 agent 2000 点
+  // 全量拉到前端再逐点聚合」的主线程卡顿。SQL 引擎做聚合，只传输最终曲线。
+  // spanMs: 窗口总时长（毫秒），用于按目标点数反推桶宽 = spanMs/maxPoints。
+  // 注意：better-sqlite3 对绑定对象里的 number 默认绑成 REAL，导致 (ts-@since)/@bucket 变浮点除法、
+  // 每个浮点值自成一组。故用 CAST(... AS INTEGER) 强制整数地板除法，保证分组数≈maxPoints。
+  metricsClusterAvg: (sinceTs, spanMs, maxPoints) => {
+    const bucket = Math.max(1, Math.ceil(spanMs / Math.max(1, maxPoints)));
+    return db.prepare(`
+      WITH agg AS (
+        SELECT CAST((ts - @since) / @bucket AS INTEGER) AS b,
+               AVG(cpu) AS cpu, AVG(mem_pct) AS mem_pct
+        FROM metrics WHERE ts>=@since AND cpu IS NOT NULL
+        GROUP BY b
+      )
+      SELECT (@since + CAST(b AS INTEGER) * @bucket) AS ts, cpu, mem_pct
+      FROM agg ORDER BY b ASC`).all({ since: sinceTs, bucket });
+  },
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
     (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
@@ -195,6 +286,14 @@ const createAgent = (fields) => {
 
 const getAgent = (id) => stmts.getAgent.get(id);
 const getAgents = () => stmts.getAgents.all();
+// 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点。
+const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparklinesAllSampled(sinceTs, maxPoints);
+
+// 集群级时间桶聚合（仪表盘平均曲线）：跨所有 agent 按时间桶求 cpu/mem 平均，返回行数≤maxPoints。
+const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAvg(sinceTs, spanMs, maxPoints);
+
+// 单节点 sparklines SQL 层采样（节点详情页）：只返回 maxPoints 行，保留首尾点供磁盘耗尽预测。
+const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints);
 
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {
@@ -206,6 +305,33 @@ const resetAgentToken = (id) => {
 };
 // 批量取所有 Agent 的时序指标（sparkline 用），按 agent_id 升序返回原始行。
 const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
+
+// 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
+const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
+
+// 单节点探针 SQL 层采样（详情页延迟波形）：只返回 maxPoints 行，规避 9.5 万次 JSON.parse。
+const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbesOne(agentId, sinceTs, maxPoints);
+
+// 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
+// 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
+const metricsProbesAll = (sinceTs, maxPoints) => {
+  const step = Math.max(1, Math.floor(maxPoints || 1));
+  return db.prepare(`
+    WITH numbered AS (
+      SELECT ts, agent_id, probes,
+             ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
+             COUNT(*) OVER (PARTITION BY agent_id) AS cnt
+      FROM metrics WHERE ts>=? AND probes IS NOT NULL
+    )
+    SELECT ts, agent_id, probes
+    FROM numbered
+    WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/${step} AS INTEGER)) = 0
+    ORDER BY agent_id, ts ASC`).all(sinceTs);
+};
+
+// sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
+const getMetricsSparklines = (agentId, sinceTs) => stmts.metricsSparklines.all(agentId, sinceTs);
+const getMetricsSparklinesAll = (sinceTs) => stmts.metricsSparklinesAll.all(sinceTs);
 
 const updateAgent = (id, f) => stmts.updateAgent.run({
   id,
@@ -265,7 +391,19 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: false, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '' };
+  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
+    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
+    glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
+    color_vision: 'normal',           // 色觉辅助：normal/protanopia/deuteranopia/tritanopia
+    card_scheme: 'official',          // 首页总览卡片方案：official/basic/ops/resource/finance/traffic/gpu/asset/full
+    card_size: 'comfortable',         // 节点卡片尺寸：mini/compact/comfortable/large
+    background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 }, // 背景图/视频
+    announcement: { enabled: false, title: '', content: '' }, // 公告
+    provider_aliases: {},             // 厂商别名映射 { "原始厂商": "显示名" }
+    custom_tags: {},                  // 节点自定义标签 { "agent_id": "标签文本" }
+    visitor_info: false               // 访客信息条（底部 IP 条）
+  };
   try {
     const o = JSON.parse(getConfig(SETTINGS_KEY) || '{}');
     const merged = Object.assign(def, o);
@@ -393,13 +531,44 @@ function pruneAiReports(retentionDays) {
   return stmts.pruneAiReports.run(cutoff).changes;
 }
 
+// ---- 审计日志 ----
+const insertAuditLog = db.prepare(`INSERT INTO audit_logs (ts, admin, ip, action, detail, via)
+  VALUES (@ts, @admin, @ip, @action, @detail, @via)`);
+const listAuditLogs = db.prepare('SELECT * FROM audit_logs ORDER BY ts DESC LIMIT ? OFFSET ?');
+const countAuditLogs = db.prepare('SELECT COUNT(*) AS n FROM audit_logs');
+const pruneAuditLogs = db.prepare('DELETE FROM audit_logs WHERE ts < ?');
+
+function addAuditLog(ts, admin, ip, action, detail, via) {
+  insertAuditLog.run({ ts, admin, ip, action, detail: detail || '', via: via || '' });
+}
+function getAuditLogs(limit, offset) {
+  return listAuditLogs.all(Math.max(1, Number(limit) || 100), Math.max(0, Number(offset) || 0));
+}
+function countAudit() { return countAuditLogs.get().n; }
+function pruneAudit(retentionDays) {
+  const cutoff = Date.now() - retentionDays * 86400000;
+  return pruneAuditLogs.run(cutoff).changes;
+}
+
+// 数据库文件大小（字节）。含主库文件 + rollback-journal（写入中暂存的 -journal），不含 WAL/SHM
+//（本应用刻意不用 WAL 模式）。用于后台仪表盘展示数据库占用监控。
+function getDbFileSize() {
+  let size = 0;
+  for (const p of [DB_PATH, `${DB_PATH}-journal`]) {
+    try { size += fs.statSync(p).size; } catch (_) { /* 文件不存在则忽略 */ }
+  }
+  return size;
+}
+
 module.exports = {
-  db, hashToken, genToken,
+  db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsAll,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsProbesOne,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
-  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports
+  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports,
+  addAuditLog, getAuditLogs, countAudit, pruneAudit
 };

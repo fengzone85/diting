@@ -247,11 +247,18 @@ async function generateAndSend(opts) {
     console.warn('[ai] 未配置通知通道，日报仅落库未发送（报告 ID:', report.id, '）');
   }
 
+  // ⑤ 统一更新运行状态（schedule/manual 触发都刷新）：
+  //    手动重试成功后应清除上次的「失败已降级」提示，否则前端状态横幅一直显示旧错误。
+  //    与 schedule.js tick 中的更新逻辑保持同构（重复写幂等无害）。
+  const finalStatus = degraded ? 'degraded' : 'ok';
+  const finalMessage = degraded ? `AI 分析失败已降级：${degradeReason}` : '日报已生成并发送';
+  db.setAiState({ last_run_ts: Date.now(), last_status: finalStatus, last_error: degraded ? finalMessage : '' });
+
   return {
-    status: degraded ? 'degraded' : 'ok',
+    status: finalStatus,
     report_id: report.id,
     degraded,
-    message: degraded ? `AI 分析失败已降级：${degradeReason}` : '日报已生成并发送'
+    message: finalMessage
   };
 }
 

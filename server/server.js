@@ -38,7 +38,7 @@ app.set('trust proxy', true);
 app.use((req, res, next) => {
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https:; connect-src 'self'"
   );
   // L-1 修复：补充安全响应头，纵深防御 XSS / 点击劫持 / MIME 嗅探
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -134,7 +134,8 @@ app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/public/') || req.path === '/report' ||
       req.path.startsWith('/v1/') ||
       req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
-      req.path === '/version' || req.path === '/rpc2') return next();
+      req.path === '/records/load' || req.path === '/records/ping' ||
+      req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse') return next();
   ipWhitelist(req, res, next);
 });
 app.use('/api', api);
@@ -172,17 +173,50 @@ const THEME_NEEDS_NONCE = new Set(['glassmorphism']);
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
 // 规避前置 Nginx / Docker 部署时静态目录未被代理 / 未打进镜像导致的 404。
 // 主题目录名与路径均经白名单校验，杜绝路径穿越；按官方文档 /themes/{short}/... 映射主题包根目录。
-app.get('/themes/:id/*path', (req, res) => {
-  const id = req.params.id;
-  const subPath = req.params.path || '';
-  if (!/^[A-Za-z0-9_-]+$/.test(id)) return res.status(404).end();
-  const fp = path.join(THEMES_DIR, id, subPath);
-  if (!fp.startsWith(path.join(THEMES_DIR, id) + path.sep)) return res.status(404).end();
-  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return res.status(404).end();
+// 注意：Express 4.22 的 ':id/*path' 星号通配不匹配多级路径，故用正则路由
+// 精确捕获 id 与剩余子路径，支持社区主题的 SPA history 深链（如 /instance/<uuid>）。
+app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
+  const id = req.params[0];
+  const subPath = req.params[1] || '';
+  const baseDir = path.join(THEMES_DIR, id);
+  const fp = path.join(baseDir, subPath);
+  if (!fp.startsWith(baseDir + path.sep)) return res.status(404).end();
+  // 真实静态资源（带后缀）：存在则返回，否则 404 交给后续处理链。
+  if (path.extname(req.path)) {
+    if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    const ext = path.extname(fp).toLowerCase();
+    res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
+    return fs.createReadStream(fp).pipe(res);
+  }
+  // 无后缀深链（如 /themes/<id>/instance/<uuid>）：社区主题 SPA history 路由，
+  // 回退到主题根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
+  const indexPath = path.join(baseDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return next();
+  if (THEME_NEEDS_NONCE.has(id)) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+  }
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  const ext = path.extname(fp).toLowerCase();
-  res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
-  fs.createReadStream(fp).pipe(res);
+  return res.sendFile(indexPath);
+});
+
+// 裸主题根路径（如 /themes/glassmorphism）：返回主题 index.html。
+app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
+  const id = req.params[0];
+  const baseDir = path.join(THEMES_DIR, id);
+  const indexPath = path.join(baseDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return next();
+  if (THEME_NEEDS_NONCE.has(id)) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+  }
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  return res.sendFile(indexPath);
 });
 
 // 版本信息端点（公开）：供前端页脚显示版本号与构建时间
@@ -190,18 +224,23 @@ app.get('/api/version', (req, res) => {
   res.json({ version: APP_VERSION, build_time: APP_BUILD_TIME });
 });
 
-// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin.html
+// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
 app.get('/setup.html', (req, res) => {
   const { getAdminToken } = require('./src/auth');
   if (getAdminToken()) {
-    return res.redirect(302, '/admin.html');
+    return res.redirect(302, '/admin');
   }
   res.sendFile(path.join(__dirname, 'public', 'setup.html'));
 });
 app.get('/setup', (req, res) => res.redirect(302, '/setup.html'));
 
-// admin.html 受 IP 白名单保护
-app.get('/admin.html', ipWhitelist, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+// admin 路由由 SPA 接管：网络层 IP 白名单闸 + 显式返回 SPA 入口
+// 正则覆盖裸 /admin 与 /admin/*（Express 4 中 /admin/* 不匹配裸 /admin）
+app.get(/^\/admin(\/.*)?$/, ipWhitelist, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+// 旧书签 / 外链兼容：/admin.html 301 到 /admin
+app.get('/admin.html', (req, res) => res.redirect(301, '/admin'));
 // 同源自定义 CSS 端点（M-1 修复）：以 <link> 投放而非内联 <style>，
 // 既让 custom_css 在严格 CSP（style-src 'self'）下真正生效，又避免内联注入。
 // 内容为落库前已清洗的版本；公开可读（仅样式，无敏感数据），并对所有访客生效。
@@ -217,6 +256,10 @@ app.get('*', (req, res, next) => {
   // API 与显式路由已注册在前，不会落到此处
   if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
 
+  // Vue SPA 内部路由前缀优先：这些路径不应被第三方主题吞掉
+  const SPA_PREFIXES = ['/admin', '/login', '/node'];
+  const isSpaRoute = SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + '/'));
+
   // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）
   const ui = db.getUiSettings();
   const theme = (req.query.theme && typeof req.query.theme === 'string')
@@ -225,7 +268,7 @@ app.get('*', (req, res, next) => {
 
   // 带后缀文件：优先尝试当前主题根目录映射，未命中再交给 express.static
   if (path.extname(req.path)) {
-    if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
+    if (!isSpaRoute && theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
       const fp = path.join(THEMES_DIR, theme, req.path);
       if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
@@ -235,6 +278,11 @@ app.get('*', (req, res, next) => {
       }
     }
     return next();
+  }
+
+  // 无后缀路径：SPA 路由直接返回 Vue 入口
+  if (isSpaRoute) {
+    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   }
 
   // 无后缀：返回主题 index.html（官方主题在 dist/ 下也按根目录 index.html 处理）
@@ -265,6 +313,29 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Komari 社区主题兼容兜底：第三方主题（如 glassmorphism）硬编码以根路径
+// /images/logo/* 与 /images/flags/* 取 OS logo / 国旗，而 diting 原生将其平铺在
+// public/ 根（os-*.svg、flags/），目录层级不同会 404。此处仅在静态资源未命中时，
+// 按当前启用主题回退到 themes/<id>/images/ 目录（那里本就含完整 logo/flags 集），
+// 既满足 Komari 主题约定，又不复制/改动 diting 原生 public/ 布局。
+const KOMARI_IMAGE_PREFIXES = ['/images/logo/', '/images/flags/'];
+app.use((req, res, next) => {
+  const p = req.path;
+  if (!KOMARI_IMAGE_PREFIXES.some(pre => p.startsWith(pre))) return next();
+  const ui = db.getUiSettings();
+  const theme = ui.public_theme;
+  if (!theme || theme === 'default' || !/^[A-Za-z0-9_-]+$/.test(theme)) return next();
+  const sub = p.slice('/images/'.length); // logo/os-x.svg 或 flags/CN.svg
+  const baseDir = path.join(THEMES_DIR, theme, 'images');
+  const fp = path.join(baseDir, sub);
+  if (!fp.startsWith(baseDir + path.sep)) return next(); // 防路径穿越
+  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();
+  const ext = path.extname(fp).toLowerCase();
+  res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  return fs.createReadStream(fp).pipe(res);
+});
 
 // periodic prune of old metrics
 // 保留天数从后台设置动态读取（db.getRetentionDays），设置变更后下次清理自动生效。
@@ -336,9 +407,13 @@ function wsRateLimit(ip) {
 try {
   const { WebSocketServer } = require('ws');
 
-  const wss = new WebSocketServer({ server, path: '/api/clients' });
-  wss.on('connection', (ws, req) => {
-    // 仅公开状态页开启时开放（数据为脱敏的公开视图）
+  // 单一 WebSocketServer（noServer 模式），在 upgrade 事件中按 path 分发给不同主题协议。
+  // 注意：不可为 /api/clients 与 /api/rpc2 各建一个非 noServer 的 WSS 共享同一 server——
+  // 那样 path 不匹配的 upgrade 会被第一个 WSS 以 HTTP 400 拒绝（ws 库默认行为），
+  // 导致主题连接 /api/rpc2 失败、实时/负载数据全部拉不到。
+  const wss = new WebSocketServer({ noServer: true });
+
+  function attachCommon(ws, req) {
     if (!db.getUiSettings().public_enabled) {
       try { ws.close(1008, 'public disabled'); } catch (_) {}
       return;
@@ -350,32 +425,30 @@ try {
       return;
     }
     set.add(ws);
+    return set;
+  }
+
+  // /api/clients：社区主题公开快照（发送 "get" 触发刷新）
+  wss.on('connection', (ws, req, pathname) => {
+    if (pathname !== '/api/clients') return;
+    const set = attachCommon(ws, req);
+    if (!set) return;
     const send = () => { try { ws.send(JSON.stringify(compat.snapshot())); } catch (_) {} };
     send();
-    ws.on('message', () => send()); // 社区主题客户端发送 "get" 触发刷新
+    ws.on('message', () => send());
     const timer = setInterval(send, 5000);
     ws.on('close', () => {
       clearInterval(timer);
       set.delete(ws);
-      if (set.size === 0) wsConns.delete(ip);
+      if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
   });
-  console.log('[monitor] theme-compat WebSocket /api/clients enabled');
 
-  // JSON-RPC WebSocket 端点：社区主题通过 /api/rpc2 拉实时状态
-  const wssRpc = new WebSocketServer({ server, path: '/api/rpc2' });
-  wssRpc.on('connection', (ws, req) => {
-    if (!db.getUiSettings().public_enabled) {
-      try { ws.close(1008, 'public disabled'); } catch (_) {}
-      return;
-    }
-    const ip = wsClientIp(req);
-    const set = wsRateLimit(ip);
-    if (!set) {
-      try { ws.close(1008, 'rate limited'); } catch (_) {}
-      return;
-    }
-    set.add(ws);
+  // /api/rpc2：社区主题 JSON-RPC 网关
+  wss.on('connection', (ws, req, pathname) => {
+    if (pathname !== '/api/rpc2') return;
+    const set = attachCommon(ws, req);
+    if (!set) return;
 
     const pushStatus = () => {
       try {
@@ -386,22 +459,71 @@ try {
     const timer = setInterval(pushStatus, 5000);
 
     ws.on('message', (data) => {
+      let msg = null;
       try {
-        const msg = JSON.parse(data.toString());
+        msg = JSON.parse(data.toString());
+      } catch (err) {
+        // 非法 JSON：msg 未解析成功，用 null id 回复，不抛出以免崩进程。
+        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
+        return;
+      }
+      try {
         const result = handleRpc(msg.method, msg.params);
         ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id }));
       } catch (err) {
-        ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg?.id ?? null }));
+        try {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg ? msg.id : null }));
+        } catch (_) {}
       }
     });
 
     ws.on('close', () => {
       clearInterval(timer);
       set.delete(ws);
-      if (set.size === 0) wsConns.delete(ip);
+      if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
   });
-  console.log('[monitor] theme-compat WebSocket /api/rpc2 enabled');
+
+  server.on('upgrade', (req, socket, head) => {
+    let pathname = req.url || '/';
+    const q = pathname.indexOf('?');
+    if (q >= 0) pathname = pathname.slice(0, q);
+    if (pathname !== '/api/clients' && pathname !== '/api/rpc2') {
+      // 非主题 WS 路径：交由其他 handler（若有），否则关闭避免悬挂。
+      try { socket.destroy(); } catch (_) {}
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req, pathname);
+    });
+  });
+  console.log('[monitor] theme-compat WebSocket (/api/clients, /api/rpc2) enabled');
 } catch (e) {
   console.warn('[monitor] theme-compat WebSocket 未启用（缺少 ws 包，仅 REST 兼容可用）：', e.message);
+}
+
+// SSE 端点 /api/clients/sse：覆盖仅支持 SSE（不支持 WebSocket）的社区主题。
+// 与 WebSocket /api/clients 同构：受 public_enabled 约束，每 5s 推送一次 compat.snapshot()，
+// 事件格式为「data: <json>\n\n」（浏览器 EventSource 原生消费）。
+try {
+  app.get('/api/clients/sse', (req, res) => {
+    if (!db.getUiSettings().public_enabled) {
+      return res.status(403).json({ status: 'error', message: 'public page disabled' });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no' // 禁用 Nginx 缓冲，确保实时推送
+    });
+    const send = () => {
+      try { res.write('data: ' + JSON.stringify(compat.snapshot()) + '\n\n'); } catch (_) {}
+    };
+    send();
+    const timer = setInterval(send, 5000);
+    req.on('close', () => clearInterval(timer));
+  });
+  console.log('[monitor] theme-compat SSE /api/clients/sse enabled');
+} catch (e) {
+  console.warn('[monitor] theme-compat SSE 未启用：', e.message);
 }
