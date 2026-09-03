@@ -11,3 +11,9 @@ data/
 public.bak-*/
 *.log
 *.db
+# 密钥文件绝不入镜像（.env 含 ADMIN_TOKEN/SESSION_SECRET/SMTP_PASS 等）；
+# 否则 COPY . . 会将其烘焙进镜像层，镜像一旦推送 registry 即造成泄密。
+# 保留 .env.example 供使用者参考。
+.env
+.env.*
+!.env.example
