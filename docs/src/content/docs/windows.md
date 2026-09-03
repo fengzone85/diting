@@ -39,10 +39,10 @@ Windows 版受控端通过 psutil 采集：
 | 内存使用率 | ✅ |
 | 磁盘使用率 | ✅ |
 | 网络流量 | ✅ |
-| 温度 | ✅（如硬件支持） |
-| Swap | ✅ |
+| 温度 | ✅（`sensors_temperatures`，无传感器时上报 `null`） |
+| Swap | ✅（`swap_memory`，Windows 多用页面文件，通常为 0） |
 | 开机时长 | ✅ |
-| 系统负载 | ❌（Windows 无此概念） |
+| 系统负载 | ⚠️ Windows 无 load average，`load1` 用进程数近似，`load5/load15` 为 0 |
 | 网络质量 | ✅ ICMP/TCP |
 
 ## 服务管理
