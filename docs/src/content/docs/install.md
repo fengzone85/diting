@@ -5,7 +5,7 @@ description: 各平台安装方式汇总
 
 # 安装指南
 
-DiTing Lite 支持多种部署方式，按需选择。
+DiTing 支持多种部署方式，按需选择。
 
 ## 方式对比
 
@@ -22,8 +22,8 @@ DiTing Lite 支持多种部署方式，按需选择。
 ```bash
 git clone https://github.com/fengzone85/diting.git
 cd diting
-cp .env.example .env
-# 编辑 .env 设置 SETUP_TOKEN、域名等
+cp server/.env.example server/.env
+# 编辑 server/.env 设置 ADMIN_TOKEN、域名等
 docker compose up -d
 ```
 
@@ -102,7 +102,7 @@ server {
     ssl_certificate_key /path/to/key.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

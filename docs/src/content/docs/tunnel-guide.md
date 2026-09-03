@@ -79,7 +79,7 @@ sudo ufw enable
 原理：所有设备加入同一个 Tailscale 虚拟网络，通过**内网 IP / Magic DNS** 互访。VPS 可**关闭全部入站端口**，外部互联网根本找不到它。适合"只有你自己/少数设备访问"的场景。
 
 ### 1. 各设备安装 Tailscale 并加入同一 tailnet
-- VPS：`curl -fsSL https://tailscale.com/diting.sh | sh` 然后 `sudo tailscale up`
+- VPS：`curl -fsSL https://tailscale.com/install.sh | sh` 然后 `sudo tailscale up`
 - 你的电脑 / 受控端同样安装并登录同一账号。
 
 ### 2. 收紧 VPS 防火墙
@@ -91,8 +91,7 @@ Tailscale 流量经其 DERP 中继或 P2P，依赖**出站** UDP（及到 `derp.
 
 ### 3. 访问与上报都走 Tailscale 地址
 - 仪表盘：浏览器打开 `http://<vps-magic-dns>:8081`（如 `http://vps-monitor.tailnet-name.ts.net:8081`）。
-- 受控端 agent：把上报地址从公网域名改成 Tailscale 地址（例如 `http://vps-monitor.tailnet-name.ts.net:8081`）。
-  - 若仍想用 Nginx + TLS，让 Nginx 监听 Tailscale 接口（或 `0.0.0.0`，但因无公网路由，仅 tailnet 可达），agent 用 `https://...ts.net`。
+- 受控端 agent：上报地址用 Tailscale 地址即可，但 **agent 强制 HTTPS**（非 localhost 的 `http://` 会直接拒绝启动），需配证书。推荐让 Nginx + TLS 监听 Tailscale 接口，agent 用 `https://<vps-magic-dns>` 上报；或直接用 `--network host` + `SERVER_URL=http://localhost:8081`（仅本机 agent 适用）。
 - admin token、agent token 照常填，认证逻辑不变。
 
 ### 优点 / 注意

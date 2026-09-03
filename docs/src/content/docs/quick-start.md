@@ -1,6 +1,6 @@
 ---
 title: 快速开始
-description: 5 分钟部署 DiTing Lite
+description: 5 分钟部署 DiTing
 ---
 
 # 快速开始
@@ -19,9 +19,9 @@ cd diting
 docker compose up -d
 ```
 
-访问 `http://<你的IP>:3000` 即可看到仪表盘。
+访问 `http://<你的IP>:8081` 即可看到仪表盘。
 
-首次访问时使用 `SETUP_TOKEN` 环境变量完成初始化。
+首次访问时用 `ADMIN_TOKEN` 环境变量登录管理端。
 
 ## 方式 2：原生 Node 部署
 
@@ -40,17 +40,21 @@ npm start
 docker run -d \
   --name diting-agent \
   --restart unless-stopped \
+  --network host \
+  -e AGENT_ID="<你的ID>" \
   -e AGENT_TOKEN="<你的Token>" \
   -e SERVER_URL="https://<你的域名>" \
-  -v /proc:/host/proc:ro \
-  --read-only \
+  -e DISK_PATH=/host \
+  -v /:/host:ro \
+  -v /proc:/hostproc:ro \
+  -v diting-state:/data \
   ghcr.io/fengzone85/diting-agent:latest
 ```
 
 ### Linux（原生 systemd）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/main/agent/diting.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
 ```
 
 按提示输入 Server URL 和 Token 即可。

@@ -1,11 +1,11 @@
 ---
 title: 安全设计
-description: DiTing Lite 安全架构与加固措施
+description: DiTing 安全架构与加固措施
 ---
 
 # 安全设计
 
-DiTing Lite 的安全模型建立在三个支柱之上。
+DiTing 的安全模型建立在三个支柱之上。
 
 ## 三大支柱
 
@@ -91,13 +91,13 @@ sudo bash diting.sh --backup
 
 ## TOTP 2FA
 
-DiTing Lite 支持 TOTP（基于时间的一次性密码），兼容 Google Authenticator、1Password 等。
+DiTing 支持 TOTP（基于时间的一次性密码），兼容 Google Authenticator、1Password 等。
 
 ### 启用流程
 
 1. 登录管理面板
 2. 进入设置 → 安全
-3. 扫描二维码或手动输入密钥
+3. 手动输入密钥到 TOTP 应用（Google Authenticator / 1Password 等；本项目不调用外部二维码服务，符合 CSP）
 4. 输入 6 位验证码确认
 
 ### 2FA 重置
