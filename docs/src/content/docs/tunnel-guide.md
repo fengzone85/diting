@@ -1,3 +1,8 @@
+---
+title: 隐藏源站 IP
+description: Cloudflare Tunnel / Tailscale 接入指南，让 VPS 不开放任何入站端口
+---
+
 # 隐藏源站 IP：Cloudflare Tunnel / Tailscale 接入指南
 
 本项目即便**不上 Cloudflare 的 CDN/WAF（"CF 盾"）**也已具备基本安全（源站 8081 仅绑回环、TLS、强 admin token、CSP、独立 agent token）。

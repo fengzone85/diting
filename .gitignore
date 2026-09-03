@@ -35,3 +35,7 @@ server/public.bak-*/
 # 前端构建产物（Vite 输出，部署端 npm run build 重新生成，非源码）
 server/public/assets/
 server/public/index.html
+
+# 文档站（Astro Starlight 构建产物与缓存，非源码）
+docs/dist/
+docs/.astro/
