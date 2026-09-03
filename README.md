@@ -6,7 +6,7 @@
 <p align="center">
   <strong>自托管 Docker 监控 · 受控端零入站 · 无指令通道</strong><br>
   <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · Komari 主题兼容 · 100 台规模设计</sub><br>
-  <a href="README_EN.md">English</a> · <a href="docs/src/content/docs/install.md">文档</a> · <a href="https://github.com/fengzone85/diting/issues">反馈</a>
+  <a href="README_EN.md">English</a> · <a href="https://fengzone85.github.io/diting/">文档</a> · <a href="https://github.com/fengzone85/diting/issues">反馈</a>
 </p>
 
 <p align="center">
@@ -423,17 +423,18 @@ sudo bash diting.sh --update-agent
 
 | 文档 | 说明 |
 |------|------|
-| [安装指南](docs/src/content/docs/install.md) | 各平台安装方式 |
-| [快速开始](docs/src/content/docs/quick-start.md) | 5 分钟部署 |
-| [服务端配置](docs/src/content/docs/server.md) | 环境变量与部署 |
-| [受控端部署](docs/src/content/docs/agent.md) | Linux / Windows |
-| [原生 Linux 部署](docs/src/content/docs/native.md) | systemd 方式 |
-| [Windows 代理](docs/src/content/docs/windows.md) | Windows 原生 |
-| [API 参考](docs/src/content/docs/api.md) | REST API 端点 |
-| [环境变量](docs/src/content/docs/env.md) | 完整变量参考 |
-| [安全设计](docs/src/content/docs/security.md) | 安全特性与加固 |
-| [隧道指南](docs/src/content/docs/tunnel-guide.md) | Cloudflare Tunnel / Tailscale |
-| [常见问题](docs/src/content/docs/faq.md) | FAQ |
+| [文档站首页](https://fengzone85.github.io/diting/) | 完整文档库（本表各篇的在线版） |
+| [安装指南](https://fengzone85.github.io/diting/install/) | 各平台安装方式 |
+| [快速开始](https://fengzone85.github.io/diting/quick-start/) | 5 分钟部署 |
+| [服务端配置](https://fengzone85.github.io/diting/server/) | 环境变量与部署 |
+| [受控端部署](https://fengzone85.github.io/diting/agent/) | Linux / Windows |
+| [原生 Linux 部署](https://fengzone85.github.io/diting/native/) | systemd 方式 |
+| [Windows 代理](https://fengzone85.github.io/diting/windows/) | Windows 原生 |
+| [API 参考](https://fengzone85.github.io/diting/api/) | REST API 端点 |
+| [环境变量](https://fengzone85.github.io/diting/env/) | 完整变量参考 |
+| [安全设计](https://fengzone85.github.io/diting/security/) | 安全特性与加固 |
+| [隧道指南](https://fengzone85.github.io/diting/tunnel-guide/) | Cloudflare Tunnel / Tailscale |
+| [常见问题](https://fengzone85.github.io/diting/faq/) | FAQ |
 
 ---
 
