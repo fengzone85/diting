@@ -22,6 +22,7 @@ export default defineConfig({
       social: {
         github: 'https://github.com/fengzone85/diting',
       },
+      lastUpdated: true,
       sidebar: [
         {
           label: '开始',
