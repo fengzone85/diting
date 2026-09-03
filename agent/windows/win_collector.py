@@ -4,7 +4,8 @@
 The returned dict shape mirrors agent/collector.py so the server treats reports
 from Windows and Linux agents identically (no server-side changes required).
 
-Windows has no load average; load1/load5/load15 are reported as 0.0 placeholders.
+Windows has no load average; load1 is approximated by the process count,
+while load5/load15 are reported as 0.0 placeholders.
 """
 import os
 import re
