@@ -181,6 +181,8 @@ diting/
 
 ## ⚙️ 环境变量
 
+> **⚠️ 升级注意（2026-09-07 起 Breaking）**：一键安装命令类接口（创建受控端 / 重置 Token / 生成安装命令）**不再从 `Host` / `X-Forwarded-Host` 请求头推导服务器地址**。必须显式配置以下任一项，否则返回 `400 server_url_not_configured`：① 后台「设置 → Agent 连接地址」（推荐）；② 后台「项目网址」；③ 环境变量 `PUBLIC_URL`。升级后若后台出现该错误，到「设置」填写即可恢复；受控端上报不受影响。
+
 ### 服务端（`.env`）
 
 | 变量 | 必填 | 默认值 | 说明 |
@@ -207,6 +209,7 @@ diting/
 | `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram Bot 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
+| `PUBLIC_URL` | 推荐 | — | 服务器公网地址（生成受控端一键安装命令用；也可在后台「设置 → Agent 连接地址」配置，见上方升级注意） |
 
 > AI 日报、计费、审计、Komari 主题均由后台「设置」页管理，无需环境变量。完整清单见 `server/.env.example`。
 
