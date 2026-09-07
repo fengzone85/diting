@@ -16,13 +16,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: server/package-lock.json
-      - name: Install dependencies
+          cache-dependency-path: |
+            server/package-lock.json
+            server/web/package-lock.json
+
+      - name: Install server dependencies
         working-directory: server
         run: npm install --no-audit --no-fund
       - name: Run npm audit (dependency vulnerabilities)
         working-directory: server
         run: npm audit --audit-level=high
-      - name: Run security unit tests
+      - name: Run server unit tests
         working-directory: server
+        run: npm test
+
+      - name: Install web dependencies
+        working-directory: server/web
+        run: npm install --no-audit --no-fund
+      - name: Run web type check
+        working-directory: server/web
+        run: npm run typecheck
+      - name: Run web unit tests
+        working-directory: server/web
         run: npm test
