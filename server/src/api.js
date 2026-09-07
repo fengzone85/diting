@@ -4,10 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
-const { daysUntil } = require('./util');
+const { daysUntil, asyncHandler } = require('./util');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
 // 纯 IP / 无点则原样，避免误截。例：pt5.521.be -> pt5；192.168.1.10 -> 原样。
@@ -147,21 +147,25 @@ const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 20);
 
 // 受控端接入用的服务端公网地址：优先级为
 // ① UI 设置中「Agent 连接地址」② UI 设置中「项目网址」③ 环境变量 PUBLIC_URL ④ 从请求头自动推导。
-function getPublicBaseUrl(req) {
+// 受控端接入用的服务端公网地址，优先级：
+// ① UI 设置中「Agent 连接地址」② UI 设置中「项目网址」③ 环境变量 PUBLIC_URL。
+// 未配置时返回 null（调用方必须中止业务流程），过去回退到 X-Forwarded-Host / Host 的兜底已被移除：
+// 该头可被攻击者注入，使管理员复制到的安装命令内嵌 AGENT_TOKEN 却指向错误地址（纵深防御）。
+// Breaking：未配置的实例调用安装命令相关端点会返回 400 server_url_not_configured。
+function getPublicBaseUrl() {
   const ui = db.getUiSettings();
   if (ui && ui.agent_server_url) return ui.agent_server_url.replace(/\/+$/, '');
   if (ui && ui.site_url) return ui.site_url.replace(/\/+$/, '');
   if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/+$/, '');
-  // 最后兜底：从请求头推导。记录告警提示管理员配置 agent_server_url 或 PUBLIC_URL，
-  // 避免 X-Forwarded-Host 被攻击者注入导致一键安装命令指向恶意服务器。
-  if (!getPublicBaseUrl._warned) {
-    console.warn('[warn] getPublicBaseUrl: 未配置 agent_server_url/site_url/PUBLIC_URL，从请求头推导（建议显式配置以防 X-Forwarded-Host 注入）');
-    getPublicBaseUrl._warned = true;
-  }
-  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim() || 'https';
-  const host = req.get('host');
-  if (!host) return 'http://localhost:8081';
-  return `${proto}://${host}`;
+  return null;
+}
+
+// 统一的「未配置服务器地址」响应，避免三个调用点文案不一致。
+function serverUrlUnconfigured(res) {
+  return res.status(400).json({
+    error: 'server_url_not_configured',
+    message: '未配置服务器公网地址：请先在「设置 → Agent 连接地址」填写（或设置环境变量 PUBLIC_URL），然后重试。'
+  });
 }
 
 // Nezha 风格：一条命令搞定对接。原生版走根 diting.sh（自动拉取 agent 载荷并装 systemd）；
@@ -746,6 +750,9 @@ router.get('/public/themes', (req, res) => {
 
 // ---- Admin: create agent ----
 router.post('/agents', adminOnly, (req, res) => {
+  // 校验必须前置到写操作之前：否则会在拿不到安装命令的情况下白白创建一个 agent。
+  const base = getPublicBaseUrl();
+  if (!base) return serverUrlUnconfigured(res);
   // 探测目标：建客户端时未显式填写则回退到「设置」里的全局默认（不同地域可单独覆盖）。
   const ui = db.getUiSettings();
   const probeTargets = str(req.body.probe_targets, 600) || ui.probe_targets || '';
@@ -766,7 +773,7 @@ router.post('/agents', adminOnly, (req, res) => {
     probe_targets: probeTargets
   });
   // 创建时一次性把「地址 + 该客户端令牌 + 探测目标」预填进一键命令返回（令牌仅此刻明文可用）。
-  const install = buildInstallCommands(getPublicBaseUrl(req), id, token, AGENT_INTERVAL_DEFAULT, probeTargets);
+  const install = buildInstallCommands(base, id, token, AGENT_INTERVAL_DEFAULT, probeTargets);
   res.json({ id, token, install });
   auditLog(req, 'create_agent', `name=${req.body.name || ''} id=${id}`);
 });
@@ -805,12 +812,16 @@ router.delete('/agents/:id', adminOnly, (req, res) => {
 
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
 router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
+  // 校验必须前置到轮换之前：resetAgentToken 会让旧 Token 立即失效，若之后才发现无法生成
+  // 命令，就会留下「旧 Token 已废、管理员也没有新安装命令」的不可逆状态。
+  const base = getPublicBaseUrl();
+  if (!base) return serverUrlUnconfigured(res);
   const token = db.resetAgentToken(req.params.id);
   if (!token) return res.status(404).json({ error: 'not found' });
   // 重置后同样回带三条一键命令：用户直接复制重装即可，无需手改环境变量。
   // 探测目标沿用该受控端已保存的值，保证重装后 DNS 保持一致。
   const a = db.getAgent(req.params.id);
-  const install = buildInstallCommands(getPublicBaseUrl(req), req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
+  const install = buildInstallCommands(base, req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
   res.json({ ok: true, token, install });
   auditLog(req, 'reset_token', `id=${req.params.id}`);
 });
@@ -835,11 +846,13 @@ router.post('/agents/:id/renew', adminOnly, (req, res) => {
 // 修改命令无需 Token（仅改本地 systemd drop-in / bat 后重启），可由管理员按需生成。
 // query.probe_targets 可临时覆盖（用于预览不同 DNS 的命令），缺省用该受控端已存值。
 router.get('/agents/:id/commands', adminOnly, (req, res) => {
+  const base = getPublicBaseUrl();
+  if (!base) return serverUrlUnconfigured(res);
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const probeTargets = str(req.query.probe_targets, 600) || a.probe_targets || '';
-  const install = buildInstallCommands(getPublicBaseUrl(req), a.id, '<token>', AGENT_INTERVAL_DEFAULT, probeTargets);
-  const modify = buildModifyCommands(getPublicBaseUrl(req), a.id, probeTargets);
+  const install = buildInstallCommands(base, a.id, '<token>', AGENT_INTERVAL_DEFAULT, probeTargets);
+  const modify = buildModifyCommands(base, a.id, probeTargets);
   res.json({ id: a.id, probe_targets: probeTargets, install, modify });
 });
 
@@ -866,7 +879,7 @@ router.put('/settings', adminOnly, (req, res) => {
 
 
 // ---- Admin: send a test alert to verify notify channels (email / Telegram) ----
-router.post('/test-alert', adminOnly, async (req, res) => {
+router.post('/test-alert', adminOnly, asyncHandler(async (req, res) => {
   const st = alerts.notifyStatus();
   if (!st.mail && !st.telegram) {
     return res.status(400).json({ error: '未配置任何通知通道（SMTP 或 TELEGRAM）', status: st });
@@ -877,7 +890,7 @@ router.post('/test-alert', adminOnly, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message, status: st });
   }
-});
+}));
 
 // ---- Admin: AI 运维分析 ----
 // 配置读写、手动触发、报告列表/详情、运行状态。全部受 admin 鉴权保护。
@@ -920,7 +933,7 @@ router.put('/ai/config', adminOnly, (req, res) => {
   auditLog(req, 'update_ai_config', allowed.enabled != null ? `enabled=${allowed.enabled}` : '');
 });
 // 手动触发一次日报生成（不等调度时刻）。返回生成结果。
-router.post('/ai/run', adminOnly, async (req, res) => {
+router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
   try {
     const r = await ai.runNow();
     res.json(r);
@@ -928,7 +941,7 @@ router.post('/ai/run', adminOnly, async (req, res) => {
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
   }
-});
+}));
 // 运行状态（前端展示 last_run / last_status）
 router.get('/ai/status', adminOrReadonly, (req, res) => {
   res.json(ai.getStatus());
@@ -953,7 +966,9 @@ router.get('/ai/reports/:id', adminOrReadonly, (req, res) => {
 
 
 // 登录后前端不再持有明文 Admin Token，凭证以 HttpOnly+Secure Cookie 维持，降低 XSS 窃取风险。
-router.post('/login', loginRateLimit, async (req, res) => {
+// 包 asyncHandler：async 内同步 throw（如 db.is2FAEnabled / totp.verifyTOTP 抛错）会变成
+// unhandledRejection，Node ≥15 默认直接杀进程。包裹后转为 next(err) 由错误中间件返回 500 JSON。
+router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
   if (!requireProto(req, res)) return; // F2：与管理端点一致，强制经 HTTPS 反代，杜绝明文 Token
   const { token, totp: code } = req.body || {};
   if (!token || !safeEqual(token, getAdminToken())) {
@@ -969,11 +984,17 @@ router.post('/login', loginRateLimit, async (req, res) => {
   const payload = { role: 'admin', totp: need, exp: Date.now() + SESSION_TTL };
   setSessionCookie(res, payload);
   res.json({ ok: true, totp: need });
-});
+}));
 
+// 注销：默认「使全部会话失效」（含其他已登录设备），再清当前 Cookie。
+// 此前只清 Cookie，已签发的会话在 TTL 内仍然有效（注销无效期）。
+// all=0 可退化为仅清当前 Cookie（不影响其他设备）。
 router.post('/logout', (req, res) => {
+  const revokeAll = req.query.all !== '0';
+  if (revokeAll) revokeAllSessions();
   clearSessionCookie(res);
-  res.json({ ok: true });
+  res.json({ ok: true, revoked: revokeAll });
+  auditLog(req, 'logout', revokeAll ? 'all sessions' : '');
 });
 
 // ---- Admin 2FA (TOTP) 管理 ----
@@ -995,8 +1016,10 @@ router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
   if (!secret) return res.status(400).json({ error: 'run setup first' });
   if (!code || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(true);
+  // 安全状态变更：吊销既有会话，强制所有设备用新安全基线重新登录
+  revokeAllSessions();
   res.json({ ok: true, enabled: true });
-  auditLog(req, '2fa_enable', '');
+  auditLog(req, '2fa_enable', 'sessions revoked');
 });
 
 router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
@@ -1005,8 +1028,10 @@ router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
   const secret = db.get2FASecret();
   if (!code || !secret || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
   db.set2FAEnabled(false);
+  // 安全状态变更：吊销既有会话，防止 2FA 关闭前的旧会话继续持有管理员权限
+  revokeAllSessions();
   res.json({ ok: true, enabled: false });
-  auditLog(req, '2fa_disable', '');
+  auditLog(req, '2fa_disable', 'sessions revoked');
 });
 
 // ---- Admin: 审计日志查询 ----

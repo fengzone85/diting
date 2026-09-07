@@ -7,6 +7,25 @@ export const zhCN: Record<string, string> = {
   'common.offline': '离线',
   'common.loading': '加载中…',
   'common.error': '加载失败',
+
+  // 服务端 API 错误码 → 本地化文案，见 utils/apiError.ts
+  'errors.serverUrlNotConfigured': '未配置服务器公网地址：请到「设置 → Agent 连接地址」填写，或设置环境变量 PUBLIC_URL 后重试。',
+  'errors.httpsRequired': '必须通过 HTTPS 反向代理访问；直连 HTTP 端口已被拒绝。',
+  'errors.alreadyInitialized': '已完成初始化，该端点已永久禁用。重置管理员 Token 请在服务器执行 diting.sh --reset-admin-token',
+  'errors.unauthorized': '未登录或凭证无效，请重新登录。',
+  'errors.adminRequired': '需要管理员权限，只读 Token 无权执行此操作。',
+  'errors.ipNotAllowed': '当前 IP 不在管理白名单内。',
+  'errors.tooManyRequests': '请求过于频繁，请稍后重试。',
+  'errors.loginRateLimited': '登录尝试过于频繁，请 60 秒后重试。',
+  'errors.invalidToken': '管理员 Token 无效。',
+  'errors.invalidTotp': '两步验证码无效或已过期。',
+  'errors.agentNotFound': '受控端不存在。',
+  'errors.notFound': '资源不存在。',
+
+  // 404 页（前端 catch-all 路由）
+  'notfound.title': '页面不存在或已被移动。',
+  'notfound.backHome': '返回首页',
+  'notfound.toAdmin': '前往后台',
   'common.cancel': '取消',
   'common.confirm': '确认',
   'common.save': '保存',

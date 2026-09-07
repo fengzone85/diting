@@ -1,6 +1,20 @@
 # Changelog
 
-> **注意**：本文件记录截至 **2026-08-03**，此后未再维护。完整变更请以 `git log` 为准。
+> **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
+
+## 2026-09-07 安全与健壮性修复（含 Breaking 变更）
+
+### ⚠️ Breaking：安装命令类接口要求显式配置服务器地址
+- 涉及端点：`GET /api/agents/:id/commands`、`POST /api/agents`、`POST /api/agents/:id/reset-token`。
+- 变更：不再从 `X-Forwarded-Host` / `Host` 请求头推导服务器地址。未显式配置时直接返回 `400 {"error":"server_url_not_configured"}`，且**在写入之前中止**（不会创建 agent、不会轮换 Token）。
+- 影响与处理：升级后若后台出现该错误，到「设置 → Agent 连接地址」填写即可；也可填「项目网址」或设置环境变量 `PUBLIC_URL`。此前依赖 Host 头自动推导、又从未配置过上述三项的实例会受影响。
+- 动机：一键安装命令内嵌 `AGENT_TOKEN`，若地址可控则会把 Token 暴露给任意被诱导访问的地址（纵深防御）。三个端点均为 `adminOnly`，属主动加固而非已利用漏洞。
+
+### 其他修复
+- **稳定性**：新增统一错误中间件与 `asyncHandler`（`src/util.js`），async 路由抛错不再导致进程崩溃——此前 Node ≥15 会因未捕获的 rejection 直接退出进程，是现存的全站 DoS 触发点。非法 JSON 现在返回 `400 application/json`，而不是默认处理器的 HTML 页。
+- **前端**：请求失败时透传服务端 `error` / `message`（此前只显示 `400 Bad Request`），并新增机器可读错误码到本地化文案的映射（`web/src/utils/apiError.ts`）。
+- **性能/健壮性**：`metrics` 采样 SQL 的 `step` 改用绑定参数；告警检查并行化（可配 `ALERT_CONCURRENCY`，默认 8）并加重入保护。
+- **CI**：开始运行前端 vitest 与 `vue-tsc` 类型检查；后端纳入此前从未执行的 `src/ai/schedule.test.js`。
 
 ## 计费系统 + AI 日报到期 + 告警规则 + Phase 4 前端增强（2026-08-03）
 > 本期为一组功能增强，覆盖服务端计费/到期/告警与前端交互。所有改动已端到端验证（见各条「验证」）。
