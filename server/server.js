@@ -310,7 +310,10 @@ app.get('*', (req, res, next) => {
       return res.sendFile(fp);
     }
   }
-  next();
+  // 无后缀 + 非 SPA 前缀 + default 主题（如 /nope）：同样返回 Vue 入口，由前端
+  // catch-all 路由渲染统一 404 页。此前落到 Express 默认 "Cannot GET /xxx"，
+  // 与 SPA 内部导航的 404 页体验割裂；未知路径本无服务端语义，统一交给前端处理。
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // 禁用 JS/CSS/SVG/HTML 的浏览器/CDN 缓存，确保更新后立即生效
