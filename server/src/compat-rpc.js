@@ -186,13 +186,6 @@ function getRecords(params = {}) {
   };
 }
 
-function getPublicPingTasks() {
-  return db.getAgents().map(a => ({
-    client: a.id,
-    targets: (a.probe_targets || '').split(',').filter(Boolean)
-  }));
-}
-
 function getPublicPingTasks(params = {}) {
   // Komari 社区主题 PingChart 调用，返回某个 entity 的全部探针任务列表。
   const entityId = params.entity_id || params.uuid;
