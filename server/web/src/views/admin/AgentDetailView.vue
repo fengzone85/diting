@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
+import { apiErrorMessage } from '../../utils/apiError';
 import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
@@ -94,7 +95,7 @@ async function fetchCommands() {
     const res = await adminApi.getCommands(agentId.value, commandProbeTargets.value || undefined);
     commands.value = { install: res.install, modify: res.modify };
   } catch (e) {
-    error.value = (e as Error).message || t('agent.loadCmdsFailed');
+    error.value = apiErrorMessage(e, 'agent.loadCmdsFailed');
   }
 }
 
@@ -124,7 +125,7 @@ async function resetToken() {
     commands.value = { ...commands.value, install: res.install };
     message.value = t('agent.tokenReset');
   } catch (e) {
-    error.value = (e as Error).message || t('agent.resetFailed');
+    error.value = apiErrorMessage(e, 'agent.resetFailed');
   }
 }
 

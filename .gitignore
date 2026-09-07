@@ -36,6 +36,9 @@ server/public.bak-*/
 server/public/assets/
 server/public/index.html
 
+# 测试覆盖率报告（vitest --coverage 输出，npm run test:cov 重新生成）
+server/web/coverage/
+
 # 文档站（Astro Starlight 构建产物与缓存，非源码）
 docs/dist/
 docs/.astro/

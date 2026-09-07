@@ -106,9 +106,11 @@ async function tick() {
 
 function start() {
   if (timer) return;
+  // unref：调度定时器不阻止进程退出（对集成测试进程尤其重要）
   timer = setInterval(tick, TICK_MS);
+  timer.unref();
   // 启动后立即检查一次（处理「宕机期间错过、刚重启」的情形，由上面的 30 分钟容差把关）
-  setTimeout(tick, 5000);
+  setTimeout(tick, 5000).unref();
   console.log('[ai] scheduler started (每 60s 检查发送时刻)');
 }
 function stop() {

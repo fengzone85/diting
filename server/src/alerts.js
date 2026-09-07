@@ -89,38 +89,67 @@ async function alertThreshold(agent, type, msg, now, cooldown) {
   }
 }
 
-async function check() {
-  const agents = db.getAgents();
-  const now = Date.now();
-  // 阈值优先取「设置中心 / UI 配置」（前端可改），缺失时回退到 docker-compose 环境变量默认值。
-  const ui = db.getUiSettings();
-  const alertCfg = (ui && ui.alert) || {};
-  const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
-  const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
-  const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
-  const cooldown = Number(process.env.ALERT_COOLDOWN_SEC || 1800);
-
-  for (const a of agents) {
-    try {
-      const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
-      if (!online) {
-        const st = db.getAlertState(a.id, 'offline');
-        if (!st || now - st.last_sent > cooldown * 1000) {
-          db.setAlertState(a.id, 'offline', now);
-          await sendAlert(`[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${offlineSec}s 未上报，可能已宕机或断网。`);
-        }
-        continue;
+// 单个 agent 的检查。返回 Promise（可能为空）。
+// 注意：db.setAlertState 必须在 await sendAlert 之前同步写入 —— better-sqlite3 为同步 API，
+// 这样即便定时任务重入也不会重复发信（冷却窗口已在此点生效）。
+function checkAgent(a, now, cfg) {
+  try {
+    const online = a.last_seen && (now - a.last_seen) < cfg.offlineSec * 1000;
+    if (!online) {
+      const st = db.getAlertState(a.id, 'offline');
+      if (!st || now - st.last_sent > cfg.cooldown * 1000) {
+        db.setAlertState(a.id, 'offline', now);
+        return sendAlert(`[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${cfg.offlineSec}s 未上报，可能已宕机或断网。`);
       }
-      // recovered -> allow future offline alerts
-      db.clearAlertState(a.id, 'offline');
-      const m = db.getLatestMetric(a.id);
-      if (!m) continue;
-      if (m.cpu >= cpuAlert) await alertThreshold(a, 'cpu', `CPU ${m.cpu.toFixed(1)}% >= ${cpuAlert}%`, now, cooldown);
-      if (m.mem_pct >= memAlert) await alertThreshold(a, 'mem', `内存 ${m.mem_pct.toFixed(1)}% >= ${memAlert}%`, now, cooldown);
-    } catch (e) {
-      // 单个 agent 异常（如 DB 读取失败）不应中断其余 agent 的告警检查
-      console.error(`[alerts] check failed for agent ${a.id}:`, e.message);
+      return null;
     }
+    // recovered -> allow future offline alerts
+    db.clearAlertState(a.id, 'offline');
+    const m = db.getLatestMetric(a.id);
+    if (!m) return null;
+    const jobs = [];
+    if (m.cpu >= cfg.cpuAlert) jobs.push(alertThreshold(a, 'cpu', `CPU ${m.cpu.toFixed(1)}% >= ${cfg.cpuAlert}%`, now, cfg.cooldown));
+    if (m.mem_pct >= cfg.memAlert) jobs.push(alertThreshold(a, 'mem', `内存 ${m.mem_pct.toFixed(1)}% >= ${cfg.memAlert}%`, now, cfg.cooldown));
+    return Promise.allSettled(jobs);
+  } catch (e) {
+    // 单个 agent 异常（如 DB 读取失败）不应中断其余 agent 的告警检查
+    console.error(`[alerts] check failed for agent ${a.id}:`, e.message);
+    return null;
+  }
+}
+
+// 重入保护：check 是 async 的，而 setInterval 会周期性触发。若上一轮因等待 SMTP/Telegram
+// 尚未结束（节点多或通知通道超时时可能发生），本轮直接跳过，避免并发叠加放大负载。
+let checkRunning = false;
+
+async function check() {
+  if (checkRunning) {
+    console.warn('[alerts] 上一轮检查尚未结束，跳过本次触发（节点数增长或通知通道超时时可能看到）');
+    return false;
+  }
+  checkRunning = true;
+  const t0 = Date.now();
+  try {
+    const agents = db.getAgents();
+    const now = Date.now();
+    // 阈值优先取「设置中心 / UI 配置」（前端可改），缺失时回退到 docker-compose 环境变量默认值。
+    const ui = db.getUiSettings();
+    const alertCfg = (ui && ui.alert) || {};
+    const cfg = {
+      offlineSec: Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60),
+      cpuAlert: Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90),
+      memAlert: Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90),
+      cooldown: Number(process.env.ALERT_COOLDOWN_SEC || 1800)
+    };
+    // 限并发而非全并发：SMTP 普遍有速率/连接限制，100 台同时离线时一次性并发易被拒收。
+    const CONCURRENCY = Math.max(1, Number(process.env.ALERT_CONCURRENCY || 8));
+    for (let i = 0; i < agents.length; i += CONCURRENCY) {
+      await Promise.allSettled(agents.slice(i, i + CONCURRENCY).map((a) => checkAgent(a, now, cfg)));
+    }
+    console.log(`[alerts] check done: ${agents.length} agents in ${Date.now() - t0}ms`);
+    return true;
+  } finally {
+    checkRunning = false;
   }
 }
 
@@ -199,9 +228,12 @@ async function runDailyChecks() {
 }
 function start() {
   const interval = Math.max(10000, (Number(process.env.OFFLINE_THRESHOLD_SEC || 60) * 1000) / 2);
+  // unref：定时器不阻止进程退出（对集成测试进程尤其重要）
   timer = setInterval(check, interval);
+  timer.unref();
   // 到期/流量为低频事件，每 6 小时检查一次即可，避免与秒级 check 互相干扰。
   dailyTimer = setInterval(runDailyChecks, 6 * 3600 * 1000);
+  dailyTimer.unref();
   // 启动后立即跑一次，确保配置生效无需等 6h。
   runDailyChecks();
   console.log('[alerts] checker started');
@@ -209,4 +241,5 @@ function start() {
 
 function stop() { if (timer) clearInterval(timer); if (dailyTimer) clearInterval(dailyTimer); }
 
-module.exports = { start, stop, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota };
+// 导出 check：便于单测与手动排查（此前未导出，只能靠定时触发观察）。
+module.exports = { start, stop, check, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota };

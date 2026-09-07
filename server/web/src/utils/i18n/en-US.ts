@@ -7,6 +7,25 @@ export const enUS: Record<string, string> = {
   'common.offline': 'Offline',
   'common.loading': 'Loading…',
   'common.error': 'Failed to load',
+
+  // Server API error codes → localized copy, see utils/apiError.ts
+  'errors.serverUrlNotConfigured': 'Server public URL is not configured. Fill it in "Settings → Agent server URL", or set the PUBLIC_URL environment variable, then retry.',
+  'errors.httpsRequired': 'HTTPS reverse proxy required; direct HTTP port access is rejected.',
+  'errors.alreadyInitialized': 'Already initialized — this endpoint is permanently disabled. To reset the admin token, run diting.sh --reset-admin-token on the server.',
+  'errors.unauthorized': 'Not signed in or invalid credentials. Please sign in again.',
+  'errors.adminRequired': 'Admin permission required; a read-only token cannot perform this action.',
+  'errors.ipNotAllowed': 'Your IP is not in the admin allow list.',
+  'errors.tooManyRequests': 'Too many requests. Please retry later.',
+  'errors.loginRateLimited': 'Too many login attempts. Please retry in 60s.',
+  'errors.invalidToken': 'Invalid admin token.',
+  'errors.invalidTotp': 'Invalid or expired 2FA code.',
+  'errors.agentNotFound': 'Agent not found.',
+  'errors.notFound': 'Resource not found.',
+
+  // 404 page (frontend catch-all route)
+  'notfound.title': 'Page not found or has been moved.',
+  'notfound.backHome': 'Back to home',
+  'notfound.toAdmin': 'Go to admin',
   'common.cancel': 'Cancel',
   'common.confirm': 'Confirm',
   'common.save': 'Save',
