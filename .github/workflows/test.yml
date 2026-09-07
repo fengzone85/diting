@@ -36,6 +36,6 @@ jobs:
       - name: Run web type check
         working-directory: server/web
         run: npm run typecheck
-      - name: Run web unit tests
+      - name: Run web unit tests (with coverage gate)
         working-directory: server/web
-        run: npm test
+        run: npm run test:cov
