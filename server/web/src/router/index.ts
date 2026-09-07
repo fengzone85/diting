@@ -12,6 +12,7 @@ import TemplateView from '../views/admin/TemplateView.vue';
 import BillingView from '../views/admin/BillingView.vue';
 import AiView from '../views/admin/AiView.vue';
 import AuditLogView from '../views/admin/AuditLogView.vue';
+import NotFoundView from '../views/NotFoundView.vue';
 
 const routes = [
   { path: '/', component: HomeView },
@@ -32,6 +33,9 @@ const routes = [
       { path: 'audit-logs', component: AuditLogView },
     ],
   },
+  // catch-all 必须放在最后：服务端 SPA fallback 对未知路径返回 200 + index.html，
+  // 没有这条路由时用户看到的是白屏而非 404 页。
+  { path: '/:pathMatch(.*)*', component: NotFoundView },
 ];
 
 const router = createRouter({

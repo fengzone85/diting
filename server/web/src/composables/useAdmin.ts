@@ -4,9 +4,11 @@ import type { Agent, Settings } from '../services/types';
 
 const REFRESH_INTERVAL_MS = 10000;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
-// 暂停意图：设置页打开时置 true，无论 AdminLayout 何时 startAutoRefresh 都不真正轮询，
-// 避免父组件 onMounted 的 start 覆盖子组件的 stop（子组件 onMounted 先于父执行）。
-let paused = false;
+// 暂停采用「计数」而非布尔：任何未来出现「多个页面/弹层同时请求暂停」的场景
+// （弹窗嵌入、嵌套 RouterView 等）都不会因某一方提前恢复而失效。
+// 代价：onMounted(true) 必须与 onUnmounted(false) 严格配对，否则轮询会永久停摆
+//（布尔版反而能自愈）——三个调用方（Settings/Template/AgentDetail）均已配对。
+let pauseDepth = 0;
 
 export interface AdminState {
   initialized: boolean;
@@ -47,9 +49,9 @@ export async function loadAdmin() {
 }
 
 export function startAutoRefresh() {
-  if (refreshTimer || paused) return;
+  if (refreshTimer || pauseDepth > 0) return;
   refreshTimer = setInterval(() => {
-    if (paused) return;
+    if (pauseDepth > 0) return;
     loadAdmin().catch(() => {});
   }, REFRESH_INTERVAL_MS);
 }
@@ -62,11 +64,12 @@ export function stopAutoRefresh() {
 }
 
 // 设置页进入/离开时调用：暂停/恢复自动刷新。
-// 用 paused 标志而非直接 stop/start，避免父组件(AdminLayout) onMounted 的 start 覆盖子组件的 stop
+// 计数语义：p=true 深度 +1，p=false 深度 -1（下限 0），深度 >0 即暂停。
+// 用计数而非直接 stop/start，避免父组件(AdminLayout) onMounted 的 start 覆盖子组件的 stop
 // （Vue 中子组件 onMounted 先于父组件执行）。
 export function setAutoRefreshPaused(p: boolean) {
-  paused = p;
-  if (p) {
+  pauseDepth = Math.max(0, pauseDepth + (p ? 1 : -1));
+  if (pauseDepth > 0) {
     stopAutoRefresh();
   } else {
     startAutoRefresh();
