@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { adminApi } from '../services/adminApi';
 
 // useAdmin 是模块级单例（state / refreshTimer / pauseDepth 都在模块顶层）。
 // 通过 vi.hoisted 让 mock factory 返回同一实例：无论 resetModules 后模块重载多少次，
