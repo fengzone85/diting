@@ -37,8 +37,27 @@ const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toSt
 const SESSION_TTL = Number(process.env.SESSION_TTL_MS || 12 * 3600 * 1000);
 const COOKIE_NAME = 'hm_session';
 
+// ---- 服务端会话吊销 ----
+// 纯 HMAC 会话是无状态的：已签发 Cookie 在 TTL 内无法撤销（「注销无效期」问题）。
+// 这里用 admin_config 里的水位线实现吊销：水位线之前签发（iat）的会话一律无效。
+// 粒度为全局（管理员自己的其他标签页也会被踢下），自托管场景下更安全、实现最简。
+const SESSION_REVOKED_BEFORE = 'session_revoked_before';
+
+// 使本时刻之前签发的所有会话失效。安全状态变更（2FA 开关）与「退出所有设备」时调用。
+function revokeAllSessions() {
+  db.setConfig(SESSION_REVOKED_BEFORE, String(Date.now()));
+}
+
+function isRevoked(p) {
+  const ts = Number(db.getConfig(SESSION_REVOKED_BEFORE) || 0);
+  if (!ts) return false;
+  // 旧会话无 iat 视为最早签发，一律失效（更安全；仅水位线非 0 时生效）
+  return !p.iat || p.iat < ts;
+}
+
 function signSession(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  // iat：签发时间，吊销判断依赖它
+  const body = Buffer.from(JSON.stringify(Object.assign({ iat: Date.now() }, payload))).toString('base64url');
   const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
   return body + '.' + sig;
 }
@@ -53,6 +72,7 @@ function verifySession(cookieVal) {
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
     if (!p.exp || p.exp < Date.now()) return null;
+    if (isRevoked(p)) return null;
     return p;
   } catch { return null; }
 }
@@ -273,5 +293,5 @@ module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
-  verifyTotpHeader, auditLog,
+  revokeAllSessions, verifyTotpHeader, auditLog,
 };

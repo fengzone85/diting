@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { formatBytes, formatDuration } from '../../utils/format';
+import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
 import type { InstallCommands } from '../../services/types';
 
@@ -81,7 +82,7 @@ async function add() {
     created.value = { id: res.id, token: res.token, install: res.install };
     await loadAdmin();
   } catch (e) {
-    error.value = (e as Error).message || t('agents.addFailed');
+    error.value = apiErrorMessage(e, 'agents.addFailed');
   }
 }
 

@@ -18,4 +18,12 @@ function cycleLabel(days) {
   return { 30: '月', 90: '季', 180: '半年', 365: '年', 730: '两年', 1095: '三年', 0: '白嫖' }[days] || `${days}天`;
 }
 
-module.exports = { daysUntil, cycleLabel };
+// Express 4 不会捕获 async handler 抛出的 rejection：async 函数内任何 throw（含同步 throw）
+// 都会变成 unhandledRejection，而 Node ≥15 起默认 --unhandled-rejections=throw，会直接杀进程。
+// 用此包装把 rejection 转为 next(err)，交给统一错误中间件处理。
+// 约定：所有新增 async 路由都必须套 asyncHandler。
+function asyncHandler(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
+module.exports = { daysUntil, cycleLabel, asyncHandler };
