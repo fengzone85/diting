@@ -13,6 +13,16 @@ const ai = require('./src/ai');
 const { safeEqual, ipWhitelist } = require('./src/auth');
 const { sanitizeCss } = require('./src/validate');
 
+// Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
+// 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
+// 真正的修复是把 async 路由套 asyncHandler（见 src/util.js）；此处只是最后兜底。
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (e) => {
+  console.error('[uncaughtException]', e && e.stack ? e.stack : e);
+});
+
 // 读取版本号与构建时间（diting.sh 部署时写入 _build_time，版本来自 package.json）
 const APP_VERSION = (() => {
   try { return require('./package.json').version || '1.0.0'; } catch (e) { return '1.0.0'; }
@@ -366,7 +376,8 @@ function runPrune() {
   }
 }
 runPrune();
-setInterval(runPrune, 3600 * 1000);
+// unref：清理循环不应阻止进程退出（对集成测试尤其重要，否则测试进程会因该定时器挂起）
+setInterval(runPrune, 3600 * 1000).unref();
 
 const PORT = Number(process.env.PORT || 8081);
 const server = app.listen(PORT, () => {
@@ -527,3 +538,25 @@ try {
 } catch (e) {
   console.warn('[monitor] theme-compat SSE 未启用：', e.message);
 }
+
+// ---- 统一错误处理 ----
+// 必须注册在所有路由/中间件之后：Express 的 next(err) 只会查找「之后注册」的错误中间件，
+// 而本文件中 WebSocket(≈407 行起) 与 SSE(≈509 行起) 都注册在 app.listen 之后，
+// 所以这里放在文件末尾才能覆盖全部路由。
+// 覆盖三类：① express.json 非法 JSON ② 超过 16kb 负载 ③ asyncHandler 转发的 rejection / 同步 throw。
+// 安全约束：绝不把 err.stack / err.message 返回客户端（信息泄露），只落地日志。
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  if (res.headersSent) return next(err);
+  console.error('[error]', req.method, req.originalUrl, '->', err && err.message);
+  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    return res.status(400).json({ error: 'invalid json' });
+  }
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'payload too large' });
+  }
+  res.status(500).json({ error: 'internal error' });
+});
+
+// 导出 app / server 供集成测试（supertest）使用。被 require 时若未设置 PORT
+// 仍会监听默认 8081，故测试必须在 require 前置 process.env.PORT = '0' 取随机端口。
+module.exports = { app, server };
