@@ -143,6 +143,8 @@ export interface PublicMeta {
   custom_css?: string;
   public_theme?: string;
   public_enabled?: boolean;
+  // 公开接口是否透出业务字段（商家/到期/备注/配额/套餐）
+  public_show_business?: boolean;
   home_layout?: 'grid' | 'list' | 'compact';
   agent_order?: string[];
   social_email?: string;

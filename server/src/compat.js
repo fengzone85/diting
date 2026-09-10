@@ -22,6 +22,30 @@ function onlineTtl(a) {
 // 历史曲线时间窗（与 api.js RANGES 保持一致）
 const RANGES_C = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
 
+// 公开历史接口结果缓存（30s，与 api.js 的 sparkline 缓存同思路）。
+// /records/load 与 /records/ping 无需登录，且最坏情况是 720h 全库窗口扫描（秒级），
+// 若不缓存，前端并发刷新或几个访客同时打开就能把服务端拖垮（DoS 级放大器）。
+const recordsCache = new Map();   // key -> { ts, data }
+const RECORDS_CACHE_TTL = 30000;
+const RECORDS_CACHE_MAX = 200;    // key 由查询参数组合而成，必须限制总量，防止被枚举撑爆内存
+// 全量（不带 uuid）查询时的每节点采样点数：按「窗口内实际有数据的节点数」分摊，
+// 给 2 倍余量并设下限 20。不能按全部节点数分摊——62 台里 24h 内只有 1 台在报，
+// 按 62 摊会把这 1 台压到 34 点（优化前是 1000 点），曲线直接失真。
+// 上限仍是 maxCount：单节点场景给满，多节点场景避免 N×1000 行的传输浪费。
+function perAgentPoints(maxCount, since) {
+  const n = Math.max(1, db.countActiveAgents(since));
+  return Math.min(maxCount, Math.max(20, Math.ceil(maxCount / n) * 2));
+}
+
+function cachedRecords(key, build) {
+  const hit = recordsCache.get(key);
+  if (hit && Date.now() - hit.ts < RECORDS_CACHE_TTL) return hit.data;
+  const data = build();
+  if (recordsCache.size >= RECORDS_CACHE_MAX) recordsCache.clear();
+  recordsCache.set(key, { ts: Date.now(), data });
+  return data;
+}
+
 // ISO 3166-1 alpha-2 -> 国旗 emoji（region 字段用国旗表情）
 function flagEmoji(iso) {
   if (!iso || iso.length !== 2) return '';
@@ -32,9 +56,16 @@ function flagEmoji(iso) {
   return String.fromCodePoint(A + cc.charCodeAt(0) - base) + String.fromCodePoint(A + cc.charCodeAt(1) - base);
 }
 
+// 公开接口是否透出业务字段（与 /api/public/* 同源开关 ui_settings.public_show_business）
+function businessVisible() {
+  const ui = db.getUiSettings();
+  return ui.public_show_business !== false;
+}
+
 // diting agent -> 社区主题 node 列表项（/api/nodes）
-function toNode(a) {
+function toNode(a, showBusiness) {
   const m = db.getLatestMetric(a.id) || {};
+  const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
     uuid: a.id,
     name: a.name,
@@ -55,7 +86,8 @@ function toNode(a) {
     billing_cycle: 30,
     auto_renewal: true,
     currency: '$',
-    expired_at: a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
+    // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值
+    expired_at: show && a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
     group: a.grp || '',
     tags: '',
     hidden: false,
@@ -219,7 +251,10 @@ router.get('/version', (req, res) => {
 // GET /api/nodes —— 节点基础信息列表（不含实时负载）
 router.get('/nodes', guard, (req, res) => {
   const agents = db.getAgents();
-  res.json({ status: 'success', message: '', data: agents.map(toNode) });
+  // 注意：不能用 agents.map(toNode)——map 会把数组下标当作第二个参数 showBusiness 传入，
+  // 下标 0 会被当成 false，导致第一个节点的业务字段被静默隐藏。
+  const show = businessVisible();
+  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show)) });
 });
 
 // GET /api/recent —— 省略 uuid 时返回空数组（避免 /api/recent/ 触发 404，便于调试）。
@@ -262,18 +297,20 @@ router.get('/records/load', guard, (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
-  const since = Date.now() - hours * 3600 * 1000;
-  const ids = db.getAgents()
-    .filter(a => !uuid || a.id === uuid)
-    .map(a => a.id);
-  let rows = [];
-  for (const id of ids) {
-    rows = rows.concat(db.getMetrics(id, since));
-  }
-  rows.sort((a, b) => a.ts - b.ts);
-  rows = rows.slice(-maxCount);
-  const records = rows.map(toLoadRecord);
-  res.json({ status: 'success', message: '', count: records.length, records });
+  // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
+  const payload = cachedRecords(`load|${uuid || '*'}|${hours}|${maxCount}`, () => {
+    const since = Date.now() - hours * 3600 * 1000;
+    // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
+    // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
+    // 每节点各取 1000 点纯属浪费——61 台 ⇒ 6 万行 324KB，降到 ~750 行后 720h 从 21s 到 2.2s）。
+    const sampled = uuid
+      ? db.getMetricsLoadOne(uuid, since, maxCount)
+      : db.getMetricsLoadAll(since, perAgentPoints(maxCount, since));
+    const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
+    const records = rows.map(toLoadRecord);
+    return { status: 'success', message: '', count: records.length, records };
+  });
+  res.json(payload);
 });
 
 // GET /api/records/ping —— 延迟历史（官方主题延迟图依赖）。
@@ -283,32 +320,51 @@ router.get('/records/ping', guard, (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
-  const since = Date.now() - hours * 3600 * 1000;
-  const ids = db.getAgents().filter(a => !uuid || a.id === uuid).map(a => a.id);
-  const tasks = new Map();      // task_id -> {id,name,interval,loss}
-  const records = [];           // {task_id,time,value}
-  let tid = 0;
-  for (const id of ids) {
-    for (const m of db.getMetrics(id, since)) {
+  // 与 /records/load 同理：游客可直连，720h 全量最坏要扫百万行，30s 缓存兜底
+  const payload = cachedRecords(`ping|${uuid || '*'}|${hours}|${maxCount}`, () => {
+    const since = Date.now() - hours * 3600 * 1000;
+    // M-02：只取 ts+probes 两列并在 SQL 层采样。指定节点用单节点版，
+    // 否则一次 SQL 跨节点采样（metricsProbesAll），避免 per-agent 循环 N 次扫索引。
+    const probeRows = uuid
+      ? db.getMetricsProbesOne(uuid, since, maxCount)
+      : db.metricsProbesAll(since, Math.max(200, perAgentPoints(maxCount, since)));
+    const tasks = new Map();      // task_id -> {id,name,interval,loss}
+    const records = [];           // {task_id,time,value}
+    let tid = 0;
+    for (const m of probeRows) {
       let probes = null;
       try { probes = m.probes ? JSON.parse(m.probes) : null; } catch (_) { probes = null; }
-      if (!Array.isArray(probes)) continue;
-      for (const p of probes) {
-        const target = p.target || p.host || 'unknown';
-        let t = tasks.get(target);
-        if (!t) { t = { id: ++tid, name: target, interval: p.interval || 1, loss: 0 }; tasks.set(target, t); }
-        const value = p.latency != null ? Number(p.latency) : (p.avg != null ? Number(p.avg) : null);
-        if (value == null) continue;
-        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value });
+      if (!probes || typeof probes !== 'object') continue;
+      // M-01：diting 实际入库的是「对象」格式（validate.js 校验并写为
+      // { "<目标名>": { ms, ok, loss } }，见 src/validate.js）。此前这里只认数组
+      // （Array.isArray），对象被整体跳过 → 该接口恒返回 count:0 / tasks:[]，
+      // 社区主题的延迟图永远是空的。现同时兼容两种格式，键名即任务名。
+      const items = Array.isArray(probes)
+        ? probes.map((p) => ({
+            name: p.target || p.host || 'unknown',
+            value: p.latency != null ? Number(p.latency) : (p.avg != null ? Number(p.avg) : null),
+            loss: Number(p.loss) || 0,
+          }))
+        : Object.entries(probes).map(([name, v]) => ({
+            name,
+            value: v && v.ms != null ? Number(v.ms) : null,
+            loss: v && v.loss != null ? Number(v.loss) : (v && v.ok === true ? 0 : 100),
+          }));
+      for (const it of items) {
+        if (it.value == null || !Number.isFinite(it.value)) continue;
+        let t = tasks.get(it.name);
+        if (!t) { t = { id: ++tid, name: it.name, interval: 1, loss: it.loss || 0 }; tasks.set(it.name, t); }
+        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
       }
     }
-  }
-  records.sort((a, b) => new Date(a.time) - new Date(b.time));
-  res.json({
-    status: 'success', message: '', count: records.length,
-    records: records.slice(-maxCount),
-    tasks: [...tasks.values()]
+    records.sort((a, b) => new Date(a.time) - new Date(b.time));
+    return {
+      status: 'success', message: '', count: records.length,
+      records: records.slice(-maxCount),
+      tasks: [...tasks.values()]
+    };
   });
+  res.json(payload);
 });
 
 // GET /api/node/:uuid —— 社区主题 node detail 取数（参考 Komari getNode 形状）
@@ -316,11 +372,12 @@ router.get('/records/ping', guard, (req, res) => {
 router.get('/node/:uuid', guard, (req, res) => {
   const a = db.getAgent(req.params.uuid);
   if (!a) return res.json({ status: 'error', message: 'node not found', data: null });
-  const node = toNode(a);
+  const node = toNode(a, businessVisible());
   const latest = db.getLatestMetric(a.id);
   const rt = toRealtime(latest);
   const sec = RANGES_C[req.query.range] || 21600;
-  const hist = db.getMetrics(a.id, Date.now() - sec * 1000);
+  // M-02：历史曲线同样走 SQL 层采样，且只取负载列（此前 7d 单节点全量拉取）
+  const hist = db.getMetricsLoadOne(a.id, Date.now() - sec * 1000, 1000);
   const history = hist.map(m => ({
     created_at: new Date(m.ts).toISOString(),
     cpu: Number(m.cpu) || 0,

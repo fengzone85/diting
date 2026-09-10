@@ -19,6 +19,10 @@ services:
       - ADMIN_ALLOW_HTTP=1
       # 数据库写入持久卷 /data（server-data），重建容器后数据不丢失
       - DB_PATH=/data/monitor.db
+      # 反代信任边界：默认只信任 loopback。若 Nginx 在另一个容器/主机，
+      # 反代源地址不是 127.0.0.1，需显式声明（否则 IP 白名单与限流会把请求全算到反代头上）：
+      # - TRUST_PROXY=172.16.0.0/12,10.0.0.8   # IP 或 CIDR，逗号分隔
+      # - TRUST_PROXY=1                        # 信任 1 跳
     ports:
       - "8081:8081"
     volumes:
