@@ -871,9 +871,11 @@ router.get('/agents/:id/commands', adminOnly, (req, res) => {
 // 该路由自身有 adminOrReadonly 鉴权，故在 server.js 的 IP 白名单中间件里放行，
 // 保证白名单配置错误把自己挡在门外时仍能自诊断。
 router.get('/client-ip', adminOrReadonly, (req, res) => {
+  const tp = req.app.get('trust proxy');
   res.json({
     ip: req.ip || '',
-    trust_proxy: req.app.get('trust proxy'),
+    // 默认值是函数（自定义 loopback 判定），直接序列化会变成 undefined，这里归一成 'loopback'
+    trust_proxy: typeof tp === 'function' ? 'loopback' : tp,
     x_forwarded_for: req.header('X-Forwarded-For') || ''
   });
 });
