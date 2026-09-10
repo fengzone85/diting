@@ -22,6 +22,7 @@ const props = defineProps<{
 const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
+let ro: ResizeObserver | null = null;
 
 // Komari 风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
@@ -55,7 +56,13 @@ function baseOption(): any {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: c.axisLine } },
-      axisLabel: { color: c.text },
+      // 对齐 Komari LoadChart 的时间轴写法：字号 10 + hideOverlap。
+      // 该卡片在三列网格里只有 ~370px 宽，默认 12px 字号会让时间刻度首尾相接
+      // （实测 1h 时 9 个 "HH:mm" 连成一片）；hideOverlap 让 ECharts 丢弃重叠标签，
+      // 实测同样宽度下标签数由 9 降到 6，间距约一倍。
+      axisTick: { show: false },
+      axisLabel: { color: c.text, fontSize: 10, hideOverlap: true },
+      splitLine: { show: false },
     },
     yAxis: {
       type: 'value',
@@ -77,6 +84,9 @@ function init() {
   if (!chartRef.value) return;
   chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
   chart.setOption(baseOption());
+  // 标签疏密由容器宽度决定（hideOverlap 在 resize 后才会重算），故必须跟随宽度重排
+  ro = new ResizeObserver(() => chart?.resize());
+  ro.observe(chartRef.value);
 }
 
 watch(colors, () => chart?.setOption(baseOption(), true));
@@ -88,7 +98,7 @@ watch(() => props.data, (next) => {
 }, { deep: true });
 
 onMounted(init);
-onUnmounted(() => chart?.dispose());
+onUnmounted(() => { ro?.disconnect(); chart?.dispose(); });
 </script>
 
 <template>
