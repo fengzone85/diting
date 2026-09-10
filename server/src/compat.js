@@ -22,6 +22,28 @@ function onlineTtl(a) {
 // 历史曲线时间窗（与 api.js RANGES 保持一致）
 const RANGES_C = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
 
+// 公开历史接口结果缓存（30s，与 api.js 的 sparkline 缓存同思路）。
+// /records/load 与 /records/ping 无需登录，且最坏情况是 720h 全库窗口扫描（秒级），
+// 若不缓存，前端并发刷新或几个访客同时打开就能把服务端拖垮（DoS 级放大器）。
+const recordsCache = new Map();   // key -> { ts, data }
+const RECORDS_CACHE_TTL = 30000;
+const RECORDS_CACHE_MAX = 200;    // key 由查询参数组合而成，必须限制总量，防止被枚举撑爆内存
+// 全量（不带 uuid）查询时每节点的采样点数：按节点数分摊，并给 2 倍余量 + 下限 20，
+// 避免 61 台各取 1000 点造成的 6 万行/324KB 传输与序列化浪费。
+function perAgentPoints(maxCount) {
+  const n = Math.max(1, (db.getAgents() || []).length);
+  return Math.min(maxCount, Math.max(20, Math.ceil(maxCount / n) * 2));
+}
+
+function cachedRecords(key, build) {
+  const hit = recordsCache.get(key);
+  if (hit && Date.now() - hit.ts < RECORDS_CACHE_TTL) return hit.data;
+  const data = build();
+  if (recordsCache.size >= RECORDS_CACHE_MAX) recordsCache.clear();
+  recordsCache.set(key, { ts: Date.now(), data });
+  return data;
+}
+
 // ISO 3166-1 alpha-2 -> 国旗 emoji（region 字段用国旗表情）
 function flagEmoji(iso) {
   if (!iso || iso.length !== 2) return '';
@@ -273,20 +295,21 @@ router.get('/records/load', guard, (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
-  const since = Date.now() - hours * 3600 * 1000;
-  const ids = db.getAgents()
-    .filter(a => !uuid || a.id === uuid)
-    .map(a => a.id);
-  let rows = [];
-  for (const id of ids) {
-    // M-02：SQL 层均匀采样（每节点最多 maxCount 行，保留首尾），
-    // 替代原先「全量拉取 → JS 排序 → slice」：100 台 × 720h 会物化百万行并触发大数组排序。
-    rows = rows.concat(db.getMetricsSampled(id, since, maxCount));
-  }
-  rows.sort((a, b) => a.ts - b.ts);
-  rows = rows.slice(-maxCount);
-  const records = rows.map(toLoadRecord);
-  res.json({ status: 'success', message: '', count: records.length, records });
+  // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
+  const payload = cachedRecords(`load|${uuid || '*'}|${hours}|${maxCount}`, () => {
+    const since = Date.now() - hours * 3600 * 1000;
+    // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
+    // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
+    // 每节点各取 1000 点纯属浪费——61 台 ⇒ 6 万行 324KB，降到 ~750 行后 720h 从 21s 到 2.2s）。
+    const perAgent = perAgentPoints(maxCount);
+    const sampled = uuid
+      ? db.getMetricsLoadOne(uuid, since, maxCount)
+      : db.getMetricsLoadAll(since, perAgent);
+    const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
+    const records = rows.map(toLoadRecord);
+    return { status: 'success', message: '', count: records.length, records };
+  });
+  res.json(payload);
 });
 
 // GET /api/records/ping —— 延迟历史（官方主题延迟图依赖）。
@@ -296,14 +319,18 @@ router.get('/records/ping', guard, (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
-  const since = Date.now() - hours * 3600 * 1000;
-  const ids = db.getAgents().filter(a => !uuid || a.id === uuid).map(a => a.id);
-  const tasks = new Map();      // task_id -> {id,name,interval,loss}
-  const records = [];           // {task_id,time,value}
-  let tid = 0;
-  for (const id of ids) {
-    // M-02：只取 ts+probes 两列并在 SQL 层采样（getMetricsProbesOne），避免 SELECT * 全行物化。
-    for (const m of db.getMetricsProbesOne(id, since, maxCount)) {
+  // 与 /records/load 同理：游客可直连，720h 全量最坏要扫百万行，30s 缓存兜底
+  const payload = cachedRecords(`ping|${uuid || '*'}|${hours}|${maxCount}`, () => {
+    const since = Date.now() - hours * 3600 * 1000;
+    // M-02：只取 ts+probes 两列并在 SQL 层采样。指定节点用单节点版，
+    // 否则一次 SQL 跨节点采样（metricsProbesAll），避免 per-agent 循环 N 次扫索引。
+    const probeRows = uuid
+      ? db.getMetricsProbesOne(uuid, since, maxCount)
+      : db.metricsProbesAll(since, Math.max(200, perAgentPoints(maxCount)));
+    const tasks = new Map();      // task_id -> {id,name,interval,loss}
+    const records = [];           // {task_id,time,value}
+    let tid = 0;
+    for (const m of probeRows) {
       let probes = null;
       try { probes = m.probes ? JSON.parse(m.probes) : null; } catch (_) { probes = null; }
       if (!probes || typeof probes !== 'object') continue;
@@ -329,13 +356,14 @@ router.get('/records/ping', guard, (req, res) => {
         records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
       }
     }
-  }
-  records.sort((a, b) => new Date(a.time) - new Date(b.time));
-  res.json({
-    status: 'success', message: '', count: records.length,
-    records: records.slice(-maxCount),
-    tasks: [...tasks.values()]
+    records.sort((a, b) => new Date(a.time) - new Date(b.time));
+    return {
+      status: 'success', message: '', count: records.length,
+      records: records.slice(-maxCount),
+      tasks: [...tasks.values()]
+    };
   });
+  res.json(payload);
 });
 
 // GET /api/node/:uuid —— 社区主题 node detail 取数（参考 Komari getNode 形状）
@@ -347,8 +375,8 @@ router.get('/node/:uuid', guard, (req, res) => {
   const latest = db.getLatestMetric(a.id);
   const rt = toRealtime(latest);
   const sec = RANGES_C[req.query.range] || 21600;
-  // M-02：历史曲线同样走 SQL 层采样（此前 7d 单节点全量拉取）
-  const hist = db.getMetricsSampled(a.id, Date.now() - sec * 1000, 1000);
+  // M-02：历史曲线同样走 SQL 层采样，且只取负载列（此前 7d 单节点全量拉取）
+  const hist = db.getMetricsLoadOne(a.id, Date.now() - sec * 1000, 1000);
   const history = hist.map(m => ({
     created_at: new Date(m.ts).toISOString(),
     cpu: Number(m.cpu) || 0,
