@@ -864,6 +864,20 @@ router.get('/agents/:id/commands', adminOnly, (req, res) => {
   res.json({ id: a.id, probe_targets: probeTargets, install, modify });
 });
 
+// ---- Admin: 客户端 IP 诊断（配合 IP 白名单 / TRUST_PROXY 排障）----
+// 返回服务端「看到的」客户端 IP 与当前 trust proxy 配置。管理员填 IP 白名单时，
+// 若看到的不是自己的公网 IP（例如是 Nginx/容器的地址），说明需要在服务端设置
+// TRUST_PROXY 声明可信反代，否则白名单与按 IP 限流都会按反代地址计算。
+// 该路由自身有 adminOrReadonly 鉴权，故在 server.js 的 IP 白名单中间件里放行，
+// 保证白名单配置错误把自己挡在门外时仍能自诊断。
+router.get('/client-ip', adminOrReadonly, (req, res) => {
+  res.json({
+    ip: req.ip || '',
+    trust_proxy: req.app.get('trust proxy'),
+    x_forwarded_for: req.header('X-Forwarded-For') || ''
+  });
+});
+
 // ---- Admin: UI + 通知设置（持久化到 admin_config）----
 // GET 返回当前设置；密码类字段脱敏（留空表示「保持不变」）。
 router.get('/settings', adminOrReadonly, (req, res) => {

@@ -158,6 +158,9 @@ function _metricsHandler(req, res) {
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/public/') || req.path === '/report' ||
       req.path.startsWith('/v1/') ||
+      // /client-ip 是白名单排障入口：白名单配错时管理员需要它才能看清自己被识别成哪个 IP
+      // （自身带 adminOrReadonly 鉴权，放行不会引入未授权访问）
+      req.path === '/client-ip' ||
       req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
       req.path === '/records/load' || req.path === '/records/ping' ||
       req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse') return next();
