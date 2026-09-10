@@ -4,6 +4,8 @@ interface Props {
   modelValue?: string | number | boolean;
   type?: 'text' | 'password' | 'number' | 'textarea' | 'checkbox';
   placeholder?: string;
+  // 字段下方的灰色小字说明（用于配置项的注意事项/排障提示）
+  hint?: string;
 }
 
 defineProps<Props>();
@@ -49,5 +51,6 @@ function onInput(e: Event) {
       :placeholder="placeholder"
       @input="onInput"
     />
+    <p v-if="hint" class="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-500">{{ hint }}</p>
   </div>
 </template>

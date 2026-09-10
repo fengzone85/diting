@@ -13,6 +13,11 @@ const DB_PATH = process.env.DB_PATH || (() => {
 })();
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
+// 负载曲线列集（不含 probes / disks 大字段），供 metricsLoadOne / metricsLoadAll 复用
+const LOAD_COLS = `ts, agent_id, cpu, mem_used, mem_total, mem_pct, load1, load5, load15,
+  net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, disk_used, disk_total,
+  disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp`;
+
 const db = new Database(DB_PATH);
 // 收紧数据库文件权限：仅属主可读写（默认 umask 常为 644，其他用户可读）。
 // 库内虽无指纹指标，但含全部监控数据，按最小权限原则限制暴露面。
@@ -164,8 +169,59 @@ const stmts = {
     VALUES (@agent_id, @ts, @cpu, @mem_used, @mem_total, @mem_pct, @disk_used, @disk_total, @disk_pct,
      @load1, @load5, @load15, @net_rx_rate, @net_tx_rate, @net_rx_month, @net_tx_month, @uptime,
      @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
+  // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
+  countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // 单节点全字段 SQL 层采样（兼容层 /records/load 与 /api/v1 历史专用）。
+  // 此前这些接口走 metricsRange 全量拉取（100 台 × 720h 可达百万行）后在 JS 层 sort/slice，
+  // 单次请求数百万次行物化 + 大数组排序，是典型的 DoS 放大器。
+  // 与 metricsProbesOne 同构：窗口函数均匀抽样，保留首尾点；step 绑定必须是整型（内层 CAST）。
+  metricsRangeSampled: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT *,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=@agentId AND ts>=@since
+      )
+      SELECT * FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
+      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
+  },
+  // 负载曲线专用列集：刻意不含 probes / disks。
+  // 这两列是 JSON 文本（probes 常 100B+、disks 可达数百 B），在窗口函数 CTE 里
+  // 会被整行物化——720h 单节点 13.5 万行 × 大字段 ⇒ 数百 MB 临时集 + 25s 响应时间。
+  // 实测：/api/records/load?hours=720 从 25.5s 降到亚秒级。
+  metricsLoadOne: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT ${LOAD_COLS},
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=@agentId AND ts>=@since
+      )
+      SELECT ${LOAD_COLS} FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
+      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
+  },
+  // 跨节点版本：按「时间桶 + 取桶内最早一行」采样（每节点约 maxPoints 点）。
+  // 不用窗口函数：实测 720h 全库（191 万行）窗口版 23.6s，分桶版 2.2s——
+  // 窗口函数要把整段匹配行进临时 B-TREE 排序两遍（ROW_NUMBER 分区 + 最终 ORDER BY），
+  // 分桶只做一次覆盖索引扫描 + 分组（同样保留首尾桶，不丢首尾点语义）。
+  metricsLoadAll: (sinceTs, maxPoints) => {
+    const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
+    return db.prepare(`
+      SELECT ${LOAD_COLS.replace(/\b(ts|agent_id)\b/g, 'm.$1')} FROM metrics m
+      JOIN (
+        SELECT agent_id, MIN(ts) AS ts
+        FROM metrics WHERE ts>=@since
+        GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
+      ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
+      ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
+  },
   // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
   metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // 单节点探针 SQL 层采样（详情页延迟波形专用）：只返回 maxPoints 行，保留首尾点。
@@ -318,18 +374,17 @@ const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbes
 // 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
 // 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
 const metricsProbesAll = (sinceTs, maxPoints) => {
-  const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
+  // 与 metricsLoadAll 同思路：改用「时间桶 + 桶内最早一行」替代窗口函数，
+  // 720h 全库下从 ~16s 降到 ~2s，且同样保留首尾桶。
+  const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
   return db.prepare(`
-    WITH numbered AS (
-      SELECT ts, agent_id, probes,
-             ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
-             COUNT(*) OVER (PARTITION BY agent_id) AS cnt
+    SELECT m.ts, m.agent_id, m.probes FROM metrics m
+    JOIN (
+      SELECT agent_id, MIN(ts) AS ts
       FROM metrics WHERE ts>=@since AND probes IS NOT NULL
-    )
-    SELECT ts, agent_id, probes
-    FROM numbered
-    WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-    ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step });
+      GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
+    ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
+    ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
 };
 
 // sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
@@ -362,6 +417,18 @@ const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', h
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ agent_id }, m));
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
+
+// 窗口内有上报数据的节点数（走 idx_metrics_ts 覆盖扫描，毫秒级）
+const countActiveAgents = (sinceTs) => (stmts.countActiveAgents.get(sinceTs) || {}).c || 0;
+// 单节点全字段采样：只返回 ≤maxPoints 行（保留首尾），替代 getMetrics 全量拉取。
+const getMetricsSampled = (agent_id, sinceTs, maxPoints) =>
+  stmts.metricsRangeSampled(agent_id, sinceTs, maxPoints);
+
+// 负载曲线采样（不含 probes/disks 大字段）：单节点 / 跨节点两版
+const getMetricsLoadOne = (agent_id, sinceTs, maxPoints) =>
+  stmts.metricsLoadOne(agent_id, sinceTs, maxPoints);
+const getMetricsLoadAll = (sinceTs, maxPoints) => stmts.metricsLoadAll(sinceTs, maxPoints);
+
 const getMetrics = (agent_id, sinceTs) => stmts.metricsRange.all(agent_id, sinceTs);
 
 const prune = (retentionDays) => {
@@ -394,7 +461,13 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
+  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
+    // 公开接口（/api/public/agents、/api/v1/nodes）是否透出业务字段：
+    // 商家 merchant、到期 expire_at、备注 note、月流量配额 monthly_quota_gb、套餐 price/billing_cycle/currency。
+    // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；
+    // 若公开页面向外部访客、不希望暴露经营信息，在后台设置里关闭即可，公开页会自动隐藏相关模块。
+    public_show_business: true,
+    home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
     // 主题可视化配置（对齐 komari-theme-Glassmorphism）
     glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
     glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
@@ -566,7 +639,8 @@ function getDbFileSize() {
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsProbesOne,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
+  getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,

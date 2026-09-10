@@ -176,3 +176,104 @@ test('logout 后旧 Cookie 立即失效（服务端吊销水位线）', async ()
     .set('X-Forwarded-Proto', 'https');
   assert.strictEqual(ok.status, 200);
 });
+
+// ---- H-01/H-04 回归护栏：公开数据边界 ----
+
+const db = require('../src/db');
+
+// 造一个带业务字段与 probes 的节点，供下面几条断言使用
+const bizAgent = db.createAgent('itest-biz-agent');
+db.updateAgent(bizAgent.id, {
+  name: 'itest-biz-agent', merchant: 'ACME 云', note: '内部备注：勿外传',
+  expire_at: '2030-01-01', monthly_quota_gb: 500, price: 99, billing_cycle: 30, currency: '¥'
+});
+// 直接写全列（insertMetric 是 named 绑定，缺列会以 undefined 触发 SQLite 绑定报错）
+db.insertMetric(bizAgent.id, {
+  ts: Date.now(),
+  cpu: 10, mem_used: 100, mem_total: 1000, mem_pct: 10,
+  disk_used: 1, disk_total: 2, disk_pct: 50,
+  load1: 0.1, load5: 0.2, load15: 0.3,
+  net_rx_rate: 1, net_tx_rate: 2, net_rx_month: 3, net_tx_month: 4,
+  uptime: 100, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
+  disk_r_rate: 0, disk_w_rate: 0,
+  // 与 validateReport 落库格式一致：对象而非数组
+  probes: JSON.stringify({ '移动': { ms: 12, ok: true, loss: 0 } }),
+  disks: '[]'
+});
+
+const withUi = async (patch, fn) => {
+  const ui = db.getUiSettings();
+  db.setUiSettings(Object.assign({}, ui, patch));
+  try { return await fn(); } finally { db.setUiSettings(ui); }
+};
+
+test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
+  const res = await request(app).get('/api/records/ping?hours=1');
+  assert.strictEqual(res.status, 200);
+  assert.ok(res.body.records.length >= 1, 'records 不应为空');
+  assert.ok(res.body.tasks.some((t) => t.name === '移动'), 'tasks 应包含「移动」');
+  const rec = res.body.records.find((r) => r.value === 12);
+  assert.ok(rec, '应存在 value=12 的延迟记录');
+});
+
+test('H-04：public_enabled=false 时 /api/v1/nodes 与 /api/public/agents 同步 403', async () => {
+  await withUi({ public_enabled: false }, async () => {
+    const v1 = await request(app).get('/api/v1/nodes');
+    assert.strictEqual(v1.status, 403);
+    assert.strictEqual(v1.body.message, 'public page disabled');
+    const pub = await request(app).get('/api/public/agents');
+    assert.strictEqual(pub.status, 403);
+  });
+  // 恢复后可用
+  const back = await request(app).get('/api/v1/nodes');
+  assert.strictEqual(back.status, 200);
+});
+
+test('H-01：public_show_business=false 时公开接口不再透出业务字段', async () => {
+  // 默认（true）应包含业务字段
+  const on = await request(app).get('/api/public/agents');
+  const withBiz = on.body.find((a) => a.id === bizAgent.id);
+  assert.strictEqual(withBiz.merchant, 'ACME 云');
+  assert.strictEqual(withBiz.note, '内部备注：勿外传');
+
+  await withUi({ public_show_business: false }, async () => {
+    const pub = await request(app).get('/api/public/agents');
+    const a = pub.body.find((x) => x.id === bizAgent.id);
+    assert.ok(a, '节点本身仍应可见');
+    for (const k of ['merchant', 'expire_at', 'note', 'monthly_quota_gb', 'price', 'billing_cycle', 'currency']) {
+      assert.strictEqual(a[k], undefined, `${k} 不应出现在公开响应中`);
+    }
+    const v1 = await request(app).get('/api/v1/nodes');
+    const n = v1.body.data.find((x) => x.uuid === bizAgent.id);
+    assert.strictEqual(n.remark, null);
+    assert.strictEqual(n.expired_at, null);
+    assert.strictEqual(n.traffic_limit, 0);
+  });
+});
+
+// ---- H-02 配套：客户端 IP 诊断接口（后台设置页据此排障）----
+
+test('GET /api/client-ip 未登录 → 401', async () => {
+  const res = await request(app).get('/api/client-ip').set('X-Forwarded-Proto', 'https');
+  assert.strictEqual(res.status, 401);
+});
+
+test('GET /api/client-ip 返回服务端识别到的 IP 与 trust proxy 配置', async () => {
+  const res = await request(app).get('/api/client-ip').set(ADMIN);
+  assert.strictEqual(res.status, 200);
+  assert.ok(typeof res.body.ip === 'string' && res.body.ip.length > 0);
+  // 默认收紧为 loopback（H-02）：不再信任任意来源的 X-Forwarded-*
+  assert.strictEqual(String(res.body.trust_proxy), 'loopback');
+});
+
+test('白名单配错时 /api/client-ip 仍可用（排障入口不受白名单拦截）', async () => {
+  await withUi({ admin_allow_ips: '203.0.113.9' }, async () => {
+    // 普通管理接口被白名单拒绝
+    const blocked = await request(app).get('/api/agents').set(ADMIN);
+    assert.strictEqual(blocked.status, 403);
+    // 诊断接口仍返回 200，管理员据此看清自己被识别成哪个 IP
+    const diag = await request(app).get('/api/client-ip').set(ADMIN);
+    assert.strictEqual(diag.status, 200);
+    assert.ok(diag.body.ip);
+  });
+});

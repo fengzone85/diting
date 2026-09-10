@@ -210,8 +210,27 @@ diting/
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram Bot 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
 | `PUBLIC_URL` | 推荐 | — | 服务器公网地址（生成受控端一键安装命令用；也可在后台「设置 → Agent 连接地址」配置，见上方升级注意） |
+| `TRUST_PROXY` | 否 | `loopback` | 可信反向代理地址（见下「反向代理与 `TRUST_PROXY`」） |
 
 > AI 日报、计费、审计、Komari 主题均由后台「设置」页管理，无需环境变量。完整清单见 `server/.env.example`。
+
+### 反向代理与 `TRUST_PROXY`
+
+服务端用 `req.ip` 做「管理端 IP 白名单、按 IP 限流、审计记录」，而 `req.ip` 取自 `X-Forwarded-For` 还是 TCP 源地址，由 `trust proxy` 决定：
+
+| 部署形态 | 需要设置 |
+|---|---|
+| Nginx 与服务端同机，8081 只绑 `127.0.0.1`（推荐） | 无需设置，默认 `loopback` 即可 |
+| Nginx 在另一台主机 / 另一个容器（docker 网络） | `TRUST_PROXY=172.16.0.0/12,10.0.0.8`（逗号分隔的 IP 或 CIDR） |
+| 固定一跳反代，不想列地址 | `TRUST_PROXY=1`（信任 1 跳） |
+
+⚠️ **升级注意**：此前为 `trust proxy = true`（信任任意来源的转发头）。只要 `8081` 能被直连，客户端就能自造 `X-Forwarded-For: <白名单内 IP>` 绕过 IP 白名单与限流，或自造 `X-Forwarded-Proto: https` 让管理接口在明文 HTTP 上放行。现默认收紧为 `loopback`，因此**反代与服务端不同机的部署必须显式设置 `TRUST_PROXY`**，否则 `req.ip` 会变成反代 IP，配了白名单的站会发现所有请求被 403。
+
+### 公开数据边界（`public_show_business`）
+
+`/api/public/agents` 与 `/api/v1/nodes` 默认透出商家、到期、备注、月流量配额、套餐等业务字段——公开页首页的「商家数 / 即将到期」与详情页的「备注 / 套餐」依赖它们，因此不能一刀切删除。若公开页面向外部访客、不希望暴露经营信息，在后台「设置 → 公开接口展示业务字段」关闭即可：关闭后这些字段直接从响应中消失，公开页相关模块自动隐藏。
+
+该开关与「公开页启用（`public_enabled`）」相互独立：关闭公开页时，两类接口一律返回 403。
 
 ### 受控端（Python 与 Go 共用）
 

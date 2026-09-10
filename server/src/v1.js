@@ -30,9 +30,18 @@ const CAPABILITY = {
   probes: true
 };
 
+// 公开接口是否透出业务字段（商家/到期/备注/月流量配额）：由 ui_settings.public_show_business 控制，
+// 默认 true（与旧版一致）。公开页面向外部访客时可在后台关闭，见 db.js getUiSettings 默认值注释。
+function businessVisible() {
+  const ui = db.getUiSettings();
+  return ui.public_show_business !== false;
+}
+
 // 节点基础信息（标准字段语义，缺失统一 null / 空对象，不猜默认值）
-function toNode(a) {
+// showBusiness 由调用方（列表/详情 handler）传入，避免每个节点各读一次 ui_settings。
+function toNode(a, showBusiness) {
   const m = db.getLatestMetric(a.id) || {};
+  const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
     uuid: a.id,
     name: a.name,
@@ -48,9 +57,9 @@ function toNode(a) {
     online: isOnline(a),
     region: a.country || null,
     group: a.grp || null,
-    remark: a.note || null,                 // 公开备注
-    expired_at: a.expire_at || null,        // 到期时间
-    traffic_limit: Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1e9) : 0,
+    remark: show ? (a.note || null) : null,              // 公开备注（受 public_show_business 控制）
+    expired_at: show ? (a.expire_at || null) : null,     // 到期时间（同上）
+    traffic_limit: show && Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1e9) : 0,
     traffic_limit_type: 'max',
     created_at: new Date(a.created_at).toISOString(),
     updated_at: new Date(a.last_seen || a.created_at).toISOString()
@@ -123,14 +132,15 @@ router.get('/sites', (req, res) => {
 
 // GET /api/v1/nodes —— 节点列表（不含实时负载）
 router.get('/nodes', (req, res) => {
-  ok(res, db.getAgents().map(toNode));
+  const show = businessVisible();
+  ok(res, db.getAgents().map((a) => toNode(a, show)));
 });
 
 // GET /api/v1/nodes/:uuid —— 单节点详情（基础信息 + 实时 + 能力声明）
 router.get('/nodes/:uuid', (req, res) => {
   const a = db.getAgent(req.params.uuid);
   if (!a) return res.status(404).json({ code: 1, message: 'node not found', data: null });
-  ok(res, { node: toNode(a), realtime: toRealtime(db.getLatestMetric(a.id)), capability: CAPABILITY });
+  ok(res, { node: toNode(a, businessVisible()), realtime: toRealtime(db.getLatestMetric(a.id)), capability: CAPABILITY });
 });
 
 // GET /api/v1/nodes/:uuid/metrics?hours=24&max_points=100 —— 时序指标（标准字段）
@@ -140,11 +150,8 @@ router.get('/nodes/:uuid/metrics', (req, res) => {
   const hours = clamp(Math.floor(Number(req.query.hours) || 0), 0, 720);
   const maxPoints = clamp(Math.floor(Number(req.query.max_points) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  let rows = db.getMetrics(a.id, since);
-  if (rows.length > maxPoints) {
-    const step = Math.ceil(rows.length / maxPoints);
-    rows = rows.filter((_, i) => i % step === 0);
-  }
+  // M-02：SQL 层均匀采样（保留首尾点），只取负载列，不再「全量拉取 720h 后 JS filter」
+  const rows = db.getMetricsLoadOne(a.id, since, maxPoints);
   const points = rows.map(r => ({
     ts: new Date(r.ts).toISOString(),
     cpu: Number(r.cpu) || 0,
@@ -162,7 +169,8 @@ router.get('/nodes/:uuid/metrics', (req, res) => {
     swap_pct: Number(r.swap_pct) || 0,
     temperature: r.temp != null ? Number(r.temp) : null
   }));
-  ok(res, { uuid: a.id, points, downsampled: rows.length > maxPoints, hours });
+  // 采样已在 SQL 层完成，此处仅如实声明是否发生了降采样（供 adapter 判断是否提示精度损失）
+  ok(res, { uuid: a.id, points, downsampled: rows.length > 0 && points.length >= maxPoints, hours });
 });
 
 // GET /api/v1/nodes/:uuid/records?hours=24&max_points=100 —— 历史探针记录（ping）
@@ -172,9 +180,8 @@ router.get('/nodes/:uuid/records', (req, res) => {
   const hours = clamp(Math.floor(Number(req.query.hours) || 0), 0, 720);
   const maxCount = clamp(Math.floor(Number(req.query.max_points) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  const rows = (db.getMetrics(a.id, since) || [])
-    .filter(r => r.probes != null)
-    .slice(0, maxCount * 10);
+  // M-02：只取 ts+probes 两列并在 SQL 层采样（原先是全量拉取后 slice(maxCount*10)）
+  const rows = db.getMetricsProbesOne(a.id, since, maxCount) || [];
   const records = [];
   rows.forEach(r => {
     try {
