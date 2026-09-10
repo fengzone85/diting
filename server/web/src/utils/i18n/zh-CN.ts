@@ -132,6 +132,7 @@ export const zhCN: Record<string, string> = {
   'settings.adminAllowIps': '管理端 IP 白名单',
   'settings.retentionDays': '数据保留天数',
   'settings.publicEnabled': '公开页启用',
+  'settings.publicShowBusiness': '公开接口展示业务字段（商家/到期/备注/配额/套餐）',
   'settings.customCss': '自定义 CSS',
   'settings.alertThresholds': '告警阈值',
   'settings.cpuThreshold': 'CPU 阈值 %',

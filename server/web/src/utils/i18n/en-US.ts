@@ -132,6 +132,7 @@ export const enUS: Record<string, string> = {
   'settings.adminAllowIps': 'Admin IP whitelist',
   'settings.retentionDays': 'Data retention days',
   'settings.publicEnabled': 'Enable public page',
+  'settings.publicShowBusiness': 'Expose business fields on public API (provider / expiry / note / quota / plan)',
   'settings.customCss': 'Custom CSS',
   'settings.alertThresholds': 'Alert Thresholds',
   'settings.cpuThreshold': 'CPU threshold %',

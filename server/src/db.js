@@ -166,6 +166,23 @@ const stmts = {
      @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // 单节点全字段 SQL 层采样（兼容层 /records/load 与 /api/v1 历史专用）。
+  // 此前这些接口走 metricsRange 全量拉取（100 台 × 720h 可达百万行）后在 JS 层 sort/slice，
+  // 单次请求数百万次行物化 + 大数组排序，是典型的 DoS 放大器。
+  // 与 metricsProbesOne 同构：窗口函数均匀抽样，保留首尾点；step 绑定必须是整型（内层 CAST）。
+  metricsRangeSampled: (agentId, sinceTs, maxPoints) => {
+    const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
+    return db.prepare(`
+      WITH numbered AS (
+        SELECT *,
+               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
+               COUNT(*) OVER () AS cnt
+        FROM metrics WHERE agent_id=@agentId AND ts>=@since
+      )
+      SELECT * FROM numbered
+      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
+      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
+  },
   // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
   metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // 单节点探针 SQL 层采样（详情页延迟波形专用）：只返回 maxPoints 行，保留首尾点。
@@ -362,6 +379,10 @@ const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', h
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ agent_id }, m));
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
+// 单节点全字段采样：只返回 ≤maxPoints 行（保留首尾），替代 getMetrics 全量拉取。
+const getMetricsSampled = (agent_id, sinceTs, maxPoints) =>
+  stmts.metricsRangeSampled(agent_id, sinceTs, maxPoints);
+
 const getMetrics = (agent_id, sinceTs) => stmts.metricsRange.all(agent_id, sinceTs);
 
 const prune = (retentionDays) => {
@@ -394,7 +415,13 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true, home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
+  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
+    // 公开接口（/api/public/agents、/api/v1/nodes）是否透出业务字段：
+    // 商家 merchant、到期 expire_at、备注 note、月流量配额 monthly_quota_gb、套餐 price/billing_cycle/currency。
+    // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；
+    // 若公开页面向外部访客、不希望暴露经营信息，在后台设置里关闭即可，公开页会自动隐藏相关模块。
+    public_show_business: true,
+    home_layout: 'grid', public_theme: 'default', probe_targets: '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
     // 主题可视化配置（对齐 komari-theme-Glassmorphism）
     glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
     glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
@@ -566,7 +593,7 @@ function getDbFileSize() {
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsProbes, getMetricsProbesOne,
+  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
   getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,

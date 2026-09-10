@@ -28,6 +28,8 @@ interface UiSettings {
     offline_sec?: number;
   };
   public_enabled?: boolean;
+  // 公开接口是否透出业务字段（商家/到期/备注/配额/套餐）
+  public_show_business?: boolean;
   home_layout?: 'grid' | 'list' | 'compact';
   public_theme?: string;
   probe_targets?: string;
@@ -195,6 +197,7 @@ async function save() {
         <FormInput v-model="local.ui.admin_allow_ips" :label="t('settings.adminAllowIps')" />
         <FormInput v-model="local.ui.retention_days" :label="t('settings.retentionDays')" type="number" />
         <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
+        <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />
         <FormInput v-model="local.ui.custom_css" :label="t('settings.customCss')" type="textarea" />
       </div>
       <div class="glass p-6">

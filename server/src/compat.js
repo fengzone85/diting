@@ -32,9 +32,16 @@ function flagEmoji(iso) {
   return String.fromCodePoint(A + cc.charCodeAt(0) - base) + String.fromCodePoint(A + cc.charCodeAt(1) - base);
 }
 
+// 公开接口是否透出业务字段（与 /api/public/* 同源开关 ui_settings.public_show_business）
+function businessVisible() {
+  const ui = db.getUiSettings();
+  return ui.public_show_business !== false;
+}
+
 // diting agent -> 社区主题 node 列表项（/api/nodes）
-function toNode(a) {
+function toNode(a, showBusiness) {
   const m = db.getLatestMetric(a.id) || {};
+  const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
     uuid: a.id,
     name: a.name,
@@ -55,7 +62,8 @@ function toNode(a) {
     billing_cycle: 30,
     auto_renewal: true,
     currency: '$',
-    expired_at: a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
+    // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值
+    expired_at: show && a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
     group: a.grp || '',
     tags: '',
     hidden: false,
@@ -219,7 +227,10 @@ router.get('/version', (req, res) => {
 // GET /api/nodes —— 节点基础信息列表（不含实时负载）
 router.get('/nodes', guard, (req, res) => {
   const agents = db.getAgents();
-  res.json({ status: 'success', message: '', data: agents.map(toNode) });
+  // 注意：不能用 agents.map(toNode)——map 会把数组下标当作第二个参数 showBusiness 传入，
+  // 下标 0 会被当成 false，导致第一个节点的业务字段被静默隐藏。
+  const show = businessVisible();
+  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show)) });
 });
 
 // GET /api/recent —— 省略 uuid 时返回空数组（避免 /api/recent/ 触发 404，便于调试）。
@@ -268,7 +279,9 @@ router.get('/records/load', guard, (req, res) => {
     .map(a => a.id);
   let rows = [];
   for (const id of ids) {
-    rows = rows.concat(db.getMetrics(id, since));
+    // M-02：SQL 层均匀采样（每节点最多 maxCount 行，保留首尾），
+    // 替代原先「全量拉取 → JS 排序 → slice」：100 台 × 720h 会物化百万行并触发大数组排序。
+    rows = rows.concat(db.getMetricsSampled(id, since, maxCount));
   }
   rows.sort((a, b) => a.ts - b.ts);
   rows = rows.slice(-maxCount);
@@ -289,17 +302,31 @@ router.get('/records/ping', guard, (req, res) => {
   const records = [];           // {task_id,time,value}
   let tid = 0;
   for (const id of ids) {
-    for (const m of db.getMetrics(id, since)) {
+    // M-02：只取 ts+probes 两列并在 SQL 层采样（getMetricsProbesOne），避免 SELECT * 全行物化。
+    for (const m of db.getMetricsProbesOne(id, since, maxCount)) {
       let probes = null;
       try { probes = m.probes ? JSON.parse(m.probes) : null; } catch (_) { probes = null; }
-      if (!Array.isArray(probes)) continue;
-      for (const p of probes) {
-        const target = p.target || p.host || 'unknown';
-        let t = tasks.get(target);
-        if (!t) { t = { id: ++tid, name: target, interval: p.interval || 1, loss: 0 }; tasks.set(target, t); }
-        const value = p.latency != null ? Number(p.latency) : (p.avg != null ? Number(p.avg) : null);
-        if (value == null) continue;
-        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value });
+      if (!probes || typeof probes !== 'object') continue;
+      // M-01：diting 实际入库的是「对象」格式（validate.js 校验并写为
+      // { "<目标名>": { ms, ok, loss } }，见 src/validate.js）。此前这里只认数组
+      // （Array.isArray），对象被整体跳过 → 该接口恒返回 count:0 / tasks:[]，
+      // 社区主题的延迟图永远是空的。现同时兼容两种格式，键名即任务名。
+      const items = Array.isArray(probes)
+        ? probes.map((p) => ({
+            name: p.target || p.host || 'unknown',
+            value: p.latency != null ? Number(p.latency) : (p.avg != null ? Number(p.avg) : null),
+            loss: Number(p.loss) || 0,
+          }))
+        : Object.entries(probes).map(([name, v]) => ({
+            name,
+            value: v && v.ms != null ? Number(v.ms) : null,
+            loss: v && v.loss != null ? Number(v.loss) : (v && v.ok === true ? 0 : 100),
+          }));
+      for (const it of items) {
+        if (it.value == null || !Number.isFinite(it.value)) continue;
+        let t = tasks.get(it.name);
+        if (!t) { t = { id: ++tid, name: it.name, interval: 1, loss: it.loss || 0 }; tasks.set(it.name, t); }
+        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
       }
     }
   }
@@ -316,11 +343,12 @@ router.get('/records/ping', guard, (req, res) => {
 router.get('/node/:uuid', guard, (req, res) => {
   const a = db.getAgent(req.params.uuid);
   if (!a) return res.json({ status: 'error', message: 'node not found', data: null });
-  const node = toNode(a);
+  const node = toNode(a, businessVisible());
   const latest = db.getLatestMetric(a.id);
   const rt = toRealtime(latest);
   const sec = RANGES_C[req.query.range] || 21600;
-  const hist = db.getMetrics(a.id, Date.now() - sec * 1000);
+  // M-02：历史曲线同样走 SQL 层采样（此前 7d 单节点全量拉取）
+  const hist = db.getMetricsSampled(a.id, Date.now() - sec * 1000, 1000);
   const history = hist.map(m => ({
     created_at: new Date(m.ts).toISOString(),
     cpu: Number(m.cpu) || 0,

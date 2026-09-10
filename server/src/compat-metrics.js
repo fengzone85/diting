@@ -139,12 +139,10 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   }
 
   for (const entityId of entity_ids) {
-    let rows = db.getMetrics(entityId, since);
-    const downsampled = rows.length > maxPoints;
-    if (downsampled) {
-      const step = Math.ceil(rows.length / maxPoints);
-      rows = rows.filter((_, i) => i % step === 0);
-    }
+    // M-02：SQL 层均匀采样（保留首尾点），不再「全量拉取后 JS filter」
+    const rows = db.getMetricsSampled(entityId, since, Math.max(1, maxPoints));
+    // 采样已在 SQL 层完成：返回点数贴着 maxPoints 即说明发生过降采样
+    const downsampled = rows.length >= maxPoints;
 
     for (const key of normalKeys) {
       // 兼容两种命名：diting 短命名（cpu）或 Komari 官方点分命名（cpu.usage）
