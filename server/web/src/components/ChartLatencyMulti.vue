@@ -30,6 +30,9 @@ const { colors } = useChartTheme();
 const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
+// 当前横轴标签间隔与其对应的时间戳序列，resize 时据此判断是否需要重算标签密度
+let curInterval = -1;
+let lastLabels: number[] = [];
 
 // Komari 风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
@@ -118,13 +121,41 @@ function fmtTime(t: number, showDate: boolean): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function baseOption(): any {
-  const c = colors.value;
-  const built = buildSeries();
-  const labels = built.labels;
+// —— 横轴标签疏密控制 ——
+// ECharts 的 hideOverlap 只保证标签「不重叠」，不保证留白：宽图上它会让标签首尾相接
+// （实测 1200px 宽 / 1h 窗口下挤了 32 个 "15:49" 这类标签，视觉上连成一条线）。
+// 故按可用宽度反推最多能放几个标签，显式给出 interval 拉开间距（对齐 Komari 的疏朗刻度）。
+// 单标签占宽（含留白）：HH:mm 约 30px、MM/DD HH:mm 约 63px（11px 字号），再各留 ~45px 间距。
+function labelSpanPx(showDate: boolean): number {
+  return showDate ? 110 : 78;
+}
+
+function labelInterval(count: number, width: number, showDate: boolean): number {
+  const usable = Math.max(width - 84, 160); // 84 ≈ grid.left(52) + grid.right(20) + 余量
+  const maxLabels = Math.max(2, Math.floor(usable / labelSpanPx(showDate)));
+  if (count <= maxLabels) return 0;
+  return Math.max(0, Math.ceil(count / maxLabels) - 1);
+}
+
+// 由时间戳序列推导横轴：标签文案 + 标签间隔。
+// 间隔依赖当前容器宽度，故 resize 后需要重算（见 syncLabelInterval）。
+function axisMeta(labels: number[]) {
   let span = 0;
   if (labels.length > 1) span = (labels[labels.length - 1] - labels[0]) / 3600000; // hours
   const showDate = span > 24;
+  const width = chartRef.value?.clientWidth || 600;
+  return {
+    data: labels.map(t => fmtTime(t, showDate)),
+    interval: labelInterval(labels.length, width, showDate),
+  };
+}
+
+function baseOption(): any {
+  const c = colors.value;
+  const built = buildSeries();
+  const meta = axisMeta(built.labels);
+  lastLabels = built.labels;
+  curInterval = meta.interval;
   // legend 的图标颜色取自 ECharts 的【全局调色板 option.color】，而非 series 的 lineStyle.color。
   // 若只设 series.lineStyle.color 而不设顶层 color，legend 会退回默认调色板
   // (#5470c6/#91cc75/#fac858/#ee6666)，导致图例与曲线颜色不一致（实测图例像素即默认色）。
@@ -150,10 +181,10 @@ function baseOption(): any {
     },
     xAxis: {
       type: 'category',
-      data: labels.map(t => fmtTime(t, showDate)),
+      data: meta.data,
       boundaryGap: false,
       axisLine: { lineStyle: { color: c.axisLine } },
-      axisLabel: { color: c.text, fontSize: 11, hideOverlap: true },
+      axisLabel: { color: c.text, fontSize: 11, hideOverlap: true, interval: meta.interval },
       axisTick: { show: false },
       splitLine: { show: true, lineStyle: { color: c.splitLine } },
     },
@@ -173,20 +204,34 @@ function init() {
   if (!chartRef.value) return;
   chart = echarts.init(chartRef.value, undefined, { renderer: 'canvas' });
   chart.setOption(baseOption());
-  ro = new ResizeObserver(() => chart?.resize());
+  ro = new ResizeObserver(() => { chart?.resize(); syncLabelInterval(); });
   ro.observe(chartRef.value);
 }
 
-function resize() { nextTick(() => chart?.resize()); }
+// 容器变宽/变窄会改变可容纳的标签数，需重算 interval，
+// 否则窄屏下标签又会被压到一起（hideOverlap 只挡重叠、不保证留白）。
+function syncLabelInterval() {
+  if (!chart || !lastLabels.length) return;
+  const meta = axisMeta(lastLabels);
+  if (meta.interval !== curInterval) {
+    curInterval = meta.interval;
+    chart.setOption({ xAxis: { data: meta.data, axisLabel: { interval: meta.interval } } });
+  }
+}
+
+function resize() { nextTick(() => { chart?.resize(); syncLabelInterval(); }); }
 
 watch(colors, () => chart?.setOption(baseOption(), true));
 
 watch(() => props.series, () => {
   const built = buildSeries();
+  const meta = axisMeta(built.labels);
+  lastLabels = built.labels;
+  curInterval = meta.interval;
   chart?.setOption({
     // 同步更新调色板，保证 legend 图标/文字与曲线颜色始终一致（见 baseOption 注释）
     color: built.series.map(s => s.lineStyle.color),
-    xAxis: { data: built.labels.map(t => fmtTime(t, (built.labels.length > 1 ? (built.labels[built.labels.length - 1] - built.labels[0]) / 3600000 : 0) > 24)) },
+    xAxis: { data: meta.data, axisLabel: { interval: meta.interval } },
     series: built.series,
     legend: { data: built.series.map(s => ({ name: s.name, textStyle: { color: s.lineStyle.color } })) },
   });
