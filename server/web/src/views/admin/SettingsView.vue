@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
@@ -95,6 +95,15 @@ function resetLocal() {
 resetLocal();
 const themes = ref<ThemeOption[]>([{ id: 'default', name: t('settings.builtinTheme') }]);
 
+// 服务端实际识别到的客户端来源 IP（配合 IP 白名单 / TRUST_PROXY 排障）
+const clientIp = ref<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string } | null>(null);
+const isLoopbackTrust = computed(() => String(clientIp.value?.trust_proxy) === 'loopback');
+// 识别到的是内网/回环地址，而你显然是从外部访问后台 → 大概率是 trust proxy 未配置
+const isPrivateSeenIp = computed(() => {
+  const ip = clientIp.value?.ip || '';
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|::1$|::ffff:127\.)/.test(ip);
+});
+
 onMounted(async () => {
   // 进入设置页暂停全局 10s 自动刷新（paused 标志，避免被父组件 start 覆盖），
   // 防止轮询重写表单清空未保存输入
@@ -104,6 +113,11 @@ onMounted(async () => {
     themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
   } catch {
     // ignore
+  }
+  try {
+    clientIp.value = await adminApi.clientIp();
+  } catch {
+    // 只读 Token 或无权限时忽略，不影响其它设置
   }
 });
 
@@ -194,7 +208,21 @@ async function save() {
         </div>
         <FormInput v-model="local.ui.default_sort" :label="t('settings.defaultSort')" />
         <FormInput v-model="local.ui.agent_server_url" :label="t('settings.agentServerUrl')" />
-        <FormInput v-model="local.ui.admin_allow_ips" :label="t('settings.adminAllowIps')" />
+        <FormInput
+          v-model="local.ui.admin_allow_ips"
+          :label="t('settings.adminAllowIps')"
+          :hint="t('settings.adminAllowIpsHint')"
+        />
+        <p v-if="clientIp" class="mb-4 text-xs text-slate-400">
+          {{ t('settings.clientIpSeen') }}：<span class="font-mono text-slate-200">{{ clientIp.ip }}</span>
+          <span v-if="clientIp.x_forwarded_for && clientIp.x_forwarded_for !== clientIp.ip">
+            （{{ t('settings.clientIpHintXff', { xff: clientIp.x_forwarded_for }) }}）
+          </span>
+          <span v-if="!isLoopbackTrust"> · {{ t('settings.trustProxyValue', { value: String(clientIp.trust_proxy) }) }}</span>
+        </p>
+        <p v-if="clientIp && isPrivateSeenIp" class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs leading-relaxed text-amber-200">
+          {{ t('settings.clientIpWarn') }}
+        </p>
         <FormInput v-model="local.ui.retention_days" :label="t('settings.retentionDays')" type="number" />
         <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
         <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />

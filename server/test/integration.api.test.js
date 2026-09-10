@@ -250,3 +250,30 @@ test('H-01：public_show_business=false 时公开接口不再透出业务字段'
     assert.strictEqual(n.traffic_limit, 0);
   });
 });
+
+// ---- H-02 配套：客户端 IP 诊断接口（后台设置页据此排障）----
+
+test('GET /api/client-ip 未登录 → 401', async () => {
+  const res = await request(app).get('/api/client-ip').set('X-Forwarded-Proto', 'https');
+  assert.strictEqual(res.status, 401);
+});
+
+test('GET /api/client-ip 返回服务端识别到的 IP 与 trust proxy 配置', async () => {
+  const res = await request(app).get('/api/client-ip').set(ADMIN);
+  assert.strictEqual(res.status, 200);
+  assert.ok(typeof res.body.ip === 'string' && res.body.ip.length > 0);
+  // 默认收紧为 loopback（H-02）：不再信任任意来源的 X-Forwarded-*
+  assert.strictEqual(String(res.body.trust_proxy), 'loopback');
+});
+
+test('白名单配错时 /api/client-ip 仍可用（排障入口不受白名单拦截）', async () => {
+  await withUi({ admin_allow_ips: '203.0.113.9' }, async () => {
+    // 普通管理接口被白名单拒绝
+    const blocked = await request(app).get('/api/agents').set(ADMIN);
+    assert.strictEqual(blocked.status, 403);
+    // 诊断接口仍返回 200，管理员据此看清自己被识别成哪个 IP
+    const diag = await request(app).get('/api/client-ip').set(ADMIN);
+    assert.strictEqual(diag.status, 200);
+    assert.ok(diag.body.ip);
+  });
+});
