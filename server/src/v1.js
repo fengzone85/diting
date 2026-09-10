@@ -150,8 +150,8 @@ router.get('/nodes/:uuid/metrics', (req, res) => {
   const hours = clamp(Math.floor(Number(req.query.hours) || 0), 0, 720);
   const maxPoints = clamp(Math.floor(Number(req.query.max_points) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  // M-02：SQL 层均匀采样（保留首尾点），不再「全量拉取 720h 后在 JS 里 filter」。
-  const rows = db.getMetricsSampled(a.id, since, maxPoints);
+  // M-02：SQL 层均匀采样（保留首尾点），只取负载列，不再「全量拉取 720h 后 JS filter」
+  const rows = db.getMetricsLoadOne(a.id, since, maxPoints);
   const points = rows.map(r => ({
     ts: new Date(r.ts).toISOString(),
     cpu: Number(r.cpu) || 0,

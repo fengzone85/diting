@@ -40,8 +40,8 @@ function getMetricsRange(agentId, { hours = 1, maxPoints = 100 } = {}) {
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxPoints = clamp(Math.floor(Number(maxPoints) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
-  // M-02：SQL 层均匀采样（保留首尾点），不再「全量拉取 720h 后 JS filter」
-  return db.getMetricsSampled(agentId, since, Math.max(1, maxPoints));
+  // M-02：SQL 层均匀采样（保留首尾点），且只取负载列，不再「全量拉取 720h 后 JS filter」
+  return db.getMetricsLoadOne(agentId, since, Math.max(1, maxPoints));
 }
 
 function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
