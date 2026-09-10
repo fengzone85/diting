@@ -40,7 +40,22 @@ const APP_BUILD_TIME = (() => {
 const app = express();
 // 信任前置反代（Nginx）的 X-Forwarded-*，使 req.ip 取到真实客户端 IP，
 // 供应用层限流按客户端区分（而非全部归到 127.0.0.1）。Nginx 已设置 X-Forwarded-For。
-app.set('trust proxy', true);
+//
+// H-02 收紧：此前为 trust proxy = true（信任任意来源的 X-Forwarded-*）。
+// 一旦 :8081 被直连（如 docker 把端口映射到 0.0.0.0），攻击者可自造
+// `X-Forwarded-For: <白名单内 IP>` 绕过 admin_allow_ips、按 IP 限流与审计来源，
+// 或自造 `X-Forwarded-Proto: https` 让 requireProto 放行明文管理请求。
+// 现默认只信任 loopback（本机 Nginx 反代，即推荐部署形态）；
+// 反代在其他主机/容器时，用 TRUST_PROXY 显式声明可信代理，例如：
+//   TRUST_PROXY=127.0.0.1            —— 单个代理地址
+//   TRUST_PROXY=172.16.0.0/12,10.0.0.8 —— 逗号分隔的 CIDR/IP（docker 网络常见）
+//   TRUST_PROXY=1                    —— 信任 1 跳（代理链固定时可用）
+// 详见 README「反向代理与 TRUST_PROXY」。
+const TRUST_PROXY_RAW = String(process.env.TRUST_PROXY || 'loopback').trim() || 'loopback';
+const TRUST_PROXY = /^\d+$/.test(TRUST_PROXY_RAW)
+  ? Number(TRUST_PROXY_RAW)                                  // 跳数
+  : TRUST_PROXY_RAW.split(',').map((s) => s.trim()).filter(Boolean); // 地址/CIDR 列表
+app.set('trust proxy', Array.isArray(TRUST_PROXY) && TRUST_PROXY.length === 1 ? TRUST_PROXY[0] : TRUST_PROXY);
 
 // 安全响应头：所有资源仅限同源，脚本仅限同源，禁止内联脚本。
 // style-src 加 'unsafe-inline'：允许 inline style（进度条宽度/动态颜色等）。
@@ -280,6 +295,10 @@ app.get('*', (req, res, next) => {
   if (path.extname(req.path)) {
     if (!isSpaRoute && theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
       const fp = path.join(THEMES_DIR, theme, req.path);
+      // 防路径穿越（与上方 /themes/:id 显式路由的守卫一致）：req.path 原样来自请求行，
+      // `?theme=<非default>` 可被任意访问者指定，join 归一化后必须仍落在主题目录内，
+      // 否则可读任意带扩展名文件（活体 PoC：8 层 ../ 读出 /etc/resolv.conf）。
+      if (!fp.startsWith(THEMES_DIR + path.sep)) return next();
       if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
         const ext = path.extname(fp).toLowerCase();
