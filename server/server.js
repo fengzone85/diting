@@ -51,11 +51,29 @@ const app = express();
 //   TRUST_PROXY=172.16.0.0/12,10.0.0.8 —— 逗号分隔的 CIDR/IP（docker 网络常见）
 //   TRUST_PROXY=1                    —— 信任 1 跳（代理链固定时可用）
 // 详见 README「反向代理与 TRUST_PROXY」。
+//
+// ⚠️ 为什么默认值要做成函数而不是字符串 'loopback'：
+// Express 的 'loopback' 关键字只匹配 127.0.0.0/8 与 ::1/128。而 Node 的 listen(port)
+// 默认绑 ::（IPv6 双栈），内核把 IPv4 回环对端表示为 IPv4-mapped 的 ::ffff:127.0.0.1，
+// 它既不等于 ::1 也匹配不到 127.0.0.0/8 —— 于是本机反代会被判为"非可信来源"，
+// 请求里的 X-Forwarded-For 被完整采信，等同于把 H-02 的绕过原样保留：
+//   实测 `curl -H 'X-Forwarded-For: 203.0.113.9' http://localhost:8081/api/agents`
+//   在白名单只允许 203.0.113.9 时返回 200（应为 403）。
+// 故这里按请求对端地址自行判定回环（含 ::ffff: 映射形态），语义等同 loopback 但更可靠。
+// 判定只看 socket 对端，与请求头无关，无法被伪造。
+const LOOPBACK_RE = /^(::1|127(\.\d{1,3}){3}|::ffff:(127(\.\d{1,3}){3}|::1))$/;
+const proxyLoopback = (addr) => LOOPBACK_RE.test(String(addr || '').toLowerCase().trim());
 const TRUST_PROXY_RAW = String(process.env.TRUST_PROXY || 'loopback').trim() || 'loopback';
 const TRUST_PROXY = /^\d+$/.test(TRUST_PROXY_RAW)
   ? Number(TRUST_PROXY_RAW)                                  // 跳数
   : TRUST_PROXY_RAW.split(',').map((s) => s.trim()).filter(Boolean); // 地址/CIDR 列表
-app.set('trust proxy', Array.isArray(TRUST_PROXY) && TRUST_PROXY.length === 1 ? TRUST_PROXY[0] : TRUST_PROXY);
+const TRUST_PROXY_RESOLVED = TRUST_PROXY_RESHAPE(TRUST_PROXY, TRUST_PROXY_RAW);
+function TRUST_PROXY_RESHAPE(value, raw) {
+  // 默认值（loopback）走自定义判定函数；用户显式配置的值原样交给 Express
+  if (raw.toLowerCase() === 'loopback') return proxyLoopback;
+  return Array.isArray(value) && value.length === 1 ? value[0] : value;
+}
+app.set('trust proxy', TRUST_PROXY_RESOLVED);
 
 // 安全响应头：所有资源仅限同源，脚本仅限同源，禁止内联脚本。
 // style-src 加 'unsafe-inline'：允许 inline style（进度条宽度/动态颜色等）。

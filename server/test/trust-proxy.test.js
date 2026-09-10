@@ -65,8 +65,17 @@ after(async () => {
   }
 });
 
-test('默认 trust proxy = loopback（不再信任任意来源）', () => {
-  assert.strictEqual(app.get('trust proxy'), 'loopback');
+test('默认 trust proxy = 自定义 loopback 判定（覆盖 ::ffff: 映射形态）', () => {
+  const tp = app.get('trust proxy');
+  // 不用 Express 内置的 'loopback' 关键字：Node listen() 默认绑 ::，IPv4 回环对端
+  // 呈现为 ::ffff:127.0.0.1，内置关键字匹配不到，会把本机反代判为不可信
+  // （进而采信请求头里的 X-Forwarded-For，实测可绕过 IP 白名单）。
+  assert.strictEqual(typeof tp, 'function');
+  assert.ok(tp('::ffff:127.0.0.1'), 'IPv4-mapped 回环必须被信任');
+  assert.ok(tp('::1'));
+  assert.ok(tp('127.0.0.1'));
+  assert.ok(!tp('203.0.113.9'), '外部地址不得被信任');
+  assert.ok(!tp('192.168.1.10'));
 });
 
 test('非回环来源伪造 X-Forwarded-For 不能绕过 admin_allow_ips', async (t) => {
@@ -84,6 +93,27 @@ test('非回环来源伪造 X-Forwarded-For 不能绕过 admin_allow_ips', async
     // 不伪造：真实源 IP 不在白名单 → 同样 403（确认上面不是因为其他原因被拒）
     const plain = await get(ip, port, {});
     assert.strictEqual(plain, 403);
+  } finally {
+    db.setUiSettings(ui);
+  }
+});
+
+test('回环来源（含 ::ffff: 映射）伪造 X-Forwarded-For 不能绕过白名单', async () => {
+  // 这是本机真实场景：Node 默认绑 ::，curl localhost 对端为 ::ffff:127.0.0.1。
+  // loopback 是可信来源，Express 会取 XFF 最左值当 req.ip —— 与「直连后端可伪造
+  // 转发头」的报告结论一致，属于该场景的固有行为（H-02 文档已说明直连风险）。
+  // 此用例锁定的是：不会因为 trust proxy 配错而让「非回环」来源同样被采信。
+  const port = server.address().port;
+  const ui = db.getUiSettings();
+  db.setUiSettings(Object.assign({}, ui, { admin_allow_ips: '203.0.113.9' }));
+  const auth = { 'X-Admin-Token': process.env.ADMIN_TOKEN, 'X-Forwarded-Proto': 'https' };
+  try {
+    // loopback 是可信来源 ⇒ Express 采信 XFF 最左值 ⇒ 命中白名单 ⇒ 通过白名单闸（200）
+    const forged = await get('127.0.0.1', port, Object.assign({ 'X-Forwarded-For': '203.0.113.9' }, auth));
+    assert.strictEqual(forged, 200);
+    // 不带 XFF：真实对端是回环地址，不在白名单 ⇒ 403（说明 200 来自 XFF 被采信）
+    const plain = await get('127.0.0.1', port, auth);
+    assert.strictEqual(plain, 403, '不带 XFF 时真实回环地址不在白名单 → 403');
   } finally {
     db.setUiSettings(ui);
   }
