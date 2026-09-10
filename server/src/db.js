@@ -169,6 +169,8 @@ const stmts = {
     VALUES (@agent_id, @ts, @cpu, @mem_used, @mem_total, @mem_pct, @disk_used, @disk_total, @disk_pct,
      @load1, @load5, @load15, @net_rx_rate, @net_tx_rate, @net_rx_month, @net_tx_month, @uptime,
      @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
+  // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
+  countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
   metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // 单节点全字段 SQL 层采样（兼容层 /records/load 与 /api/v1 历史专用）。
@@ -415,6 +417,9 @@ const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', h
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ agent_id }, m));
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
+
+// 窗口内有上报数据的节点数（走 idx_metrics_ts 覆盖扫描，毫秒级）
+const countActiveAgents = (sinceTs) => (stmts.countActiveAgents.get(sinceTs) || {}).c || 0;
 // 单节点全字段采样：只返回 ≤maxPoints 行（保留首尾），替代 getMetrics 全量拉取。
 const getMetricsSampled = (agent_id, sinceTs, maxPoints) =>
   stmts.metricsRangeSampled(agent_id, sinceTs, maxPoints);
@@ -635,7 +640,7 @@ module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
-  getMetricsLoadOne, getMetricsLoadAll,
+  getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,

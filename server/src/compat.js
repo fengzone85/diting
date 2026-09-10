@@ -28,10 +28,12 @@ const RANGES_C = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
 const recordsCache = new Map();   // key -> { ts, data }
 const RECORDS_CACHE_TTL = 30000;
 const RECORDS_CACHE_MAX = 200;    // key 由查询参数组合而成，必须限制总量，防止被枚举撑爆内存
-// 全量（不带 uuid）查询时每节点的采样点数：按节点数分摊，并给 2 倍余量 + 下限 20，
-// 避免 61 台各取 1000 点造成的 6 万行/324KB 传输与序列化浪费。
-function perAgentPoints(maxCount) {
-  const n = Math.max(1, (db.getAgents() || []).length);
+// 全量（不带 uuid）查询时的每节点采样点数：按「窗口内实际有数据的节点数」分摊，
+// 给 2 倍余量并设下限 20。不能按全部节点数分摊——62 台里 24h 内只有 1 台在报，
+// 按 62 摊会把这 1 台压到 34 点（优化前是 1000 点），曲线直接失真。
+// 上限仍是 maxCount：单节点场景给满，多节点场景避免 N×1000 行的传输浪费。
+function perAgentPoints(maxCount, since) {
+  const n = Math.max(1, db.countActiveAgents(since));
   return Math.min(maxCount, Math.max(20, Math.ceil(maxCount / n) * 2));
 }
 
@@ -301,10 +303,9 @@ router.get('/records/load', guard, (req, res) => {
     // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
     // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
     // 每节点各取 1000 点纯属浪费——61 台 ⇒ 6 万行 324KB，降到 ~750 行后 720h 从 21s 到 2.2s）。
-    const perAgent = perAgentPoints(maxCount);
     const sampled = uuid
       ? db.getMetricsLoadOne(uuid, since, maxCount)
-      : db.getMetricsLoadAll(since, perAgent);
+      : db.getMetricsLoadAll(since, perAgentPoints(maxCount, since));
     const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
     const records = rows.map(toLoadRecord);
     return { status: 'success', message: '', count: records.length, records };
@@ -326,7 +327,7 @@ router.get('/records/ping', guard, (req, res) => {
     // 否则一次 SQL 跨节点采样（metricsProbesAll），避免 per-agent 循环 N 次扫索引。
     const probeRows = uuid
       ? db.getMetricsProbesOne(uuid, since, maxCount)
-      : db.metricsProbesAll(since, Math.max(200, perAgentPoints(maxCount)));
+      : db.metricsProbesAll(since, Math.max(200, perAgentPoints(maxCount, since)));
     const tasks = new Map();      // task_id -> {id,name,interval,loss}
     const records = [];           // {task_id,time,value}
     let tid = 0;
