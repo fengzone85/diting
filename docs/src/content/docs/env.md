@@ -30,8 +30,21 @@ description: 服务端与受控端环境变量参考
 | `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
+| `TRUST_PROXY` | 否 | `loopback` | 可信反向代理（决定 `req.ip` 取转发头还是 TCP 源地址） |
 
 > AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
+
+### `TRUST_PROXY`：反向代理信任边界
+
+`req.ip` 用于管理端 IP 白名单、按 IP 限流与审计记录。它取自 `X-Forwarded-For` 还是 TCP 源地址，由 `trust proxy` 决定：
+
+| 部署形态 | 需要设置 |
+|---|---|
+| Nginx 与服务端同机，8081 只绑 `127.0.0.1`（推荐） | 无需设置（默认 `loopback`） |
+| Nginx 在另一台主机 / 另一个容器 | `TRUST_PROXY=172.16.0.0/12,10.0.0.8`（逗号分隔 IP 或 CIDR） |
+| 固定一跳反代 | `TRUST_PROXY=1` |
+
+⚠️ 2026-09-10 起默认从 `trust proxy = true`（信任任意来源）收紧为 `loopback`：只要 `8081` 能被直连，客户端就能自造 `X-Forwarded-For` 绕过 IP 白名单与限流，或自造 `X-Forwarded-Proto: https` 让管理接口走明文 HTTP。**反代与服务端不同机的部署升级后必须显式设置 `TRUST_PROXY`**，否则 `req.ip` 会变成反代 IP，配了白名单的站会全部被 403。
 
 ## 受控端（Python 与 Go 共用）
 

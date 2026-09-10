@@ -431,17 +431,22 @@ router.get('/public/overview', (req, res) => {
   });
 });
 
-// 返回脱敏的公开 agent 列表（不含 token / note / 商家 / 到期 / 配额等敏感字段）。
+// 公开 agent 列表（游客可见，受 ui_settings.public_enabled 控制）。
+// 默认透出商家/到期/备注/配额/套餐等业务字段——这是公开页首页「商家数、即将到期」
+// 与详情页「备注、套餐卡片」的数据来源，故不能简单删除；
+// 改由 ui_settings.public_show_business 统一开关：面向外部访客的站点可在后台关闭，
+// 关闭后这些字段直接不出现在响应里（而非返回空串），避免"字段在但值为空"的误判。
 router.get('/public/agents', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
+  const showBiz = ui.public_show_business !== false;
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const list = db.getAgents().map((a) => {
     const latest = db.getLatestMetric(a.id);
     const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
     const m = online && latest ? latest : null;
-    return {
+    const base = {
       id: a.id, name: a.name, group: a.grp || '',
       country: a.country || '',
       online: !!online,
@@ -469,16 +474,19 @@ router.get('/public/agents', (req, res) => {
       os: (m && m.os) ? m.os : (a.os || ''),
       probes: m ? (m.probes || '') : '',
       hostname: online ? shortHost(a.hostname) : '',
+      disks: m ? parseDisks(m.disks) : []
+    };
+    if (!showBiz) return base;
+    // 业务字段（商家/到期/备注/配额/套餐）：受 public_show_business 开关控制
+    return Object.assign(base, {
       merchant: a.merchant || '',
       expire_at: a.expire_at || '',
       note: a.note || '',
       monthly_quota_gb: a.monthly_quota_gb || 0,
-      // 计费套餐字段（与 Komari price/billing_cycle/currency 对齐）
       price: a.price || 0,
       billing_cycle: a.billing_cycle || 30,
-      currency: a.currency || '¥',
-      disks: m ? parseDisks(m.disks) : []
-    };
+      currency: a.currency || '¥'
+    });
   });
   res.json(list);
 });
