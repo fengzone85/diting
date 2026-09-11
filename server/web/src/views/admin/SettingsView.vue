@@ -49,6 +49,24 @@ interface UiSettings {
   provider_aliases?: Record<string, string>;
   custom_tags?: Record<string, string>;
   visitor_info?: boolean;
+  // 数据库备份策略（由宿主侧 diting.sh 执行，这里只下发策略）
+  backup_schedule?: 'off' | 'daily' | 'weekly';
+  backup_hour?: number;
+  backup_keep_days?: number;
+  backup_compress?: boolean;
+}
+
+// 备份监控状态（宿主侧 diting.sh 执行后回写服务端，本页只读展示）
+interface BackupState {
+  last_run_ts?: number;
+  last_status?: string;
+  last_file?: string;
+  last_size_bytes?: number;
+  last_duration_ms?: number;
+  last_error?: string;
+  last_pruned?: number;
+  backup_count?: number;
+  total_bytes?: number;
 }
 
 interface NotifySettings {
@@ -88,6 +106,10 @@ function resetLocal() {
       card_scheme: 'official',
       card_size: 'comfortable',
       visitor_info: false,
+      backup_schedule: 'off',
+      backup_hour: 3,
+      backup_keep_days: 14,
+      backup_compress: true,
     },
     notify: {},
   };
@@ -142,6 +164,11 @@ function cloneSettings(src: Settings): SettingsForm {
       card_scheme: ui.card_scheme || 'official',
       card_size: ui.card_size || 'comfortable',
       visitor_info: !!ui.visitor_info,
+      backup_schedule: ui.backup_schedule || 'off',
+      backup_hour: Number.isFinite(Number(ui.backup_hour)) ? Number(ui.backup_hour) : 3,
+      backup_keep_days: Number.isFinite(Number(ui.backup_keep_days)) ? Number(ui.backup_keep_days) : 14,
+      // 注意：后端默认 true，未配置时也应显示开启，故用 !== false 判断
+      backup_compress: ui.backup_compress !== false,
     },
     notify: { ...notify },
   };
@@ -153,6 +180,46 @@ watch(() => state.settings, (s) => {
   if (dirty.value) return;
   if (s) local.value = cloneSettings(s);
 }, { immediate: true });
+
+// ---- 备份监控：宿主侧 diting.sh 执行后回写服务端，本页只读展示 ----
+const backupState = ref<BackupState | null>(null);
+
+async function loadBackupState() {
+  try {
+    const r = await adminApi.getBackupStatus();
+    backupState.value = (r.state || {}) as BackupState;
+  } catch {
+    // 备份监控是增强信息，失败不打扰用户（可能服务端未重启 / 未开启）
+    backupState.value = null;
+  }
+}
+onMounted(() => { loadBackupState(); });
+
+function fmtBytes(n?: number): string {
+  const v = Number(n || 0);
+  if (!v) return '-';
+  const mb = v / 1048576;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+function fmtTime(ts?: number): string {
+  const v = Number(ts || 0);
+  if (!v) return '-';
+  return new Date(v).toLocaleString();
+}
+const backupStatusText = computed(() => {
+  const s = backupState.value?.last_status || 'unknown';
+  const key = `settings.backupState_${s}`;
+  const out = t(key);
+  // 未命中的 key，t() 会原样返回 key（形如 settings.backupState_xxx），据此回退
+  return out === key ? t('settings.backupState_unknown') : out;
+});
+const backupStale = computed(() => {
+  const ts = Number(backupState.value?.last_run_ts || 0);
+  if (!ts) return false;
+  // 超过 48 小时没成功备份即视为「可能未运行」
+  return Date.now() - ts > 48 * 3600 * 1000;
+});
 
 async function save() {
   saving.value = true;
@@ -251,6 +318,83 @@ async function save() {
         <FormInput v-model="local.ui.social_telegram" label="Telegram" />
         <FormInput v-model="local.ui.social_qq" label="QQ" />
         <FormInput v-model="local.ui.social_website" :label="t('footer.website')" />
+      </div>
+
+      <!-- 数据库备份：策略由本页下发，实际执行在宿主机（diting.sh + cron） -->
+      <div class="glass p-6 lg:col-span-2">
+        <h2 class="mb-1 text-lg font-semibold">{{ t('settings.backup') }}</h2>
+        <p class="mb-4 text-xs opacity-70">{{ t('settings.backupHint') }}</p>
+
+        <div class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+          <div>
+            <label class="mb-1 block text-sm opacity-80">{{ t('settings.backupSchedule') }}</label>
+            <select
+              v-model="local.ui.backup_schedule"
+              class="mb-3 w-full rounded-lg border border-white/20 bg-transparent px-3 py-2 text-sm"
+            >
+              <option value="off">{{ t('settings.backupScheduleOff') }}</option>
+              <option value="daily">{{ t('settings.backupScheduleDaily') }}</option>
+              <option value="weekly">{{ t('settings.backupScheduleWeekly') }}</option>
+            </select>
+
+            <FormInput
+              v-model="local.ui.backup_hour"
+              :label="t('settings.backupHour')"
+              type="number"
+              :hint="t('settings.backupHourHint')"
+            />
+            <FormInput
+              v-model="local.ui.backup_keep_days"
+              :label="t('settings.backupKeepDays')"
+              type="number"
+              :hint="t('settings.backupKeepDaysHint')"
+            />
+            <FormInput
+              v-model="local.ui.backup_compress"
+              :label="t('settings.backupCompress')"
+              type="checkbox"
+              :hint="t('settings.backupCompressHint')"
+            />
+          </div>
+
+          <div class="rounded-lg border border-white/10 p-4 text-sm">
+            <h3 class="mb-3 font-semibold">{{ t('settings.backupMonitor') }}</h3>
+            <div v-if="!backupState" class="opacity-60">{{ t('settings.backupNoState') }}</div>
+            <dl v-else class="space-y-2">
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.backupLastRun') }}</dt>
+                <dd class="text-right">{{ fmtTime(backupState.last_run_ts) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.backupResult') }}</dt>
+                <dd class="text-right">
+                  <span :class="backupState.last_status === 'ok' ? 'text-emerald-400' : 'text-amber-400'">
+                    {{ backupStatusText }}
+                  </span>
+                  <span v-if="backupStale" class="ml-2 text-amber-400">{{ t('settings.backupStale') }}</span>
+                </dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.backupFile') }}</dt>
+                <dd class="break-all text-right">{{ backupState.last_file || '-' }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.backupSize') }}</dt>
+                <dd class="text-right">{{ fmtBytes(backupState.last_size_bytes) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.backupTotal') }}</dt>
+                <dd class="text-right">
+                  {{ fmtBytes(backupState.total_bytes) }}
+                  <span class="opacity-70">({{ backupState.backup_count ?? 0 }})</span>
+                </dd>
+              </div>
+              <div v-if="backupState.last_error" class="text-amber-400">
+                {{ backupState.last_error }}
+              </div>
+            </dl>
+          </div>
+        </div>
       </div>
 
     </div>

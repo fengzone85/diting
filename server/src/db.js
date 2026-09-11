@@ -505,6 +505,7 @@ const set2FAEnabled = (b) => setConfig(TWOFA_ENABLED, b ? '1' : '0');
 // ---- UI / 通知设置（持久化到 admin_config 的 key-value）----
 const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
+const BACKUP_STATE_KEY = 'backup_state';
 function getUiSettings() {
   const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
     // 公开接口（/api/public/agents、/api/v1/nodes）是否透出业务字段：
@@ -523,7 +524,15 @@ function getUiSettings() {
     announcement: { enabled: false, title: '', content: '' }, // 公告
     provider_aliases: {},             // 厂商别名映射 { "原始厂商": "显示名" }
     custom_tags: {},                  // 节点自定义标签 { "agent_id": "标签文本" }
-    visitor_info: false               // 访客信息条（底部 IP 条）
+    visitor_info: false,              // 访客信息条（底部 IP 条）
+    // ---- 数据库备份（由宿主侧 diting.sh 消费，服务端不执行备份）----
+    // 备份在宿主机执行（容器内访问不到宿主备份目录），这里只存策略，
+    // 由 cron 每日触发 diting.sh --backup，脚本启动后读这些值决定「今天是否该跑」。
+    // 因此改周期无需改动 crontab，配置即时生效。
+    backup_schedule: 'off',           // off / daily / weekly（weekly 在周一执行）
+    backup_hour: 3,                   // 执行小时 0-23
+    backup_keep_days: 14,             // 保留天数（0=不自动清理）
+    backup_compress: true             // gzip 压缩（实测体积约 20%，强烈建议开启）
   };
   try {
     const o = JSON.parse(getConfig(SETTINGS_KEY) || '{}');
@@ -630,6 +639,33 @@ function getAiState() {
 }
 function setAiState(s) { setConfig(AI_STATE_KEY, JSON.stringify(s)); }
 
+// ---- 数据库备份状态（宿主侧 diting.sh 执行后回写，供后台「备份监控」展示）----
+// 刻意存独立键而非放进 ui_settings：前端保存设置时是整体覆盖写 ui_settings，
+// 若放那里会被未 clone 该字段的提交抹掉。
+function getBackupState() {
+  const def = {
+    last_run_ts: 0,          // 最近一次备份完成时间（ms）
+    last_status: 'unknown',  // ok / failed / skipped / unknown
+    last_file: '',           // 备份文件名
+    last_size_bytes: 0,      // 备份后体积（字节，压缩后）
+    last_raw_bytes: 0,       // 备份前体积（字节，未压缩）
+    last_duration_ms: 0,
+    last_error: '',
+    last_pruned: 0,          // 本次清理掉的过期备份数
+    backup_count: 0,         // 当前保留的备份份数
+    total_bytes: 0,          // 备份目录占用（字节）
+    updated_at: 0
+  };
+  try {
+    const o = JSON.parse(getConfig(BACKUP_STATE_KEY) || '{}');
+    return Object.assign(def, o);
+  } catch (e) { return def; }
+}
+function setBackupState(s) {
+  const merged = Object.assign(getBackupState(), s || {}, { updated_at: Date.now() });
+  setConfig(BACKUP_STATE_KEY, JSON.stringify(merged));
+}
+
 // ---- AI 报告 CRUD ----
 function insertAiReport(r) {
   const info = stmts.insertAiReport.run({
@@ -701,6 +737,7 @@ module.exports = {
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
+  getBackupState, setBackupState,
   insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
   addAuditLog, getAuditLogs, countAudit, pruneAudit
 };

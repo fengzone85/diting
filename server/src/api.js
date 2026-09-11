@@ -882,6 +882,40 @@ router.get('/client-ip', adminOrReadonly, (req, res) => {
 
 // ---- Admin: UI + 通知设置（持久化到 admin_config）----
 // GET 返回当前设置；密码类字段脱敏（留空表示「保持不变」）。
+// 备份策略校验：非法/越界值一律收敛到合法范围，避免写入脏数据后宿主侧脚本读不懂。
+// 只做钳制不做报错——设置页保存是整体提交，因一个字段报错会打断其它设置。
+function sanitizeBackupSettings(ui) {
+  const schedules = ['off', 'daily', 'weekly'];
+  if (ui.backup_schedule !== undefined && !schedules.includes(ui.backup_schedule)) {
+    ui.backup_schedule = 'off';
+  }
+  if (ui.backup_hour !== undefined) {
+    const h = Number(ui.backup_hour);
+    ui.backup_hour = Number.isFinite(h) ? Math.min(23, Math.max(0, Math.trunc(h))) : 3;
+  }
+  if (ui.backup_keep_days !== undefined) {
+    const d = Number(ui.backup_keep_days);
+    // 0=不清理；上限 3650 天，防止误填天文数字
+    ui.backup_keep_days = Number.isFinite(d) ? Math.min(3650, Math.max(0, Math.trunc(d))) : 14;
+  }
+  if (ui.backup_compress !== undefined) ui.backup_compress = !!ui.backup_compress;
+}
+
+// ---- Admin: 数据库备份监控（宿主侧 diting.sh 执行后回写的状态）----
+// 服务端本身不执行备份（容器内访问不到宿主备份目录），仅负责展示与下发策略。
+router.get('/admin/backup-status', adminOrReadonly, (req, res) => {
+  const ui = db.getUiSettings();
+  res.json({
+    config: {
+      schedule: ui.backup_schedule || 'off',
+      hour: Number.isFinite(Number(ui.backup_hour)) ? Number(ui.backup_hour) : 3,
+      keep_days: Number.isFinite(Number(ui.backup_keep_days)) ? Number(ui.backup_keep_days) : 14,
+      compress: ui.backup_compress !== false
+    },
+    state: db.getBackupState()
+  });
+});
+
 router.get('/settings', adminOrReadonly, (req, res) => {
   const notify = db.getNotifyConfig();
   const safe = Object.assign({}, notify);
@@ -894,6 +928,7 @@ router.put('/settings', adminOnly, (req, res) => {
   if (b.ui && typeof b.ui === 'object') {
     // M-1：自定义 CSS 在落库前清洗，杜绝 @import/url()/外链字体/脚本注入。
     if (typeof b.ui.custom_css === 'string') b.ui.custom_css = sanitizeCss(b.ui.custom_css);
+    sanitizeBackupSettings(b.ui);
     db.setUiSettings(b.ui);
   }
   if (b.notify && typeof b.notify === 'object') db.setNotifyConfig(b.notify);
