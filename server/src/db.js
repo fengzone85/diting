@@ -86,7 +86,12 @@ CREATE TABLE IF NOT EXISTS ai_reports (
   suggestion    TEXT,
   report_json   TEXT,
   prompt_version TEXT,
-  created_at    INTEGER NOT NULL
+  created_at    INTEGER NOT NULL,
+  prompt_tokens     INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens      INTEGER DEFAULT 0,
+  duration_ms       INTEGER DEFAULT 0,
+  degraded          INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
 
@@ -143,6 +148,21 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   if (!existing.has('billing_cycle')) db.exec("ALTER TABLE agents ADD COLUMN billing_cycle INTEGER DEFAULT 30");
   if (!existing.has('currency')) db.exec("ALTER TABLE agents ADD COLUMN currency TEXT DEFAULT '¥'");
   if (!existing.has('auto_renewal')) db.exec("ALTER TABLE agents ADD COLUMN auto_renewal INTEGER DEFAULT 1");
+}
+
+// schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(ai_reports)').all().map((r) => r.name));
+  const cols = [
+    ['prompt_tokens', 'INTEGER DEFAULT 0'],
+    ['completion_tokens', 'INTEGER DEFAULT 0'],
+    ['total_tokens', 'INTEGER DEFAULT 0'],
+    ['duration_ms', 'INTEGER DEFAULT 0'],
+    ['degraded', 'INTEGER DEFAULT 0'],
+  ];
+  for (const [col, type] of cols) {
+    if (!existing.has(col)) db.exec(`ALTER TABLE ai_reports ADD COLUMN ${col} ${type};`);
+  }
 }
 
 const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
@@ -251,6 +271,19 @@ const stmts = {
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
+  // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
+  // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
+  // 调用方用 last.ts - first.ts 求跨度会得到 NaN → 趋势分析静默失效。
+  // 复刻 metricsClusterAvg 的 CAST 整数地板除法：绑定 number 会被 better-sqlite3 绑成 REAL，
+  // 浮点除法会让每个值自成一组。
+  metricsDiskTrendAll: (sinceTs, bucketMs) => db.prepare(`
+    SELECT agent_id,
+           MIN(ts) AS ts,
+           AVG(disk_pct) AS pct
+    FROM metrics
+    WHERE ts >= @since AND disk_pct IS NOT NULL
+    GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
+    ORDER BY agent_id, ts`).all({ since: sinceTs, bucket: Math.max(1, bucketMs) }),
   // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
   metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
@@ -312,8 +345,10 @@ const stmts = {
   },
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
-    (period, risk_level, summary, suggestion, report_json, prompt_version, created_at)
-    VALUES (@period, @risk_level, @summary, @suggestion, @report_json, @prompt_version, @created_at)`),
+    (period, risk_level, summary, suggestion, report_json, prompt_version, created_at,
+     prompt_tokens, completion_tokens, total_tokens, duration_ms, degraded)
+    VALUES (@period, @risk_level, @summary, @suggestion, @report_json, @prompt_version, @created_at,
+     @prompt_tokens, @completion_tokens, @total_tokens, @duration_ms, @degraded)`),
   getAiReport: db.prepare('SELECT * FROM ai_reports WHERE id = ?'),
   listAiReports: db.prepare('SELECT id, period, risk_level, summary, suggestion, prompt_version, created_at FROM ai_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'),
   countAiReports: db.prepare('SELECT COUNT(*) AS n FROM ai_reports'),
@@ -350,6 +385,9 @@ const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparkli
 
 // 集群级时间桶聚合（仪表盘平均曲线）：跨所有 agent 按时间桶求 cpu/mem 平均，返回行数≤maxPoints。
 const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAvg(sinceTs, spanMs, maxPoints);
+
+// 磁盘趋势：跨所有 agent 的桶聚合 disk_pct 序列（仅 ts/agent_id/disk_pct 三列），供 AI 日报趋势估计。
+const metricsDiskTrendAll = (sinceTs, bucketMs) => stmts.metricsDiskTrendAll(sinceTs, bucketMs);
 
 // 单节点 sparklines SQL 层采样（节点详情页）：只返回 maxPoints 行，保留首尾点供磁盘耗尽预测。
 const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints);
@@ -592,7 +630,12 @@ function insertAiReport(r) {
     suggestion: r.suggestion || '',
     report_json: r.report_json || '',
     prompt_version: r.prompt_version || '',
-    created_at: r.created_at || Date.now()
+    created_at: r.created_at || Date.now(),
+    prompt_tokens: Number(r.prompt_tokens) || 0,
+    completion_tokens: Number(r.completion_tokens) || 0,
+    total_tokens: Number(r.total_tokens) || 0,
+    duration_ms: Number(r.duration_ms) || 0,
+    degraded: r.degraded ? 1 : 0
   });
   return stmts.getAiReport.get(info.lastInsertRowid);
 }
@@ -641,7 +684,7 @@ module.exports = {
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
-  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, getMetricsSparklinesOne,
+  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
