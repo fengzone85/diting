@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage, BackupState } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -51,6 +51,9 @@ export const adminApi = {
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
   getSettings: () => api.get<Settings>('/api/settings'),
   saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
+
+  // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
+  getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),
 
   // alerts
   testAlert: () => api.post<{ ok: boolean; message?: string }>('/api/test-alert', {}),
