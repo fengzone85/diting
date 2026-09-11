@@ -554,7 +554,6 @@ function getAiConfig() {
     schedule_freq: 'daily',       // daily | weekly（友好下拉式，不暴露 cron 语法）
     schedule_time: '08:00',       // HH:MM，按 tz_offset_hours 解释
     tz_offset_hours: 8,           // 默认东八区
-    batch_mode: true,             // true=全部服务器一个 prompt（省 token），false=逐台调用
     locale: 'zh-CN',              // 通知正文语言：zh-CN | en（跟随后台设置，默认中文）
     log_retention_days: 30        // AI 日报保留天数（与 metrics 保留期独立）
   };
@@ -575,7 +574,8 @@ function setAiConfig(incoming) {
 }
 // AI 调度状态：last_run_ts 防同日重复、进程重启后从 DB 恢复；last_status/last_error 供前端展示。
 function getAiState() {
-  const def = { last_run_ts: 0, last_status: 'idle', last_error: '' };
+  // last_duration_ms：最近一次生成耗时（ms），落库以便跨进程重启后仍能在前端展示
+  const def = { last_run_ts: 0, last_status: 'idle', last_error: '', last_duration_ms: 0 };
   try {
     const o = JSON.parse(getConfig(AI_STATE_KEY) || '{}');
     return Object.assign(def, o);

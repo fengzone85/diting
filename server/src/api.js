@@ -942,7 +942,6 @@ router.put('/ai/config', adminOnly, (req, res) => {
   if (typeof b.schedule_freq === 'string' && ['daily', 'weekly'].includes(b.schedule_freq)) allowed.schedule_freq = b.schedule_freq;
   if (typeof b.schedule_time === 'string' && /^\d{1,2}:\d{2}$/.test(b.schedule_time)) allowed.schedule_time = b.schedule_time;
   if (typeof b.tz_offset_hours === 'number' && Number.isFinite(b.tz_offset_hours)) allowed.tz_offset_hours = Math.max(-12, Math.min(14, b.tz_offset_hours));
-  if (typeof b.batch_mode === 'boolean') allowed.batch_mode = b.batch_mode;
   if (typeof b.locale === 'string' && ['zh-CN', 'en'].includes(b.locale)) allowed.locale = b.locale;
   if (typeof b.log_retention_days === 'number' && Number.isFinite(b.log_retention_days)) allowed.log_retention_days = Math.max(7, Math.min(3650, Math.floor(b.log_retention_days)));
   // 启用时校验：必须有 model；api_key 要么本次传入非空，要么之前已配置
@@ -956,14 +955,26 @@ router.put('/ai/config', adminOnly, (req, res) => {
   res.json({ ok: true });
   auditLog(req, 'update_ai_config', allowed.enabled != null ? `enabled=${allowed.enabled}` : '');
 });
-// 手动触发一次日报生成（不等调度时刻）。返回生成结果。
+// 手动触发一次日报生成（不等调度时刻）：【异步任务】—— 立即返回，任务在后台跑。
+// 状态码：202 已受理 / 400 未启用 / 409 已有任务在执行 / 429 冷却中（带 Retry-After）。
+// 之所以不阻塞等待：单次生成最长 180s（推理模型），同步等待会被反代按默认 60s 超时截断成 504，
+// 而服务端仍会跑完并发报，用户以为失败会重复点击 → 重复计费。
 router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
+  const force = req.query.force === '1';
   try {
-    const r = await ai.runNow();
-    res.json(r);
-    auditLog(req, 'ai_run', '');
+    const r = await ai.triggerRun({ force });
+    auditLog(req, 'ai_run', `status=${r.status}${force ? ' force=1' : ''}`);
+    if (r.status === 'disabled') return res.status(400).json(r);
+    if (r.status === 'busy') return res.status(409).json(r);
+    if (r.status === 'cooldown') {
+      res.set('Retry-After', String(r.retry_after_s));
+      // message 保持中文（与 API 层其余错误文案一致）；本地化由前端用 retry_after_s 渲染
+      return res.status(429).json(Object.assign({}, r, { message: `冷却中，请 ${r.retry_after_s} 秒后再试` }));
+    }
+    return res.status(202).json(r);
   } catch (e) {
-    res.status(500).json({ status: 'error', message: e.message });
+    auditLog(req, 'ai_run', `status=error ${e.message}`);
+    throw e;
   }
 }));
 // 运行状态（前端展示 last_run / last_status）
