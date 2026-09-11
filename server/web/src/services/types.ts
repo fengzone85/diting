@@ -205,7 +205,6 @@ export interface AiConfig {
   schedule_freq?: 'daily' | 'weekly';
   schedule_time?: string;
   tz_offset_hours?: number;
-  batch_mode?: boolean;
   locale?: 'zh-CN' | 'en';
   log_retention_days?: number;
 }
@@ -218,7 +217,17 @@ export interface AiStatus {
   last_run_ts?: number;
   last_status?: string;
   last_error?: string;
+  last_duration_ms?: number;
+  running?: boolean;
+  started_at?: number | null;
   report_count?: number;
+}
+
+// POST /api/ai/run 的返回值：异步任务，202 受理 / 400 未启用 / 409 执行中 / 429 冷却
+export interface AiRunResult {
+  status: 'accepted' | 'disabled' | 'busy' | 'cooldown';
+  message?: string;
+  retry_after_s?: number;
 }
 
 export interface AiReport {

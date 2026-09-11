@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
 import type { AiConfig, AiStatus, AiReport } from '../../services/types';
@@ -19,9 +19,50 @@ const running = ref(false);
 const message = ref('');
 const error = ref('');
 
+// 手动触发是【异步任务】：后端立即返回（202），这里轮询 running 直至结束。
+// 上限 360s（单次 LLM 超时 180s + 全量统计 + 投递）；超时不报「失败」——任务可能仍在跑。
+const POLL_MS = 3000;
+const POLL_MAX = 120;
+let pollTimer: number | null = null;
+let pollCount = 0;
+
+function stopPolling() {
+  if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  pollCount = 0;
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = window.setInterval(async () => {
+    pollCount += 1;
+    try {
+      const s = await adminApi.aiStatus();
+      status.value = s;
+      if (!s.running) {
+        stopPolling();
+        running.value = false;
+        await load();
+        message.value = s.last_status === 'degraded' ? t('ai.runDegraded') : t('ai.runDone');
+        return;
+      }
+    } catch {
+      // 轮询偶发失败（网络抖动）不中断，等下一轮
+    }
+    if (pollCount >= POLL_MAX) {
+      stopPolling();
+      running.value = false;
+      message.value = t('ai.runTimeout');
+      await load();
+    }
+  }, POLL_MS);
+}
+
 onMounted(async () => {
   await load();
 });
+
+// 离开页面时清掉轮询定时器，避免组件卸载后继续打接口
+onUnmounted(stopPolling);
 
 async function load() {
   loading.value = true;
@@ -58,17 +99,23 @@ async function save() {
   }
 }
 
-async function run() {
+async function run(force = false) {
   running.value = true;
   message.value = '';
   error.value = '';
   try {
-    await adminApi.runAi();
+    await adminApi.runAi({ force });
     message.value = t('ai.runTriggered');
-    await load();
+    startPolling();
   } catch (e) {
-    error.value = (e as Error).message || t('ai.runFailed');
-  } finally {
+    // 未被受理（400 未启用 / 409 执行中 / 429 冷却）：立即恢复按钮并给出可读原因。
+    // 冷却秒数由后端 retry_after_s 提供，前端按当前语言渲染，避免后端硬编码语言。
+    const err = e as Error & { detail?: string; body?: { status?: string; retry_after_s?: number } | null };
+    if (err.body?.status === 'cooldown' && err.body.retry_after_s) {
+      error.value = t('ai.cooldown', { s: err.body.retry_after_s });
+    } else {
+      error.value = err.detail || err.message || t('ai.runFailed');
+    }
     running.value = false;
   }
 }
@@ -76,6 +123,11 @@ async function run() {
 function formatTime(ts?: number) {
   if (!ts) return '—';
   return new Date(ts).toLocaleString('zh-CN');
+}
+
+function formatDuration(ms?: number) {
+  if (!ms) return '—';
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 function changePage(delta: number) {
@@ -115,13 +167,10 @@ function changePage(delta: number) {
             <FormInput v-model="config.schedule_time" :label="t('ai.scheduleTime')" placeholder="09:00" />
           </div>
           <FormInput v-model.number="config.tz_offset_hours" :label="t('ai.tzOffset')" placeholder="8" />
-          <label class="flex items-center gap-2">
-            <input v-model="config.batch_mode" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500" />
-            <span>{{ t('ai.batchMode') }}</span>
-          </label>
-          <div class="flex gap-3 pt-2">
+          <div class="flex flex-wrap gap-3 pt-2">
             <button :disabled="saving" @click="save" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">{{ t('ai.saveConfig') }}</button>
-            <button :disabled="running" @click="run" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{{ t('ai.run') }}</button>
+            <button :disabled="running || status?.running" @click="run(false)" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{{ (running || status?.running) ? t('ai.running') : t('ai.run') }}</button>
+            <button :disabled="running || status?.running" @click="run(true)" class="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-50">{{ t('ai.forceRun') }}</button>
           </div>
         </div>
       </div>
@@ -135,6 +184,7 @@ function changePage(delta: number) {
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.model') }}</dt><dd>{{ status.model || '—' }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.schedule') }}</dt><dd>{{ status.schedule || '—' }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.lastRun') }}</dt><dd>{{ formatTime(status.last_run_ts) }}</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.duration') }}</dt><dd>{{ formatDuration(status.last_duration_ms) }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.lastStatus') }}</dt><dd :class="status.last_status === 'ok' ? 'text-emerald-400' : status.last_status ? 'text-rose-400' : ''">{{ status.last_status || '—' }}</dd></div>
             <div v-if="status.last_error" class="flex justify-between"><dt class="text-slate-400">{{ t('ai.error') }}</dt><dd class="max-w-xs truncate text-rose-400">{{ status.last_error }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.reportCount') }}</dt><dd>{{ status.report_count }}</dd></div>

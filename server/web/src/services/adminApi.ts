@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -62,7 +62,10 @@ export const adminApi = {
   aiConfig: () => api.get<{ config: AiConfig }>('/api/ai/config'),
   saveAiConfig: (config: Partial<AiConfig>) => api.put<{ ok: boolean }>('/api/ai/config', { config }),
   aiStatus: () => api.get<AiStatus>('/api/ai/status'),
-  runAi: () => api.post<Record<string, unknown>>('/api/ai/run', {}),
+  // AI 手动触发为【异步任务】：202=已受理（随后用 aiStatus() 轮询 running/last_status）；
+  // force=true 绕过冷却（用于连续重跑或调试）。
+  runAi: (opts?: { force?: boolean }) =>
+    api.post<AiRunResult>(`/api/ai/run${opts?.force ? '?force=1' : ''}`, {}),
   aiReports: (limit = 20, offset = 0) =>
     api.get<AiReportList>(`/api/ai/reports?limit=${limit}&offset=${offset}`),
   aiReport: (id: number) => api.get<AiReport>(`/api/ai/reports/${encodeURIComponent(String(id))}`),
