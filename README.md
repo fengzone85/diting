@@ -422,7 +422,7 @@ cd server/web && npm install && npm run build
 - [ ] 设置 `SESSION_SECRET`（固定随机值，防重启失效）
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
 - [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外（误配时用 `sudo bash diting.sh --clear-ip-whitelist` 救援，改库即时生效）
-- [ ] 定期备份数据库（`sudo bash diting.sh --backup`）
+- [ ] 定期备份数据库（`sudo bash diting.sh --backup`，或 `--backup-schedule install` 开每日自动备份）
 - [ ] 配置告警通知（邮件 / Telegram）
 - [ ] 定期查阅审计日志（后台 → 审计日志）
 - [ ] 使用 Cloudflare Tunnel 或 Tailscale 隐藏源站 IP（可选）

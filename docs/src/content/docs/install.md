@@ -58,17 +58,33 @@ sudo bash diting.sh --backup /tmp/my-backup.db
 # 从备份恢复（恢复前自动备份当前状态，可回滚）
 sudo bash diting.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
-# 列出已有备份
+# 备份并指定保留天数（默认 14 天，超出自动清理最旧的 monitor_*.db；0=不清理）
+sudo bash diting.sh --backup --keep-days 30
+
+# 列出已有备份（含占用总量、时间跨度、定时状态）
 sudo bash diting.sh --backup-list
 
 # 查看数据库统计（大小/记录数/时间范围）
 sudo bash diting.sh --db-stats
+
+# 每日自动备份（cron，默认凌晨 3 点）
+sudo bash diting.sh --backup-schedule install     # 安装（幂等，重复安装不会重复添加）
+sudo bash diting.sh --backup-schedule status      # 查看是否已启用
+sudo bash diting.sh --backup-schedule uninstall   # 取消（只移除本脚本添加的标记行）
 ```
 
 **恢复安全机制**：
 - 恢复前自动备份当前数据库（`pre_restore_*.db`），误操作可回滚
 - 备份文件自动校验 SQLite 完整性（魔数 + `PRAGMA integrity_check`）
 - 需输入 `yes` 确认才执行覆盖
+
+**保留与轮转**：默认保留 14 天，超期的 `monitor_*.db` 会在每次备份后自动清理；
+`pre_restore_*.db`（恢复前的回滚点）永不自动删除，需人工确认后再删。
+可用 `--keep-days N` 或环境变量 `DB_BACKUP_KEEP_DAYS` 调整，设为 `0` 关闭清理。
+
+**定时备份说明**：写入的 cron 行带 `# diting-backup` 标记，卸载时按该标记精准移除，
+不会动你已有的其它定时任务；日志落在 `/var/backups/diting/backup.log`。
+若提示未检测到 `crontab`，先安装 cron（Debian/Ubuntu: `apt-get install -y cron`）。
 
 **定时备份**（crontab）：
 

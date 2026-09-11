@@ -44,9 +44,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.3"
+SCRIPT_VERSION="1.1.4"
 SCRIPT_DATE="2026-09-11"
-SCRIPT_NOTES="菜单新增 9) 重置管理员 Token、10) 清除 IP 白名单（两项原仅命令行可用）；新增 --clear-ip-whitelist 救援入口，误配白名单锁门时无需登录即可恢复；修复图形菜单失效、卸载路径与更新丢失探测目标"
+SCRIPT_NOTES="修复 --backup <路径> 被当成未知参数（usage/docs 早有承诺但未实现）；新增备份保留轮转（默认 14 天）与 --keep-days；新增每日自动备份 --backup-schedule install/uninstall/status；备份列表显示占用、时间跨度与定时状态"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -57,6 +57,7 @@ SRC_DIR="/opt/diting-src"
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
 A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""
+A_BACKUP_PATH=""; A_BACKUP_KEEP=""; A_BACKUP_SCHEDULE=""
 
 show_usage() {
     cat <<EOF
@@ -91,8 +92,14 @@ show_usage() {
   # 数据库备份 / 恢复 / 管理
   sudo bash diting.sh --backup [输出路径]         # 备份数据库（默认存到 $DB_BACKUP_DIR）
   sudo bash diting.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
-  sudo bash diting.sh --backup-list               # 列出已有备份
+  sudo bash diting.sh --backup-list               # 列出已有备份（含占用/时间跨度/定时状态）
   sudo bash diting.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
+
+  # 每日自动备份（cron，默认凌晨 3 点；默认保留 14 天并自动清理过期）
+  sudo bash diting.sh --backup-schedule install      # 安装
+  sudo bash diting.sh --backup-schedule status       # 查看是否已启用
+  sudo bash diting.sh --backup-schedule uninstall    # 取消
+  sudo bash diting.sh --backup --keep-days 30        # 单次备份并保留 30 天
 
   # 管理员 Token 重置（丢失 Token 时使用，需 SSH 登录服务器）
   sudo bash diting.sh --reset-admin-token         # 生成新管理员 Token（旧 Token 立即失效）
@@ -109,8 +116,10 @@ show_usage() {
   --status                查看服务端/受控端状态
   --uninstall             卸载服务端与受控端
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
+  --keep-days N           备份保留天数（默认 14，超出自动清理；0=不清理）
   --restore <路径>        从备份恢复数据库（恢复前自动备份当前状态）
   --backup-list           列出已有备份
+  --backup-schedule 动作  每日自动备份：install / uninstall / status
   --db-stats              查看数据库统计信息
   --reset-admin-token     重置管理员 Token（丢失时使用，旧 Token 立即失效）
   --clear-ip-whitelist    清除管理端 IP 白名单（误配锁门时救援，改库即时生效）
@@ -590,6 +599,9 @@ status_all() {
 # 原生/开发态在 $SRC_DIR/server/data/monitor.db。
 # 备份原则：SQLite 单文件即全量，但必须通过 .backup 命令或停服后 cp，避免写坏。
 DB_BACKUP_DIR="/var/backups/diting"
+# 备份保留天数（默认 14）。超出时「自动备份」会清理最旧的 monitor_*.db；
+# =0 关闭清理（永不自动删除）。可用 --keep-days N 覆盖，或环境变量 DB_BACKUP_KEEP_DAYS。
+DB_BACKUP_KEEP_DAYS="${DB_BACKUP_KEEP_DAYS:-14}"
 
 # 定位数据库：返回「容器名:容器内路径」或「宿主机文件路径」；找不到则返回空。
 locate_db() {
@@ -622,8 +634,10 @@ locate_db() {
 
 # 备份数据库：通过 docker exec 调用 sqlite3 .backup 保证一致性（WAL 检查点 +
 # 事务合并到主库），不依赖停服；无 sqlite3 时回退到 cp（需先停容器防写坏）。
+# 用法：do_backup [输出路径] [保留天数]
 do_backup() {
     local out_path="${1:-}"
+    local keep_days="${2:-}"
     ensure_docker || return 1
     local loc; loc="$(locate_db)"
     if [[ -z "$loc" ]]; then
@@ -673,10 +687,45 @@ do_backup() {
         local sz; sz="$(du -h "$out_path" | cut -f1)"
         echo -e "${GREEN}[OK]   备份完成: ${out_path} (${sz})${NC}"
         echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
+        # 仅在默认目录场景下轮转，避免误删用户自定义路径下的文件
+        if [[ "$(dirname "$out_path")" == "$DB_BACKUP_DIR" ]]; then
+            prune_backups "${keep_days:-$DB_BACKUP_KEEP_DAYS}"
+        fi
     else
         echo -e "${RED}[错误] 备份失败，请检查磁盘空间与权限${NC}" >&2
         return 1
     fi
+}
+
+# 清理超过保留天数的旧备份（只动 $DB_BACKUP_DIR/monitor_*.db，
+# 保留 pre_restore_*.db —— 那是恢复前的后悔药，需人工确认后再删）。
+# 用法：prune_backups <保留天数>；天数 <=0 表示不清理。
+prune_backups() {
+    local keep="${1:-$DB_BACKUP_KEEP_DAYS}"
+    [[ -z "$keep" || "$keep" =~ ^[0-9]+$ ]] || keep="$DB_BACKUP_KEEP_DAYS"
+    [[ "${keep:-0}" -le 0 ]] && return 0
+    [[ -d "$DB_BACKUP_DIR" ]] || return 0
+
+    local -a old=()
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && old+=("$f")
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name 'monitor_*.db' -mtime "+${keep}" 2>/dev/null)
+
+    if [[ ${#old[@]} -eq 0 ]]; then
+        echo -e "  $(msg "bk.keep_tip") ${keep} $(msg "bk.keep_days")"
+        return 0
+    fi
+    echo -e "${YELLOW}[信息] $(msg "bk.pruning")${NC}"
+    local freed=0
+    for f in "${old[@]}"; do
+        local s; s="$(du -k "$f" 2>/dev/null | cut -f1)"; s="${s:-0}"
+        if rm -f "$f" 2>/dev/null; then
+            echo "       - $(basename "$f")"
+            freed=$((freed + s))
+        fi
+    done
+    echo -e "${GREEN}[OK]   $(msg "bk.pruned") ${#old[@]} $(msg "bk.pruned_unit")（~$((freed / 1024)) MB）${NC}"
 }
 
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
@@ -770,27 +819,122 @@ do_restore() {
     echo -e "${YELLOW}[提示] 请刷新后台确认数据正确；如有问题可从 ${pre_restore:-（无）} 回滚${NC}"
 }
 
-# 列出已有备份
+# 安装/卸载每日自动备份（cron）。
+# 用法：do_backup_schedule install|uninstall [保留天数] [小时]
+# 设计要点：
+#  - 只在 crontab 里写一行，带 # diting-backup 标记，卸载时按标记精准移除，不动其它条目；
+#  - 备份输出到 $DB_BACKUP_DIR 并按保留天数轮转，避免占满磁盘；
+#  - 无 crontab 命令时给出清晰指引（最小化容器需 apt-get install -y cron）。
+do_backup_schedule() {
+    local act="${1:-status}"
+    local keep="${2:-$DB_BACKUP_KEEP_DAYS}"
+    local hour="${3:-3}"
+    local marker="# diting-backup"
+    local self; self="$(realpath "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "$0")"
+
+    case "$act" in
+        install)
+            if ! command -v crontab >/dev/null 2>&1; then
+                echo -e "${RED}[错误] 未检测到 crontab，请安装后重试（Debian/Ubuntu: apt-get install -y cron）${NC}" >&2
+                return 1
+            fi
+            [[ "$keep" =~ ^[0-9]+$ ]] || keep="$DB_BACKUP_KEEP_DAYS"
+            [[ "$hour" =~ ^[0-9]+$ ]] || hour=3
+            [[ "$hour" -ge 0 && "$hour" -le 23 ]] || hour=3
+            # 先移除旧的同名条目，保证幂等（重复安装不会产生多行）
+            local cur
+            cur="$(crontab -l 2>/dev/null | grep -v -F "$marker" || true)"
+            local line="0 ${hour} * * * ${self} --backup --keep-days ${keep} >> ${DB_BACKUP_DIR}/backup.log 2>&1 ${marker}"
+            printf '%s\n%s\n' "$cur" "$line" | grep -v '^$' | crontab -
+            echo -e "${GREEN}[OK]   $(msg "bk.cron_installed")${NC}"
+            echo "       $line"
+            echo -e "${YELLOW}$(msg "bk.cron_hint")${NC}"
+            echo -e "       $(msg "bk.cron_log") ${DB_BACKUP_DIR}/backup.log"
+            echo -e "       $(msg "bk.cron_remove") sudo bash $self --backup-schedule uninstall"
+            ;;
+        uninstall)
+            if ! command -v crontab >/dev/null 2>&1; then
+                echo -e "${RED}[错误] 未检测到 crontab${NC}" >&2; return 1
+            fi
+            local before after newcron
+            before="$(crontab -l 2>/dev/null | grep -c -F "$marker" || true)"
+            # 先算出过滤后的内容再写回。切勿写成 `... | crontab - || crontab -r`：
+            # 一旦写回失败（或管道因 pipefail 判非 0），-r 会清空用户整个 crontab。
+            # 这里只在「过滤后确实没有其它条目」时才 -r。
+            newcron="$(crontab -l 2>/dev/null | grep -v -F "$marker" | grep -v '^$' || true)"
+            if [[ -z "$newcron" ]]; then
+                crontab -r 2>/dev/null || true
+            else
+                printf '%s\n' "$newcron" | crontab - 2>/dev/null || true
+            fi
+            after="$(crontab -l 2>/dev/null | grep -c -F "$marker" || true)"
+            if [[ "${after:-0}" -eq 0 ]]; then
+                echo -e "${GREEN}[OK]   $(msg "bk.cron_removed")（移除 ${before:-0} 条）${NC}"
+            else
+                echo -e "${RED}[错误] $(msg "bk.cron_remove_failed")${NC}" >&2; return 1
+            fi
+            ;;
+        status|*)
+            if ! command -v crontab >/dev/null 2>&1; then
+                echo -e "  $(msg "bk.cron_none")"; return 0
+            fi
+            local lines
+            lines="$(crontab -l 2>/dev/null | grep -F "$marker" || true)"
+            if [[ -n "$lines" ]]; then
+                echo -e "  $(msg "bk.cron_active")"
+                echo "$lines" | sed 's/^/       /'
+            else
+                echo -e "  $(msg "bk.cron_none")"
+            fi
+            ;;
+    esac
+}
+
+# 列出已有备份（含占用总量、时间跨度与定时备份状态）
 do_backup_list() {
     echo "== 数据库备份列表 =="
     if [[ ! -d "$DB_BACKUP_DIR" ]]; then
         echo "  暂无备份（目录 $DB_BACKUP_DIR 不存在）"
         echo -e "  ${YELLOW}首次备份: sudo bash diting.sh --backup${NC}"
+        echo -e "  ${YELLOW}每日自动: sudo bash diting.sh --backup-schedule install${NC}"
         return
     fi
-    local count=0
-    ls -lhS "$DB_BACKUP_DIR"/*.db 2>/dev/null | while read -r line; do
-        echo "  $line"
-        count=$((count+1))
-    done
-    local total; total="$(ls "$DB_BACKUP_DIR"/*.db 2>/dev/null | wc -l)"
-    if [[ $total -eq 0 ]]; then
+    # 按修改时间排序（不能按文件名字典序：pre_restore_* 会混进 monitor_* 中间，
+    # 导致「时间跨度」显示错误）。备份文件名由本脚本生成、不含空格/换行。
+    local -a files=()
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name '*.db' -printf '%T@\t%p\n' 2>/dev/null \
+             | LC_ALL=C sort -n -k1,1 -k2,2 | cut -f2-)
+
+    if [[ ${#files[@]} -eq 0 ]]; then
         echo "  暂无备份文件"
         echo -e "  ${YELLOW}首次备份: sudo bash diting.sh --backup${NC}"
-    else
-        echo -e "  共 ${total} 个备份  |  目录: $DB_BACKUP_DIR"
-        echo -e "  ${YELLOW}恢复: sudo bash diting.sh --restore $DB_BACKUP_DIR/<文件名>${NC}"
+        echo -e "  ${YELLOW}每日自动: sudo bash diting.sh --backup-schedule install${NC}"
+        return
     fi
+
+    local total_kb=0 sz first_f last_f
+    for f in "${files[@]}"; do
+        sz="$(du -k "$f" 2>/dev/null | cut -f1)"; sz="${sz:-0}"
+        total_kb=$((total_kb + sz))
+        printf '  %s  %8s  %s\n' \
+            "$(date -r "$f" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')" \
+            "$(du -h "$f" 2>/dev/null | cut -f1)" \
+            "$(basename "$f")"
+    done
+    first_f="$(basename "${files[0]}")"
+    last_f="$(basename "${files[${#files[@]}-1]}")"
+
+    echo ""
+    echo -e "  $(msg "bk.total") ${#files[@]} $(msg "bk.total_unit")  |  $(msg "bk.size") ~$((total_kb / 1024)) MB  |  $(msg "bk.dir") $DB_BACKUP_DIR"
+    echo -e "  $(msg "bk.range") ${first_f} → ${last_f}"
+    echo -e "  $(msg "bk.keep_tip") ${DB_BACKUP_KEEP_DAYS} $(msg "bk.keep_days")"
+    echo ""
+    echo -e "  ${YELLOW}$(msg "bk.restore_hint") sudo bash diting.sh --restore $DB_BACKUP_DIR/<文件名>${NC}"
+    echo -e "  ${YELLOW}$(msg "bk.auto_hint") sudo bash diting.sh --backup-schedule install${NC}"
+    do_backup_schedule status
 }
 
 # 数据库统计信息
@@ -863,16 +1007,35 @@ db_manage_menu() {
         "2" "$(msg "db_menu.restore")" \
         "3" "$(msg "db_menu.list")" \
         "4" "$(msg "db_menu.stats")" \
+        "5" "$(msg "db_menu.schedule")" \
         "0" "$(msg "db_menu.back")" )"
     [[ -z "$c" ]] && return
     case "$c" in
-        1) do_backup "" ;;
+        1) do_backup "" "" ;;
         2)
             local bkp; bkp="$(ui_prompt "$(msg "db_menu.header")" "$(msg "db_menu.restore_prompt")")" || return
             [[ -n "$bkp" ]] && do_restore "$bkp" || msg "cancelled"
             ;;
         3) do_backup_list ;;
         4) do_db_stats ;;
+        5) db_manage_schedule_menu ;;
+        *) return ;;
+    esac
+}
+
+# 定时备份子菜单：安装 / 卸载 / 查看状态
+db_manage_schedule_menu() {
+    local c
+    c="$(ui_menu "$(msg "db_menu.schedule_header")" "$(msg "db_menu.schedule_prompt")" \
+        "1" "$(msg "db_menu.schedule_install")" \
+        "2" "$(msg "db_menu.schedule_remove")" \
+        "3" "$(msg "db_menu.schedule_status")" \
+        "0" "$(msg "db_menu.back")" )"
+    [[ -z "$c" ]] && return
+    case "$c" in
+        1) do_backup_schedule install ;;
+        2) do_backup_schedule uninstall ;;
+        3) do_backup_list ;;
         *) return ;;
     esac
 }
@@ -1109,8 +1272,14 @@ declare -A I18N_ZH=(
     [db_menu.restore]="从备份恢复"
     [db_menu.list]="查看备份列表"
     [db_menu.stats]="查看数据库统计"
+    [db_menu.schedule]="定时自动备份（每日，cron）"
+    [db_menu.schedule_header]="━━━ 定时自动备份 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    [db_menu.schedule_install]="安装每日自动备份"
+    [db_menu.schedule_remove]="取消每日自动备份"
+    [db_menu.schedule_status]="查看备份列表与定时状态"
     [db_menu.back]="返回主菜单"
-    [db_menu.prompt]="请选择 [0-4]: "
+    [db_menu.prompt]="请选择: "
+    [db_menu.schedule_prompt]="请选择 [0-3]: "
     [db_menu.restore_prompt]="备份文件路径: "
     [cancelled]="已取消"
     [status.server_header]="== 服务端 (Docker) =="
@@ -1136,6 +1305,26 @@ declare -A I18N_ZH=(
     [wl.ok]="IP 白名单已清除，管理接口恢复全放行"
     [wl.old_value]="原值:"
     [wl.hint]="[提示] 改库即时生效，无需重启；请重新登录后台确认。恢复正常后可在「设置」重新配置白名单。"
+    [bk.total]="共"
+    [bk.total_unit]="个备份"
+    [bk.size]="占用"
+    [bk.dir]="目录"
+    [bk.range]="时间跨度"
+    [bk.keep_tip]="保留策略"
+    [bk.keep_days]="天（超出自动清理）"
+    [bk.restore_hint]="恢复"
+    [bk.auto_hint]="开启每日自动备份"
+    [bk.pruning]="清理超过保留期的旧备份…"
+    [bk.pruned]="已清理"
+    [bk.pruned_unit]="个过期备份"
+    [bk.cron_installed]="已安装每日自动备份（cron）"
+    [bk.cron_hint]="[提示] 备份会落到默认目录并按保留天数轮转；请确认 cron 服务已运行。"
+    [bk.cron_log]="日志"
+    [bk.cron_remove]="取消自动备份"
+    [bk.cron_removed]="已取消每日自动备份"
+    [bk.cron_remove_failed]="取消自动备份失败，请手动执行 crontab -e 删除标记行"
+    [bk.cron_active]="当前已启用每日自动备份："
+    [bk.cron_none]="当前未启用每日自动备份"
     [wl.failed]="清除失败"
     [wl.read_failed]="无法读取数据库"
     [wl.node_hint]="原生部署要求宿主机 node 与 better-sqlite3 版本匹配；Docker 部署不受此影响。"
@@ -1169,8 +1358,14 @@ declare -A I18N_EN=(
     [db_menu.restore]="Restore from Backup"
     [db_menu.list]="List Backups"
     [db_menu.stats]="Database Stats"
+    [db_menu.schedule]="Scheduled daily backup (cron)"
+    [db_menu.schedule_header]="━━━ Scheduled Backup ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    [db_menu.schedule_install]="Install daily auto-backup"
+    [db_menu.schedule_remove]="Remove daily auto-backup"
+    [db_menu.schedule_status]="Show backups & schedule status"
     [db_menu.back]="Back to Main Menu"
-    [db_menu.prompt]="Select [0-4]: "
+    [db_menu.prompt]="Select: "
+    [db_menu.schedule_prompt]="Select [0-3]: "
     [db_menu.restore_prompt]="Backup file path: "
     [cancelled]="Cancelled"
     [status.server_header]="== Server (Docker) =="
@@ -1196,6 +1391,26 @@ declare -A I18N_EN=(
     [wl.ok]="IP whitelist cleared - admin API allows all sources again"
     [wl.old_value]="Old value:"
     [wl.hint]="[Note] Takes effect immediately (no restart). Log in again to confirm; you may re-configure the whitelist in Settings afterwards."
+    [bk.total]="Total"
+    [bk.total_unit]="backups"
+    [bk.size]="Size"
+    [bk.dir]="Dir"
+    [bk.range]="Range"
+    [bk.keep_tip]="Retention"
+    [bk.keep_days]="days (older ones pruned)"
+    [bk.restore_hint]="Restore"
+    [bk.auto_hint]="Enable daily auto-backup"
+    [bk.pruning]="Pruning backups older than retention…"
+    [bk.pruned]="Pruned"
+    [bk.pruned_unit]="expired backups"
+    [bk.cron_installed]="Daily auto-backup installed (cron)"
+    [bk.cron_hint]="[Note] Backups land in the default dir and rotate by retention days; make sure the cron service is running."
+    [bk.cron_log]="Log"
+    [bk.cron_remove]="Remove auto-backup"
+    [bk.cron_removed]="Daily auto-backup removed"
+    [bk.cron_remove_failed]="Failed to remove; please delete the tagged line via crontab -e"
+    [bk.cron_active]="Daily auto-backup is enabled:"
+    [bk.cron_none]="Daily auto-backup is not enabled"
     [wl.failed]="Failed to clear"
     [wl.read_failed]="cannot read the database"
     [wl.node_hint]="Native deployments require a host node matching better-sqlite3 ABI; Docker deployments are unaffected."
@@ -1370,10 +1585,23 @@ while [[ $# -gt 0 ]]; do
         --update-agent)   ACTION="update-agent"; shift ;;
         --status)         ACTION="status"; shift ;;
         --uninstall)      ACTION="uninstall"; shift ;;
-        --backup)         ACTION="backup"; shift ;;
+        # 兼容两种调用：--backup（默认目录）与 --backup <输出路径>。
+        # 路径以 / 或 . 开头才当作输出路径，避免把后续选项（如 --status）误吞。
+        --backup)
+            ACTION="backup"; shift
+            if [[ -n "${1:-}" && ( "$1" == /* || "$1" == ./* ) ]]; then
+                A_BACKUP_PATH="$1"; shift
+            fi
+            ;;
         --restore)        A_RESTORE_PATH="$2"; ACTION="restore"; shift 2 ;;
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
+        --keep-days)      A_BACKUP_KEEP="$2"; shift 2 ;;
+        # 安装/取消/查看每日自动备份：--backup-schedule install|uninstall|status
+        --backup-schedule)
+            ACTION="backup-schedule"; A_BACKUP_SCHEDULE="${2:-status}"; shift
+            [[ -n "${1:-}" && "$1" != --* ]] && { A_BACKUP_SCHEDULE="$1"; shift; }
+            ;;
         --reset-admin-token) ACTION="reset-admin-token"; shift ;;
         --clear-ip-whitelist) ACTION="clear-ip-whitelist"; shift ;;
         --server)      A_SERVER="$2"; shift 2 ;;
@@ -1405,7 +1633,8 @@ if [[ -n "$ACTION" ]]; then
         update-agent)  update_agent ;;
         status)       status_all ;;
         uninstall)    uninstall_all ;;
-        backup)       do_backup "" ;;
+        backup)       do_backup "${A_BACKUP_PATH:-}" "${A_BACKUP_KEEP:-}" ;;
+        backup-schedule) do_backup_schedule "${A_BACKUP_SCHEDULE:-status}" "${A_BACKUP_KEEP:-}" ;;
         restore)      do_restore "${A_RESTORE_PATH:-}" ;;
         backup-list)  do_backup_list ;;
         db-stats)     do_db_stats ;;
