@@ -59,7 +59,7 @@ Content-Type: application/json
 | GET / PUT | `/api/settings` | 读取 / 保存设置 |
 | POST | `/api/test-alert` | 发送测试告警 |
 | GET / PUT | `/api/ai/config` | AI 日报配置 |
-| POST | `/api/ai/run` | 手动触发 AI 日报 |
+| POST | `/api/ai/run` | 手动触发 AI 日报（异步任务：`202` 已受理 / `400` 未启用 / `409` 执行中 / `429` 冷却带 `Retry-After`；`?force=1` 跳过冷却） |
 | GET | `/api/ai/reports` | AI 日报列表 |
 
 ## 公开只读接口（脱敏）
