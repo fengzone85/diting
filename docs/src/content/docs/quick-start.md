@@ -77,9 +77,15 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/inst
 # 首次备份
 sudo bash diting.sh --backup
 
-# 设置每天凌晨 3 点自动备份（需 root）
-(crontab -l 2>/dev/null; echo "0 3 * * * root bash $(which diting-diting.sh || echo /usr/local/bin/diting-diting.sh) --backup") | crontab -
+# 设置每日自动备份（幂等，重复执行不会产生重复条目）
+sudo bash diting.sh --backup-schedule install
+
+# 查看是否已启用
+sudo bash diting.sh --backup-schedule status
 ```
+
+> 默认备份到 `/var/backups/diting/`，带 gzip 压缩（体积约为数据库的 20%），
+> 默认保留 14 天并自动清理过期文件。
 
 > 数据库包含全部 Agent 记录、历史监控数据、设置项。Docker 重建容器不会丢失数据，但整机迁移或卷删除前需手动备份。
 

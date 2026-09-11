@@ -71,15 +71,41 @@ sudo bash diting.sh --db-stats
 sudo bash diting.sh --backup-schedule install     # 安装（幂等，重复安装不会重复添加）
 sudo bash diting.sh --backup-schedule status      # 查看是否已启用
 sudo bash diting.sh --backup-schedule uninstall   # 取消（只移除本脚本添加的标记行）
+
+# 关闭压缩（默认开启；环境无 pigz/gzip 时会自动跳过）
+sudo bash diting.sh --backup --no-compress
 ```
+
+| 参数 | 说明 |
+|---|---|
+| `--backup [路径]` | 备份（路径须以 `/` 或 `./` 开头；默认存 `/var/backups/diting/`） |
+| `--keep-days N` | 备份保留天数（默认 14，超期自动清理；`0` = 不清理） |
+| `--compress` / `--no-compress` | 是否 gzip 压缩（**默认压缩**，体积约 20%） |
+| `--restore <文件>` | 从备份恢复，`.db` 与 `.db.gz` 均可 |
+| `--backup-list` | 列出备份（占用总量、时间跨度、定时状态） |
+| `--backup-schedule <动作>` | `install` / `uninstall` / `status` |
+| `--process-restore` | 处理后台投递的恢复请求，**仅供 cron 调用** |
 
 **恢复安全机制**：
 - 恢复前自动备份当前数据库（`pre_restore_*.db`），误操作可回滚
 - 备份文件自动校验 SQLite 完整性（魔数 + `PRAGMA integrity_check`）
-- 需输入 `yes` 确认才执行覆盖
+- 终端手动执行时需输入 `yes` 确认才覆盖；由后台/定时任务触发时跳过确认
+  （发起方本身已是管理员显式操作，且流程内已强制备份当前状态）
 
-**保留与轮转**：默认保留 14 天，超期的 `monitor_*.db` 会在每次备份后自动清理；
-`pre_restore_*.db`（恢复前的回滚点）永不自动删除，需人工确认后再删。
+**恢复的两种入口**：
+
+| 入口 | 命令 | 适用 |
+|---|---|---|
+| 终端 | `sudo bash diting.sh --restore <文件>` | SSH 直连，同步执行、当场看结果 |
+| 网页 | 后台「设置 → 数据库备份 → 备份文件 → 恢复」 | 异步：投递请求，等宿主 cron 处理（≤5 分钟） |
+
+网页入口依赖 `--process-restore`（由 `--backup-schedule install` 写入的 cron 每 5 分钟调用，
+**不要手动执行**）。它读取宿主备份目录里的 `restore.request`，取出文件路径后走与
+手动恢复完全相同的流程。
+
+**保留与轮转**：默认保留 14 天，超期的 `monitor_*.db[.gz]` 会在每次备份后自动清理；
+`pre_restore_*.db[.gz]`（恢复前的回滚点）永不自动删除，需人工确认后再删
+（它每恢复一次就多一份，占用等于库体积，建议定期检查 `/var/backups/diting/`）。
 可用 `--keep-days N` 或环境变量 `DB_BACKUP_KEEP_DAYS` 调整，设为 `0` 关闭清理。
 
 **压缩（默认开启）**：备份默认用 `pigz`（并行 gzip，无则回退 `gzip -6`）压缩成 `.db.gz`。
@@ -93,8 +119,16 @@ sudo bash diting.sh --backup-schedule uninstall   # 取消（只移除本脚本�
 且不碰 `pre_restore_*`），最后仍不够才报错退出 —— 避免「磁盘写满后
 备份失败、清理又在成功后才跑」导致的死锁。
 
-**定时备份说明**：写入的 cron 行带 `# diting-backup` 标记，卸载时按该标记精准移除，
-不会动你已有的其它定时任务；日志落在 `/var/backups/diting/backup.log`。
+**定时备份说明**：`--backup-schedule install` 会写入**两行** cron，都带 `# diting-backup`
+标记（卸载时按标记精准移除，不会动你已有的其它定时任务）：
+
+| 频率 | 任务 | 日志 |
+|---|---|---|
+| 每日 | `BACKUP_AUTO=1 diting.sh --backup` | `/var/backups/diting/backup.log` |
+| 每 5 分钟 | `diting.sh --process-restore`（消费后台恢复请求） | `/var/backups/diting/restore.log` |
+
+两行都会先 `source /etc/diting/host.env`（若存在），以取得 `BACKUP_VISIBLE_DIR` /
+`RESTORE_REQUEST_FILE` —— 所以**改了 host.env 无需重装定时任务**。
 若提示未检测到 `crontab`，先安装 cron（Debian/Ubuntu: `apt-get install -y cron`）。
 
 **周期可在后台调整**：cron 固定每日触发一次，是否真正执行由后台
@@ -108,22 +142,40 @@ sudo bash diting.sh --backup-schedule uninstall   # 取消（只移除本脚本�
 
 ### 在后台管理备份文件（列表 / 下载 / 恢复 / 删除）
 
-后台「设置 → 数据库备份 → 备份文件」可以直接操作备份。前提是**把宿主备份目录
-挂进容器**（默认容器内读不到宿主目录）：
+后台「设置 → 数据库备份 → 备份文件」可以直接浏览、下载、恢复、删除备份。
+**这一步是可选的** —— 不做也能正常备份/恢复，只是备份文件不会出现在网页里。
+
+前提是让服务端能读到备份目录（Docker 部署默认读不到宿主的 `/var/backups/diting`）。
+**必须按顺序执行**，否则后台列表是空的：
 
 ```bash
-# 宿主侧：建一个容器可读写的备份目录，并登记路径
+# 1) 宿主侧：建目录，并登记给后台（diting.sh 每次运行都会读这个文件）
 sudo mkdir -p /opt/diting-backups
+sudo chown "$(whoami)" /opt/diting-backups        # 容器/服务端需要可写
 echo 'BACKUP_VISIBLE_DIR=/opt/diting-backups' | sudo tee -a /etc/diting/host.env
 
-# server/.env：告诉 compose 把哪个宿主目录挂进来（重启/重建后生效）
+# 2) 服务端：告诉它备份目录在哪
+#    Docker 部署 —— 挂载宿主目录进容器，必须重建才生效
 echo 'HOST_BACKUP_DIR=/opt/diting-backups' >> server/.env
 sudo bash diting.sh --update-server
+#    原生/systemd 部署（直接跑 node server.js）—— 无需挂载，指同一路径即可
+#    echo 'BACKUP_DIR=/opt/diting-backups' >> server/.env
+#    echo 'RESTORE_TRIGGER=/opt/diting-backups/restore.request' >> server/.env
+#    sudo systemctl restart simple-probe-server.service
+
+# 3) 安装定时任务（含「每 5 分钟处理后台恢复请求」那一行，恢复功能依赖它）
+sudo bash diting.sh --backup-schedule install
+
+# 4) 验证：做一次备份，然后看后台是否列出
+sudo bash diting.sh --backup
+sudo bash diting.sh --backup-list
 ```
 
-- **备份脚本会自动把新备份同步一份到 `BACKUP_VISIBLE_DIR`**（默认不配则不复制），
-  所以后台看到的是宿主目录里的实际文件。
-- **下载**走 `GET /api/admin/backups/:name/download`，同源流式返回。
+- **备份脚本会自动把新备份同步一份到 `BACKUP_VISIBLE_DIR`**（未配置则不复制），
+  所以后台看到的就是这个目录里的实际文件。恢复前的回滚快照 `pre_restore_*`
+  **不会**同步（每恢复一次就多一份，同步会让占用翻倍），需要时到
+  `/var/backups/diting/` 取。
+- **下载**走 `GET /api/admin/backups/:name/download`，同源流式返回（实测 322MB 约 1.6s）。
 - **删除**只允许本脚本生成的命名（`monitor_*` / `pre_restore_*`），
   目录里的其它文件不会被列出也不会被删。
 - **恢复**是**异步**的：后台只投递请求文件（落在宿主备份目录内），
@@ -131,12 +183,9 @@ sudo bash diting.sh --update-server
   真正恢复时仍会走「恢复前自动备份 → 完整性校验 → 停服原子替换 → 重启」全流程。
   若长时间未生效，检查宿主是否已 `--backup-schedule install` 且配置了 `/etc/diting/host.env`。
 
-**定时备份**（crontab）：
-
-```bash
-# 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
-```
+> **注意**：网页点「恢复」时不需要再输入 `yes`（按钮本身已是管理员显式操作，
+> 带写保护与审计日志，且流程内强制先备份当前状态可回滚）；
+> 在终端手动 `--restore` 时仍会要求输入 `yes` 二次确认。
 
 ## 数据保留与自动清理
 

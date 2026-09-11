@@ -386,16 +386,31 @@ sudo bash diting.sh --db-stats
 ### Scheduled backup
 
 ```bash
-# crontab: automatic daily backup at 3:00 AM
-0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
+# Install the daily backup (writes cron entries: daily backup + a 5-minute
+# restore-request poller; idempotent)
+sudo bash diting.sh --backup-schedule install
+
+# Check / remove
+sudo bash diting.sh --backup-schedule status
+sudo bash diting.sh --backup-schedule uninstall
 ```
+
+The period, run hour, retention days and compression can be tuned in the
+admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 
 ### Backup mechanism
 
 - **Hot backup**: uses `sqlite3 .backup` command first; no service interruption during backup
+- **Compressed by default**: gzip via `pigz` when available (~20% of the DB size)
+- **Retention**: 14 days by default, older `monitor_*.db[.gz]` pruned after each run
+  (`pre_restore_*.db[.gz]` rollback points are never auto-deleted)
+- **Space guard**: estimates the required space before writing; prunes expired backups,
+  then the oldest ones (always keeping the newest) if still short
 - **Safe restore**: auto-backs up current database as `pre_restore_*.db` before restoring; rollback-capable on misoperation
 - **Integrity check**: auto-validates backup files before restore (SQLite magic + `PRAGMA integrity_check`)
 - **Auto-discovery**: auto-detects Docker volume or host file path; no manual lookup needed
+- **Admin UI**: browse / download / restore / delete backups (restore is queued and
+  executed host-side by `diting.sh --process-restore`)
 
 ## Environment variables
 

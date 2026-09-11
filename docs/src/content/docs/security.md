@@ -83,11 +83,13 @@ Agent 之间互不通信，互不知道彼此存在。
 # 一键备份（热备份，不中断服务）
 sudo bash diting.sh --backup
 
-# 定时自动备份（crontab）
-0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
+# 安装每日自动备份（写入 cron，含恢复请求处理行；幂等）
+sudo bash diting.sh --backup-schedule install
 ```
 
-备份文件默认存到 `/var/backups/diting/`，包含完整数据库快照。恢复前会自动备份当前状态，确保可回滚。
+备份文件默认存到 `/var/backups/diting/`（gzip 压缩，体积约 20%），包含完整
+数据库快照。恢复前会自动备份当前状态，确保可回滚。新增的备份状态与操作都会
+写入 audit_logs（下载 / 删除 / 请求恢复均可审计）。
 
 ## TOTP 2FA
 
