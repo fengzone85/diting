@@ -467,11 +467,17 @@ update_script() {
         fi
         [[ -n "$newnotes" ]] && echo -e "       要点: ${newnotes}"
     fi
+    # 覆盖目标：优先原地更新当前脚本；当前脚本不可写（如从只读介质/管道运行）
+    # 时退到 PATH 里的安装位置。
+    # 注意：这里曾写成 diting-diting.sh（simple-probe.sh → diting.sh 全局重命名
+    # 留下的双重前缀），导致兜底路径不存在、cp 直接失败。
     local target
     if [[ -f "$0" && -w "$(dirname "$0")" ]]; then
         target="$(realpath "$0")"
+    elif [[ -f "$SRC_DIR/diting.sh" && -w "$SRC_DIR" ]]; then
+        target="$SRC_DIR/diting.sh"
     else
-        target="/usr/local/bin/diting-diting.sh"
+        target="/usr/local/bin/diting.sh"
     fi
     cp "$new" "$target"
     chmod +x "$target"
