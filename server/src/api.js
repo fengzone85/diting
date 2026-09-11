@@ -993,6 +993,21 @@ router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => 
   return res.json(r);
 }));
 
+// AI 用量趋势（近 N 天按 UTC 日聚合 token 消耗）。默认 7 天，clamp 1–90。
+// 老报告的 token 列为 0（加列前的数据），不影响聚合正确性。
+router.get('/ai/usage', adminOrReadonly, (req, res) => {
+  const days = Math.max(1, Math.min(90, Number(req.query.days) || 7));
+  const rows = db.aiUsageDaily(Date.now() - days * 86400000);
+  const list = rows.map((r) => ({
+    day: new Date(Number(r.day) * 86400000).toISOString().slice(0, 10),
+    reports: Number(r.reports) || 0,
+    prompt_tokens: Number(r.prompt_tokens) || 0,
+    completion_tokens: Number(r.completion_tokens) || 0,
+    total_tokens: Number(r.total_tokens) || 0
+  }));
+  res.json({ days, total_tokens: list.reduce((s, x) => s + x.total_tokens, 0), list });
+});
+
 // 运行状态（前端展示 last_run / last_status）
 router.get('/ai/status', adminOrReadonly, (req, res) => {
   res.json(ai.getStatus());
