@@ -15,6 +15,7 @@
 const db = require('../db');
 const { summarize } = require('./summarizer');
 const { analyze, parseAnalysis, AiError } = require('./provider');
+const { clampRisk } = require('./stats');
 const { PROMPT_VERSION } = require('./prompt');
 const alerts = require('../alerts');
 
@@ -220,8 +221,12 @@ function capHighlights(analysis, summary, opts) {
 
   const clean = list.filter((h) => h && typeof h === 'object' && names.has(h.agent_name));
   const droppedUnknown = list.length - clean.length;
-  const offlineHits = clean.filter((h) => offline.has(h.agent_name));
-  const onlineHits = clean.filter((h) => !offline.has(h.agent_name));
+  // 沉默期（长期未上报）节点：不再逐台写进日报，只并入离线聚合条目里提一句（T9）
+  const stale = new Set(agents.filter((a) => a.stale).map((a) => a.name));
+  const staleHits = clean.filter((h) => stale.has(h.agent_name));
+  const rest = clean.filter((h) => !stale.has(h.agent_name));
+  const offlineHits = rest.filter((h) => offline.has(h.agent_name));
+  const onlineHits = rest.filter((h) => !offline.has(h.agent_name));
 
   const out = [];
   // 只要离线节点达到 3 台就必须有一条聚合条目（由本函数生成，不依赖模型是否逐台列出）：
@@ -230,9 +235,11 @@ function capHighlights(analysis, summary, opts) {
   // 离线信息就会从报告里彻底消失（真机报告 #54 复现过）。
   if (offline.size >= 3) {
     const sample = Array.from(offline).slice(0, 5).join('、');
+    const silentDays = Number(summary && summary.silent_days) || 3;
     out.push({
       agent_name: '(多节点)',
-      issue: `${offline.size} 台节点离线（${sample}${offline.size > 5 ? ' 等' : ''}）`,
+      issue: `${offline.size} 台节点离线（${sample}${offline.size > 5 ? ' 等' : ''}）`
+        + (staleHits.length ? `，其中 ${staleHits.length} 台超过 ${silentDays} 天未上报` : ''),
       reason: '可能是区域性网络中断、批量到期停机或探针未部署（概率性判断）',
       suggestion: '按分组/地域核对离线集合，优先确认是否共用同一网络出口或服务商'
     });
@@ -262,7 +269,13 @@ function capHighlights(analysis, summary, opts) {
 
   return {
     analysis: Object.assign({}, analysis, { highlights: safe }),
-    stats: { raw: list.length, kept: safe.length, dropped_unknown: droppedUnknown, offline_total: offline.size }
+    stats: {
+      raw: list.length,
+      kept: safe.length,
+      dropped_unknown: droppedUnknown,
+      offline_total: offline.size,
+      stale_dropped: staleHits.length
+    }
   };
 }
 
@@ -315,6 +328,18 @@ async function generateAndSend(opts) {
   const capped = capHighlights(analysis, summary);
   analysis = capped.analysis;
 
+  // 风险等级锚定本地确定性规则：偏离 summary.baseline_risk 超过一级即校正（见 stats.clampRisk），
+  // 并保留模型原始判定，便于回看它是否长期被少数节点带偏（「风险通胀」）。
+  if (analysis) {
+    const rawRisk = String(analysis.risk_level || '').toLowerCase();
+    const clamped = clampRisk(rawRisk, summary.baseline_risk);
+    analysis = Object.assign({}, analysis, {
+      risk_level: clamped,
+      risk_level_raw: rawRisk,
+      risk_clamped: clamped !== rawRisk
+    });
+  }
+
   const riskLevel = analysis ? (analysis.risk_level || '') : '';
   const aiSummary = analysis ? (analysis.summary || '') : '';
   const suggestion = analysis
@@ -325,6 +350,9 @@ async function generateAndSend(opts) {
     summary,
     analysis: analysis || { _parse_error: true, raw: aiText.slice(0, 2000) },
     highlight_stats: capped.stats || null,
+    // 本地确定性锚点与信号量：便于回溯「模型原始等级 vs 本地规则」的偏差
+    baseline_risk: summary.baseline_risk,
+    signals: summary.signals,
     degraded,
     degrade_reason: degradeReason
   });
