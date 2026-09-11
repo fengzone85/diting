@@ -190,4 +190,35 @@ function summarize(options) {
   };
 }
 
-module.exports = { summarize, summarizeAgent, stats };
+// 单节点摘要（T11 按需分析用）：自行取数——近 periodHours 的采样行 + 14 天磁盘趋势序列。
+function summarizeOne(agent, options) {
+  const opts = options || {};
+  const periodHours = Number(opts.periodHours) || 24;
+  const sinceTs = Date.now() - periodHours * 3600000;
+
+  const ui = db.getUiSettings();
+  const alertCfg = (ui && ui.alert) || {};
+  const intervalSec = Number(process.env.AGENT_INTERVAL || DEFAULT_AGENT_INTERVAL);
+  const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
+  const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
+  const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
+  const silentDays = Number(db.getAiConfig().silent_days) || 0;
+
+  const rows = db.getMetricsSparklinesOne(agent.id, sinceTs, 1000);
+  const trendDays = resolveTrendDays();
+  const diskSeriesByAgent = {};
+  if (trendDays > 0) {
+    const mine = db.metricsDiskTrendAll(Date.now() - AI_TREND_FETCH_DAYS * 86400000, AI_TREND_BUCKET_MS)
+      .filter((r) => r.agent_id === agent.id)
+      .map((r) => ({ ts: r.ts, pct: r.pct }));
+    if (mine.length) diskSeriesByAgent[agent.id] = mine;
+  }
+
+  const summary = summarizeAgent(agent, rows, {
+    intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays
+  });
+  summary.period = `${periodHours}h`;
+  return summary;
+}
+
+module.exports = { summarize, summarizeAgent, summarizeOne, stats };

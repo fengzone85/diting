@@ -925,8 +925,11 @@ router.get('/ai/config', adminOrReadonly, (req, res) => {
   const c = db.getAiConfig();
   const safe = Object.assign({}, c);
   if (safe.api_key) safe.api_key = '';
-  // 补充一个 has_key 标志，让前端知道密钥是否已配置（不泄露密钥本身）
-  safe.has_key = !!c.api_key;
+  // 补充一个 has_key 标志，让前端知道密钥是否已配置（不泄露密钥本身）；
+  // AI_KEY_FROM_ENV=1 时以环境变量为准，DB 中的 Key 不参与。
+  const fromEnv = process.env.AI_KEY_FROM_ENV === '1';
+  safe.has_key = fromEnv ? !!process.env.AI_API_KEY : !!c.api_key;
+  safe.key_from_env = fromEnv;
   res.json({ config: safe });
 });
 // PUT 配置：api_key 留空保持不变（同 setNotifyConfig 模式，db.js setAiConfig 内部处理）
@@ -939,7 +942,7 @@ router.put('/ai/config', adminOnly, (req, res) => {
   if (typeof b.base_url === 'string') allowed.base_url = b.base_url.slice(0, 200);
   if (typeof b.model === 'string') allowed.model = b.model.slice(0, 80);
   if (typeof b.api_key === 'string') allowed.api_key = b.api_key.slice(0, 200);
-  if (typeof b.schedule_freq === 'string' && ['daily', 'weekly'].includes(b.schedule_freq)) allowed.schedule_freq = b.schedule_freq;
+  if (typeof b.schedule_freq === 'string' && ['daily', 'weekly', 'every6h', 'every12h'].includes(b.schedule_freq)) allowed.schedule_freq = b.schedule_freq;
   if (typeof b.schedule_time === 'string' && /^\d{1,2}:\d{2}$/.test(b.schedule_time)) allowed.schedule_time = b.schedule_time;
   if (typeof b.tz_offset_hours === 'number' && Number.isFinite(b.tz_offset_hours)) allowed.tz_offset_hours = Math.max(-12, Math.min(14, b.tz_offset_hours));
   if (typeof b.locale === 'string' && ['zh-CN', 'en'].includes(b.locale)) allowed.locale = b.locale;
@@ -947,7 +950,9 @@ router.put('/ai/config', adminOnly, (req, res) => {
   if (typeof b.silent_days === 'number' && Number.isFinite(b.silent_days)) allowed.silent_days = Math.max(0, Math.min(90, Math.floor(b.silent_days)));
   // 启用时校验：必须有 model；api_key 要么本次传入非空，要么之前已配置
   if (allowed.enabled) {
-    const hasKey = !!allowed.api_key || !!db.getAiConfig().api_key;
+    // AI_KEY_FROM_ENV=1 时以环境变量为准，DB 中的 Key 不参与校验
+    const fromEnv = process.env.AI_KEY_FROM_ENV === '1';
+    const hasKey = fromEnv ? !!process.env.AI_API_KEY : (!!allowed.api_key || !!db.getAiConfig().api_key);
     const hasModel = !!allowed.model || !!db.getAiConfig().model;
     if (!hasModel) return res.status(400).json({ error: '启用 AI 分析需先配置模型名称（model）' });
     if (!hasKey) return res.status(400).json({ error: '启用 AI 分析需先配置 API Key' });
@@ -978,6 +983,16 @@ router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
     throw e;
   }
 }));
+// 单节点按需分析（T11）：同一节点结果缓存 30 分钟，避免重复点击重复计费。
+router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => {
+  const r = await ai.analyzeNode(String(req.params.id));
+  auditLog(req, 'ai_analyze_node', `agent=${req.params.id} status=${r.status}`);
+  if (r.status === 'not_found') return res.status(404).json(r);
+  if (r.status === 'disabled') return res.status(400).json(r);
+  if (r.status === 'error') return res.status(502).json(r);
+  return res.json(r);
+}));
+
 // 运行状态（前端展示 last_run / last_status）
 router.get('/ai/status', adminOrReadonly, (req, res) => {
   res.json(ai.getStatus());
