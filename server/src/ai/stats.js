@@ -160,4 +160,64 @@ function diskTrend(series, opts) {
   };
 }
 
-module.exports = { nums, stats, overThresholdMinutes, median, quantile, diskFullDays, diskTrend, memSlope };
+// ---- 风险分级（确定性锚点）----
+// 模型对「整体风险等级」的自由裁量很容易被少数扎眼节点带偏（实测某站点曾连续多日恒为 high）。
+// 这里先用本地规则算一个确定性的 baseline，模型只能在此基础上上下浮动一级（见 report.clampRisk）。
+
+// 是否属于「指标超阈值节点」：超阈值分钟数 > 0，或峰值达到告警阈值。
+function isOverThreshold(a, cpuAlert, memAlert) {
+  const c = a.cpu || {};
+  const m = a.memory || {};
+  if ((c.over_threshold_minutes || 0) > 0 || (m.over_threshold_minutes || 0) > 0) return true;
+  if (c.max != null && c.max >= cpuAlert) return true;
+  if (m.max != null && m.max >= memAlert) return true;
+  return false;
+}
+
+// 汇总用于分级与展示的信号量。
+function computeSignals(summaryAgents, opts) {
+  const o = opts || {};
+  const cpuAlert = Number(o.cpuAlert) || 90;
+  const memAlert = Number(o.memAlert) || 90;
+  const list = Array.isArray(summaryAgents) ? summaryAgents : [];
+  const agents = list.length;
+  const offline = list.filter((a) => !a.online).length;
+  const stale = list.filter((a) => a.stale).length;
+  const overThreshold = list.filter((a) => isOverThreshold(a, cpuAlert, memAlert)).length;
+  const expiring7d = list.filter((a) => a.billing && a.billing.days_until_expire != null && a.billing.days_until_expire <= 7).length;
+  return {
+    agents,
+    online: agents - offline,
+    offline,
+    stale,
+    offline_ratio: agents ? +(offline / agents).toFixed(3) : 0,
+    over_threshold: overThreshold,
+    expiring_7d: expiring7d
+  };
+}
+
+// 本地规则分级：离线占比 >30% 且离线数 ≥3，或超阈值节点 ≥3 → high；
+// 有离线 / 有超阈值 / 有 7 天内临期 → medium；否则 low。
+// 「至少 3 台」的门槛是为了小规模部署：2 台里掉 1 台占比就有 50%，不该直接判 high。
+function baselineRisk(signals) {
+  const s = signals || {};
+  if (((s.offline_ratio || 0) > 0.3 && (s.offline || 0) >= 3) || (s.over_threshold || 0) >= 3) return 'high';
+  if ((s.offline || 0) > 0 || (s.over_threshold || 0) >= 1 || (s.expiring_7d || 0) >= 1) return 'medium';
+  return 'low';
+}
+
+const RISK_ORDER = { low: 0, medium: 1, high: 2 };
+
+// 把模型给出的 risk_level 锚定到 baseline 的 ±1 级；非法值原样返回（渲染层会兜底）。
+function clampRisk(raw, baseline) {
+  const ri = RISK_ORDER[String(raw || '').toLowerCase()];
+  const bi = RISK_ORDER[baseline];
+  if (ri == null || bi == null) return raw;
+  const capped = Math.max(bi - 1, Math.min(bi + 1, ri));
+  return Object.keys(RISK_ORDER).find((k) => RISK_ORDER[k] === capped);
+}
+
+module.exports = {
+  nums, stats, overThresholdMinutes, median, quantile, diskFullDays, diskTrend, memSlope,
+  computeSignals, baselineRisk, clampRisk
+};

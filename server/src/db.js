@@ -593,7 +593,8 @@ function getAiConfig() {
     schedule_time: '08:00',       // HH:MM，按 tz_offset_hours 解释
     tz_offset_hours: 8,           // 默认东八区
     locale: 'zh-CN',              // 通知正文语言：zh-CN | en（跟随后台设置，默认中文）
-    log_retention_days: 30        // AI 日报保留天数（与 metrics 保留期独立）
+    log_retention_days: 30,       // AI 日报保留天数（与 metrics 保留期独立）
+    silent_days: 3                // 长期离线沉默期（天）：超过则标 stale，不逐台写进日报（0=关闭）
   };
   try {
     const o = JSON.parse(getConfig(AI_CONFIG_KEY) || '{}');

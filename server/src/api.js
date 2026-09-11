@@ -944,6 +944,7 @@ router.put('/ai/config', adminOnly, (req, res) => {
   if (typeof b.tz_offset_hours === 'number' && Number.isFinite(b.tz_offset_hours)) allowed.tz_offset_hours = Math.max(-12, Math.min(14, b.tz_offset_hours));
   if (typeof b.locale === 'string' && ['zh-CN', 'en'].includes(b.locale)) allowed.locale = b.locale;
   if (typeof b.log_retention_days === 'number' && Number.isFinite(b.log_retention_days)) allowed.log_retention_days = Math.max(7, Math.min(3650, Math.floor(b.log_retention_days)));
+  if (typeof b.silent_days === 'number' && Number.isFinite(b.silent_days)) allowed.silent_days = Math.max(0, Math.min(90, Math.floor(b.silent_days)));
   // 启用时校验：必须有 model；api_key 要么本次传入非空，要么之前已配置
   if (allowed.enabled) {
     const hasKey = !!allowed.api_key || !!db.getAiConfig().api_key;
