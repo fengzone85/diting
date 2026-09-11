@@ -92,7 +92,6 @@ const message = ref('');
 const local = ref<SettingsForm>({ ui: {}, notify: {} });
 // 用户是否已修改但未保存；编辑期间禁止自动刷新覆盖输入（避免 10s 轮询清空）
 const dirty = ref(false);
-watch(local, () => { dirty.value = true; }, { deep: true });
 
 function resetLocal() {
   local.value = {
@@ -180,6 +179,13 @@ watch(() => state.settings, (s) => {
   if (dirty.value) return;
   if (s) local.value = cloneSettings(s);
 }, { immediate: true });
+
+// ⚠ 顺序要求：dirty 的监听必须在上面「回填 local」的 watch 之后注册。
+// 否则上面的 resetLocal() 会先触发本 watcher（flush:'pre' 延迟到 setup 结束后执行），
+// 使 dirty 在服务端设置到达前就变 true → 回填被 `if (dirty.value) return` 拦掉，
+// 结果是冷加载（刷新 /admin/settings）时表单显示默认值，且此时点保存会用残缺的
+// local 覆盖服务端已存配置（site_title、logo、SMTP 等被清空）。
+watch(local, () => { dirty.value = true; }, { deep: true });
 
 // ---- 备份监控：宿主侧 diting.sh 执行后回写服务端，本页只读展示 ----
 const backupState = ref<BackupState | null>(null);

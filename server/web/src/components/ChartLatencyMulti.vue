@@ -66,8 +66,8 @@ function detectInterval(series: LatencySeries[]): number {
 // 对齐 Komari：按探测间隔做时间桶聚合（最小 800ms / 最大 6000ms 桶宽）
 // 同一桶内取最后一个有效点（null 跳过），把点数压到 ~区间长度/桶宽
 function bucketDownsample(series: LatencySeries[]): LatencySeries[] {
-  const interval = detectInterval(series);
-  const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 1000 * 0.25)));
+  const interval = detectInterval(series); // 单位已是 ms，不要再乘 1000
+  const bucket = Math.min(6000, Math.max(800, Math.floor(interval * 0.25)));
   return series.map((s) => {
     const map = new Map<number, { t: number; v: number | null }>();
     const order: number[] = [];
