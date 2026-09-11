@@ -15,7 +15,13 @@
 
 const db = require('../db');
 const { daysUntil, cycleLabel } = require('../util');
-const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope } = require('./stats');
+const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk } = require('./stats');
+
+// 节点名是不可信输入（自助注册可自定义）：进 prompt 前清洗控制字符并限长，
+// 避免换行/超长文本破坏 JSON 结构，或在提示词里夹带指令（提示注入）。
+function safeName(v) {
+  return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 50);
+}
 
 const DEFAULT_AGENT_INTERVAL = 20;   // 秒；与 agent/agent.py 的 INTERVAL 默认值保持一致
 const AI_TREND_FETCH_DAYS = 14;      // 趋势查询最多回看的天数（成本上限：14d ≈1s）
@@ -76,6 +82,9 @@ function summarizeAgent(agent, rows, opts) {
   const memAlert = Number(o.memAlert) || 90;
   const now = Date.now();
   const online = agent.last_seen && (now - agent.last_seen) < offlineSec * 1000;
+  // 沉默期：离线且超过 silent_days 天未上报 → 标 stale（日报不逐台展开，只在汇总里提一句）
+  const silentDays = Number(o.silentDays) || 0;
+  const stale = !!(!online && silentDays > 0 && agent.last_seen && (now - agent.last_seen) > silentDays * 86400000);
 
   const cpuStats = stats(rows.map(r => r.cpu));
   const memStats = stats(rows.map(r => r.mem_pct));
@@ -89,8 +98,9 @@ function summarizeAgent(agent, rows, opts) {
 
   return {
     id: agent.id,
-    name: agent.name,
+    name: safeName(agent.name),
     online,
+    stale,
     samples: rows.length,
     cpu: {
       avg: cpuStats.avg, max: cpuStats.max, p95: cpuStats.p95,
@@ -156,9 +166,14 @@ function summarize(options) {
     }
   }
 
-  const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays };
+  const silentDays = Number(db.getAiConfig().silent_days) || 0;
+  const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays };
   const out = agents.map(a => summarizeAgent(a, byAgent[a.id] || [], sumOpts));
   const onlineCount = out.filter(s => s.online).length;
+
+  // 确定性风险锚点：模型只能在它上下浮动一级（见 stats.baselineRisk / report.clampRisk），
+  // 避免「风险通胀」——实测站点曾因少数扎眼节点导致 risk_level 连续多日恒为 high。
+  const signals = computeSignals(out, { cpuAlert, memAlert });
 
   return {
     generated_at: new Date().toISOString(),
@@ -167,6 +182,9 @@ function summarize(options) {
     online_count: onlineCount,
     offline_count: agents.length - onlineCount,
     thresholds: { cpu_pct: cpuAlert, mem_pct: memAlert, offline_sec: offlineSec },
+    silent_days: silentDays,
+    baseline_risk: baselineRisk(signals),
+    signals,
     disk_trend_days: trendDays,
     agents: out
   };
