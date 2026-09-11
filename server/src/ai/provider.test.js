@@ -6,7 +6,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { parseAnalysis, checkBaseUrl, AiError } = require('./provider');
+const { parseAnalysis, checkBaseUrl, resolveApiKey, AiError } = require('./provider');
 
 test('parseAnalysis: 标准 JSON', () => {
   const r = parseAnalysis('{"risk_level":"low","summary":"ok"}');
@@ -39,6 +39,22 @@ test('checkBaseUrl: 云元数据地址一律拒绝（SSRF 黑名单）', async (
   await assert.rejects(() => checkBaseUrl('http://100.100.100.200/latest/meta-data'), AiError);
   // 169.254.0.0/16 全段
   await assert.rejects(() => checkBaseUrl('http://169.254.1.1/v1'), AiError);
+});
+
+test('resolveApiKey: 默认取配置里的 Key', () => {
+  delete process.env.AI_KEY_FROM_ENV;
+  assert.strictEqual(resolveApiKey({ api_key: 'sk-a' }), 'sk-a');
+  assert.strictEqual(resolveApiKey({}), '');
+  assert.strictEqual(resolveApiKey(null), '');
+});
+
+test('resolveApiKey: AI_KEY_FROM_ENV=1 时只认环境变量，且不回退到 DB', () => {
+  process.env.AI_KEY_FROM_ENV = '1';
+  process.env.AI_API_KEY = 'sk-env';
+  assert.strictEqual(resolveApiKey({ api_key: 'sk-db' }), 'sk-env');
+  delete process.env.AI_API_KEY;
+  assert.strictEqual(resolveApiKey({ api_key: 'sk-db' }), '', '环境变量缺失时应为空而不是回退到 DB');
+  delete process.env.AI_KEY_FROM_ENV;
 });
 
 test('checkBaseUrl: 内网/回环允许（本地 Ollama / vLLM 场景），非法 URL 抛错', async () => {

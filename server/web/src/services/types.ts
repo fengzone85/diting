@@ -208,6 +208,8 @@ export interface AiConfig {
   locale?: 'zh-CN' | 'en';
   log_retention_days?: number;
   silent_days?: number;
+  period_hours?: number;
+  key_from_env?: boolean;
 }
 
 export interface AiStatus {
@@ -222,6 +224,24 @@ export interface AiStatus {
   running?: boolean;
   started_at?: number | null;
   report_count?: number;
+}
+
+// POST /api/ai/analyze-node/:id 的返回值：单节点按需分析（结果缓存 30 分钟）
+export interface AiNodeAnalysis {
+  status: 'ok' | 'cached' | 'disabled' | 'not_found' | 'error';
+  cached?: boolean;
+  agent?: { id: string; name: string; online?: boolean };
+  analysis?: {
+    risk_level?: string;
+    summary?: string;
+    findings?: Array<{ metric?: string; detail?: string; reason?: string; suggestion?: string }>;
+    _parse_error?: boolean;
+    raw?: string;
+  };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
+  duration_ms?: number;
+  prompt_version?: string;
+  message?: string;
 }
 
 // POST /api/ai/run 的返回值：异步任务，202 受理 / 400 未启用 / 409 执行中 / 429 冷却
