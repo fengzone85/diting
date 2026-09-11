@@ -110,6 +110,18 @@ test('节点不存在时 POST /api/ai/analyze-node/:id → 404（AI 已启用）
   assert.strictEqual(res.body.status, 'not_found');
 });
 
+test('GET /api/ai/usage 返回按日聚合与合计（降级报告的 token 记为 0）', async () => {
+  const res = await request(app).get('/api/ai/usage?days=7').set(ADMIN);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.days, 7);
+  assert.ok(Array.isArray(res.body.list));
+  assert.ok(typeof res.body.total_tokens === 'number' && res.body.total_tokens >= 0);
+  for (const row of res.body.list) {
+    assert.match(row.day, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(row.reports >= 1);
+  }
+});
+
 test('状态接口暴露 running / last_duration_ms / started_at 字段', async () => {
   const st = await waitIdle();
   assert.ok(Object.prototype.hasOwnProperty.call(st, 'running'), '缺 running');

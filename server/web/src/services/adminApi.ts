@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -69,6 +69,8 @@ export const adminApi = {
   aiReports: (limit = 20, offset = 0) =>
     api.get<AiReportList>(`/api/ai/reports?limit=${limit}&offset=${offset}`),
   aiReport: (id: number) => api.get<AiReport>(`/api/ai/reports/${encodeURIComponent(String(id))}`),
+  // AI 用量趋势（按 UTC 日聚合 token 消耗）
+  aiUsage: (days = 7) => api.get<AiUsage>(`/api/ai/usage?days=${days}`),
   // 单节点按需分析（服务端缓存 30 分钟，重复点击不会重复计费）
   aiAnalyzeNode: (id: string) => api.post<AiNodeAnalysis>(`/api/ai/analyze-node/${encodeURIComponent(id)}`, {}),
 

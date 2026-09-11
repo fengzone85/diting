@@ -471,6 +471,7 @@ export const zhCN: Record<string, string> = {
   'ai.lastStatus': '最近状态',
   'ai.error': '错误',
   'ai.reportCount': '报告数量',
+  'ai.usage7d': '近 7 天 Token 消耗',
   'ai.noSummary': '无摘要',
   'ai.prevPage': '上一页',
   'ai.nextPage': '下一页',
