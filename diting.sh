@@ -44,9 +44,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.2"
+SCRIPT_VERSION="1.1.3"
 SCRIPT_DATE="2026-09-11"
-SCRIPT_NOTES="修复图形菜单(whiptail)因命令替换导致 -t 1 恒假而从未生效；修复卸载受控端脚本路径(unditing→uninstall)；更新受控端保留 PROBE_TARGETS；服务端 compose 补齐 SESSION_SECRET/SETUP_TOKEN 等环境变量"
+SCRIPT_NOTES="菜单新增 9) 重置管理员 Token、10) 清除 IP 白名单（两项原仅命令行可用）；新增 --clear-ip-whitelist 救援入口，误配白名单锁门时无需登录即可恢复；修复图形菜单失效、卸载路径与更新丢失探测目标"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -97,6 +97,9 @@ show_usage() {
   # 管理员 Token 重置（丢失 Token 时使用，需 SSH 登录服务器）
   sudo bash diting.sh --reset-admin-token         # 生成新管理员 Token（旧 Token 立即失效）
 
+  # IP 白名单配错把管理员锁在门外时的救援（改库即时生效，无需重启）
+  sudo bash diting.sh --clear-ip-whitelist        # 清空 admin_allow_ips，恢复全放行
+
 选项：
   --install-server        安装服务端（Docker）
   --install-agent         安装受控端（systemd）
@@ -110,6 +113,7 @@ show_usage() {
   --backup-list           列出已有备份
   --db-stats              查看数据库统计信息
   --reset-admin-token     重置管理员 Token（丢失时使用，旧 Token 立即失效）
+  --clear-ip-whitelist    清除管理端 IP 白名单（误配锁门时救援，改库即时生效）
   --server URL            SERVER_URL
   --id / --token          节点 ID 与令牌（手动模式）
   --token-file FILE       从文件读取令牌（推荐，避免明文暴露）
@@ -873,6 +877,127 @@ db_manage_menu() {
     esac
 }
 
+# 在服务端数据库上执行一段 Node 脚本。
+# 参数约定：脚本内用 process.argv[2] 取库路径（node 的 argv[1] 是脚本自身路径），
+# 其余入参依次为 argv[3..]。
+# 三种部署形态通用：运行中容器 / 仅卷存在 / 宿主机文件。
+# 依赖服务端镜像自带的 better-sqlite3（无额外依赖）；原生部署需宿主机 node 可用。
+db_run_js() {
+    local js="$1"; shift
+    local loc; loc="$(locate_db)"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装${NC}" >&2
+        return 1
+    fi
+    if [[ "$loc" == docker:* ]]; then
+        local cid cpath
+        cid="$(echo "$loc" | cut -d: -f2)"
+        cpath="$(echo "$loc" | cut -d: -f4)"
+        timeout 180 docker cp "$js" "${cid}:/tmp/diting_db.js" >/dev/null 2>&1 || return 1
+        timeout 180 docker exec "$cid" node /tmp/diting_db.js "$cpath" "$@" || {
+            timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+            return 1
+        }
+        timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+    elif [[ "$loc" == volume:* ]]; then
+        local vol simg jsdir jsname
+        vol="$(echo "$loc" | cut -d: -f2)"
+        jsdir="$(dirname "$js")"; jsname="$(basename "$js")"
+        simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
+        if [[ -z "$simg" ]]; then
+            echo -e "${RED}[错误] 未找到服务端镜像，无法启动临时容器${NC}" >&2
+            return 1
+        fi
+        timeout 180 docker run --rm -v "$vol":/data -v "$jsdir":/host_js:ro \
+            "$simg" node "/host_js/$jsname" /data/monitor.db "$@" || return 1
+    else
+        local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
+        if ! command -v node >/dev/null 2>&1; then
+            echo -e "${RED}[错误] 原生部署需要宿主机 node（且能 require better-sqlite3）${NC}" >&2
+            return 1
+        fi
+        node "$js" "$fpath" "$@" || return 1
+    fi
+}
+
+# 读取 admin_config.ui_settings 里的某个顶层字段值（查不到/解析失败输出空串）。
+# 用法：db_ui_field_get <字段名>
+db_ui_field_get() {
+    local field="$1" js; js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+const row = db.prepare("SELECT value FROM admin_config WHERE key = 'ui_settings'").get();
+let v = '';
+if (row && row.value) { try { v = (JSON.parse(row.value)[process.argv[3]] || ''); } catch (e) { v = ''; } }
+console.log(String(v));
+JS
+    db_run_js "$js" "$field"
+    local rc=$?
+    rm -f "$js"
+    return $rc
+}
+
+# 清除管理端 IP 白名单（ui_settings.admin_allow_ips）。
+# 用途：白名单配错把管理员锁在门外（/api/* 全部 403 ip not allowed）时的救援入口。
+# 无需登录、无需重启 —— auth.js 每次请求读库，改完即时生效。
+do_clear_ip_whitelist() {
+    echo "$(msg "wl.header")"
+    echo ""
+    echo -e "${YELLOW}$(msg "wl.warn")${NC}"
+    # 交互模式才确认：命令行调用（救援/CI）要求一步到位
+    if [[ "$UI_TTY" -eq 1 ]]; then
+        if ! ui_confirm "$(msg "wl.header")" "$(msg "wl.warn")\n\n$(msg "wl.confirm_prompt")"; then
+            msg "wl.cancelled"; return 0
+        fi
+    fi
+
+    ensure_docker || return 1
+
+    local cur
+    if ! cur="$(db_ui_field_get admin_allow_ips)"; then
+        echo -e "${RED}[错误] $(msg "wl.failed")：$(msg "wl.read_failed")${NC}" >&2
+        echo -e "       $(msg "wl.node_hint")" >&2
+        return 1
+    fi
+    if [[ -z "$cur" ]]; then
+        echo -e "${GREEN}[OK]   $(msg "wl.empty")${NC}"
+        echo -e "       $(msg "wl.empty_hint")"
+        return 0
+    fi
+    echo -e "  $(msg "wl.current") ${cur}"
+
+    local js out; js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+const before = db.prepare("SELECT value FROM admin_config WHERE key = 'ui_settings'").get();
+// json_set 保留其它设置字段，仅把 admin_allow_ips 置空
+const r = db.prepare("UPDATE admin_config SET value = json_set(value, '$.admin_allow_ips', '') WHERE key = 'ui_settings'").run();
+const after = db.prepare("SELECT value FROM admin_config WHERE key = 'ui_settings'").get();
+const pick = (row) => { let v = ''; if (row && row.value) { try { v = JSON.parse(row.value).admin_allow_ips || ''; } catch (e) { v = ''; } } return v; };
+console.log('BEFORE=' + pick(before));
+console.log('CHANGED=' + r.changes);
+console.log('AFTER=' + pick(after));
+JS
+    if ! out="$(db_run_js "$js")"; then
+        rm -f "$js"
+        echo -e "${RED}[错误] $(msg "wl.failed")${NC}" >&2
+        return 1
+    fi
+    rm -f "$js"
+
+    local after; after="$(printf '%s\n' "$out" | sed -n 's/^AFTER=//p' | tail -n1)"
+    if [[ -n "$after" ]]; then
+        echo -e "${RED}[错误] $(msg "wl.failed")（$(msg "wl.current") ${after}）${NC}" >&2
+        return 1
+    fi
+    echo ""
+    echo -e "${GREEN}[OK]   $(msg "wl.ok")${NC}"
+    echo -e "       $(msg "wl.old_value") ${cur}  →  （空）"
+    echo -e "${YELLOW}$(msg "wl.hint")${NC}"
+}
+
 # 重置管理员 Token：仅通过 SSH 在服务器上运行，生成新 Token 并立即使旧 Token 失效
 do_reset_admin_token() {
     echo "$(msg "reset.header")"
@@ -970,8 +1095,10 @@ declare -A I18N_ZH=(
     [menu.status]="查看状态"
     [menu.uninstall]="卸载"
     [menu.db_manage]="数据库管理（备份/恢复/统计）"
+    [menu.reset_token]="重置管理员 Token（丢失 Token 时救援）"
+    [menu.clear_whitelist]="清除 IP 白名单（误配锁门时救援）"
     [menu.exit]="退出"
-    [menu.prompt]="请选择 [0-8]: "
+    [menu.prompt]="请选择 [0-10]: "
     [menu.exit_msg]="退出"
     [tui.title]="谛听轻量探针 一键部署"
     [tui.available]="检测到图形终端 (whiptail/dialog)，已启用交互界面"
@@ -999,6 +1126,19 @@ declare -A I18N_ZH=(
     [reset.ok]="[OK]   新管理员 Token 已生成"
     [reset.save]="[重要] 请立即保存！旧 Token 已失效，需用新 Token 登录。"
     [reset.warn]="[警告] 此操作将生成新的管理员 Token，旧 Token 立即失效！"
+    [wl.header]="== 清除 IP 白名单 =="
+    [wl.warn]="[警告] 清除后任何来源 IP 都能访问管理接口（安全性下降）。仅用于白名单配错把管理员锁在门外时的救援。"
+    [wl.confirm_prompt]="确认清除？"
+    [wl.cancelled]="已取消"
+    [wl.empty]="当前未配置 IP 白名单（默认全放行），无需清除"
+    [wl.empty_hint]="若仍无法登录，请检查 Nginx allow/deny、云防火墙或反代来源 IP 等其它拦截层。"
+    [wl.current]="当前白名单:"
+    [wl.ok]="IP 白名单已清除，管理接口恢复全放行"
+    [wl.old_value]="原值:"
+    [wl.hint]="[提示] 改库即时生效，无需重启；请重新登录后台确认。恢复正常后可在「设置」重新配置白名单。"
+    [wl.failed]="清除失败"
+    [wl.read_failed]="无法读取数据库"
+    [wl.node_hint]="原生部署要求宿主机 node 与 better-sqlite3 版本匹配；Docker 部署不受此影响。"
 )
 declare -A I18N_EN=(
     [menu.header]="━━━ 谛听轻量探针 Deploy  v%s (%s) ━━━━━━━━"
@@ -1015,8 +1155,10 @@ declare -A I18N_EN=(
     [menu.status]="Status"
     [menu.uninstall]="Uninstall"
     [menu.db_manage]="Database (backup/restore/stats)"
+    [menu.reset_token]="Reset Admin Token (rescue when lost)"
+    [menu.clear_whitelist]="Clear IP Whitelist (rescue from lockout)"
     [menu.exit]="Exit"
-    [menu.prompt]="Select [0-8]: "
+    [menu.prompt]="Select [0-10]: "
     [menu.exit_msg]="Exit"
     [tui.title]="Diting Deploy"
     [tui.available]="Graphical terminal detected (whiptail/dialog), TUI enabled"
@@ -1044,6 +1186,19 @@ declare -A I18N_EN=(
     [reset.ok]="[OK]   New admin token generated"
     [reset.save]="[Important] Save it now! Old token is invalid."
     [reset.warn]="[Warning] This will generate a new admin token. Old token will be invalid!"
+    [wl.header]="== Clear IP Whitelist =="
+    [wl.warn]="[Warning] After clearing, any source IP can reach the admin API (lower security). Only use this to recover from a misconfigured whitelist that locked you out."
+    [wl.confirm_prompt]="Confirm clearing?"
+    [wl.cancelled]="Cancelled"
+    [wl.empty]="No IP whitelist configured (all allowed by default) - nothing to clear"
+    [wl.empty_hint]="If you still cannot log in, check other blocking layers: Nginx allow/deny, cloud firewall, or reverse-proxy source IP."
+    [wl.current]="Current whitelist:"
+    [wl.ok]="IP whitelist cleared - admin API allows all sources again"
+    [wl.old_value]="Old value:"
+    [wl.hint]="[Note] Takes effect immediately (no restart). Log in again to confirm; you may re-configure the whitelist in Settings afterwards."
+    [wl.failed]="Failed to clear"
+    [wl.read_failed]="cannot read the database"
+    [wl.node_hint]="Native deployments require a host node matching better-sqlite3 ABI; Docker deployments are unaffected."
 )
 
 # ── 图形交互层（TUI）────────────────────────────────────────────────────────────
@@ -1186,6 +1341,8 @@ show_menu() {
         "6" "$(msg "menu.status")" \
         "7" "$(msg "menu.uninstall")" \
         "8" "$(msg "menu.db_manage")" \
+        "9" "$(msg "menu.reset_token")" \
+        "10" "$(msg "menu.clear_whitelist")" \
         "0" "$(msg "menu.exit")" )"
     [[ -z "$c" ]] && exit 0
     case "$c" in
@@ -1197,6 +1354,8 @@ show_menu() {
         6) status_all ;;
         7) uninstall_all ;;
         8) db_manage_menu ;;
+        9) do_reset_admin_token ;;
+        10) do_clear_ip_whitelist ;;
         *) echo "$(msg "menu.exit_msg")"; exit 0 ;;
     esac
 }
@@ -1216,6 +1375,7 @@ while [[ $# -gt 0 ]]; do
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
         --reset-admin-token) ACTION="reset-admin-token"; shift ;;
+        --clear-ip-whitelist) ACTION="clear-ip-whitelist"; shift ;;
         --server)      A_SERVER="$2"; shift 2 ;;
         --id)          A_ID="$2"; shift 2 ;;
         --token)       A_TOKEN="$2"; shift 2 ;;
@@ -1250,6 +1410,7 @@ if [[ -n "$ACTION" ]]; then
         backup-list)  do_backup_list ;;
         db-stats)     do_db_stats ;;
         reset-admin-token) do_reset_admin_token ;;
+        clear-ip-whitelist) do_clear_ip_whitelist ;;
     esac
 elif [[ -t 0 ]]; then
     while true; do show_menu; done
