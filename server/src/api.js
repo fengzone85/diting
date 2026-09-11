@@ -7,6 +7,7 @@ const db = require('./db');
 const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
+const backups = require('./backups');
 const { daysUntil, asyncHandler } = require('./util');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
@@ -912,8 +913,57 @@ router.get('/admin/backup-status', adminOrReadonly, (req, res) => {
       keep_days: Number.isFinite(Number(ui.backup_keep_days)) ? Number(ui.backup_keep_days) : 14,
       compress: ui.backup_compress !== false
     },
-    state: db.getBackupState()
+    state: db.getBackupState(),
+    // 文件管理可用性：容器内必须能读到备份目录（compose 需挂载宿主备份目录）
+    files: backups.backupSummary(),
+    files_available: fs.existsSync(backups.BACKUP_DIR),
+    dir: backups.BACKUP_DIR
   });
+});
+
+// ---- Admin: 备份文件管理（列表 / 下载 / 删除 / 恢复）----
+// 前提：宿主备份目录已挂进容器（compose 卷 + BACKUP_DIR），否则目录为空。
+router.get('/admin/backups', adminOrReadonly, (req, res) => {
+  res.json({
+    dir: backups.BACKUP_DIR,
+    available: fs.existsSync(backups.BACKUP_DIR),
+    files: backups.listBackups(),
+    restore_request: backups.readRestoreRequest()
+  });
+});
+
+// 下载：流式返回，支持大文件；文件名经白名单校验，杜绝任意文件读取
+router.get('/admin/backups/:name/download', adminOnly, (req, res) => {
+  const full = backups.resolveBackupFile(req.params.name);
+  if (!full) return res.status(400).json({ error: 'invalid backup name' });
+  let st;
+  try { st = fs.statSync(full); } catch (e) { return res.status(404).json({ error: 'not found' }); }
+  if (!st.isFile()) return res.status(404).json({ error: 'not found' });
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Length', String(st.size));
+  // filename 用 origin 形式，避免非 ASCII 触发 header 解析问题
+  res.setHeader('Content-Disposition',
+    `attachment; filename="${req.params.name}"; filename*=UTF-8''${encodeURIComponent(req.params.name)}`);
+  auditLog(req, 'download_backup', `name=${req.params.name} size=${st.size}`);
+  const stream = fs.createReadStream(full);
+  stream.on('error', () => { if (!res.headersSent) res.status(500).end(); else res.end(); });
+  stream.pipe(res);
+});
+
+router.delete('/admin/backups/:name', adminOnly, (req, res) => {
+  const r = backups.deleteBackup(req.params.name);
+  if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
+  res.json({ ok: true, name: r.name });
+  auditLog(req, 'delete_backup', `name=${r.name}`);
+});
+
+// 恢复：不直接改数据库，而是投递恢复请求文件，由宿主侧 diting.sh 消费执行
+// （脚本会先备份当前状态、校验完整性、停服原子替换再重启）。
+router.post('/admin/backups/:name/restore', adminOnly, (req, res) => {
+  const r = backups.requestRestore(req.params.name);
+  if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
+  res.json({ ok: true, name: r.name, trigger: r.trigger, queued: true });
+  auditLog(req, 'request_restore_backup', `name=${r.name}`);
 });
 
 router.get('/settings', adminOrReadonly, (req, res) => {
