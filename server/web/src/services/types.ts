@@ -305,6 +305,22 @@ export interface ModifyCommands {
   probe_targets: string;
 }
 
+// 备份文件条目（来自宿主备份目录，经服务端挂载读取）
+export interface BackupFile {
+  name: string;
+  size_bytes: number;
+  mtime: number;
+  compressed: boolean;
+  kind: 'monitor' | 'pre_restore';
+}
+
+export interface BackupList {
+  dir: string;
+  available: boolean;
+  files: BackupFile[];
+  restore_request: { file?: string; name?: string; ts?: number } | null;
+}
+
 // 数据库备份监控状态（宿主侧 diting.sh 执行后回写服务端）
 export interface BackupState {
   last_run_ts?: number;
