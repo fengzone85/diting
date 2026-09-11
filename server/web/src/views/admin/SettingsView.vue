@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
-import type { Settings } from '../../services/types';
+import type { Settings, BackupFile } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 
@@ -193,7 +193,67 @@ async function loadBackupState() {
     backupState.value = null;
   }
 }
-onMounted(() => { loadBackupState(); });
+
+// ---- 备份文件列表：下载 / 删除 / 恢复 ----
+const backupFiles = ref<BackupFile[]>([]);
+const backupDir = ref('');
+const backupAvailable = ref(true);
+const backupBusy = ref('');
+const backupMsg = ref('');
+
+async function loadBackups() {
+  try {
+    const r = await adminApi.listBackups();
+    backupFiles.value = r.files || [];
+    backupDir.value = r.dir || '';
+    backupAvailable.value = r.available !== false;
+  } catch {
+    backupFiles.value = [];
+    backupAvailable.value = false;
+  }
+}
+
+function downloadBackup(f: BackupFile) {
+  // 同源 GET + download 属性，交给浏览器流式下载，避免把整份备份读进内存
+  const a = document.createElement('a');
+  a.href = adminApi.backupDownloadUrl(f.name);
+  a.download = f.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function removeBackup(f: BackupFile) {
+  if (!confirm(t('settings.backupDeleteConfirm').replace('{name}', f.name))) return;
+  backupBusy.value = f.name;
+  backupMsg.value = '';
+  try {
+    await adminApi.deleteBackup(f.name);
+    backupMsg.value = t('settings.backupDeleted');
+    await Promise.all([loadBackups(), loadBackupState()]);
+  } catch (e) {
+    backupMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    backupBusy.value = '';
+  }
+}
+
+async function restoreBackup(f: BackupFile) {
+  if (!confirm(t('settings.backupRestoreConfirm').replace('{name}', f.name))) return;
+  backupBusy.value = f.name;
+  backupMsg.value = '';
+  try {
+    await adminApi.requestRestore(f.name);
+    backupMsg.value = t('settings.backupRestoreQueued');
+    await loadBackups();
+  } catch (e) {
+    backupMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    backupBusy.value = '';
+  }
+}
+
+onMounted(() => { loadBackupState(); loadBackups(); });
 
 function fmtBytes(n?: number): string {
   const v = Number(n || 0);
@@ -393,6 +453,78 @@ async function save() {
                 {{ backupState.last_error }}
               </div>
             </dl>
+          </div>
+        </div>
+
+        <!-- 备份文件列表：下载 / 恢复 / 删除 -->
+        <div class="mt-6 border-t border-white/10 pt-4">
+          <div class="mb-3 flex flex-wrap items-center gap-3">
+            <h3 class="font-semibold">{{ t('settings.backupFiles') }}</h3>
+            <span v-if="backupDir" class="text-xs opacity-60">{{ backupDir }}</span>
+            <button
+              class="rounded border border-white/20 px-3 py-1 text-xs hover:bg-white/10"
+              @click="loadBackups"
+            >
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+
+          <div v-if="backupMsg" class="mb-3 rounded border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">
+            {{ backupMsg }}
+          </div>
+
+          <div v-if="!backupAvailable" class="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            {{ t('settings.backupDirUnavailable') }}
+          </div>
+          <div v-else-if="!backupFiles.length" class="p-3 text-sm opacity-60">
+            {{ t('settings.backupNoFiles') }}
+          </div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="text-xs opacity-60">
+                <tr>
+                  <th class="py-2 pr-4">{{ t('settings.backupFile') }}</th>
+                  <th class="py-2 pr-4">{{ t('settings.backupTime') }}</th>
+                  <th class="py-2 pr-4">{{ t('settings.backupSize') }}</th>
+                  <th class="py-2 text-right">{{ t('common.actions') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="f in backupFiles" :key="f.name" class="border-t border-white/10">
+                  <td class="py-2 pr-4 break-all">
+                    {{ f.name }}
+                    <span v-if="f.kind === 'pre_restore'" class="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">
+                      {{ t('settings.backupKindPreRestore') }}
+                    </span>
+                  </td>
+                  <td class="py-2 pr-4 whitespace-nowrap">{{ fmtTime(f.mtime) }}</td>
+                  <td class="py-2 pr-4 whitespace-nowrap">{{ fmtBytes(f.size_bytes) }}</td>
+                  <td class="py-2 text-right whitespace-nowrap">
+                    <button
+                      class="mr-2 rounded border border-white/20 px-2 py-1 text-xs hover:bg-white/10"
+                      @click="downloadBackup(f)"
+                    >
+                      {{ t('settings.backupDownload') }}
+                    </button>
+                    <button
+                      :disabled="backupBusy === f.name"
+                      class="mr-2 rounded border border-sky-500/40 px-2 py-1 text-xs text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
+                      @click="restoreBackup(f)"
+                    >
+                      {{ t('settings.backupRestore') }}
+                    </button>
+                    <button
+                      :disabled="backupBusy === f.name"
+                      class="rounded border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/20 disabled:opacity-50"
+                      @click="removeBackup(f)"
+                    >
+                      {{ t('settings.backupDelete') }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="mt-3 text-xs opacity-60">{{ t('settings.backupRestoreHint') }}</p>
           </div>
         </div>
       </div>

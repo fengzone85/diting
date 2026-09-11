@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage, BackupState } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage, BackupState, BackupList } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -54,6 +54,14 @@ export const adminApi = {
 
   // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
   getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),
+
+  // 备份文件管理（需要宿主备份目录已挂进容器）
+  listBackups: () => api.get<BackupList>('/api/admin/backups'),
+  deleteBackup: (name: string) => api.del<{ ok: boolean }>(`/api/admin/backups/${encodeURIComponent(name)}`),
+  requestRestore: (name: string) =>
+    api.post<{ ok: boolean; queued: boolean }>(`/api/admin/backups/${encodeURIComponent(name)}/restore`, {}),
+  // 下载走同源 GET，直接用 <a download> 触发，避免把整份备份读进内存
+  backupDownloadUrl: (name: string) => `/api/admin/backups/${encodeURIComponent(name)}/download`,
 
   // alerts
   testAlert: () => api.post<{ ok: boolean; message?: string }>('/api/test-alert', {}),
