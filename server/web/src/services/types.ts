@@ -304,3 +304,18 @@ export interface ModifyCommands {
   windows_cmd: string;
   probe_targets: string;
 }
+
+// 数据库备份监控状态（宿主侧 diting.sh 执行后回写服务端）
+export interface BackupState {
+  last_run_ts?: number;
+  last_status?: string;
+  last_file?: string;
+  last_size_bytes?: number;
+  last_raw_bytes?: number;
+  last_duration_ms?: number;
+  last_error?: string;
+  last_pruned?: number;
+  backup_count?: number;
+  total_bytes?: number;
+  updated_at?: number;
+}
