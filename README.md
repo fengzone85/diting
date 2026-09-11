@@ -421,7 +421,7 @@ cd server/web && npm install && npm run build
 - [ ] 设置强随机 `ADMIN_TOKEN`（≥16 位）
 - [ ] 设置 `SESSION_SECRET`（固定随机值，防重启失效）
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
-- [ ] 配置 IP 白名单（支持 IPv4/IPv6/CIDR）
+- [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外
 - [ ] 定期备份数据库（`sudo bash diting.sh --backup`）
 - [ ] 配置告警通知（邮件 / Telegram）
 - [ ] 定期查阅审计日志（后台 → 审计日志）
