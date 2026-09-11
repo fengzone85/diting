@@ -224,7 +224,11 @@ function capHighlights(analysis, summary, opts) {
   const onlineHits = clean.filter((h) => !offline.has(h.agent_name));
 
   const out = [];
-  if (offline.size >= 3 && offlineHits.length >= 2) {
+  // 只要离线节点达到 3 台就必须有一条聚合条目（由本函数生成，不依赖模型是否逐台列出）：
+  // 实测模型有时会自行聚合成「mock-000 ~ mock-059 等 61 台节点」这类非真实节点名，
+  // 该条目会被上面的白名单当幻觉丢弃 —— 若此时要求 offlineHits>=2 才聚合，
+  // 离线信息就会从报告里彻底消失（真机报告 #54 复现过）。
+  if (offline.size >= 3) {
     const sample = Array.from(offline).slice(0, 5).join('、');
     out.push({
       agent_name: '(多节点)',
