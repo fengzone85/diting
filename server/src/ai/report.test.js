@@ -42,6 +42,23 @@ test('capHighlights: 大量离线节点被聚合成一条，输出 ≤9 条', ()
   assert.strictEqual(r.stats.dropped_unknown, 0);
 });
 
+test('capHighlights: 模型自行聚合的条目被丢弃后，离线仍必须出现聚合条目（真机报告 #54 回归）', () => {
+  // 真实形态：模型把 61 台离线写成 "mock-000 ~ mock-059 等 61 台节点"（非真实节点名），
+  // 同时给了 3 条在线节点 j4125 的问题。修复前：该条被丢 → 无离线聚合 → 离线信息消失。
+  const offline = Array.from({ length: 61 }, (_, i) => `mock-${String(i).padStart(3, '0')}`);
+  const analysis = {
+    highlights: [
+      { agent_name: 'mock-000 ~ mock-059 等 61 台节点', issue: '大量节点离线', reason: 'r', suggestion: 's' },
+      { agent_name: 'j4125', issue: '磁盘增长', reason: 'r', suggestion: 's' },
+      { agent_name: 'j4125', issue: '账号过期', reason: 'r', suggestion: 's' }
+    ]
+  };
+  const r = capHighlights(analysis, mkSummary(['j4125'], offline));
+  assert.strictEqual(r.stats.dropped_unknown, 1);
+  assert.strictEqual(r.analysis.highlights[0].agent_name, '(多节点)');
+  assert.match(r.analysis.highlights[0].issue, /61 台节点离线/);
+});
+
 test('capHighlights: 不在摘要中的节点名（幻觉）被丢弃并计数', () => {
   const analysis = {
     highlights: [
