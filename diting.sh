@@ -44,9 +44,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.1"
-SCRIPT_DATE="2026-07-10"
-SCRIPT_NOTES="更新服务端前先释放端口(修复8081占用)；更新后重新加载最新脚本自身；端口占用兜底强杀"
+SCRIPT_VERSION="1.1.2"
+SCRIPT_DATE="2026-09-11"
+SCRIPT_NOTES="修复图形菜单(whiptail)因命令替换导致 -t 1 恒假而从未生效；修复卸载受控端脚本路径(unditing→uninstall)；更新受控端保留 PROBE_TARGETS；服务端 compose 补齐 SESSION_SECRET/SETUP_TOKEN 等环境变量"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -379,7 +379,8 @@ install_server() {
         echo -e "${GREEN}[OK]   已生成随机 ADMIN_TOKEN / SESSION_SECRET / SETUP_TOKEN${NC}"
         echo -e "${YELLOW}[重要] SETUP_TOKEN = ${setup}${NC}"
         echo -e "${YELLOW}        受控端一键注册请用: --setup-token ${setup}${NC}"
-        echo -e "${YELLOW}        ADMIN_TOKEN 已写入 .env，请妥善保存（仅显示此一次）${NC}"
+        echo -e "${YELLOW}        ADMIN_TOKEN 已写入 .env，请妥善保存${NC}"
+        echo -e "${YELLOW}        查看: grep '^ADMIN_TOKEN=' $SRC_DIR/server/.env${NC}"
     else
         echo -e "${GREEN}[OK]   已存在 .env，跳过生成${NC}"
     fi
@@ -519,13 +520,14 @@ update_agent() {
         return 1
     fi
     # 从已存 env 读取注册身份，用户无需重新输入令牌
-    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 k v
+    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 PROBE_TARGETS="" k v
     while IFS='=' read -r k v; do
         case "$k" in
-            SERVER_URL)  SERVER_URL="$v" ;;
-            AGENT_ID)    AGENT_ID="$v" ;;
-            AGENT_TOKEN) AGENT_TOKEN="$v" ;;
-            INTERVAL)    INTERVAL="$v" ;;
+            SERVER_URL)     SERVER_URL="$v" ;;
+            AGENT_ID)       AGENT_ID="$v" ;;
+            AGENT_TOKEN)    AGENT_TOKEN="$v" ;;
+            INTERVAL)       INTERVAL="$v" ;;
+            PROBE_TARGETS)  PROBE_TARGETS="$v" ;;
         esac
     done < "$envfile"
     if [[ -z "$SERVER_URL" || -z "$AGENT_ID" || -z "$AGENT_TOKEN" ]]; then
@@ -543,8 +545,12 @@ update_agent() {
         rm -rf "$tmp"; return 1
     fi
     chmod +x "$tmp/install.sh"
-    # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务
-    bash "$tmp/install.sh" --server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL"
+    # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务。
+    # 必须回传 PROBE_TARGETS：install.sh 仅在显式传参时才写该键，否则更新后
+    # 用户自定义的探测目标会被覆盖丢失。
+    local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL")
+    [[ -n "$PROBE_TARGETS" ]] && re_args+=(--probe-targets "$PROBE_TARGETS")
+    bash "$tmp/install.sh" "${re_args[@]}"
     rm -rf "$tmp"
     echo -e "${GREEN}[OK]   受控端已更新并重启${NC}"
 }
@@ -873,7 +879,7 @@ do_reset_admin_token() {
     echo ""
     echo -e "${YELLOW}$(msg "reset.warn")${NC}"
     if ! ui_confirm "$(msg "reset.header")" "$(msg "reset.warn")\n\n$(msg "reset.confirm_prompt")"; then
-        msg "cancelled"; return 0
+        msg "reset.cancelled"; return 0
     fi
 
     ensure_deps || return 1
@@ -930,7 +936,11 @@ do_reset_admin_token() {
 
 uninstall_all() {
     echo "== 卸载受控端 =="
-    if [[ -f /opt/diting/unditing.sh ]]; then
+    # 受控端实际部署的是 /opt/diting/uninstall.sh（见 agent/install.sh）；
+    # 兼容早期重命名失误遗留的 unditing.sh。
+    if [[ -f /opt/diting/uninstall.sh ]]; then
+        bash /opt/diting/uninstall.sh || true
+    elif [[ -f /opt/diting/unditing.sh ]]; then
         bash /opt/diting/unditing.sh || true
     else
         echo "  受控端未安装"
@@ -952,26 +962,27 @@ declare -A I18N_ZH=(
     [menu.notes]="本版要点:"
     [menu.new_version]="▲ 发现新版 v%s（当前 v%s），建议先选「4) 更新安装脚本」"
     [menu.up_to_date]="✓ 已是最新脚本 (v%s)"
-    [menu.install_server]="1) 安装服务端 (Docker)"
-    [menu.install_agent]="2) 安装受控端 Agent (systemd)"
-    [menu.update_agent]="3) 更新受控端 (拉取最新 agent 代码)"
-    [menu.update_script]="4) 更新安装脚本 (diting.sh 自身)"
-    [menu.update_server]="5) 更新服务端 (拉取最新 + 重建)"
-    [menu.status]="6) 查看状态"
-    [menu.uninstall]="7) 卸载"
-    [menu.db_manage]="8) 数据库管理（备份/恢复/统计）"
-    [menu.exit]="0) 退出"
+    [menu.install_server]="安装服务端 (Docker)"
+    [menu.install_agent]="安装受控端 Agent (systemd)"
+    [menu.update_agent]="更新受控端 (拉取最新 agent 代码)"
+    [menu.update_script]="更新安装脚本 (diting.sh 自身)"
+    [menu.update_server]="更新服务端 (拉取最新 + 重建)"
+    [menu.status]="查看状态"
+    [menu.uninstall]="卸载"
+    [menu.db_manage]="数据库管理（备份/恢复/统计）"
+    [menu.exit]="退出"
     [menu.prompt]="请选择 [0-8]: "
     [menu.exit_msg]="退出"
     [tui.title]="谛听轻量探针 一键部署"
     [tui.available]="检测到图形终端 (whiptail/dialog)，已启用交互界面"
     [tui.fallback]="未检测到 whiptail/dialog，使用文字菜单"
+    [tui.install_hint]="如需图形菜单: apt-get install -y whiptail（Debian/Ubuntu）或 yum install -y newt（RHEL 系）"
     [db_menu.header]="━━━ 数据库管理 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    [db_menu.backup]="1) 备份数据库"
-    [db_menu.restore]="2) 从备份恢复"
-    [db_menu.list]="3) 查看备份列表"
-    [db_menu.stats]="4) 查看数据库统计"
-    [db_menu.back]="0) 返回主菜单"
+    [db_menu.backup]="备份数据库"
+    [db_menu.restore]="从备份恢复"
+    [db_menu.list]="查看备份列表"
+    [db_menu.stats]="查看数据库统计"
+    [db_menu.back]="返回主菜单"
     [db_menu.prompt]="请选择 [0-4]: "
     [db_menu.restore_prompt]="备份文件路径: "
     [cancelled]="已取消"
@@ -996,26 +1007,27 @@ declare -A I18N_EN=(
     [menu.notes]="Notes:"
     [menu.new_version]="▲ New version v%s available (current v%s), recommend '4) Update script'"
     [menu.up_to_date]="✓ Script up to date (v%s)"
-    [menu.install_server]="1) Install Server (Docker)"
-    [menu.install_agent]="2) Install Agent (systemd)"
-    [menu.update_agent]="3) Update Agent (fetch latest)"
-    [menu.update_script]="4) Update diting.sh (self)"
-    [menu.update_server]="5) Update Server (fetch + rebuild)"
-    [menu.status]="6) Status"
-    [menu.uninstall]="7) Uninstall"
-    [menu.db_manage]="8) Database (backup/restore/stats)"
-    [menu.exit]="0) Exit"
+    [menu.install_server]="Install Server (Docker)"
+    [menu.install_agent]="Install Agent (systemd)"
+    [menu.update_agent]="Update Agent (fetch latest)"
+    [menu.update_script]="Update diting.sh (self)"
+    [menu.update_server]="Update Server (fetch + rebuild)"
+    [menu.status]="Status"
+    [menu.uninstall]="Uninstall"
+    [menu.db_manage]="Database (backup/restore/stats)"
+    [menu.exit]="Exit"
     [menu.prompt]="Select [0-8]: "
     [menu.exit_msg]="Exit"
     [tui.title]="Diting Deploy"
     [tui.available]="Graphical terminal detected (whiptail/dialog), TUI enabled"
     [tui.fallback]="whiptail/dialog not found, using text menu"
+    [tui.install_hint]="For the graphical menu: apt-get install -y whiptail (Debian/Ubuntu) or yum install -y newt (RHEL)"
     [db_menu.header]="━━━ Database ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    [db_menu.backup]="1) Backup Database"
-    [db_menu.restore]="2) Restore from Backup"
-    [db_menu.list]="3) List Backups"
-    [db_menu.stats]="4) Database Stats"
-    [db_menu.back]="0) Back to Main Menu"
+    [db_menu.backup]="Backup Database"
+    [db_menu.restore]="Restore from Backup"
+    [db_menu.list]="List Backups"
+    [db_menu.stats]="Database Stats"
+    [db_menu.back]="Back to Main Menu"
     [db_menu.prompt]="Select [0-4]: "
     [db_menu.restore_prompt]="Backup file path: "
     [cancelled]="Cancelled"
@@ -1038,6 +1050,10 @@ declare -A I18N_EN=(
 # 优先使用 whiptail / dialog 渲染交互菜单；两者均不可用时回退到纯文本 read 菜单。
 # 设计原则：不破坏任何现有功能函数，仅在「交互菜单」与「用户输入」处叠加 TUI。
 UI_BIN=""
+# 是否处于交互式终端。**必须在顶层一次性判定**：所有 ui_* 调用点都用命令替换
+# （如 c="$(ui_menu ...)"）捕获 stdout，命令替换会把函数内 stdout 变成管道，
+# 此时在函数里再判 [ -t 1 ] 恒为假 → TUI 永远走不到，图形菜单形同虚设。
+UI_TTY=0
 detect_ui() {
     if command -v whiptail >/dev/null 2>&1; then
         UI_BIN="whiptail"
@@ -1046,25 +1062,39 @@ detect_ui() {
     else
         UI_BIN=""
     fi
+    [[ -t 0 && -t 1 ]] && UI_TTY=1
+    # 仅在交互模式下提示一次当前用的是图形还是文本界面（免得用户以为「没有可视化」）
+    if [[ "$UI_TTY" -eq 1 ]]; then
+        if [[ -n "$UI_BIN" ]]; then
+            echo -e "${GREEN}[信息] $(msg "tui.available")${NC}"
+        else
+            echo -e "${YELLOW}[信息] $(msg "tui.fallback")${NC}"
+            echo -e "        $(msg "tui.install_hint")"
+        fi
+    fi
 }
 detect_ui
 
 # ui_menu <标题> <prompt> <"tag item" 列表...>
 # 输出所选 tag 到 stdout。无 TUI 时回退到纯文本编号菜单（与旧行为一致）。
-# 调用方需把选项文本里的前导编号（如 "1) xxx"）作为展示，tag 用纯数字。
+# 条目文本不要自带编号（whiptail/dialog 会渲染 tag），文本回退会自动补 "N)"。
+# 标题传空串可跳过标题行（主菜单的 header 已含标题信息）。
 ui_menu() {
     local title="$1"; shift
     local prompt="$1"; shift
     # 剩余参数：成对的 "tag" "item"
-    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
         # 回退：纯文本
         echo "" >&2
-        echo -e "${BLUE}${title}${NC}" >&2
-        local i
+        [[ -n "$title" ]] && echo -e "${BLUE}${title}${NC}" >&2
+        # 条目文本本身不带编号（whiptail/dialog 会自动显示 tag），此处按 tag 补上 "N)"
+        local i tag
         for ((i=1; i<=$#; i+=2)); do
-            echo "  ${!i} ${@:i+1:1}" >&2
+            tag="${!i}"
+            echo "  ${tag}) ${@:i+1:1}" >&2
         done
         echo "" >&2
+        local c
         read -r -p "$prompt" c || exit 0
         echo "$c"
         return
@@ -1081,7 +1111,8 @@ ui_menu() {
 # ui_prompt <标题> <提示> [默认值] → 输出到 stdout（回车用默认值）
 ui_prompt() {
     local title="$1" text="$2" def="${3:-}"
-    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
+        local v
         read -r -p "$text${def:+ [$def]}: " v || return 1
         echo "${v:-$def}"
         return
@@ -1096,7 +1127,8 @@ ui_prompt() {
 # ui_confirm <标题> <提示> → 0=yes 1=no
 ui_confirm() {
     local title="$1" text="$2"
-    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
+        local v
         read -r -p "$text (yes/no): " v || return 1
         [[ "$v" == "yes" || "$v" == "y" || "$v" == "Y" ]]
         return
@@ -1111,7 +1143,7 @@ ui_confirm() {
 # ui_msg <标题> <消息> → 展示信息框（回退时直接 echo）
 ui_msg() {
     local title="$1" text="$2"
-    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
         echo -e "${BLUE}${title}${NC}" >&2
         echo "$text" >&2
         return
@@ -1126,19 +1158,24 @@ ui_msg() {
 # ── 菜单 ───────────────────────────────────────────────────────────────────────
 show_menu() {
     # 顶部信息（TUI 下用 msgbox 会打断流程，故信息仅回退文本模式展示；TUI 标题已含版本）
-    if [[ -z "$UI_BIN" || ! -t 1 ]]; then
+    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
         echo ""
         printf "${BLUE}$(msg "menu.header")${NC}\n" "$SCRIPT_VERSION" "$SCRIPT_DATE"
         echo -e "  $(msg "menu.os") ${GREEN}$(detect_os)${NC}  $(msg "menu.arch") ${GREEN}$(detect_arch)${NC}"
         echo -e "  $(msg "menu.notes") ${SCRIPT_NOTES}"
         local _rv; _rv="$(remote_script_version)"
         if version_gt "$_rv" "$SCRIPT_VERSION"; then
-            echo -e "  ${YELLOW}$(msg "menu.new_version" "$_rv" "$SCRIPT_VERSION")${NC}"
+            # msg 只做查表，%s 需由 printf 填充（否则会原样输出 "v%s"）
+            printf "  ${YELLOW}$(msg "menu.new_version")${NC}\n" "$_rv" "$SCRIPT_VERSION"
         elif [[ -n "$_rv" ]]; then
-            echo -e "  ${GREEN}$(msg "menu.up_to_date" "$SCRIPT_VERSION")${NC}"
+            printf "  ${GREEN}$(msg "menu.up_to_date")${NC}\n" "$SCRIPT_VERSION"
         fi
     fi
-    local title; title="$(msg "tui.title") v${SCRIPT_VERSION}"
+    # 文本模式下标题已由上方 header 打印，此处留空避免重复；TUI 下标题进窗口标题栏。
+    local title=""
+    if [[ "$UI_TTY" -eq 1 && -n "$UI_BIN" ]]; then
+        title="$(msg "tui.title") v${SCRIPT_VERSION}"
+    fi
     local c
     c="$(ui_menu "$title" "$(msg "menu.prompt")" \
         "1" "$(msg "menu.install_server")" \
@@ -1160,7 +1197,7 @@ show_menu() {
         6) status_all ;;
         7) uninstall_all ;;
         8) db_manage_menu ;;
-        *) echo "退出"; exit 0 ;;
+        *) echo "$(msg "menu.exit_msg")"; exit 0 ;;
     esac
 }
 
