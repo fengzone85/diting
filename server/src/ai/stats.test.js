@@ -94,6 +94,20 @@ test('diskTrend: 末 3 桶尖峰注入后变化 < 25%', () => {
   assert.ok(delta < 0.25, `末 3 桶尖峰影响应 <25%，实际 ${(delta * 100).toFixed(1)}%`);
 });
 
+test('diskTrend: 新增一个跳变末点时估计不漂移（稳定性回归护栏）', () => {
+  // 真机故障形态：最新 1 小时的数据到来改变了段末值，旧实现（段末值 + 单窗口）会在 9 天 ↔ 24 天间跳变，
+  // 导致日报与节点分析对同一台机器给出相差 2.5 倍的结论。
+  const base = series(10 * 24, (i) => 60 + (i / 24) * 0.8 + (i % 48 < 24 ? 0 : -3));   // 上升 + 日锯齿
+  const last = base[base.length - 1];
+  const withNew = base.concat([{ ts: last.ts + H, pct: last.pct + 4 }]);
+  const a = diskTrend(base, { maxDays: 7 });
+  const b = diskTrend(withNew, { maxDays: 7 });
+  assert.strictEqual(a.note, 'ok');
+  assert.strictEqual(b.note, 'ok');
+  const delta = Math.abs(b.days_to_90 - a.days_to_90) / a.days_to_90;
+  assert.ok(delta < 0.3, `新增跳变末点后漂移应 <30%，实际 ${(delta * 100).toFixed(1)}%`);
+});
+
 test('diskTrend: 跨度 <2 天 → insufficient（1 天窗口是噪声，不给数字）', () => {
   const r = diskTrend(series(20, (i) => 50 + i / 24), { maxDays: 7 });
   assert.strictEqual(r.note, 'insufficient');
@@ -105,11 +119,11 @@ test('diskTrend: 已达 90% → reached', () => {
 });
 
 test('diskTrend: 锯齿上升（含回落段）→ 上界为 null 且区间不倒置', () => {
-  // 控制点：升 2 → 落 1 → 再落 0.5 → 大涨 5 → 涨 2 → 涨 2（pp），保证中位斜率为正但 p25 ≤ 0
-  const pts = [[0, 60], [28, 62], [56, 61], [84, 60.5], [112, 65.5], [140, 67.5], [168, 69.5]];
+  // 6 个控制点 → 5 个段斜率；构造两段回落，使 p25 ≤ 0（存在回落）但中位斜率仍为正
+  const pts = [[0, 60], [28, 64], [56, 58], [84, 62], [112, 56], [140, 70], [168, 76]];
   const r = diskTrend(ramp(pts, 7 * 24), { maxDays: 7 });
   assert.strictEqual(r.note, 'ok');
-  assert.ok(r.slope_pct_per_day > 0, '中位斜率应为正');
+  assert.ok(r.slope_pct_per_day > 0, `中位斜率应为正，实际 ${r.slope_pct_per_day}`);
   assert.strictEqual(r.range[1], null, '存在回落时区间上界不设值（报告写「可能更久」）');
   assert.ok(r.range[0] > 0 && (r.range[1] === null || r.range[0] <= r.range[1]), '区间不得倒置');
 });
