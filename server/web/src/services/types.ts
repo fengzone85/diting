@@ -240,6 +240,12 @@ export interface AiReport {
   report_json_parsed?: Record<string, unknown>;
   prompt_version?: string;
   created_at: number;
+  // 以下字段仅详情接口（getAiReport 的 SELECT *）会返回；老报告可能没有 → 全部可选
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  duration_ms?: number;
+  degraded?: number;
 }
 
 export interface AiReportList {
