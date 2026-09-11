@@ -69,7 +69,7 @@
 - **Komari 主题兼容** — 官方社区皮肤即插即用（`/?theme=<id>`）
 - **WebSocket 实时推送** — 离线/恢复/告警实时下发
 - **仪表盘自定义** — 拖拽排序、分组、卡片/列表两种模式
-- **统一 diting.sh** — 部署+更新+卸载+数据库管理（whiptail TUI，无 GUI 回退文本菜单）
+- **统一 diting.sh** — 部署+更新+卸载+数据库管理+救援（重置 Token / 清除 IP 白名单），whiptail TUI，无 GUI 回退文本菜单
 - **自助注册** — `SETUP_TOKEN` 一键建客户端
 - **100 台规模设计** — 后端降采样 + SQL 聚合，非事后调优</td>
 </tr>
@@ -140,7 +140,7 @@ sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-to
 
 ```
 diting/
-├── diting.sh                # 一键部署/更新/卸载/数据库管理（whiptail TUI）
+├── diting.sh                # 一键部署/更新/卸载/数据库管理/救援（whiptail TUI）
 ├── docker-compose.yml       # 快速启动（测试用）
 ├── server/                  # 服务端（Node.js 22 + Express + SQLite）
 │   ├── server.js            # 入口 + 路由 + WebSocket + SPA fallback
@@ -421,7 +421,7 @@ cd server/web && npm install && npm run build
 - [ ] 设置强随机 `ADMIN_TOKEN`（≥16 位）
 - [ ] 设置 `SESSION_SECRET`（固定随机值，防重启失效）
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
-- [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外
+- [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外（误配时用 `sudo bash diting.sh --clear-ip-whitelist` 救援，改库即时生效）
 - [ ] 定期备份数据库（`sudo bash diting.sh --backup`）
 - [ ] 配置告警通知（邮件 / Telegram）
 - [ ] 定期查阅审计日志（后台 → 审计日志）
