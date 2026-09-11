@@ -62,6 +62,12 @@ test('AI 未启用时 POST /api/ai/run → 400，且不写 ai_state（不占冷�
   assert.strictEqual(st.body.last_run_ts, 0, '未启用不应推进 last_run_ts');
 });
 
+test('AI 未启用时 POST /api/ai/analyze-node/:id → 400', async () => {
+  const res = await request(app).post('/api/ai/analyze-node/agt_whatever').set(ADMIN);
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.status, 'disabled');
+});
+
 test('启用后触发 → 202 立即返回；后台跑完写入 degraded 状态与耗时', async () => {
   const cfg = await request(app).put('/api/ai/config').set(ADMIN).send({
     config: {
@@ -96,6 +102,12 @@ test('?force=1 绕过冷却 → 202', async () => {
   assert.strictEqual(res.status, 202);
   assert.strictEqual(res.body.status, 'accepted');
   await waitIdle();
+});
+
+test('节点不存在时 POST /api/ai/analyze-node/:id → 404（AI 已启用）', async () => {
+  const res = await request(app).post('/api/ai/analyze-node/agt_does_not_exist').set(ADMIN);
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.status, 'not_found');
 });
 
 test('状态接口暴露 running / last_duration_ms / started_at 字段', async () => {

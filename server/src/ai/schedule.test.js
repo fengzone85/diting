@@ -70,5 +70,27 @@ console.log('—— 辅助函数 ——');
   check('prevOccurrence weekly = -7天', prevOccurrence('weekly', 1000, 8, 8, 0), 1000 - 7 * DAY);
 }
 
+console.log('—— 间隔型频率（every6h / every12h，对齐当地整点边界）——');
+{
+  const H = 3600000;
+  const r = computeSchedulePoint('every6h', '00:00', 8);
+  check('every6h: next - last = 6小时', r.nextScheduled - r.lastScheduled, 6 * H);
+  check('every6h: lastScheduled <= now', r.lastScheduled <= Date.now(), true);
+  check('every6h: nextScheduled > now', r.nextScheduled > Date.now(), true);
+  // 对齐当地 00/06/12/18：换算到本地后小时数应为 6 的倍数
+  check('every6h: 对齐当地 6 小时边界', new Date(r.lastScheduled + 8 * H).getUTCHours() % 6, 0);
+}
+{
+  const H = 3600000;
+  const r = computeSchedulePoint('every12h', '00:00', 0);
+  check('every12h: next - last = 12小时', r.nextScheduled - r.lastScheduled, 12 * H);
+  check('every12h: 对齐当地 12 小时边界', new Date(r.lastScheduled).getUTCHours() % 12, 0);
+}
+{
+  // 间隔型不依赖 schedule_time：即使传了非法时刻也应正常返回
+  const r = computeSchedulePoint('every6h', '99:99', 8);
+  check('every6h: 忽略 schedule_time', typeof r, 'object');
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail > 0 ? 1 : 0);
