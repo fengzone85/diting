@@ -117,6 +117,7 @@ show_usage() {
   --uninstall             卸载服务端与受控端
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
   --keep-days N           备份保留天数（默认 14，超出自动清理；0=不清理）
+  --compress / --no-compress   是否 gzip 压缩备份（默认压缩，体积约 20%）
   --restore <路径>        从备份恢复数据库（恢复前自动备份当前状态）
   --backup-list           列出已有备份
   --backup-schedule 动作  每日自动备份：install / uninstall / status
@@ -602,6 +603,10 @@ DB_BACKUP_DIR="/var/backups/diting"
 # 备份保留天数（默认 14）。超出时「自动备份」会清理最旧的 monitor_*.db；
 # =0 关闭清理（永不自动删除）。可用 --keep-days N 覆盖，或环境变量 DB_BACKUP_KEEP_DAYS。
 DB_BACKUP_KEEP_DAYS="${DB_BACKUP_KEEP_DAYS:-14}"
+# 是否压缩备份（gzip，默认开）。SQLite 逐页拷贝会带上已删数据留下的空闲页，
+# 且内容为高重复数值，实测可压到原体积约 20%（1.5G → ~300M），是控制占用最有效的手段。
+# 关闭：DB_BACKUP_COMPRESS=0 或 --no-compress（环境无 gzip 时自动跳过）。
+DB_BACKUP_COMPRESS="${DB_BACKUP_COMPRESS:-1}"
 
 # 定位数据库：返回「容器名:容器内路径」或「宿主机文件路径」；找不到则返回空。
 locate_db() {
@@ -638,16 +643,61 @@ locate_db() {
 do_backup() {
     local out_path="${1:-}"
     local keep_days="${2:-}"
+    local started; started="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
+
+    # ── 后台周期策略（--force 或未指定 ACTION 的手动调用都跳过此判断）──────
+    # 仅当「由 cron/自动路径调用」时才按后台配置的周期决定是否执行：
+    # 手动敲 --backup 必须始终生效，否则用户会以为功能坏了。
+    if [[ "${BACKUP_AUTO:-}" == "1" ]]; then
+        local decision
+        decision="$(backup_should_run)"
+        if [[ "$decision" == "skipped" ]]; then
+            echo -e "${YELLOW}[信息] 按后台配置跳过本次备份${NC}"
+            return 0
+        fi
+        # 读到配置时，用后台的保留天数/压缩开关覆盖本地默认
+        if [[ "$decision" == "yes" ]]; then
+            local cfg_keep cfg_comp
+            cfg_keep="$(db_ui_field_get backup_keep_days 2>/dev/null || true)"
+            [[ "$cfg_keep" =~ ^[0-9]+$ ]] && keep_days="$cfg_keep"
+            cfg_comp="$(db_ui_field_get backup_compress 2>/dev/null || true)"
+            [[ "$cfg_comp" == "false" ]] && DB_BACKUP_COMPRESS=0
+            [[ "$cfg_comp" == "true" ]] && DB_BACKUP_COMPRESS=1
+        fi
+    fi
+
     ensure_docker || return 1
     local loc; loc="$(locate_db)"
     if [[ -z "$loc" ]]; then
         echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装且卷/文件存在${NC}" >&2
+        db_backup_state_set last_status=failed "last_error=cannot locate database" 2>/dev/null || true
         return 1
     fi
 
     mkdir -p "$DB_BACKUP_DIR"
     local ts; ts="$(date +%Y%m%d_%H%M%S)"
     [[ -z "$out_path" ]] && out_path="$DB_BACKUP_DIR/monitor_${ts}.db"
+
+    # ── 空间预检 + 满盘自愈（B + C）─────────────────────────────────────────
+    # 先预估需求：库有多大，备份就要多大（SQLite .backup 是逐页原样拷贝，
+    # 含已删除数据留下的空闲页；实测压缩后约为原体积的 20%）。
+    local need_kb=0
+    case "$loc" in
+        docker:*) need_kb="$(timeout 180 docker exec "$(echo "$loc" | cut -d: -f2)" \
+                     du -k "$(echo "$loc" | cut -d: -f4)" 2>/dev/null | cut -f1)" ;;
+        volume:*) need_kb="$(docker run --rm -v "$(echo "$loc" | cut -d: -f2)":/data \
+                     alpine:3.20 du -k /data/monitor.db 2>/dev/null | cut -f1)" ;;
+        *)       need_kb="$(du -k "$(echo "$loc" | cut -d: -f2)" 2>/dev/null | cut -f1)" ;;
+    esac
+    need_kb="${need_kb:-0}"
+    [[ "$need_kb" =~ ^[0-9]+$ ]] || need_kb=0
+    # 压缩时按 35% 估（压缩率实测约 20%，留余量）；不压缩则按 100% 另加 5% 余量
+    if [[ "$DB_BACKUP_COMPRESS" -eq 1 ]]; then
+        need_kb=$(( need_kb * 35 / 100 ))
+    else
+        need_kb=$(( need_kb * 105 / 100 ))
+    fi
+    [[ "$need_kb" -gt 0 ]] && ensure_backup_space "$(dirname "$out_path")" "$need_kb" "${keep_days:-$DB_BACKUP_KEEP_DAYS}" || return 1
 
     if [[ "$loc" == docker:* ]]; then
         # 格式 docker:cid:svc:path — 容器内拷贝
@@ -683,18 +733,122 @@ do_backup() {
         cp "$fpath" "$out_path"
     fi
 
-    if [[ -f "$out_path" ]]; then
-        local sz; sz="$(du -h "$out_path" | cut -f1)"
-        echo -e "${GREEN}[OK]   备份完成: ${out_path} (${sz})${NC}"
-        echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
-        # 仅在默认目录场景下轮转，避免误删用户自定义路径下的文件
-        if [[ "$(dirname "$out_path")" == "$DB_BACKUP_DIR" ]]; then
-            prune_backups "${keep_days:-$DB_BACKUP_KEEP_DAYS}"
-        fi
-    else
+    if [[ ! -f "$out_path" ]]; then
         echo -e "${RED}[错误] 备份失败，请检查磁盘空间与权限${NC}" >&2
+        echo -e "       $(msg "bk.space_hint")" >&2
         return 1
     fi
+
+    # ── 压缩（A）：SQLite 含大量空闲页且内容为高重复数值，实测压到约 20% ────
+    # 压缩器选择（实测 200MB 采样 / 4 核）：pigz -6 = 2.0s/41M，gzip -6 = 7.2s/41M，
+    # gzip -9 = 18.2s/40M。-9 比 -6 只小 1M 却慢 2.5 倍，故固定用 -6 并优先 pigz。
+    local final_path="$out_path"
+    if [[ "$DB_BACKUP_COMPRESS" -eq 1 ]]; then
+        local comp_bin="" comp_tag=""
+        if command -v pigz >/dev/null 2>&1; then
+            comp_bin="pigz -6"; comp_tag="pigz"
+        elif command -v gzip >/dev/null 2>&1; then
+            comp_bin="gzip -6"; comp_tag="gzip"
+        fi
+        if [[ -n "$comp_bin" ]]; then
+            echo -e "${YELLOW}[信息] 压缩备份中（${comp_tag}）…${NC}"
+            if timeout 900 $comp_bin -c "$out_path" > "${out_path}.gz" 2>/dev/null && [[ -s "${out_path}.gz" ]]; then
+                rm -f "$out_path"
+                final_path="${out_path}.gz"
+            else
+                rm -f "${out_path}.gz"
+                echo -e "${YELLOW}[警告] 压缩失败，保留未压缩备份${NC}"
+            fi
+        else
+            echo -e "${YELLOW}[警告] 未找到 pigz/gzip，备份未压缩（安装: apt-get install -y pigz）${NC}"
+        fi
+    fi
+
+    local sz; sz="$(du -h "$final_path" | cut -f1)"
+    echo -e "${GREEN}[OK]   备份完成: ${final_path} (${sz})${NC}"
+    echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
+
+    # ── 轮转（含压缩产物）与状态回写 ────────────────────────────────────────
+    local pruned=0
+    if [[ "$(dirname "$out_path")" == "$DB_BACKUP_DIR" ]]; then
+        local prune_out
+        prune_out="$(prune_backups "${keep_days:-$DB_BACKUP_KEEP_DAYS}" 2>&1)"
+        [[ -n "$prune_out" ]] && echo "$prune_out"
+        # prune_backups 输出形如「[OK]   已清理 N 个过期备份」，提取 N
+        if [[ "$prune_out" =~ ([0-9]+)[[:space:]]*(个|expired) ]]; then
+            pruned="${BASH_REMATCH[1]}"
+        fi
+    fi
+
+    local ended; ended="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
+    local dur=$(( ended - started ))
+    [[ "$dur" -lt 0 ]] && dur=0
+    local total_kb cnt
+    total_kb="$(du -sk "$DB_BACKUP_DIR" 2>/dev/null | cut -f1)"; total_kb="${total_kb:-0}"
+    cnt="$(find "$DB_BACKUP_DIR" -maxdepth 1 -type f \( -name 'monitor_*.db' -o -name 'monitor_*.db.gz' \) 2>/dev/null | wc -l)"
+    db_backup_state_set last_status=ok last_run_ts="$ended" \
+        "last_file=$(basename "$final_path")" \
+        last_size_bytes="$(stat -c %s "$final_path" 2>/dev/null || echo 0)" \
+        last_raw_bytes=0 last_duration_ms="$dur" last_error= \
+        last_pruned="$pruned" backup_count="$cnt" total_bytes="$((total_kb * 1024))" 2>/dev/null || true
+}
+
+# 取目录所在文件系统的可用空间（KiB）。查不到返回空串。
+dir_avail_kb() {
+    local d="$1"
+    [[ -d "$d" ]] || d="$(dirname "$d")"
+    df -Pk "$d" 2>/dev/null | awk 'NR==2 {print $4}'
+}
+
+# 备份前空间预检 + 满盘自愈。
+# 顺序：先按保留策略清理腾空间 → 再检查够不够 → 仍不够则清理紧急备份池
+# （仅当 keep>0，避免把用户唯一一份备份也删掉）。
+# 返回 0=空间可用；1=仍然不足。need_kb 为预估需求（KiB）。
+ensure_backup_space() {
+    local dir="$1" need_kb="$2" keep="$3"
+    local avail; avail="$(dir_avail_kb "$dir")"
+    if [[ -z "$avail" ]]; then
+        echo -e "${YELLOW}[警告] 无法读取磁盘可用空间（df 不可用），跳过预检${NC}" >&2
+        return 0
+    fi
+    if [[ "$avail" -ge "$need_kb" ]]; then
+        return 0
+    fi
+
+    echo -e "${YELLOW}[警告] 目标分区可用空间不足：需 ~$((need_kb / 1024)) MB，仅剩 $((avail / 1024)) MB${NC}" >&2
+    # ① 先按保留策略清理（正常轮转路径）
+    if [[ "${keep:-0}" -gt 0 ]]; then
+        echo -e "${YELLOW}[信息] 尝试清理过期备份以腾出空间…${NC}" >&2
+        prune_backups "$keep" >&2
+        avail="$(dir_avail_kb "$dir")"
+        [[ -z "$avail" ]] && return 0
+        if [[ "$avail" -ge "$need_kb" ]]; then
+            echo -e "${GREEN}[OK]   清理后空间充足（$((avail / 1024)) MB）${NC}" >&2
+            return 0
+        fi
+    fi
+    # ② 仍不足：清掉最旧的 monitor_*.db 直到够用（保留最新的 1 份）
+    echo -e "${YELLOW}[信息] 仍不足，继续清理最旧的备份（至少保留最新 1 份）…${NC}" >&2
+    local f cnt=0
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        if rm -f "$f" 2>/dev/null; then
+            cnt=$((cnt + 1))
+            echo "       - $(basename "$f")" >&2
+            avail="$(dir_avail_kb "$dir")"
+            [[ -z "$avail" ]] && return 0
+            [[ "$avail" -ge "$need_kb" ]] && break
+        fi
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name 'monitor_*.db*' -printf '%T@\t%p\n' 2>/dev/null \
+             | LC_ALL=C sort -n -k1,1 -k2,2 | cut -f2- | head -n -1)
+    avail="$(dir_avail_kb "$dir")"
+    if [[ -n "$avail" && "$avail" -ge "$need_kb" ]]; then
+        echo -e "${GREEN}[OK]   已腾出空间（清理 ${cnt} 份，现有 $((avail / 1024)) MB）${NC}" >&2
+        return 0
+    fi
+    echo -e "${RED}[错误] 空间仍不足（$((avail / 1024)) MB < $((need_kb / 1024)) MB）。${NC}" >&2
+    echo -e "       $(msg "bk.space_hint")" >&2
+    return 1
 }
 
 # 清理超过保留天数的旧备份（只动 $DB_BACKUP_DIR/monitor_*.db，
@@ -710,7 +864,8 @@ prune_backups() {
     local f
     while IFS= read -r f; do
         [[ -n "$f" ]] && old+=("$f")
-    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name 'monitor_*.db' -mtime "+${keep}" 2>/dev/null)
+    # 同时匹配 .db 与 .db.gz（压缩开启后产物带 .gz 后缀）
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f \( -name 'monitor_*.db' -o -name 'monitor_*.db.gz' \) -mtime "+${keep}" 2>/dev/null)
 
     if [[ ${#old[@]} -eq 0 ]]; then
         echo -e "  $(msg "bk.keep_tip") ${keep} $(msg "bk.keep_days")"
@@ -735,16 +890,36 @@ do_restore() {
     [[ -f "$in_path" ]] || { echo -e "${RED}[错误] 文件不存在: $in_path${NC}" >&2; return 1; }
     ensure_docker || return 1
 
+    # ── 解压（备份可能是 .gz）──────────────────────────────────────────────
+    # 解压到同目录临时文件，校验/替换都用解压后的路径；退出时清理。
+    local restore_src="$in_path" tmp_dec=""
+    if [[ "$in_path" == *.gz ]]; then
+        if ! command -v gzip >/dev/null 2>&1; then
+            echo -e "${RED}[错误] 备份为 gzip 压缩格式，但本机无 gzip（apt-get install -y gzip）${NC}" >&2
+            return 1
+        fi
+        tmp_dec="$(mktemp "${TMPDIR:-/tmp}/diting_restore_XXXXXX.db")"
+        echo -e "${YELLOW}[信息] 解压备份中…${NC}"
+        if ! gzip -dc "$in_path" > "$tmp_dec" 2>/dev/null; then
+            rm -f "$tmp_dec"
+            echo -e "${RED}[错误] 解压失败，备份文件可能已损坏${NC}" >&2
+            return 1
+        fi
+        restore_src="$tmp_dec"
+    fi
+    # 无论成功失败都清理临时解压文件
+    trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"' RETURN
+
     # ── 校验：SQLite 完整性 + 魔数 ──────────────────────────────────────────
     local magic
-    magic="$(head -c 16 "$in_path" 2>/dev/null)"
+    magic="$(head -c 16 "$restore_src" 2>/dev/null)"
     if [[ "$magic" != "SQLite format 3"* ]]; then
         echo -e "${RED}[错误] 文件不是合法的 SQLite 数据库${NC}" >&2
         return 1
     fi
     # 有 sqlite3 时做 integrity_check
     if command -v sqlite3 >/dev/null 2>&1; then
-        if ! sqlite3 "$in_path" "PRAGMA integrity_check;" 2>/dev/null | grep -qx "ok"; then
+        if ! sqlite3 "$restore_src" "PRAGMA integrity_check;" 2>/dev/null | grep -qx "ok"; then
             echo -e "${RED}[错误] 备份文件完整性校验未通过，已放弃恢复${NC}" >&2
             return 1
         fi
@@ -785,9 +960,11 @@ do_restore() {
         cpath="$(echo "$loc" | cut -d: -f4)"
         echo -e "${YELLOW}[信息] 停止服务端容器以安全替换数据库…${NC}"
         timeout 180 docker stop "$cid" >/dev/null 2>&1 || true
-        cp "$in_path" "${in_path}.tmp"
-        timeout 180 docker cp "${in_path}.tmp" "${cid}:${cpath}" 2>/dev/null
-        rm -f "${in_path}.tmp"
+        # 注意：必须用解压后的 restore_src，绝不能用 in_path（可能是 .gz，
+        # 直接拷进去会把数据库写坏）
+        cp "$restore_src" "${restore_src}.tmp"
+        timeout 180 docker cp "${restore_src}.tmp" "${cid}:${cpath}" 2>/dev/null
+        rm -f "${restore_src}.tmp"
         echo -e "${YELLOW}[信息] 重启服务端…${NC}"
         timeout 180 docker start "$cid" >/dev/null 2>&1 || true
         # compose 管理的容器用 restart 更稳妥
@@ -798,8 +975,9 @@ do_restore() {
     elif [[ "$loc" == volume:* ]]; then
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 通过临时容器写入卷…${NC}"
-        timeout 180 docker run --rm -v "$vol":/data -v "$(dirname "$in_path")":/in \
-            alpine:3.20 cp "/in/$(basename "$in_path")" /data/monitor.db 2>/dev/null
+        # 同样必须用解压后的文件（临时解压文件在 /tmp，需按其所在目录挂载）
+        timeout 180 docker run --rm -v "$vol":/data -v "$(dirname "$restore_src")":/in \
+            alpine:3.20 cp "/in/$(basename "$restore_src")" /data/monitor.db 2>/dev/null
     else
         local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 替换宿主机数据库文件…${NC}"
@@ -808,7 +986,7 @@ do_restore() {
             ( cd "$SRC_DIR/server" && timeout 180 docker compose down 2>/dev/null ) || true
         fi
         cp "$fpath" "${fpath}.before_restore.bak"
-        cp "$in_path" "$fpath"
+        cp "$restore_src" "$fpath"
         # 重启
         if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
             ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d 2>/dev/null ) || true
@@ -844,7 +1022,8 @@ do_backup_schedule() {
             # 先移除旧的同名条目，保证幂等（重复安装不会产生多行）
             local cur
             cur="$(crontab -l 2>/dev/null | grep -v -F "$marker" || true)"
-            local line="0 ${hour} * * * ${self} --backup --keep-days ${keep} >> ${DB_BACKUP_DIR}/backup.log 2>&1 ${marker}"
+            # BACKUP_AUTO=1 让脚本读后台配置的周期判断是否执行 —— 周期改了不用重建 cron
+            local line="0 ${hour} * * * BACKUP_AUTO=1 ${self} --backup --keep-days ${keep} >> ${DB_BACKUP_DIR}/backup.log 2>&1 ${marker}"
             printf '%s\n%s\n' "$cur" "$line" | grep -v '^$' | crontab -
             echo -e "${GREEN}[OK]   $(msg "bk.cron_installed")${NC}"
             echo "       $line"
@@ -905,8 +1084,8 @@ do_backup_list() {
     local f
     while IFS= read -r f; do
         [[ -n "$f" ]] && files+=("$f")
-    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f -name '*.db' -printf '%T@\t%p\n' 2>/dev/null \
-             | LC_ALL=C sort -n -k1,1 -k2,2 | cut -f2-)
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f \( -name '*.db' -o -name '*.db.gz' \) \
+             -printf '%T@\t%p\n' 2>/dev/null | LC_ALL=C sort -n -k1,1 -k2,2 | cut -f2-)
 
     if [[ ${#files[@]} -eq 0 ]]; then
         echo "  暂无备份文件"
@@ -1099,6 +1278,58 @@ JS
     local rc=$?
     rm -f "$js"
     return $rc
+}
+
+# 回写备份状态到 admin_config.backup_state（后台「备份监控」读它）。
+# 用法：db_backup_state_set k=v k=v ...（值不要含换行）
+db_backup_state_set() {
+    local js; js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+const KEY = 'backup_state';
+const def = { last_run_ts: 0, last_status: 'unknown', last_file: '', last_size_bytes: 0, last_raw_bytes: 0, last_duration_ms: 0, last_error: '', last_pruned: 0, backup_count: 0, total_bytes: 0, updated_at: 0 };
+let cur = Object.assign({}, def);
+const row = db.prepare('SELECT value FROM admin_config WHERE key = ?').get(KEY);
+if (row && row.value) { try { cur = Object.assign(cur, JSON.parse(row.value)); } catch (e) { /* 保留默认 */ } }
+// 只接受白名单键，避免脏键写入
+const allow = new Set(Object.keys(def));
+for (const arg of process.argv.slice(3)) {
+  const i = arg.indexOf('=');
+  if (i < 0) continue;
+  const k = arg.slice(0, i);
+  if (!allow.has(k)) continue;
+  const raw = arg.slice(i + 1);
+  cur[k] = /^-?\d+$/.test(raw) ? Number(raw) : raw;
+}
+cur.updated_at = Date.now();
+db.prepare('INSERT INTO admin_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(KEY, JSON.stringify(cur));
+JS
+    db_run_js "$js" "$@" >/dev/null 2>&1
+    local rc=$?
+    rm -f "$js"
+    return $rc
+}
+
+# 按后台配置判断「今天是否该备份」。cron 固定每日触发，周期由这里决定，
+# 因此后台改周期无需重建 crontab。
+# 输出：yes（该跑）/ no（跳过，并打印原因）/ unknown（读不到配置，按本地策略跑）
+backup_should_run() {
+    local sched
+    sched="$(db_ui_field_get backup_schedule 2>/dev/null || true)"
+    case "$sched" in
+        off)    echo "skipped"; echo "（后台备份周期=关闭）" >&2; return 1 ;;
+        daily)  echo "yes"; return 0 ;;
+        weekly)
+            # 周一执行（%u：1=周一）
+            if [[ "$(date +%u)" -eq 1 ]]; then echo "yes"; return 0; fi
+            echo "skipped"; echo "（后台备份周期=每周，今天不是周一）" >&2; return 1
+            ;;
+        "")
+            echo "unknown"; return 0 ;;
+        *)
+            echo "unknown"; return 0 ;;
+    esac
 }
 
 # 清除管理端 IP 白名单（ui_settings.admin_allow_ips）。
@@ -1323,6 +1554,9 @@ declare -A I18N_ZH=(
     [bk.cron_remove]="取消自动备份"
     [bk.cron_removed]="已取消每日自动备份"
     [bk.cron_remove_failed]="取消自动备份失败，请手动执行 crontab -e 删除标记行"
+    [bk.space_hint]="可减小保留天数（--keep-days）、清理旧的 pre_restore_*.db，或把备份目录挂到更大的分区。"
+    [bk.compress_hint]="压缩: 开启（gzip，体积约 20%）"
+    [bk.nocompress_hint]="压缩: 关闭（体积与数据库等大）"
     [bk.cron_active]="当前已启用每日自动备份："
     [bk.cron_none]="当前未启用每日自动备份"
     [wl.failed]="清除失败"
@@ -1409,6 +1643,9 @@ declare -A I18N_EN=(
     [bk.cron_remove]="Remove auto-backup"
     [bk.cron_removed]="Daily auto-backup removed"
     [bk.cron_remove_failed]="Failed to remove; please delete the tagged line via crontab -e"
+    [bk.space_hint]="Try a smaller --keep-days, remove old pre_restore_*.db, or point the backup dir at a larger partition."
+    [bk.compress_hint]="Compression: on (gzip, ~20% of size)"
+    [bk.nocompress_hint]="Compression: off (same size as the database)"
     [bk.cron_active]="Daily auto-backup is enabled:"
     [bk.cron_none]="Daily auto-backup is not enabled"
     [wl.failed]="Failed to clear"
@@ -1597,6 +1834,8 @@ while [[ $# -gt 0 ]]; do
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
         --keep-days)      A_BACKUP_KEEP="$2"; shift 2 ;;
+        --no-compress)    DB_BACKUP_COMPRESS=0; shift ;;
+        --compress)       DB_BACKUP_COMPRESS=1; shift ;;
         # 安装/取消/查看每日自动备份：--backup-schedule install|uninstall|status
         --backup-schedule)
             ACTION="backup-schedule"; A_BACKUP_SCHEDULE="${2:-status}"; shift
