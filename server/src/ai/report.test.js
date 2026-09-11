@@ -59,6 +59,24 @@ test('capHighlights: 模型自行聚合的条目被丢弃后，离线仍必须�
   assert.match(r.analysis.highlights[0].issue, /61 台节点离线/);
 });
 
+test('capHighlights: 沉默期（stale）节点不逐台展开，只在离线聚合里计数', () => {
+  const offline = Array.from({ length: 5 }, (_, i) => `old-${i}`);
+  const analysis = {
+    highlights: [
+      ...offline.map((n) => ({ agent_name: n, issue: '节点离线', reason: '', suggestion: '' })),
+      { agent_name: 'j4125', issue: 'CPU 高', reason: '', suggestion: '' }
+    ]
+  };
+  const summary = mkSummary(['j4125'], offline);
+  summary.silent_days = 3;
+  summary.agents.forEach((a) => { if (!a.online) a.stale = true; });
+  const r = capHighlights(analysis, summary);
+  assert.strictEqual(r.stats.stale_dropped, 5);
+  assert.strictEqual(r.stats.kept, 2, '聚合条目 + 在线节点条目');
+  assert.match(r.analysis.highlights[0].issue, /其中 5 台超过 3 天未上报/);
+  assert.ok(r.analysis.highlights.every((h) => !offline.includes(h.agent_name)), 'stale 节点不应逐台出现');
+});
+
 test('capHighlights: 不在摘要中的节点名（幻觉）被丢弃并计数', () => {
   const analysis = {
     highlights: [
