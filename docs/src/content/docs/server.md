@@ -86,9 +86,16 @@ sudo bash diting.sh --restore /path/to/monitor_backup.db
 ### 定时备份
 
 ```bash
-# crontab 每天凌晨 3 点自动备份
-0 3 * * * root bash /usr/local/bin/diting-diting.sh --backup
+# 安装每日自动备份（cron 会写入两行：每日备份 + 每 5 分钟处理后台恢复请求）
+sudo bash diting.sh --backup-schedule install
+
+# 查看 / 取消
+sudo bash diting.sh --backup-schedule status
+sudo bash diting.sh --backup-schedule uninstall
 ```
+
+备份默认压缩（gzip，体积约 20%）并按保留天数轮转，可在后台
+「设置 → 数据库备份」调整周期、执行小时、保留天数与是否压缩。
 
 ## 进程守护
 

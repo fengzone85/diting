@@ -34,8 +34,28 @@ description: 服务端与受控端环境变量参考
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
 | `TRUST_PROXY` | 否 | `loopback` | 可信反向代理（决定 `req.ip` 取转发头还是 TCP 源地址） |
+| `BACKUP_DIR` | 否 | `/data/backups` | 备份目录（**容器内路径**）。后台「备份文件」列表/下载/删除读它；默认需 compose 把宿主目录挂到此路径，且用 `HOST_BACKUP_DIR` 指定宿主侧来源 |
+| `RESTORE_TRIGGER` | 否 | `<BACKUP_DIR>/restore.request` | 后台点「恢复」时投递的请求文件。必须落在宿主可读的备份目录内，宿主侧 `diting.sh --process-restore` 读取并执行 |
 
 > AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
+
+### 备份相关（宿主机侧）
+
+以下变量写在 `/etc/diting/host.env`（**不是** `server/.env`），由 `diting.sh`
+每次运行读取，也由 `--backup-schedule install` 写入的 cron 行 `source`：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `BACKUP_VISIBLE_DIR` | — | 备份同步目标目录。设了它，每次备份会额外复制一份到此目录（即 `HOST_BACKUP_DIR` 指向的宿主目录），后台才能列出/下载；不设则不复制 |
+| `RESTORE_REQUEST_FILE` | — | 恢复请求文件路径（宿主侧），应与容器内 `RESTORE_TRIGGER` 指向同一个文件 |
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `DB_BACKUP_KEEP_DAYS` | `14` | 备份保留天数（`0` = 不自动清理），等价于 `--keep-days` |
+| `DB_BACKUP_COMPRESS` | `1` | 是否 gzip 压缩备份（`0` = 关闭），等价于 `--no-compress` |
+
+> 传输中的备份是**完整数据库快照**（含全部 Agent Token 哈希、设置项），
+> 下载后请按敏感文件保管。
 
 ### `TRUST_PROXY`：反向代理信任边界
 
