@@ -9,7 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope } = require('./stats');
+const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk } = require('./stats');
 
 const H = 3600000;          // 1h 桶
 const DAY = 24 * H;
@@ -118,4 +118,52 @@ test('diskTrend: 非法/空序列不抛异常', () => {
   assert.strictEqual(diskTrend([], {}).note, 'insufficient');
   assert.strictEqual(diskTrend(null, {}).note, 'insufficient');
   assert.strictEqual(diskTrend([{ ts: 1, pct: null }, { ts: 2, pct: 'x' }], {}).note, 'insufficient');
+});
+
+// ---- 风险分级（确定性锚点）----
+
+function mkAgent(over) {
+  return Object.assign({ online: true, cpu: {}, memory: {}, billing: {} }, over || {});
+}
+
+test('computeSignals: 统计离线/沉默/超阈值/临期', () => {
+  const s = computeSignals([
+    mkAgent({ online: false, stale: true }),
+    mkAgent({ online: false }),
+    mkAgent({ cpu: { max: 95 } }),
+    mkAgent({ billing: { days_until_expire: 5 } })
+  ], { cpuAlert: 90, memAlert: 90 });
+  assert.strictEqual(s.agents, 4);
+  assert.strictEqual(s.offline, 2);
+  assert.strictEqual(s.stale, 1);
+  assert.strictEqual(s.offline_ratio, 0.5);
+  assert.strictEqual(s.over_threshold, 1);
+  assert.strictEqual(s.expiring_7d, 1);
+});
+
+test('baselineRisk: 按离线占比 / 超阈值数 / 临期数分级', () => {
+  const risk = (list) => baselineRisk(computeSignals(list, { cpuAlert: 90, memAlert: 90 }));
+  assert.strictEqual(risk([]), 'low');
+  assert.strictEqual(risk([mkAgent()]), 'low');
+  assert.strictEqual(risk([mkAgent({ online: false }), mkAgent()]), 'medium');
+  // 离线占比 >30% → high（10 台中 4 台离线）
+  assert.strictEqual(risk(Array.from({ length: 10 }, (_, i) => mkAgent({ online: i >= 4 }))), 'high');
+  assert.strictEqual(risk([mkAgent({ cpu: { over_threshold_minutes: 5 } })]), 'medium');
+  // 超阈值节点 ≥3 → high
+  assert.strictEqual(risk([
+    mkAgent({ cpu: { over_threshold_minutes: 5 } }),
+    mkAgent({ cpu: { max: 95 } }),
+    mkAgent({ memory: { max: 95 } })
+  ]), 'high');
+  assert.strictEqual(risk([mkAgent({ billing: { days_until_expire: 3 } })]), 'medium');
+});
+
+test('clampRisk: 模型判定只能偏离本地 baseline 一级', () => {
+  assert.strictEqual(clampRisk('high', 'low'), 'medium', '越两级应收敛到 +1');
+  assert.strictEqual(clampRisk('low', 'high'), 'medium', '越两级应收敛到 −1');
+  assert.strictEqual(clampRisk('high', 'high'), 'high');
+  assert.strictEqual(clampRisk('medium', 'low'), 'medium');
+  assert.strictEqual(clampRisk('LOW', 'low'), 'low', '大小写应容错');
+  assert.strictEqual(clampRisk('bogus', 'low'), 'bogus', '非法值原样返回，由渲染层兜底');
+  assert.strictEqual(clampRisk('high', undefined), 'high', 'baseline 缺失时不干预');
 });
