@@ -10,12 +10,32 @@ services:
       - PORT=8081
       - DB_PATH=/data/monitor.db
       - ADMIN_TOKEN=${ADMIN_TOKEN}
-      - AGENT_INTERVAL=15
+      # 会话 Cookie 签名密钥。缺失则每次重启随机生成 → 所有登录态失效（必须持久化）。
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      # 登录会话有效期（毫秒），默认 12 小时
+      - SESSION_TTL_MS=${SESSION_TTL_MS:-43200000}
+      # 只读 Token（留空=无只读账号）
+      - READONLY_TOKEN=${READONLY_TOKEN:-}
+      # 一键注册令牌。缺失时 /api/setup/register 返回「服务端未启用一键注册」，
+      # 受控端 --setup-token 注册将失败（install_server 生成的就是本值）。
+      - SETUP_TOKEN=${SETUP_TOKEN:-}
+      # 反代信任边界（IP/CIDR 逗号分隔，或跳数）。默认只信任 loopback；
+      # Nginx 在另一容器/主机时必须显式声明，否则限流与 IP 白名单会把请求全算到反代头上。
+      - TRUST_PROXY=${TRUST_PROXY:-loopback}
+      - AGENT_INTERVAL=${AGENT_INTERVAL:-20}
       - PUBLIC_URL=${PUBLIC_URL:-}
       - AGENT_RAW_REPO=${AGENT_RAW_REPO:-}
       - AGENT_GIT_REPO=${AGENT_GIT_REPO:-}
       - OFFLINE_THRESHOLD_SEC=60
       - RETENTION_DAYS=30
+      # 延迟波形后端降采样（对齐 Komari downsample/max_points 契约）
+      - PROBES_DOWNSAMPLE=${PROBES_DOWNSAMPLE:-1}
+      - PROBES_MAX_POINTS=${PROBES_MAX_POINTS:-5000}
+      # AI 日报：Key 存放方式（1=只读环境变量 AI_API_KEY，不落库）与磁盘趋势窗口（天，0=回退旧算法）。
+      # 注意 AI_TREND_DAYS 必须给默认值：空值会被 Number('') 解析为 0 从而关闭趋势分析。
+      - AI_KEY_FROM_ENV=${AI_KEY_FROM_ENV:-0}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_TREND_DAYS=${AI_TREND_DAYS:-7}
       - ALERT_CPU_PCT=90
       - ALERT_MEM_PCT=90
       - ALERT_COOLDOWN_SEC=1800
