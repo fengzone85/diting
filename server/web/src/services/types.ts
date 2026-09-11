@@ -207,6 +207,7 @@ export interface AiConfig {
   tz_offset_hours?: number;
   locale?: 'zh-CN' | 'en';
   log_retention_days?: number;
+  silent_days?: number;
 }
 
 export interface AiStatus {

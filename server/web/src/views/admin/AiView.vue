@@ -138,6 +138,7 @@ const detailHighlights = ref<Array<Record<string, string>>>([]);
 const detailSummary = ref('');
 const detailDegradeReason = ref('');
 const detailRaw = ref('');
+const detailRiskRaw = ref('');
 const showAllHighlights = ref(false);
 const HIGHLIGHT_PREVIEW = 10;
 
@@ -151,6 +152,7 @@ async function loadDetail(id: number) {
     detail.value = r;
     detailHighlights.value = Array.isArray(a.highlights) ? (a.highlights as Array<Record<string, string>>) : [];
     detailSummary.value = String(a.summary || r.summary || '');
+    detailRiskRaw.value = String(a.risk_level_raw || '');
     detailDegradeReason.value = String(parsed.degrade_reason || '');
     detailRaw.value = String(a.raw || (a._parse_error ? (r.report_json || '') : ''));
   } catch (e) {
@@ -209,6 +211,7 @@ function changePage(delta: number) {
             <FormInput v-model="config.schedule_time" :label="t('ai.scheduleTime')" placeholder="09:00" />
           </div>
           <FormInput v-model.number="config.tz_offset_hours" :label="t('ai.tzOffset')" placeholder="8" />
+          <FormInput v-model.number="config.silent_days" :label="t('ai.silentDays')" placeholder="3" />
           <div class="flex flex-wrap gap-3 pt-2">
             <button :disabled="saving" @click="save" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">{{ t('ai.saveConfig') }}</button>
             <button :disabled="running || status?.running" @click="run(false)" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{{ (running || status?.running) ? t('ai.running') : t('ai.run') }}</button>
@@ -271,6 +274,7 @@ function changePage(delta: number) {
               <span>{{ detail.period || '24h' }} · v{{ detail.prompt_version || '—' }}</span>
               <span v-if="detail.total_tokens">{{ t('ai.tokens') }}: {{ detail.prompt_tokens || 0 }} / {{ detail.completion_tokens || 0 }} / {{ detail.total_tokens }}</span>
               <span v-if="detail.duration_ms">{{ t('ai.duration') }}: {{ formatDuration(detail.duration_ms) }}</span>
+              <span v-if="detailRiskRaw && detailRiskRaw !== detail.risk_level" class="text-amber-300">{{ t('ai.riskRaw') }}: {{ detailRiskRaw }} → {{ detail.risk_level }}（{{ t('ai.riskClamped') }}）</span>
               <span v-if="detail.degraded" class="rounded bg-amber-500/20 px-2 py-0.5 text-amber-300">{{ t('ai.degraded') }}</span>
             </div>
             <p v-if="detailSummary" class="whitespace-pre-wrap text-slate-200">{{ detailSummary }}</p>
