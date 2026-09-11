@@ -221,7 +221,7 @@ const columns = '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 
       </div>
 
       <!-- 流量 -->
-      <div class="group min-w-0" :title="`↑ ${formatBytes(trafficUsed.used)} ↓ ${formatBytes(trafficUsed.used)}`">
+      <div class="group min-w-0" :title="`↑ ${formatBytes(agent.net_tx_month || 0)} ↓ ${formatBytes(agent.net_rx_month || 0)}`">
         <div class="space-y-1 w-full">
           <div class="text-[11px] font-medium text-foreground/75 truncate">
             <span class="inline group-hover:hidden">{{ trafficPct > 0 ? trafficPct.toFixed(1) + '%' : '∞' }}</span>

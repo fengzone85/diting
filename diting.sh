@@ -75,10 +75,31 @@ SRC_DIR="/opt/diting-src"
 #   RESTORE_REQUEST_FILE=/opt/diting-backups/restore.request
 # cron 行里也会 source 它；这里在【任何】调用场景下都读一次，这样手动执行
 # `diting.sh --backup` 产出的备份同样会同步过去（否则后台列表里看不到）。
+#
+# ⚠ 必须「环境变量优先」：host.env 是无条件赋值（如 BACKUP_VISIBLE_DIR=xxx），
+# 直接 source 会覆盖调用方显式传入的同名变量（例如临时用
+# `BACKUP_VISIBLE_DIR=/tmp/x diting.sh --backup` 会失效，且不报错、很难排查）。
+# 先存下环境中已存在的值，source 之后再恢复回去。
 if [[ -f /etc/diting/host.env ]]; then
+    _env_keep_visible="${BACKUP_VISIBLE_DIR:-}"
+    _env_keep_request="${RESTORE_REQUEST_FILE:-}"
     # shellcheck disable=SC1091
     . /etc/diting/host.env
+    [[ -n "$_env_keep_visible" ]] && BACKUP_VISIBLE_DIR="$_env_keep_visible"
+    [[ -n "$_env_keep_request" ]] && RESTORE_REQUEST_FILE="$_env_keep_request"
+    unset _env_keep_visible _env_keep_request
 fi
+
+# 带值参数的缺值保护：脚本开头 set -u，裸 $2 在漏写值时会让 bash 直接
+# 以「$2: unbound variable」中断，连用法提示都来不及打印。
+# 用法：need_val_guard <选项名> <值>
+need_val_guard() {
+    if [[ -z "${2:-}" || "$2" == --* ]]; then
+        echo -e "${RED}[错误] 参数 $1 缺少取值${NC}" >&2
+        echo -e "       用法见: $0 --help" >&2
+        exit 1
+    fi
+}
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
@@ -747,7 +768,14 @@ do_backup() {
     else
         need_kb=$(( need_kb * 105 / 100 ))
     fi
-    [[ "$need_kb" -gt 0 ]] && ensure_backup_space "$(dirname "$out_path")" "$need_kb" "${keep_days:-$DB_BACKUP_KEEP_DAYS}" || return 1
+    # 注意：不可写成 `[[ ... ]] && ensure_backup_space ... || return 1` ——
+    # 当 need_kb=0（du 取不到大小、或极小库压缩后取整为 0）时左侧判假，
+    # 会直接落到 `|| return 1` 把备份静默中止。空间未知时应当放行而不是中止。
+    if [[ "$need_kb" -gt 0 ]]; then
+        ensure_backup_space "$(dirname "$out_path")" "$need_kb" "${keep_days:-$DB_BACKUP_KEEP_DAYS}" || return 1
+    else
+        echo -e "${YELLOW}[警告] 无法确定数据库大小，跳过空间预检${NC}" >&2
+    fi
 
     if [[ "$loc" == docker:* ]]; then
         # 格式 docker:cid:svc:path — 容器内拷贝
@@ -829,6 +857,16 @@ do_backup() {
         # prune_backups 输出形如「[OK]   已清理 N 个过期备份」，提取 N
         if [[ "$prune_out" =~ ([0-9]+)[[:space:]]*(个|expired) ]]; then
             pruned="${BASH_REMATCH[1]}"
+        fi
+        # 可见目录（BACKUP_VISIBLE_DIR）的副本同样要轮转：sync_to_visible_dir 每次
+        # 备份都复制一份，若不清理会与源目录一起无限增长（占用翻倍）。
+        # prune_backups 以 DB_BACKUP_DIR 为目标，这里临时切换后立即还原。
+        local vis="${BACKUP_VISIBLE_DIR:-}"
+        if [[ -n "$vis" && -d "$vis" && "$vis" != "$DB_BACKUP_DIR" ]]; then
+            local saved_dir="$DB_BACKUP_DIR"
+            DB_BACKUP_DIR="$vis"
+            prune_backups "${keep_days:-$DB_BACKUP_KEEP_DAYS}" 2>/dev/null || true
+            DB_BACKUP_DIR="$saved_dir"
         fi
     fi
 
@@ -938,7 +976,10 @@ prune_backups() {
 # 后台发起的恢复请求文件（容器内 BACKUP_DIR 挂载到宿主备份目录后可达）。
 # 后台点「恢复」只写请求文件，真正的恢复由本脚本在宿主侧执行
 # —— 容器内无法安全完成「先备份当前状态 + 停服原子替换 + 重启」。
-RESTORE_REQUEST_FILE="${RESTORE_REQUEST_FILE:-${BACKUP_DIR_HOST:-}/restore.request}"
+# 默认落在「容器可见的备份目录」内，即容器 RESTORE_TRIGGER 的宿主侧对应路径。
+# 注：此处曾误写 BACKUP_DIR_HOST（从未定义）→ 默认退化成 /restore.request，
+# 导致按文档只配 BACKUP_VISIBLE_DIR 时，--process-restore 永远找不到请求文件。
+RESTORE_REQUEST_FILE="${RESTORE_REQUEST_FILE:-${BACKUP_VISIBLE_DIR:-}/restore.request}"
 
 # 处理前台（后台 UI）投递的恢复请求。仅 ADMIN 从后台发起才可能生成该文件。
 process_restore_request() {
@@ -1947,10 +1988,12 @@ while [[ $# -gt 0 ]]; do
                 A_BACKUP_PATH="$1"; shift
             fi
             ;;
-        --restore)        A_RESTORE_PATH="$2"; ACTION="restore"; shift 2 ;;
+        # 所有带值参数统一用 ${2:-}：脚本开头是 set -u，漏写值时裸 $2 会直接
+        # 以「$2: unbound variable」中断，连用法提示都来不及打印。
+        --restore)        need_val_guard "$1" "${2:-}"; A_RESTORE_PATH="${2:-}"; ACTION="restore"; shift 2 ;;
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
-        --keep-days)      A_BACKUP_KEEP="$2"; shift 2 ;;
+        --keep-days)      need_val_guard "$1" "${2:-}"; A_BACKUP_KEEP="${2:-}"; shift 2 ;;
         --no-compress)    DB_BACKUP_COMPRESS=0; shift ;;
         --compress)       DB_BACKUP_COMPRESS=1; shift ;;
         # 安装/取消/查看每日自动备份：--backup-schedule install|uninstall|status
@@ -1962,15 +2005,15 @@ while [[ $# -gt 0 ]]; do
         --clear-ip-whitelist) ACTION="clear-ip-whitelist"; shift ;;
         # 消费后台「恢复」按钮投递的请求文件（仅供 cron 调用）
         --process-restore) ACTION="process-restore"; shift ;;
-        --server)      A_SERVER="$2"; shift 2 ;;
-        --id)          A_ID="$2"; shift 2 ;;
-        --token)       A_TOKEN="$2"; shift 2 ;;
-        --token-file)  A_TOKEN_FILE="$2"; shift 2 ;;
-        --setup-token) A_SETUP="$2"; shift 2 ;;
-        --setup-name)  A_SETUP_NAME="$2"; shift 2 ;;
-        --interval)    A_INTERVAL="$2"; shift 2 ;;
-        --probe-targets) A_PROBE_TARGETS="$2"; shift 2 ;;
-        --repo)        REPO_RAW="$2"; shift 2 ;;
+        --server)      need_val_guard "$1" "${2:-}"; A_SERVER="${2:-}"; shift 2 ;;
+        --id)          need_val_guard "$1" "${2:-}"; A_ID="${2:-}"; shift 2 ;;
+        --token)       need_val_guard "$1" "${2:-}"; A_TOKEN="${2:-}"; shift 2 ;;
+        --token-file)  need_val_guard "$1" "${2:-}"; A_TOKEN_FILE="${2:-}"; shift 2 ;;
+        --setup-token) need_val_guard "$1" "${2:-}"; A_SETUP="${2:-}"; shift 2 ;;
+        --setup-name)  need_val_guard "$1" "${2:-}"; A_SETUP_NAME="${2:-}"; shift 2 ;;
+        --interval)    need_val_guard "$1" "${2:-}"; A_INTERVAL="${2:-}"; shift 2 ;;
+        --probe-targets) need_val_guard "$1" "${2:-}"; A_PROBE_TARGETS="${2:-}"; shift 2 ;;
+        --repo)        need_val_guard "$1" "${2:-}"; REPO_RAW="${2:-}"; shift 2 ;;
         -h|--help)     show_usage; exit 0 ;;
         *) echo -e "${RED}[错误] 未知参数: $1${NC}" >&2; show_usage; exit 1 ;;
     esac

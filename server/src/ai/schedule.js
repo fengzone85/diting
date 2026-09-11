@@ -107,12 +107,15 @@ async function tick() {
         console.log('[ai] 已有任务在执行，本轮调度跳过');
         return;
       }
-      // 无论成功还是降级，都更新 last_run_ts（degraded 也算「已生成」）
-      db.setAiState({
+      // 无论成功还是降级，都更新 last_run_ts（degraded 也算「已生成」）。
+      // ⚠ 必须基于当前状态合并：setAiState 是整体覆盖，而 runExclusive 内部
+      // （report.js）刚写入 last_duration_ms 等字段 —— 直接传对象字面量会把它们
+      // 抹掉，导致后台「最近耗时」在定时触发时恒为 0。
+      db.setAiState(Object.assign(db.getAiState(), {
         last_run_ts: Date.now(),
         last_status: r.status,
         last_error: r.status === 'degraded' ? (r.message || '') : (r.status === 'error' ? r.message : '')
-      });
+      }));
       console.log('[ai] 日报生成结束：', r.status, r.message || '');
     } catch (e) {
       // 生成过程抛异常：记录失败，但不更新 last_run_ts，让下一轮 tick 可重试
