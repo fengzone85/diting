@@ -106,6 +106,31 @@ sudo bash diting.sh --backup-schedule uninstall   # 取消（只移除本脚本�
 超过 48 小时没有成功备份会给出提示。注意备份状态存在独立配置项里，
 不受设置页整体保存的影响。
 
+### 在后台管理备份文件（列表 / 下载 / 恢复 / 删除）
+
+后台「设置 → 数据库备份 → 备份文件」可以直接操作备份。前提是**把宿主备份目录
+挂进容器**（默认容器内读不到宿主目录）：
+
+```bash
+# 宿主侧：建一个容器可读写的备份目录，并登记路径
+sudo mkdir -p /opt/diting-backups
+echo 'BACKUP_VISIBLE_DIR=/opt/diting-backups' | sudo tee -a /etc/diting/host.env
+
+# server/.env：告诉 compose 把哪个宿主目录挂进来（重启/重建后生效）
+echo 'HOST_BACKUP_DIR=/opt/diting-backups' >> server/.env
+sudo bash diting.sh --update-server
+```
+
+- **备份脚本会自动把新备份同步一份到 `BACKUP_VISIBLE_DIR`**（默认不配则不复制），
+  所以后台看到的是宿主目录里的实际文件。
+- **下载**走 `GET /api/admin/backups/:name/download`，同源流式返回。
+- **删除**只允许本脚本生成的命名（`monitor_*` / `pre_restore_*`），
+  目录里的其它文件不会被列出也不会被删。
+- **恢复**是**异步**的：后台只投递请求文件（落在宿主备份目录内），
+  由宿主侧 `diting.sh --process-restore` 执行（cron 每 5 分钟轮询一次），
+  真正恢复时仍会走「恢复前自动备份 → 完整性校验 → 停服原子替换 → 重启」全流程。
+  若长时间未生效，检查宿主是否已 `--backup-schedule install` 且配置了 `/etc/diting/host.env`。
+
 **定时备份**（crontab）：
 
 ```bash
