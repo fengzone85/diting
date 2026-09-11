@@ -147,7 +147,7 @@ test('renderStatsText: 磁盘行带窗口/区间/置信度，缺数据时明确�
     current_pct: 75.3, estimated_full_days: 6, estimated_full_days_range: [4, 21],
     trend_confidence: 'low', trend_window_days: 7, trend_note: 'ok'
   }), 'zh-CN');
-  assert.match(withRange, /按近 7 天趋势约 6 天达 90%（4–21 天，置信度低）/);
+  assert.match(withRange, /按近 7 天趋势综合估计约 6 天达 90%（4–21 天，置信度低）/);
   assert.doesNotMatch(withRange, /按当前增速/);
 
   const noUpper = renderStatsText(mk({
