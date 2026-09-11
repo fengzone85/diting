@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/security.test.js src/ai/schedule.test.js test/integration.api.test.js",
+    "test": "node --test test/ src/ai/",
     "lint": "eslint ."
   },
   "dependencies": {
