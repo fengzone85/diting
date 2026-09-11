@@ -6,15 +6,15 @@
 //    用「友好下拉式」配置：schedule_freq ∈ {daily, weekly} + schedule_time HH:MM。
 //    覆盖 99% 的真实需求，普通用户也不会写错 cron 语法。
 // 3. 用 ai_state.last_run_ts【防同日重复】：发过今天这一档就不再发，进程重启后从 DB 恢复。
-// 4. running 标志【防重入】：一次生成耗时的 LLM 调用进行中时，下一轮 tick 直接跳过。
+// 4. 运行锁【防重入】：统一由 report.runExclusive 提供（与手动触发共用同一把锁，
+//    避免「定时 + 手动」并发调两次 LLM 产生双份费用与双份报告），busy 时本轮 tick 跳过。
 //
 // 时区：按 config.tz_offset_hours 解释 HH:MM。默认东八区（8）。
 
 const db = require('../db');
-const { generateAndSend } = require('./report');
+const { runExclusive } = require('./report');
 
 let timer = null;
-let running = false;
 const TICK_MS = 60000;
 
 // 计算下一个「应发送时刻」的时间戳（ms）。
@@ -64,7 +64,6 @@ function prevOccurrence(freq, fromTs, tzOffsetHours, hour, minute) {
 
 // 单次检查：判断是否到了应发送的时刻，且本次尚未发送过。
 async function tick() {
-  if (running) return; // 防重入
   const config = db.getAiConfig();
   if (!config.enabled) return;
 
@@ -83,10 +82,15 @@ async function tick() {
       console.log('[ai] 错过发送时刻超过 30 分钟，跳过本次补发');
       return;
     }
-    running = true;
     try {
       console.log('[ai] 到达发送时刻，开始生成日报（触发：schedule）');
-      const r = await generateAndSend({ trigger: 'schedule' });
+      const r = await runExclusive({ trigger: 'schedule' });
+      // busy：另一触发源（手动）正持锁 → 本轮跳过且不推进 last_run_ts，
+      // 让下一轮 tick 仍在 30 分钟容差内重试，避免「定时 + 手动」并发调两次 LLM。
+      if (r.status === 'busy') {
+        console.log('[ai] 已有任务在执行，本轮调度跳过');
+        return;
+      }
       // 无论成功还是降级，都更新 last_run_ts（degraded 也算「已生成」）
       db.setAiState({
         last_run_ts: Date.now(),
@@ -98,8 +102,6 @@ async function tick() {
       // 生成过程抛异常：记录失败，但不更新 last_run_ts，让下一轮 tick 可重试
       db.setAiState(Object.assign(db.getAiState(), { last_status: 'error', last_error: e.message }));
       console.error('[ai] 日报生成异常：', e.message);
-    } finally {
-      running = false;
     }
   }
 }

@@ -187,6 +187,8 @@ async function generateAndSend(opts) {
   const channels = alerts.notifyStatus();
   const hasChannel = channels.mail || channels.telegram;
 
+  const t0 = Date.now();   // 单次生成耗时起点（含 LLM 调用 + 投递），结果写 ai_state.last_duration_ms
+
   // ① 始终先做本地统计（降级基底）
   const summary = summarize({ periodHours: 24 });
 
@@ -250,9 +252,15 @@ async function generateAndSend(opts) {
   // ⑤ 统一更新运行状态（schedule/manual 触发都刷新）：
   //    手动重试成功后应清除上次的「失败已降级」提示，否则前端状态横幅一直显示旧错误。
   //    与 schedule.js tick 中的更新逻辑保持同构（重复写幂等无害）。
+  //    last_duration_ms 落库而非仅存内存，使状态跨进程重启仍可见。
   const finalStatus = degraded ? 'degraded' : 'ok';
   const finalMessage = degraded ? `AI 分析失败已降级：${degradeReason}` : '日报已生成并发送';
-  db.setAiState({ last_run_ts: Date.now(), last_status: finalStatus, last_error: degraded ? finalMessage : '' });
+  db.setAiState({
+    last_run_ts: Date.now(),
+    last_status: finalStatus,
+    last_error: degraded ? finalMessage : '',
+    last_duration_ms: Date.now() - t0
+  });
 
   return {
     status: finalStatus,
@@ -262,4 +270,16 @@ async function generateAndSend(opts) {
   };
 }
 
-module.exports = { generateAndSend, renderStatsText, renderFullText, renderDegradedText };
+// ---- 运行锁：定时触发（schedule）与手动触发（/api/ai/run）共用同一把锁 ----
+// 放在 report.js 而非 index.js，是为了避免 index.js ↔ schedule.js 的循环依赖：
+// 两个触发源本就都 require report。命中锁时返回 { status:'busy' }，由调用方决定跳过/回 409。
+let running = false;
+async function runExclusive(opts) {
+  if (running) return { status: 'busy', message: '已有分析任务在执行中' };
+  running = true;
+  try { return await generateAndSend(opts); }
+  finally { running = false; }
+}
+const isRunning = () => running;
+
+module.exports = { generateAndSend, runExclusive, isRunning, renderStatsText, renderFullText, renderDegradedText };
