@@ -25,12 +25,27 @@
 set -euo pipefail
 
 # ── 国际化（i18n）──────────────────────────────────────────────────────────────
-# 根据 LANG / LC_ALL 环境变量自动选择语言，默认中文
-_I18N_LANG="${LANG:-zh_CN}"
-case "$_I18N_LANG" in
-    en*|EN*) I18N_LANG="en" ;;
-    *)       I18N_LANG="zh" ;;
-esac
+# 自动选语言，默认中文。
+# 取值优先级需处理 sudo 的干扰：sudo 默认注入 LC_ALL=C.UTF-8 并把 LANG 重置为
+# C.UTF-8（除非 sudoers 配 env_keep）。而 LC_ALL 优先级高于 LANG，若直接采用
+# LC_ALL，用户显式写的 LANG=zh_CN.UTF-8 会被忽略 → 界面变英文。
+# 故：LC_ALL 仅在它是「明确语言」时采用；C/POSIX 系视为未指定，回退看 LANG。
+_pick_lang() {
+    local l="$1"
+    case "$l" in
+        C|POSIX|C.UTF-8|POSIX.UTF-8) return 1 ;;   # 「未指定」语义
+        "") return 1 ;;
+        en*|EN*) echo "en"; return 0 ;;
+        zh*|ZH*) echo "zh"; return 0 ;;
+        *) echo "zh"; return 0 ;;
+    esac
+}
+I18N_LANG="zh"
+if _pick_lang "${LC_ALL:-}" >/dev/null 2>&1; then
+    I18N_LANG="$( _pick_lang "${LC_ALL:-}" )"
+elif _pick_lang "${LANG:-}" >/dev/null 2>&1; then
+    I18N_LANG="$( _pick_lang "${LANG:-}" )"
+fi
 # 消息函数：msg "key" → 输出对应语言的文本
 msg() {
     local key="$1"
@@ -53,6 +68,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo
 REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fengzone85/diting/master}"
 REPO_GIT="${REPO_GIT:-https://github.com/fengzone85/diting.git}"
 SRC_DIR="/opt/diting-src"
+
+# ── 宿主侧环境（可选）────────────────────────────────────────────────────────
+# /etc/diting/host.env 里配置后台可见备份目录与恢复请求路径：
+#   BACKUP_VISIBLE_DIR=/opt/diting-backups
+#   RESTORE_REQUEST_FILE=/opt/diting-backups/restore.request
+# cron 行里也会 source 它；这里在【任何】调用场景下都读一次，这样手动执行
+# `diting.sh --backup` 产出的备份同样会同步过去（否则后台列表里看不到）。
+if [[ -f /etc/diting/host.env ]]; then
+    # shellcheck disable=SC1091
+    . /etc/diting/host.env
+fi
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
@@ -611,7 +637,24 @@ DB_BACKUP_COMPRESS="${DB_BACKUP_COMPRESS:-1}"
 
 # 定位数据库：返回「容器名:容器内路径」或「宿主机文件路径」；找不到则返回空。
 locate_db() {
-    # 优先：Docker 命名卷（server-data）
+    # 最高优先：.env 里的 DB_PATH —— 原生/systemd 部署（非 Docker）走这条，
+    # 数据库常在仓库外（如 /data/simple-probe-data/server-data/monitor.db），
+    # 仅靠下面的固定回退路径找不到。
+    # 依次尝试：$SRC_DIR（部署路径，VPS 上为 /opt/diting-src）、脚本自身所在目录、
+    # 当前工作目录 —— 本机直接从仓库跑脚本时 SRC_DIR 并不存在，必须靠后两者。
+    local cand env_db="" selfdir
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd 2>/dev/null || echo "")"
+    for cand in "$SRC_DIR/server/.env" "$selfdir/server/.env" "./server/.env"; do
+        [[ -n "$cand" && -f "$cand" ]] || continue
+        env_db="$(sed -n 's/^[[:space:]]*DB_PATH[[:space:]]*=[[:space:]]*//p' "$cand" | tail -n1)"
+        env_db="${env_db%\"}"; env_db="${env_db#\"}"; env_db="${env_db%\'}"; env_db="${env_db#\'}"
+        env_db="${env_db%%[[:space:]]*}"
+        if [[ -n "$env_db" && -f "$env_db" ]]; then
+            echo "file:$env_db"
+            return
+        fi
+    done
+    # 其次：Docker 命名卷（server-data）
     local vol="server-data"
     docker volume inspect "$vol" >/dev/null 2>&1 || vol=""
     if [[ -n "$vol" ]]; then
@@ -921,7 +964,12 @@ sync_to_visible_dir() {
     local dst="${BACKUP_VISIBLE_DIR:-}"
     [[ -n "$dst" && -f "$src" ]] || return 0
     mkdir -p "$dst" 2>/dev/null || return 0
+    # 同一目录（SAME 源和目标）不复制
     [[ "$(dirname "$src")" == "$dst" ]] && return 0
+    # pre_restore_* 不同步：它是恢复前的回滚点，每恢复一次就多一份，
+    # 复制到可见目录会让占用翻倍（实测 4 次恢复 = 1.3G 冗余）。
+    # 且它只服务于「宿主侧手动回滚」这一场景，无需在网页里下载。
+    [[ "$(basename "$src")" == pre_restore_* ]] && return 0
     cp -f "$src" "$dst/" 2>/dev/null || true
 }
 
@@ -953,9 +1001,10 @@ do_restore() {
     trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"' RETURN
 
     # ── 校验：SQLite 完整性 + 魔数 ──────────────────────────────────────────
-    local magic
-    magic="$(head -c 16 "$restore_src" 2>/dev/null)"
-    if [[ "$magic" != "SQLite format 3"* ]]; then
+    # 用 read 而非 $(head -c)：SQLite 头部第 16 字节是 \0，命令替换会丢弃并告警
+    local magic=""
+    IFS= read -r -n 15 -d '' magic < "$restore_src" 2>/dev/null || magic="$(head -c 15 "$restore_src" 2>/dev/null)"
+    if [[ "$magic" != "SQLite format 3" ]]; then
         echo -e "${RED}[错误] 文件不是合法的 SQLite 数据库${NC}" >&2
         return 1
     fi
@@ -978,8 +1027,15 @@ do_restore() {
 
     echo ""
     echo -e "${YELLOW}[警告] 恢复将覆盖当前全部数据！恢复前会自动备份当前状态。${NC}"
-    read -r -p "确认恢复？输入 yes 继续: " confirm || { echo "已取消"; return 0; }
-    [[ "$confirm" == "yes" ]] || { echo "已取消"; return 0; }
+    # 非交互场景（cron 调 --process-restore，或 stdin 非终端）无法回答确认：
+    # 此时放行 —— 后台「恢复」按钮本身已是管理员显式操作（写保护 + 审计日志），
+    # 且流程内已强制自动备份当前状态可回滚，不再要求第二次人工确认。
+    if [[ -t 0 && "${RESTORE_ASSUME_YES:-}" != "1" ]]; then
+        read -r -p "确认恢复？输入 yes 继续: " confirm || { echo "已取消"; return 0; }
+        [[ "$confirm" == "yes" ]] || { echo "已取消"; return 0; }
+    else
+        echo -e "${YELLOW}[信息] 非交互执行（后台请求/管道），跳过二次确认${NC}"
+    fi
 
     # ── 恢复前自动备份（后悔药）──────────────────────────────────────────────
     echo -e "${YELLOW}[信息] 自动备份当前数据库（恢复失败可回滚）…${NC}"
@@ -988,6 +1044,8 @@ do_restore() {
     set +e
     do_backup "$pre_restore" 2>/dev/null
     set -e
+    # 开启压缩时实际产物带 .gz 后缀，必须按实际落盘文件判断，否则会误报「备份失败」
+    [[ -f "${pre_restore}.gz" ]] && pre_restore="${pre_restore}.gz"
     if [[ -f "$pre_restore" ]]; then
         echo -e "${GREEN}[OK]   已保存当前状态: ${pre_restore}${NC}"
     else
