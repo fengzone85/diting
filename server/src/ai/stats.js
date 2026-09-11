@@ -2,7 +2,8 @@
 //
 // 从 summarizer.js 抽出，便于单测（不需要打开数据库）。
 // diskTrend 是磁盘趋势的定稿实现：
-//   - 斜率：对给定窗口「等分 6 段」取段末值差分，再取中位数（抗单点尖峰 + 平滑日锯齿）
+//   - 斜率：对给定窗口「等分 6 段」取【段内中位值】差分，再对多个窗口的斜率取中位数
+//     （段内中位抗单点尖峰与段边界移动；跨窗口中位抗「最新一小时数据到来」造成的跳变）
 //   - 分子：固定「近 24h 桶中位」（不能用末点：实测末点 73.10% vs 近 24h 中位 75.26%，差 4pp；
 //           尖峰注入时末点分子会让估计变化 −30%）
 //   - 区间：跨窗口取「最快/最慢」，p25 ≤ 0（存在回落）时上界不设值
@@ -106,7 +107,9 @@ function diskTrend(series, opts) {
   const level = recent.length >= 3 ? median(recent.map((r) => r.pct)) : median(pts.map((r) => r.pct));
   if (!(level < 90)) return { note: 'reached', level: +level.toFixed(2), span_days: +mainDays.toFixed(2) };
 
-  // 单个窗口的斜率族：等分 seg 段 → 段末值差分 / 段长 = pp/天
+  // 单个窗口的斜率族：等分 seg 段 → 段内【中位值】差分 / 段长 = pp/天。
+  // 用「段内中位」而非「段末值」：实测同一台机器只因最新 1 小时数据到来改变段末值，
+  // 单窗口估计就会在 9.3 天 ↔ 23.9 天之间跳变（日报与节点分析因此给出 24 天 vs 9 天）。
   const calc = (days) => {
     const from = endTs - days * 86400000;
     const sp = pts.filter((r) => r.ts >= from);
@@ -116,9 +119,8 @@ function diskTrend(series, opts) {
     if (!(w > 0)) return null;
     const ends = [];
     for (let i = 0; i < seg; i++) {
-      const idx = i;
-      const inSeg = sp.filter((r) => Math.min(seg - 1, Math.floor((r.ts - t0) / w)) === idx);
-      if (inSeg.length) ends.push(inSeg[inSeg.length - 1].pct);
+      const inSeg = sp.filter((r) => Math.min(seg - 1, Math.floor((r.ts - t0) / w)) === i);
+      if (inSeg.length) ends.push(median(inSeg.map((r) => r.pct)));
     }
     if (ends.length < 3) return null;
     const slopes = [];
@@ -127,32 +129,43 @@ function diskTrend(series, opts) {
   };
 
   const main = calc(mainDays);
-  if (!main || !(main.m > 0)) {
-    return { note: 'no_growth', level: +level.toFixed(2), span_days: +mainDays.toFixed(2) };
-  }
+  if (!main) return { note: 'insufficient', level: +level.toFixed(2), span_days: +mainDays.toFixed(2) };
 
-  const toDays = (slope) => (slope > 0 ? (90 - level) / slope : null);
-
-  // 区间：跨窗口取最快（p75 斜率→天数最小）与最慢（p25 斜率→天数最大）；
-  // 任一窗口 p25 ≤ 0（存在回落/不增长）→ 上界不设值，报告写「可能更久」。
+  // 注意去重：当数据跨度不足最大窗口时，多个 window 会退化成同一个有效窗口
+  // （例如跨度 7 天时 7d/14d 都是 7 天），重复计入会让中位斜率被长窗口单方面带偏。
   const perWin = [];
+  const seen = new Set();
   for (const d of windows) {
-    const c = calc(Math.min(spanDays, d));
+    const eff = Math.min(spanDays, d);
+    const key = eff.toFixed(3);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const c = calc(eff);
     if (c) perWin.push(c);
   }
   const pool = perWin.length ? perWin : [main];
+
+  // 点估计用【跨窗口斜率中位数】而非仅主窗口：实测对最新 1 小时数据到来极敏感，
+  // 跨窗口取中位后波动收敛到 ±7% 以内（27.3/24.7/24.4/24.2/23.7 天）。
+  const slope = median(pool.map((c) => c.m));
+  if (!(slope > 0)) return { note: 'no_growth', level: +level.toFixed(2), span_days: +mainDays.toFixed(2) };
+
+  const toDays = (s) => (s > 0 ? (90 - level) / s : null);
+
+  // 区间：跨窗口取最快（p75 斜率→天数最小）与最慢（p25 斜率→天数最大）；
+  // 任一窗口 p25 ≤ 0（存在回落/不增长）→ 上界不设值，报告写「可能更久」。
   const hasDrop = pool.some((c) => !(c.p25 > 0));
   const fast = toDays(Math.max(...pool.map((c) => c.p75)));
   const slow = hasDrop ? null : toDays(Math.min(...pool.map((c) => c.p25)));
   const allUp = pool.every((c) => c.m > 0);
-  const range = fast == null ? null : [Math.min(fast, slow == null ? fast : slow), slow == null ? null : Math.max(fast, slow)];
+  const range = fast == null ? [null, null] : [Math.min(fast, slow == null ? fast : slow), slow == null ? null : Math.max(fast, slow)];
 
   return {
     note: 'ok',
     level: +level.toFixed(2),
-    days_to_90: toDays(main.m),
+    days_to_90: toDays(slope),
     range,
-    slope_pct_per_day: main.m,
+    slope_pct_per_day: slope,
     confidence: (allUp && !hasDrop && spanDays >= 7) ? 'medium' : 'low',
     window_days: +mainDays.toFixed(2),
     span_days: +spanDays.toFixed(2),
