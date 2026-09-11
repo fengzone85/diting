@@ -18,6 +18,8 @@ const saving = ref(false);
 const running = ref(false);
 const message = ref('');
 const error = ref('');
+// 近 7 天 token 消耗（按 UTC 日聚合；加列前的老报告 token 记为 0）
+const usage7d = ref<{ total_tokens: number; list: Array<{ day: string; reports: number; total_tokens: number }> } | null>(null);
 
 // 手动触发是【异步任务】：后端立即返回（202），这里轮询 running 直至结束。
 // 上限 360s（单次 LLM 超时 180s + 全量统计 + 投递）；超时不报「失败」——任务可能仍在跑。
@@ -68,15 +70,17 @@ async function load() {
   loading.value = true;
   error.value = '';
   try {
-    const [c, s, r] = await Promise.all([
+    const [c, s, r, u] = await Promise.all([
       adminApi.aiConfig(),
       adminApi.aiStatus(),
-      adminApi.aiReports(limit, offset.value)
+      adminApi.aiReports(limit, offset.value),
+      adminApi.aiUsage(7)
     ]);
     config.value = { ...c.config };
     status.value = s;
     reports.value = r.list;
     reportTotal.value = r.total;
+    usage7d.value = u;
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
   } finally {
@@ -236,6 +240,7 @@ function changePage(delta: number) {
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.lastStatus') }}</dt><dd :class="status.last_status === 'ok' ? 'text-emerald-400' : status.last_status ? 'text-rose-400' : ''">{{ status.last_status || '—' }}</dd></div>
             <div v-if="status.last_error" class="flex justify-between"><dt class="text-slate-400">{{ t('ai.error') }}</dt><dd class="max-w-xs truncate text-rose-400">{{ status.last_error }}</dd></div>
             <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.reportCount') }}</dt><dd>{{ status.report_count }}</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">{{ t('ai.usage7d') }}</dt><dd>{{ usage7d ? usage7d.total_tokens : '—' }}</dd></div>
           </dl>
         </div>
 

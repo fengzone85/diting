@@ -471,6 +471,7 @@ export const enUS: Record<string, string> = {
   'ai.lastStatus': 'Last status',
   'ai.error': 'Error',
   'ai.reportCount': 'Report count',
+  'ai.usage7d': 'Tokens (last 7 days)',
   'ai.noSummary': 'No summary',
   'ai.prevPage': 'Prev',
   'ai.nextPage': 'Next',

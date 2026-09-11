@@ -352,7 +352,14 @@ const stmts = {
   getAiReport: db.prepare('SELECT * FROM ai_reports WHERE id = ?'),
   listAiReports: db.prepare('SELECT id, period, risk_level, summary, suggestion, prompt_version, created_at FROM ai_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'),
   countAiReports: db.prepare('SELECT COUNT(*) AS n FROM ai_reports'),
-  pruneAiReports: db.prepare('DELETE FROM ai_reports WHERE created_at < ?')
+  pruneAiReports: db.prepare('DELETE FROM ai_reports WHERE created_at < ?'),
+  // AI 用量按 UTC 日聚合（day = created_at 的整数天序号），供后台展示 token 消耗趋势
+  aiUsageDaily: db.prepare(`SELECT CAST(created_at / 86400000 AS INTEGER) AS day,
+      COUNT(*) AS reports,
+      SUM(prompt_tokens) AS prompt_tokens,
+      SUM(completion_tokens) AS completion_tokens,
+      SUM(total_tokens) AS total_tokens
+    FROM ai_reports WHERE created_at >= ? GROUP BY day ORDER BY day ASC`)
 };
 
 const createAgent = (fields) => {
@@ -646,6 +653,9 @@ function listAiReports(limit, offset) {
   return stmts.listAiReports.all(Math.max(1, Number(limit) || 20), Math.max(0, Number(offset) || 0));
 }
 function countAiReports() { return stmts.countAiReports.get().n; }
+// AI 用量按日聚合（返回 [{ day: 天序号, reports, prompt_tokens, completion_tokens, total_tokens }]）
+function aiUsageDaily(sinceTs) { return stmts.aiUsageDaily.all(sinceTs); }
+
 // 纳入 prune：按保留天数同步清理历史 AI 报告（与 metrics 清理同周期）。
 function pruneAiReports(retentionDays) {
   const cutoff = Date.now() - retentionDays * 86400000;
@@ -691,6 +701,6 @@ module.exports = {
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
-  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports,
+  insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
   addAuditLog, getAuditLogs, countAudit, pruneAudit
 };
