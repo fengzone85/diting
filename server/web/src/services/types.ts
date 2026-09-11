@@ -226,6 +226,21 @@ export interface AiStatus {
   report_count?: number;
 }
 
+// GET /api/ai/usage：按 UTC 日的 token 消耗聚合
+export interface AiUsageDay {
+  day: string;
+  reports: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface AiUsage {
+  days: number;
+  total_tokens: number;
+  list: AiUsageDay[];
+}
+
 // POST /api/ai/analyze-node/:id 的返回值：单节点按需分析（结果缓存 30 分钟）
 export interface AiNodeAnalysis {
   status: 'ok' | 'cached' | 'disabled' | 'not_found' | 'error';
