@@ -80,5 +80,8 @@ server {
 #         proxy_set_header X-Real-IP $remote_addr;
 #         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 #         proxy_set_header X-Forwarded-Proto $scheme;
+#         # 与上方 80 端口块保持一致：后台长请求（AI 生成、大窗口查询）需放宽读超时
+#         proxy_read_timeout 200s;
+#         proxy_send_timeout 200s;
 #     }
 # }
