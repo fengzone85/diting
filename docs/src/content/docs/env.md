@@ -18,7 +18,8 @@ description: 服务端与受控端环境变量参考
 | `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌（`--setup-token` 用） |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 数据库路径 |
-| `AGENT_INTERVAL` | 否 | `15` | 期望上报间隔（用于离线判定） |
+| `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
+| `AI_TREND_DAYS` | 否 | `7` | AI 日报磁盘趋势窗口（天）。范围 2–14，自动收敛到不超过 `RETENTION_DAYS`；`0` = 关闭趋势、回退旧的「24 小时首末两点」算法 |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭） |
