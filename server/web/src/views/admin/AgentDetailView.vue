@@ -5,7 +5,7 @@ import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
 import { apiErrorMessage } from '../../utils/apiError';
-import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
+import type { Agent, InstallCommands, ModifyCommands, ChartPoint, AiNodeAnalysis } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
 
@@ -28,6 +28,22 @@ const commands = ref<{ install?: InstallCommands; modify?: ModifyCommands }>({})
 const commandProbeTargets = ref('');
 const newToken = ref('');
 const showToken = ref(false);
+
+// 单节点按需分析（服务端缓存 30 分钟：同一节点重复点击不会重复计费）
+const nodeAnalysis = ref<AiNodeAnalysis | null>(null);
+const nodeAnalyzing = ref(false);
+
+async function analyzeNodeNow() {
+  nodeAnalyzing.value = true;
+  error.value = '';
+  try {
+    nodeAnalysis.value = await adminApi.aiAnalyzeNode(agentId.value);
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'ai.runFailed');
+  } finally {
+    nodeAnalyzing.value = false;
+  }
+}
 
 const billingCycles = [
   { value: 0, key: 'free' },
@@ -368,6 +384,49 @@ function formatDate(ts?: number) {
                 <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(newToken)">{{ t('common.copy') }}</button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="glass p-6">
+          <div class="mb-4 flex items-center justify-between">
+            <h2 class="text-lg font-semibold">{{ t('ai.analyzeNode') }}</h2>
+            <button
+              :disabled="nodeAnalyzing"
+              class="rounded-lg bg-sky-600 px-3 py-1 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50"
+              @click="analyzeNodeNow"
+            >{{ nodeAnalyzing ? t('ai.analyzing') : t('ai.analyzeNode') }}</button>
+          </div>
+          <div v-if="nodeAnalysis" class="space-y-3 text-sm">
+            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+              <span
+                v-if="nodeAnalysis.analysis?.risk_level"
+                :class="nodeAnalysis.analysis.risk_level === 'high' ? 'text-rose-400' : nodeAnalysis.analysis.risk_level === 'medium' ? 'text-amber-400' : 'text-emerald-400'"
+              >{{ nodeAnalysis.analysis.risk_level }}</span>
+              <span v-if="nodeAnalysis.cached">{{ t('ai.nodeCached') }}</span>
+              <span v-if="nodeAnalysis.duration_ms">{{ t('ai.duration') }}: {{ (nodeAnalysis.duration_ms / 1000).toFixed(1) }} s</span>
+              <span v-if="nodeAnalysis.usage?.total_tokens">{{ t('ai.tokens') }}: {{ nodeAnalysis.usage.total_tokens }}</span>
+            </div>
+            <p v-if="nodeAnalysis.message" class="text-amber-300">{{ nodeAnalysis.message }}</p>
+            <p v-if="nodeAnalysis.analysis?.summary" class="whitespace-pre-wrap text-slate-200">{{ nodeAnalysis.analysis.summary }}</p>
+            <table v-if="nodeAnalysis.analysis?.findings?.length" class="w-full table-fixed border-collapse text-left text-xs">
+              <thead class="text-slate-400">
+                <tr>
+                  <th class="w-1/6 border-b border-slate-800 py-2 pr-2">{{ t('ai.metric') }}</th>
+                  <th class="w-1/4 border-b border-slate-800 py-2 pr-2">{{ t('ai.issue') }}</th>
+                  <th class="w-1/4 border-b border-slate-800 py-2 pr-2">{{ t('ai.reason') }}</th>
+                  <th class="w-1/4 border-b border-slate-800 py-2">{{ t('ai.suggestion') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(f, i) in nodeAnalysis.analysis.findings" :key="i" class="align-top">
+                  <td class="border-b border-slate-900 py-2 pr-2 text-slate-300">{{ f.metric }}</td>
+                  <td class="border-b border-slate-900 py-2 pr-2 text-slate-300">{{ f.detail }}</td>
+                  <td class="border-b border-slate-900 py-2 pr-2 text-slate-500">{{ f.reason }}</td>
+                  <td class="border-b border-slate-900 py-2 text-slate-500">{{ f.suggestion }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <pre v-if="nodeAnalysis.analysis?.raw" class="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-3 text-xs text-slate-500">{{ nodeAnalysis.analysis.raw }}</pre>
           </div>
         </div>
 

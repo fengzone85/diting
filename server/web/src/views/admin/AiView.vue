@@ -206,12 +206,15 @@ function changePage(delta: number) {
               <select v-model="config.schedule_freq" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
                 <option value="daily">{{ t('ai.daily') }}</option>
                 <option value="weekly">{{ t('ai.weekly') }}</option>
+                <option value="every6h">{{ t('ai.every6h') }}</option>
+                <option value="every12h">{{ t('ai.every12h') }}</option>
               </select>
             </div>
             <FormInput v-model="config.schedule_time" :label="t('ai.scheduleTime')" placeholder="09:00" />
           </div>
           <FormInput v-model.number="config.tz_offset_hours" :label="t('ai.tzOffset')" placeholder="8" />
           <FormInput v-model.number="config.silent_days" :label="t('ai.silentDays')" placeholder="3" />
+          <FormInput v-model.number="config.period_hours" :label="t('ai.periodHours')" placeholder="24" />
           <div class="flex flex-wrap gap-3 pt-2">
             <button :disabled="saving" @click="save" class="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:opacity-50">{{ t('ai.saveConfig') }}</button>
             <button :disabled="running || status?.running" @click="run(false)" class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{{ (running || status?.running) ? t('ai.running') : t('ai.run') }}</button>
