@@ -29,7 +29,14 @@ const I18N = {
     node_label: (name) => `[${name}]`,
     cpu_line: (avg, max, min) => `  CPU：均值 ${avg} / 峰值 ${max} / 超90% ${min}分钟`,
     mem_line: (avg, max, slope) => `  内存：均值 ${avg} / 峰值 ${max}${slope != null ? ` / 周期内变化 ${slope >= 0 ? '+' : ''}${slope}个百分点` : ''}`,
-    disk_line: (pct, full) => `  磁盘：当前 ${pct}${full != null && full > 0 ? ` / 按当前增速约 ${full} 天后达 90%` : ''}`,
+    disk_current: (v) => `  磁盘：当前 ${v}（近 24h 中位）`,
+    disk_forecast: (days, lo, hi, win, conf) => ` / 按近 ${win} 天趋势约 ${days} 天达 90%（${lo}–${hi} 天，置信度${conf}）`,
+    disk_forecast_fast: (days, fast, win) => ` / 按近 ${win} 天趋势约 ${days} 天达 90%（最快 ${fast} 天；存在回落，可能更久）`,
+    disk_no_trend: (win) => ` / 近 ${win} 天无增长趋势`,
+    disk_insufficient: ' / 趋势数据不足，暂不预测',
+    conf_low: '低',
+    conf_medium: '中',
+    conf_high: '高',
     ai_section: '———— AI 运维分析（仅供参考）————',
     risk_level: (v) => `整体风险：${v}`,
     issue: (v) => `  问题：${v}`,
@@ -54,7 +61,14 @@ const I18N = {
     node_label: (name) => `[${name}]`,
     cpu_line: (avg, max, min) => `  CPU: avg ${avg} / peak ${max} / over90% ${min}min`,
     mem_line: (avg, max, slope) => `  Memory: avg ${avg} / peak ${max}${slope != null ? ` / period delta ${slope >= 0 ? '+' : ''}${slope}pp` : ''}`,
-    disk_line: (pct, full) => `  Disk: current ${pct}${full != null && full > 0 ? ` / ~${full} days to 90% at current rate` : ''}`,
+    disk_current: (v) => `  Disk: ${v} (24h median)`,
+    disk_forecast: (days, lo, hi, win, conf) => ` / ~${days} days to 90% at the ${win}-day trend (${lo}–${hi} days, ${conf} confidence)`,
+    disk_forecast_fast: (days, fast, win) => ` / ~${days} days to 90% at the ${win}-day trend (fastest ${fast} days; recent dip, could be longer)`,
+    disk_no_trend: (win) => ` / no growth trend over the last ${win} days`,
+    disk_insufficient: ' / not enough trend data to forecast',
+    conf_low: 'low',
+    conf_medium: 'medium',
+    conf_high: 'high',
     ai_section: '———— AI Ops Analysis (for reference) ————',
     risk_level: (v) => `Risk level: ${v}`,
     issue: (v) => `  Issue: ${v}`,
@@ -90,7 +104,8 @@ function renderExpireSection(s, locale) {
   if (!b) return '';
   const cycle = b.cycle_label || '';
   if (b.billing_cycle === 0) return t('expire_free', locale, cycle);
-  if (b.days_until_expire == null) return t('expire_no_date', locale, cycle);
+  // expire_at 为空时不要打印「undefined/null（剩 N 天）」：只设了周期未填到期日属常见情形
+  if (b.days_until_expire == null || !b.expire_at) return t('expire_no_date', locale, cycle);
   if (b.days_until_expire < 0) return t('expire_overdue', locale, b.days_until_expire);
   return t('expire_upcoming', locale, b.expire_at, b.days_until_expire);
 }
@@ -127,10 +142,7 @@ function renderStatsText(summary, locale) {
       const slope = s.memory.slope_pct;
       lines.push(t('mem_line', locale, pct(s.memory.avg), pct(s.memory.max), slope));
     }
-    if (s.disk && s.disk.current_pct != null) {
-      const full = s.disk.estimated_full_days;
-      lines.push(t('disk_line', locale, pct(s.disk.current_pct), full));
-    }
+    if (s.disk && s.disk.current_pct != null) lines.push(renderDiskLine(s.disk, locale));
     const expireLine = renderExpireSection(s, locale);
     if (expireLine) lines.push(expireLine);
   }
@@ -172,6 +184,84 @@ function renderDegradedText(summary, errMsg, locale) {
   return lines.join('\n');
 }
 
+// ---- 磁盘行渲染（统计正文用）----
+// 与 prompt 的「引用数字必须带区间/不确定性」规则保持一致：若统计段给裸数字、AI 段给区间，
+// 同一份报告里两种口径会互相打架。
+function renderDiskLine(disk, locale) {
+  const head = t('disk_current', locale, pct(disk.current_pct));
+  const note = disk.trend_note;
+  const win = disk.trend_window_days || 7;
+  if (note === 'insufficient') return head + t('disk_insufficient', locale);
+  if (note === 'no_growth') return head + t('disk_no_trend', locale, win);
+  const days = disk.estimated_full_days;
+  if (typeof days !== 'number' || days <= 0) return head;
+  const rng = Array.isArray(disk.estimated_full_days_range) ? disk.estimated_full_days_range : [];
+  const lo = Number.isFinite(rng[0]) ? rng[0] : null;
+  const hi = Number.isFinite(rng[1]) ? rng[1] : null;
+  if (hi == null) return head + t('disk_forecast_fast', locale, days, lo == null ? days : lo, win);
+  const conf = disk.trend_confidence === 'medium' ? t('conf_medium', locale)
+    : (disk.trend_confidence === 'high' ? t('conf_high', locale) : t('conf_low', locale));
+  return head + t('disk_forecast', locale, days, lo, hi, win, conf);
+}
+
+// ---- highlights 后处理：上限 + 幻觉过滤 + 离线聚合 ----
+// 职责边界：prompt 只负责「≤8 条、按严重度排序、agent_name 必须逐字取自摘要」，
+// 聚合 100% 由这里生成 —— 若让模型自造聚合名（如「多节点」），会被下面的白名单当幻觉删掉，
+// 聚合逻辑将永不触发（第一轮审计的 P0-2）。
+function capHighlights(analysis, summary, opts) {
+  const max = (opts && Number(opts.max)) || 8;
+  // 模型可能返回数组/标量：非普通对象一律原样透传（renderFullText 会走「无法解析」分支）
+  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) return { analysis, stats: null };
+
+  const list = Array.isArray(analysis.highlights) ? analysis.highlights.slice() : [];
+  const agents = Array.isArray(summary && summary.agents) ? summary.agents : [];
+  const names = new Set(agents.map((a) => a.name));
+  const offline = new Set(agents.filter((a) => !a.online).map((a) => a.name));
+
+  const clean = list.filter((h) => h && typeof h === 'object' && names.has(h.agent_name));
+  const droppedUnknown = list.length - clean.length;
+  const offlineHits = clean.filter((h) => offline.has(h.agent_name));
+  const onlineHits = clean.filter((h) => !offline.has(h.agent_name));
+
+  const out = [];
+  if (offline.size >= 3 && offlineHits.length >= 2) {
+    const sample = Array.from(offline).slice(0, 5).join('、');
+    out.push({
+      agent_name: '(多节点)',
+      issue: `${offline.size} 台节点离线（${sample}${offline.size > 5 ? ' 等' : ''}）`,
+      reason: '可能是区域性网络中断、批量到期停机或探针未部署（概率性判断）',
+      suggestion: '按分组/地域核对离线集合，优先确认是否共用同一网络出口或服务商'
+    });
+  } else {
+    out.push(...offlineHits);
+  }
+  out.push(...onlineHits);
+
+  const trimmed = out.slice(0, max);
+  if (out.length > max) {
+    trimmed.push({
+      agent_name: '(其他)',
+      issue: `另有 ${out.length - max} 个关注项未逐条列出`,
+      reason: '',
+      suggestion: '详见报告正文的统计部分'
+    });
+  }
+
+  // 长度卫生：模型可能把字段回成数字/对象，直接进邮件或 Telegram 会显示 [object Object]
+  const clip = (v, n) => (v == null ? '' : (typeof v === 'string' ? v : String(v)).slice(0, n));
+  const safe = trimmed.map((h) => ({
+    agent_name: clip(h.agent_name, 50),
+    issue: clip(h.issue, 200),
+    reason: clip(h.reason, 300),
+    suggestion: clip(h.suggestion, 300)
+  }));
+
+  return {
+    analysis: Object.assign({}, analysis, { highlights: safe }),
+    stats: { raw: list.length, kept: safe.length, dropped_unknown: droppedUnknown, offline_total: offline.size }
+  };
+}
+
 // 主入口：生成并落库一份日报，然后发送通知。
 //   opts.trigger: 'schedule' | 'manual'（用于日志/状态区分）
 // 返回 { status: 'ok'|'degraded'|'disabled'|'error', report_id?, message }
@@ -194,6 +284,7 @@ async function generateAndSend(opts) {
 
   let analysis = null;
   let aiText = '';        // 模型原始返回文本，落库用
+  let aiUsage = null;     // 模型返回的 token 用量（此前被丢弃 → 无成本可见性）
   let degradeReason = '';
   let degraded = false;
 
@@ -201,6 +292,7 @@ async function generateAndSend(opts) {
   try {
     const result = await analyze(config, summary);
     aiText = result.text;
+    aiUsage = result.usage || null;
     analysis = parseAnalysis(result.text);
     if (!analysis) {
       // 文本不是合法 JSON：不算硬失败（模型还是回了），降级为「无法解析」
@@ -213,12 +305,25 @@ async function generateAndSend(opts) {
   }
 
   // ③ 落库（无论成败都存一份，便于回溯）
+  //   先做 highlights 后处理并【回写 analysis】：上限裁剪 + 幻觉节点名过滤 + 离线聚合。
+  //   必须早于下面的 risk_level/summary/suggestion 取值——否则 suggestion 仍按原始 60+ 条拼，
+  //   且 report_json 仍会是 35~44KB 的节点清单。
+  const capped = capHighlights(analysis, summary);
+  analysis = capped.analysis;
+
   const riskLevel = analysis ? (analysis.risk_level || '') : '';
   const aiSummary = analysis ? (analysis.summary || '') : '';
   const suggestion = analysis
     ? (Array.isArray(analysis.highlights) ? analysis.highlights.map(h => `[${h.agent_name||'-'}] ${h.suggestion||''}`).join('\n') : '')
     : (degraded ? 'AI 分析失败：' + degradeReason : '');
-  const reportJson = JSON.stringify({ summary, analysis: analysis || { _parse_error: true, raw: aiText.slice(0, 2000) }, degraded, degrade_reason: degradeReason });
+  const usage = (aiUsage && typeof aiUsage === 'object') ? aiUsage : {};
+  const reportJson = JSON.stringify({
+    summary,
+    analysis: analysis || { _parse_error: true, raw: aiText.slice(0, 2000) },
+    highlight_stats: capped.stats || null,
+    degraded,
+    degrade_reason: degradeReason
+  });
 
   const report = db.insertAiReport({
     period: summary.period,
@@ -226,7 +331,13 @@ async function generateAndSend(opts) {
     summary: aiSummary,
     suggestion,
     report_json: reportJson,
-    prompt_version: PROMPT_VERSION
+    prompt_version: PROMPT_VERSION,
+    prompt_tokens: Number(usage.prompt_tokens) || 0,
+    completion_tokens: Number(usage.completion_tokens) || 0,
+    total_tokens: Number(usage.total_tokens) || 0,
+    duration_ms: Date.now() - t0,
+    // 与 report_json.degraded 同源赋值，避免两处漂移
+    degraded: degraded ? 1 : 0
   });
 
   // ④ 渲染并投递
@@ -282,4 +393,8 @@ async function runExclusive(opts) {
 }
 const isRunning = () => running;
 
-module.exports = { generateAndSend, runExclusive, isRunning, renderStatsText, renderFullText, renderDegradedText };
+module.exports = {
+  generateAndSend, runExclusive, isRunning,
+  capHighlights, renderDiskLine,
+  renderStatsText, renderFullText, renderDegradedText
+};

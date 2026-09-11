@@ -238,4 +238,4 @@ function parseAnalysis(text) {
   }
 }
 
-module.exports = { analyze, parseAnalysis, AiError };
+module.exports = { analyze, parseAnalysis, checkBaseUrl, AiError };
