@@ -297,7 +297,7 @@ async function generateAndSend(opts) {
   const t0 = Date.now();   // 单次生成耗时起点（含 LLM 调用 + 投递），结果写 ai_state.last_duration_ms
 
   // ① 始终先做本地统计（降级基底）
-  const summary = summarize({ periodHours: 24 });
+  const summary = summarize({ periodHours: Number(config.period_hours) || 24 });
 
   let analysis = null;
   let aiText = '';        // 模型原始返回文本，落库用

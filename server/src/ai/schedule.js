@@ -22,7 +22,23 @@ const TICK_MS = 60000;
 //   time: 'HH:MM'
 //   tzOffsetHours: 数字
 // 返回「上一个应发送时刻」与「下一个应发送时刻」，用于判断当前是否处于「应已发送」窗口。
+// 间隔型频率：对齐当地整点边界（every6h → 00/06/12/18，every12h → 00/12），与「时刻型」不同，
+// 它们不需要 schedule_time。
+const INTERVAL_HOURS = { every6h: 6, every12h: 12 };
+
+function computeIntervalPoint(hours, tzOffsetHours) {
+  const stepMs = hours * 3600000;
+  const tzMs = tzOffsetHours * 3600000;
+  const localNow = Date.now() + tzMs;
+  const localMidnight = Math.floor(localNow / 86400000) * 86400000;  // 当地 00:00（以偏移后的"本地 epoch"取整）
+  const k = Math.floor((localNow - localMidnight) / stepMs);
+  const lastScheduled = localMidnight + k * stepMs - tzMs;           // 换回真实 UTC 时间戳
+  return { lastScheduled, nextScheduled: lastScheduled + stepMs };
+}
+
 function computeSchedulePoint(freq, time, tzOffsetHours) {
+  const intervalHours = INTERVAL_HOURS[freq];
+  if (intervalHours) return computeIntervalPoint(intervalHours, Number(tzOffsetHours) || 0);
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(time || '08:00'));
   if (!m) return null;
   const hour = +m[1], minute = +m[2];

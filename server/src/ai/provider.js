@@ -98,9 +98,18 @@ class AiError extends Error {
 // 调用模型。返回 { text, usage, model }。
 //   config: db.getAiConfig() 的返回值
 //   summary: summarizer.summarize() 的返回值
-async function analyze(config, summary) {
-  if (!config.api_key) {
-    throw new AiError('未配置 API Key', { retryable: false });
+// API Key 解析：AI_KEY_FROM_ENV=1 时只从环境变量读（密钥不落库，降低 DB 泄露面）。
+function resolveApiKey(config) {
+  if (process.env.AI_KEY_FROM_ENV === '1') return String(process.env.AI_API_KEY || '');
+  return (config && config.api_key) || '';
+}
+
+// opts.systemPrompt / opts.userMessage：单节点分析等场景可换成专用提示词（默认走日报提示词）。
+async function analyze(config, summary, opts) {
+  const apiKey = resolveApiKey(config);
+  if (!apiKey) {
+    const hint = process.env.AI_KEY_FROM_ENV === '1' ? '（已启用 AI_KEY_FROM_ENV，请设置 AI_API_KEY 环境变量）' : '';
+    throw new AiError('未配置 API Key' + hint, { retryable: false });
   }
   if (!config.model) {
     throw new AiError('未配置模型名称', { retryable: false });
@@ -112,12 +121,14 @@ async function analyze(config, summary) {
   // SSRF 防护：校验 base_url 指向的不是云元数据地址，同时获取已解析的 IP（防 DNS rebinding）
   const resolved = await checkBaseUrl(baseUrl);
 
-  const userMsg = buildUserMessage(summary);
+  // 单节点分析会传入专用提示词；日报走默认提示词
+  const systemPrompt = (opts && opts.systemPrompt) || SYSTEM_PROMPT;
+  const userMsg = (opts && opts.userMessage) || buildUserMessage(summary);
 
   const body = JSON.stringify({
     model: config.model,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userMsg }
     ],
     temperature: 0.3,    // 低温度：分析报告倾向稳定、可复现
@@ -128,7 +139,7 @@ async function analyze(config, summary) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.api_key}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Length': Buffer.byteLength(body) // 显式声明，避免非标代理 411
     },
     body,
@@ -238,4 +249,4 @@ function parseAnalysis(text) {
   }
 }
 
-module.exports = { analyze, parseAnalysis, checkBaseUrl, AiError };
+module.exports = { analyze, parseAnalysis, checkBaseUrl, resolveApiKey, AiError };
