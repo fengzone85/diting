@@ -44,9 +44,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.4"
+SCRIPT_VERSION="1.1.5"
 SCRIPT_DATE="2026-09-11"
-SCRIPT_NOTES="修复 --backup <路径> 被当成未知参数（usage/docs 早有承诺但未实现）；新增备份保留轮转（默认 14 天）与 --keep-days；新增每日自动备份 --backup-schedule install/uninstall/status；备份列表显示占用、时间跨度与定时状态"
+SCRIPT_NOTES="新增 --process-restore：消费后台「恢复」请求（cron 每 5 分钟轮询）；备份自动同步到 BACKUP_VISIBLE_DIR 供后台列表/下载；备份压缩（pigz，约 20% 体积）与空间预检自愈；修复 --backup <路径>、备份保留轮转与每日自动备份"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -121,6 +121,7 @@ show_usage() {
   --restore <路径>        从备份恢复数据库（恢复前自动备份当前状态）
   --backup-list           列出已有备份
   --backup-schedule 动作  每日自动备份：install / uninstall / status
+  --process-restore       消费后台「恢复」请求（由 cron 每 5 分钟调用，勿手动执行）
   --db-stats              查看数据库统计信息
   --reset-admin-token     重置管理员 Token（丢失时使用，旧 Token 立即失效）
   --clear-ip-whitelist    清除管理端 IP 白名单（误配锁门时救援，改库即时生效）
@@ -767,6 +768,8 @@ do_backup() {
     local sz; sz="$(du -h "$final_path" | cut -f1)"
     echo -e "${GREEN}[OK]   备份完成: ${final_path} (${sz})${NC}"
     echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
+    # 同步一份到后台可见目录（供网页列表/下载），未配置则跳过
+    sync_to_visible_dir "$final_path"
 
     # ── 轮转（含压缩产物）与状态回写 ────────────────────────────────────────
     local pruned=0
@@ -883,6 +886,45 @@ prune_backups() {
     echo -e "${GREEN}[OK]   $(msg "bk.pruned") ${#old[@]} $(msg "bk.pruned_unit")（~$((freed / 1024)) MB）${NC}"
 }
 
+# 后台发起的恢复请求文件（容器内 BACKUP_DIR 挂载到宿主备份目录后可达）。
+# 后台点「恢复」只写请求文件，真正的恢复由本脚本在宿主侧执行
+# —— 容器内无法安全完成「先备份当前状态 + 停服原子替换 + 重启」。
+RESTORE_REQUEST_FILE="${RESTORE_REQUEST_FILE:-${BACKUP_DIR_HOST:-}/restore.request}"
+
+# 处理前台（后台 UI）投递的恢复请求。仅 ADMIN 从后台发起才可能生成该文件。
+process_restore_request() {
+    local reqf="${RESTORE_REQUEST_FILE:-}"
+    [[ -n "$reqf" && -f "$reqf" ]] || return 1
+    local file name
+    file="$(sed -n 's/.*"file":"\([^"]*\)".*/\1/p' "$reqf" | head -n1)"
+    name="$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$reqf" | head -n1)"
+    if [[ -z "$file" ]]; then
+        echo -e "${RED}[错误] 恢复请求文件格式异常，已忽略: $reqf${NC}" >&2
+        rm -f "$reqf"
+        return 1
+    fi
+    echo -e "${YELLOW}[信息] 检测到后台恢复请求: ${name:-$file}${NC}"
+    if [[ ! -f "$file" ]]; then
+        echo -e "${RED}[错误] 请求的备份文件不存在: $file${NC}" >&2
+        rm -f "$reqf"
+        return 1
+    fi
+    # 先删请求文件再执行，避免恢复过程中的失败被反复重试成循环
+    rm -f "$reqf"
+    do_restore "$file"
+}
+
+# 把备份同步到「容器可见」目录，供后台列表/下载使用。
+# 独立于备份逻辑：未配置/不可写时静默跳过，不影响备份本身。
+sync_to_visible_dir() {
+    local src="$1"
+    local dst="${BACKUP_VISIBLE_DIR:-}"
+    [[ -n "$dst" && -f "$src" ]] || return 0
+    mkdir -p "$dst" 2>/dev/null || return 0
+    [[ "$(dirname "$src")" == "$dst" ]] && return 0
+    cp -f "$src" "$dst/" 2>/dev/null || true
+}
+
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
 do_restore() {
     local in_path="$1"
@@ -995,6 +1037,9 @@ do_restore() {
 
     echo -e "${GREEN}[OK]   数据库已恢复${NC}"
     echo -e "${YELLOW}[提示] 请刷新后台确认数据正确；如有问题可从 ${pre_restore:-（无）} 回滚${NC}"
+    # 恢复结果回写状态，供后台展示（与备份共用 backup_state）
+    db_backup_state_set last_status=ok last_run_ts="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")" \
+        "last_error=" "last_file=restore:$(basename "$in_path")" 2>/dev/null || true
 }
 
 # 安装/卸载每日自动备份（cron）。
@@ -1022,11 +1067,18 @@ do_backup_schedule() {
             # 先移除旧的同名条目，保证幂等（重复安装不会产生多行）
             local cur
             cur="$(crontab -l 2>/dev/null | grep -v -F "$marker" || true)"
-            # BACKUP_AUTO=1 让脚本读后台配置的周期判断是否执行 —— 周期改了不用重建 cron
-            local line="0 ${hour} * * * BACKUP_AUTO=1 ${self} --backup --keep-days ${keep} >> ${DB_BACKUP_DIR}/backup.log 2>&1 ${marker}"
-            printf '%s\n%s\n' "$cur" "$line" | grep -v '^$' | crontab -
+            # BACKUP_AUTO=1 让脚本读后台配置的周期判断是否执行 —— 周期改了不用重建 cron。
+            # 先 source /etc/diting/host.env（可选）：里面配置 BACKUP_VISIBLE_DIR /
+            # RESTORE_REQUEST_FILE（即 compose 挂进容器的那个卷的宿主侧路径），
+            # 使备份能被后台列表/下载，并让后台「恢复」请求落在此可被消费的位置。
+            # 每 5 分钟轮询一次恢复请求：后台点「恢复」最多 5 分钟内由宿主执行。
+            local pre="[ -f /etc/diting/host.env ] && . /etc/diting/host.env;"
+            local line="0 ${hour} * * * ${pre} BACKUP_AUTO=1 ${self} --backup --keep-days ${keep} >> ${DB_BACKUP_DIR}/backup.log 2>&1 ${marker}"
+            local line2="*/5 * * * * ${pre} ${self} --process-restore >> ${DB_BACKUP_DIR}/restore.log 2>&1 ${marker}-restore"
+            printf '%s\n%s\n%s\n' "$cur" "$line" "$line2" | grep -v '^$' | crontab -
             echo -e "${GREEN}[OK]   $(msg "bk.cron_installed")${NC}"
             echo "       $line"
+            echo "       $line2"
             echo -e "${YELLOW}$(msg "bk.cron_hint")${NC}"
             echo -e "       $(msg "bk.cron_log") ${DB_BACKUP_DIR}/backup.log"
             echo -e "       $(msg "bk.cron_remove") sudo bash $self --backup-schedule uninstall"
@@ -1319,7 +1371,8 @@ backup_should_run() {
     sched="$(db_ui_field_get backup_schedule 2>/dev/null || true)"
     case "$sched" in
         off)    echo "skipped"; echo "（后台备份周期=关闭）" >&2; return 1 ;;
-        daily)  echo "yes"; return 0 ;;
+        daily|"")  # 未配置时按每日（与 db.js 默认 off 不同：未配置视为未接管，保持可用）
+            echo "yes"; return 0 ;;
         weekly)
             # 周一执行（%u：1=周一）
             if [[ "$(date +%u)" -eq 1 ]]; then echo "yes"; return 0; fi
@@ -1843,6 +1896,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         --reset-admin-token) ACTION="reset-admin-token"; shift ;;
         --clear-ip-whitelist) ACTION="clear-ip-whitelist"; shift ;;
+        # 消费后台「恢复」按钮投递的请求文件（仅供 cron 调用）
+        --process-restore) ACTION="process-restore"; shift ;;
         --server)      A_SERVER="$2"; shift 2 ;;
         --id)          A_ID="$2"; shift 2 ;;
         --token)       A_TOKEN="$2"; shift 2 ;;
@@ -1879,6 +1934,7 @@ if [[ -n "$ACTION" ]]; then
         db-stats)     do_db_stats ;;
         reset-admin-token) do_reset_admin_token ;;
         clear-ip-whitelist) do_clear_ip_whitelist ;;
+        process-restore) process_restore_request || true ;;
     esac
 elif [[ -t 0 ]]; then
     while true; do show_menu; done

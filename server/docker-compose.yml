@@ -28,6 +28,9 @@ services:
       - AGENT_GIT_REPO=${AGENT_GIT_REPO:-}
       - OFFLINE_THRESHOLD_SEC=60
       - RETENTION_DAYS=30
+      # 备份目录与恢复请求文件（对应上面的备份卷挂载；容器内路径，一般无需改）
+      - BACKUP_DIR=${BACKUP_DIR:-/data/backups}
+      - RESTORE_TRIGGER=${RESTORE_TRIGGER:-/data/backups/restore.request}
       # 延迟波形后端降采样（对齐 Komari downsample/max_points 契约）
       - PROBES_DOWNSAMPLE=${PROBES_DOWNSAMPLE:-1}
       - PROBES_MAX_POINTS=${PROBES_MAX_POINTS:-5000}
@@ -50,6 +53,10 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     volumes:
       - server-data:/data
+      # 宿主备份目录挂进容器：后台「备份列表 / 下载 / 恢复」需要读到备份文件。
+      # 同时把恢复请求文件写在同名卷内，由宿主侧 diting.sh --process-restore 消费。
+      # 宿主上先建目录并写入 /etc/diting/host.env（见 diting.sh --backup-schedule install 的提示）。
+      - ${HOST_BACKUP_DIR:-./backups}:/data/backups
 
 volumes:
   server-data:
