@@ -15,7 +15,7 @@ This project trades "doing less" for "being safer". Five non-negotiable design p
 1. **Trust isolation over feature richness** — neither the server nor any agent is assumed trustworthy; a breach of either must not spread to the other.
 2. **No command channel** — Agent → Server is a one-way data flow; the server has no mechanism to influence agent behavior (no WebSocket downstream, no task push).
 3. **Zero coupling between agents** — each agent knows only its own `SERVER_URL` + token; agents cannot perceive one another.
-4. **Data minimization** — we collect only basic state (online / load / CPU / memory / disk / traffic / temperature / Swap / uptime) and never fingerprint the host (no kernel version, GPU, public IP, connection count, or process count).
+4. **Data minimization** — we collect only basic state (online / load / CPU / memory / disk / traffic / temperature / Swap / uptime) and never fingerprint the host (no kernel version, CPU model, GPU, public IP, connection count, or process count).
 5. **Server untrusted + credentials never naked** — HTTPS throughout, tokens stored as SHA-256 hashes, sessions via signed cookies, dangerous actions gated by TOTP; defense in depth, not single-point trust.
 
 > See "Threat model: trust-boundary analysis" below for the full compromise walkthrough.
@@ -154,6 +154,25 @@ Our design assumes the opposite: **the server may be compromised, a single agent
 - We collect only basic state: online, load, CPU, memory, disk, traffic (incl. monthly totals), temperature, Swap, uptime. Temperature / Swap / uptime are **non-fingerprint** metrics (no kernel version / CVE targeting, no public IP, no GPU), so even a leak yields nothing actionable.
 - We do **not** collect kernel version, GPU, public IP, connection count, or process count — fingerprints usable for targeted attack. Even if the server DB is exfiltrated, the leak is only "machine X had CPU/memory Y at time Z" — useless for targeted attacks (no kernel version → no CVE targeting, no public IP → no direct target, no GPU → no mining leverage).
 
+**③·b Fingerprints carry two distinct risks: location, and clustering**
+
+The common intuition is: "Since the agent has zero inbound, we don't collect the public IP, and agents take no commands, nothing collected is reachable — so fingerprints are harmless." That reasoning covers only the first dimension and misses the second:
+
+| Dimension | The problem the attacker must solve | What defends against it | diting's stance |
+| --- | --- | --- | --- |
+| **Location** | Where is this machine? How do I reach it? | Not collecting the public IP / any IP | ✅ No IP collected, plus zero inbound |
+| **Clustering** | I've already landed on one host — **which other hosts can I hit with the same exploit?** | Not collecting vulnerability-matchable fingerprints | ✅ No kernel version, no CPU model, no GPU |
+
+The key insight: **clustering does not require location capability.** If an attacker already has a shell on one host via a completely unrelated entry point (say, an outdated CMS on that box), what he wants to know is "which of your other hosts can my existing exploit hit again?" Any field in the DB that groups machines together lowers his second-wave cost:
+
+- **Kernel version** → directly matches CVEs (`3.10.0-1160` ⇒ that specific vulnerability list);
+- **CPU model** → identifies the microarchitecture (`E5-2680 v4` ⇒ Skylake-SP ⇒ MDS/Downfall class; `EPYC 7B13` ⇒ Zen family). All hosts of the same model share an identical vulnerability surface, so **owning one means owning the recipe for all of them**;
+- **Listening ports / process list** → literally a to-do list of "which host still runs openssh 7.4 / nginx 1.14".
+
+So "no public IP" defends against *finding you*, while "no kernel version / CPU model" defends against *knowing where to strike once found* — two independent lines, neither a substitute for the other. This project does both, and the discipline **is not relaxed just because a field cannot be exploited in isolation**: once the first exception is granted for "it's unreachable anyway", the line is gone.
+
+> Note: `hostname` and `os` (e.g. "Ubuntu 22.04") are indeed stored and are lightweight identifiers. The former is an operational necessity (telling nodes apart); the latter is coarse-grained (a distro name cannot be matched to a kernel CVE). The line we draw is explicit: **do not collect fields that directly match vulnerabilities or lower the cost of second-wave spread** — not "collect no strings at all".
+
 ### Three compromise scenarios
 
 | Scenario | Attacker can | This project | Command-channel / fingerprinting monitor |
@@ -178,10 +197,11 @@ Tokens are stored in the database as **SHA-256 hashes** (`token_hash`), never in
 
 In the worst case (server + one agent both compromised), the attacker's ceiling is **spoofing other agents' reports** — the dashboard shows fake data, but **no machine is controlled**.
 
-### Two honest caveats
+### Three honest caveats
 
 1. **On the collected set**: besides the basic state, `hostname`, `os` (distro name, e.g. "Ubuntu 22.04"), temperature, Swap, and uptime are also stored. They are lightweight identifiers or **non-fingerprint metrics** (temperature / Swap / uptime carry no kernel version / CVE targeting, no public IP, no GPU), not attack fingerprints; the "no fingerprint" claim should be read as "no fingerprint useful for targeted attack".
 2. **Token hashing downgrades "plaintext leak" to "forge only with DB write access"**, not complete immunity — this should be explicit when evaluating scenario ③.
+3. **On the "clustering" dimension**: see ③·b above. "No public IP" addresses *location* only; it does not address "an attacker who already landed on one host uses fingerprints in the DB to select other hosts of the same model for a repeat run". Hence we do not collect kernel version / CPU model / GPU / process count / connection count — not because those fields are directly exploitable given "no public IP + no command channel" (they are not), but because they lower the cost of an attacker's second wave. The same discipline is why **adding any new collected field requires a fresh security review**, rather than granting exceptions one by one on the grounds that "it's unreachable anyway".
 
 ## Trust-boundary comparison with mainstream monitors (e.g. Nezha)
 
@@ -194,6 +214,7 @@ Many monitors (e.g. Nezha) prioritize features with an architecture of **monitor
 | Remote execution | ❌ none (deliberately absent) | ✅ present (command exec → RCE risk) |
 | Agent coupling | Zero; mutually unaware | Server can orchestrate; agents can be jump hosts |
 | Collected data | Basic state (incl. non-fingerprint metrics like temp/Swap/uptime), no fingerprint | May include kernel/version/network detail |
+| Clustering risk | ❌ none (no kernel/CPU model collected, so the attacker cannot bucket the fleet by microarchitecture) | ⚠️ present (kernel/model bucket the fleet, letting one exploit be reused) |
 | Worst case (server + 1 agent breached) | Only report spoofing; no machine controlled | Can push tasks to probe / execute via agents |
 | Trust model | Server and agents both untrusted | Implicitly assumes "server is trusted" |
 
