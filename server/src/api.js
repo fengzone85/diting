@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
@@ -1143,10 +1143,17 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
   }
   const need = db.is2FAEnabled();
   if (need) {
+    // 失败节流（L-2）：与 adminOnly 同一套锁定，避免经 /login 绕过枚举防护。
+    if (!totpGuard(req)) {
+      return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+    }
     const secret = db.get2FASecret();
-    if (!code || !secret || !totp.verifyTOTP(secret, code)) {
+    // verifyTotpOnce：同一 6 位码只能成功一次（防重放，L-2）。
+    if (!code || !secret || !verifyTotpOnce(secret, code)) {
+      recordTotpFailure(req);
       return res.status(401).json({ error: 'invalid totp', need_totp: true });
     }
+    clearTotpFailures(req);
   }
   const payload = { role: 'admin', totp: need, exp: Date.now() + SESSION_TTL };
   setSessionCookie(res, payload);
@@ -1181,7 +1188,12 @@ router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
   const { code } = req.body || {};
   const secret = db.get2FASecret();
   if (!secret) return res.status(400).json({ error: 'run setup first' });
-  if (!code || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
+  if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+  // 防重放（L-2）：同一时间步的码只能成功一次
+  if (!code || !verifyTotpOnce(secret, code)) {
+    recordTotpFailure(req);
+    return res.status(400).json({ error: 'invalid code' });
+  }
   db.set2FAEnabled(true);
   // 安全状态变更：吊销既有会话，强制所有设备用新安全基线重新登录
   revokeAllSessions();
@@ -1193,7 +1205,12 @@ router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
   const { code } = req.body || {};
   if (!db.is2FAEnabled()) return res.status(400).json({ error: '2fa not enabled' });
   const secret = db.get2FASecret();
-  if (!code || !secret || !totp.verifyTOTP(secret, code)) return res.status(400).json({ error: 'invalid code' });
+  if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+  // 防重放（L-2）：同一时间步的码只能成功一次
+  if (!code || !secret || !verifyTotpOnce(secret, code)) {
+    recordTotpFailure(req);
+    return res.status(400).json({ error: 'invalid code' });
+  }
   db.set2FAEnabled(false);
   // 安全状态变更：吊销既有会话，防止 2FA 关闭前的旧会话继续持有管理员权限
   revokeAllSessions();
