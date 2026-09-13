@@ -128,3 +128,52 @@ test('状态接口暴露 running / last_duration_ms / started_at 字段', async 
   assert.ok(Object.prototype.hasOwnProperty.call(st, 'last_duration_ms'), '缺 last_duration_ms');
   assert.ok(Object.prototype.hasOwnProperty.call(st, 'started_at'), '缺 started_at');
 });
+
+// ---- §9 T19：周期对比端到端（走降级路径落库，不调模型）----
+// 降级报告的 report_json.summary.agents[] 就是喂给模型的原始摘要，因此可直接断言 compare 字段：
+//   ① 两个窗口都有数据 → compare 存在且差值符号为「当期 − 前一期」；
+//   ② 只有当期窗口有数据 → compare=null 且 compare_insufficient=true（prompt 据此禁止推断趋势）。
+const db = require('../src/db');
+
+function mkMetric(agentId, ts, over) {
+  return Object.assign({
+    agent_id: agentId, ts, cpu: 10, mem_used: 1, mem_total: 2, mem_pct: 50,
+    disk_used: 50, disk_total: 100, disk_pct: 50, load1: 1, load5: 1, load15: 1,
+    net_rx_rate: 1000, net_tx_rate: 1000, net_rx_month: 1, net_tx_month: 1, uptime: 1,
+    temp: 40, swap_used: 0, swap_total: 0, swap_pct: 0, disk_r_rate: 0, disk_w_rate: 0,
+    probes: null, disks: null
+  }, over || {});
+}
+
+test('日报摘要带周期对比：有前窗时给差值，缺前窗时标记 insufficient', async () => {
+  const now = Date.now();
+  const HOUR = 3600000;
+  const a = db.createAgent({ name: 'cmp-both' }).id;       // 两个窗口都有数据
+  const b = db.createAgent({ name: 'cmp-cur-only' }).id;   // 只有当期
+
+  for (let i = 0; i < 48; i++) {
+    const ts = now - i * HOUR;
+    // 当期（近 24h）cpu=20；前窗（24–48h）cpu=10 → cpu_avg_delta 应为 +10
+    db.insertMetric(a, mkMetric(a, ts, { cpu: i < 24 ? 20 : 10, mem_pct: i < 24 ? 60 : 50 }));
+    if (i < 24) db.insertMetric(b, mkMetric(b, ts, { cpu: 30 }));
+  }
+
+  const res = await request(app).post('/api/ai/run?force=1').set(ADMIN);
+  assert.strictEqual(res.status, 202);
+  await waitIdle();
+
+  const row = db.db.prepare('SELECT report_json FROM ai_reports ORDER BY id DESC LIMIT 1').get();
+  const summary = JSON.parse(row.report_json).summary;
+  const sa = summary.agents.find(x => x.name === 'cmp-both');
+  const sb = summary.agents.find(x => x.name === 'cmp-cur-only');
+
+  assert.ok(sa && sa.compare, '两窗口都有数据时应给出 compare');
+  assert.strictEqual(sa.compare_insufficient, false);
+  assert.strictEqual(sa.compare.window, '24h');
+  assert.strictEqual(sa.compare.cpu_avg_delta, 10, '当期 20 − 前窗 10');
+  assert.strictEqual(sa.compare.mem_avg_delta, 10, '当期 60 − 前窗 50');
+
+  assert.ok(sb, '应存在只当期有数据的节点');
+  assert.strictEqual(sb.compare, null, '前窗无数据时 compare 必须为 null');
+  assert.strictEqual(sb.compare_insufficient, true, '必须显式标记，供 prompt 禁止推断趋势');
+});

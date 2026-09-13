@@ -15,7 +15,15 @@
 
 const db = require('../db');
 const { daysUntil, cycleLabel } = require('../util');
-const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk } = require('./stats');
+const {
+  stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk,
+  compareWindows, aggregateProbes
+} = require('./stats');
+
+// 周期对比开关（§9 T19）：AI_COMPARE=0 关闭（省一次同规模采样查询）；默认开启。
+function compareEnabled() {
+  return process.env.AI_COMPARE !== '0';
+}
 
 // 节点名是不可信输入（自助注册可自定义）：进 prompt 前清洗控制字符并限长，
 // 避免换行/超长文本破坏 JSON 结构，或在提示词里夹带指令（提示注入）。
@@ -26,6 +34,7 @@ function safeName(v) {
 const DEFAULT_AGENT_INTERVAL = 20;   // 秒；与 agent/agent.py 的 INTERVAL 默认值保持一致
 const AI_TREND_FETCH_DAYS = 14;      // 趋势查询最多回看的天数（成本上限：14d ≈1s）
 const AI_TREND_BUCKET_MS = 3600000;  // 1h 桶 → 14d ≈336 点/台（桶宽只影响输出分辨率，不影响扫描成本）
+const AI_PROBE_POINTS = 200;         // 单节点探针聚合的采样点数（仅 §9 T20 用；日报不做探针）
 
 // 趋势窗口天数：0=关闭（回退 24h 算法）；默认 7；clamp 到 [2, 14] 且不超过 metrics 保留天数。
 function resolveTrendDays() {
@@ -156,6 +165,17 @@ function summarize(options) {
     (byAgent[r.agent_id] || (byAgent[r.agent_id] = [])).push(r);
   }
 
+  // 周期对比（§9 T19）：再取「前一等长窗口」ts ∈ [since − period, since) 做差。
+  // 成本 = 多一次同规模采样查询（走 idx_metrics_ts 范围扫描）；AI_COMPARE=0 可关闭。
+  const doCompare = compareEnabled();
+  const prevByAgent = {};
+  if (doCompare) {
+    const prevRows = db.metricsSparklinesAllSampled(sinceTs - periodHours * 3600000, AI_SAMPLE_POINTS, sinceTs);
+    for (const r of prevRows) {
+      (prevByAgent[r.agent_id] || (prevByAgent[r.agent_id] = [])).push(r);
+    }
+  }
+
   // 磁盘趋势：单独一条轻量序列（1 次查询覆盖 3d/7d/14d 全部窗口，按窗切片在 JS 里算）
   const trendDays = resolveTrendDays();
   const diskSeriesByAgent = {};
@@ -168,7 +188,14 @@ function summarize(options) {
 
   const silentDays = Number(db.getAiConfig().silent_days) || 0;
   const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays };
-  const out = agents.map(a => summarizeAgent(a, byAgent[a.id] || [], sumOpts));
+  const out = agents.map((a) => {
+    const s = summarizeAgent(a, byAgent[a.id] || [], sumOpts);
+    // compare 不参与 baseline_risk（避免风险等级因新增字段发生行为突变）
+    if (doCompare) {
+      Object.assign(s, compareWindows(byAgent[a.id] || [], prevByAgent[a.id] || [], { periodHours }));
+    }
+    return s;
+  });
   const onlineCount = out.filter(s => s.online).length;
 
   // 确定性风险锚点：模型只能在它上下浮动一级（见 stats.baselineRisk / report.clampRisk），
@@ -217,6 +244,22 @@ function summarizeOne(agent, options) {
   const summary = summarizeAgent(agent, rows, {
     intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays
   });
+
+  // 周期对比（§9 T19）：单节点再取一次同长的前窗（单节点查询成本可忽略）
+  if (compareEnabled()) {
+    const prevRows = db.getMetricsSparklinesOne(agent.id, sinceTs - periodHours * 3600000, 1000, sinceTs);
+    Object.assign(summary, compareWindows(rows, prevRows, { periodHours }));
+  }
+
+  // 探针质量聚合（§9 T20）：**仅单节点分析启用**——日报不做（62 台 × probes 大字段解析，
+  // 成本与 token 都不划算）。探针是附加信息，任何异常都只告警、不影响其余统计。
+  try {
+    const probes = aggregateProbes(db.getMetricsProbesOne(agent.id, sinceTs, AI_PROBE_POINTS), { maxTasks: 6 });
+    if (probes.length) summary.probes = probes;
+  } catch (e) {
+    console.warn('[ai] 探针聚合失败（忽略，不影响分析）：', e.message);
+  }
+
   summary.period = `${periodHours}h`;
   return summary;
 }
