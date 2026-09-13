@@ -19,6 +19,7 @@ export const enUS: Record<string, string> = {
   'errors.loginRateLimited': 'Too many login attempts. Please retry in 60s.',
   'errors.invalidToken': 'Invalid admin token.',
   'errors.invalidTotp': 'Invalid or expired 2FA code.',
+  'errors.totpRequired': 'Two-factor verification is required before this action.',
   'errors.agentNotFound': 'Agent not found.',
   'errors.notFound': 'Resource not found.',
 
@@ -515,6 +516,14 @@ export const enUS: Record<string, string> = {
   'ai.reportCount': 'Report count',
   'ai.usage7d': 'Tokens (last 7 days)',
   'ai.noSummary': 'No summary',
+  'ai.needLogin': 'Admin sign-in is required to analyze this node.',
+  'ai.gotoLogin': 'Sign in',
+  'ai.window': 'Window',
+  'ai.win24h': '24 hours',
+  'ai.win7d': '7 days',
+  'ai.win30d': '30 days',
+  'ai.reanalyze': 'Re-analyze',
+  'ai.analyzeNodeHint': 'Read-only AI interpretation of this node\u2019s recent metrics; conclusions are probabilistic and no commands are issued.',
   'ai.prevPage': 'Prev',
   'ai.nextPage': 'Next',
 

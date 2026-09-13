@@ -19,6 +19,7 @@ export const zhCN: Record<string, string> = {
   'errors.loginRateLimited': '登录尝试过于频繁，请 60 秒后重试。',
   'errors.invalidToken': '管理员 Token 无效。',
   'errors.invalidTotp': '两步验证码无效或已过期。',
+  'errors.totpRequired': '需要先完成两步验证才能执行此操作。',
   'errors.agentNotFound': '受控端不存在。',
   'errors.notFound': '资源不存在。',
 
@@ -515,6 +516,14 @@ export const zhCN: Record<string, string> = {
   'ai.reportCount': '报告数量',
   'ai.usage7d': '近 7 天 Token 消耗',
   'ai.noSummary': '无摘要',
+  'ai.needLogin': '需要管理员登录后才能分析该节点。',
+  'ai.gotoLogin': '去登录',
+  'ai.window': '统计窗口',
+  'ai.win24h': '24 小时',
+  'ai.win7d': '7 天',
+  'ai.win30d': '30 天',
+  'ai.reanalyze': '重新分析',
+  'ai.analyzeNodeHint': '由 AI 对该节点近期指标做只读解读，结论为概率性判断，不会下发任何指令。',
   'ai.prevPage': '上一页',
   'ai.nextPage': '下一页',
 
