@@ -98,3 +98,8 @@ type ProbeTarget struct {
 	Host  string
 	Port  int
 }
+// round2 四舍五入到 2 位小数（平台共用：linux disk.go 与 windows disk 使用）。
+// round2 四舍五入到 2 位小数（对齐 Python round(pct, 2)）。
+func round2(v float64) float64 {
+	return float64(uint64(v*100+0.5)) / 100
+}
