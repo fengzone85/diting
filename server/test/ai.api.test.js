@@ -177,3 +177,50 @@ test('日报摘要带周期对比：有前窗时给差值，缺前窗时标记 i
   assert.strictEqual(sb.compare, null, '前窗无数据时 compare 必须为 null');
   assert.strictEqual(sb.compare_insufficient, true, '必须显式标记，供 prompt 禁止推断趋势');
 });
+
+// ---- §9 T18：核数链路（上报 → 落库 → 摘要负载归一化）----
+const sum = require('../src/ai/summarizer');
+
+test('核数链路：/api/report 带 cores → 落库 → 摘要给出每核负载；缺失/越界不清零', async () => {
+  const a = db.createAgent({ name: 'cores-agent' });
+  const auth = { 'X-Agent-ID': a.id, Authorization: `Bearer ${a.token}` };
+  const base = {
+    cpu: 10, mem_used: 100, mem_total: 1000, mem_pct: 10,
+    disk_used: 1, disk_total: 2, disk_pct: 50,
+    load1: 2, load5: 2, load15: 2,
+    net_rx_rate: 1, net_tx_rate: 2, net_rx_month: 3, net_tx_month: 4,
+    uptime: 100, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
+    disk_r_rate: 0, disk_w_rate: 0, cores: 4
+  };
+
+  const res = await request(app).post('/api/report').set(auth).send(base);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(db.getAgent(a.id).cores, 4, '核数应落到 agents.cores');
+
+  const summary = sum.summarizeOne(db.getAgent(a.id), { periodHours: 24 });
+  assert.strictEqual(summary.cpu.cores, 4);
+  assert.strictEqual(summary.load.avg1, 2);
+  assert.strictEqual(summary.load.avg1_per_core, 0.5, '2 / 4 核');
+
+  // 老 agent（不带 cores）继续上报：不得把已记录的核数清成 0
+  const legacy = Object.assign({}, base);
+  delete legacy.cores;
+  assert.strictEqual((await request(app).post('/api/report').set(auth).send(legacy)).status, 200);
+  assert.strictEqual(db.getAgent(a.id).cores, 4, '缺失 cores 不得覆盖已有值');
+
+  // 越界/非法核数应被校验拒收（保持原值）
+  await request(app).post('/api/report').set(auth).send(Object.assign({}, base, { cores: 99999 }));
+  await request(app).post('/api/report').set(auth).send(Object.assign({}, base, { cores: 'many' }));
+  assert.strictEqual(db.getAgent(a.id).cores, 4, '非法核数不得写入');
+
+  // 未上报核数的节点：摘要必须缺席分母并显式标记 cores_unknown
+  const b = db.createAgent({ name: 'no-cores-agent' });
+  const authB = { 'X-Agent-ID': b.id, Authorization: `Bearer ${b.token}` };
+  const nb = Object.assign({}, base);
+  delete nb.cores;
+  await request(app).post('/api/report').set(authB).send(nb);
+  const sb = sum.summarizeOne(db.getAgent(b.id), { periodHours: 24 });
+  assert.strictEqual(sb.cpu.cores, null);
+  assert.strictEqual(sb.load.cores_unknown, true);
+  assert.ok(!Object.prototype.hasOwnProperty.call(sb.load, 'avg1_per_core'), '不得用 0/1 冒充分母');
+});
