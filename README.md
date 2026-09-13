@@ -100,6 +100,26 @@ sudo bash diting.sh --install-agent --server https://your-server:8008 --id NODE1
 sudo bash diting.sh --install-agent --server https://your-server:8008 --setup-token <SETUP_TOKEN>
 ```
 
+**版本锁定与完整性校验（可选，建议生产使用）：**
+
+每个 Release 的 notes 会列出各文件的 SHA256。钉版本 + 校验可防 CDN/中间人投毒：
+
+```bash
+# 1) 钉住发布 tag（默认 master，跟随最新）
+sudo REPO_BRANCH=v1.2.0 bash diting.sh --install-server
+
+# 2) 校验脚本自身（可在 Release notes 里核对）
+sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-script
+
+# 3) 校验受控端载荷（逗号分隔，顺序须与下载清单一致：
+#    install.sh uninstall.sh agent.py collector.py diting-agent.service）
+sudo SP_AGENT_SHA256S=<s1>,<s2>,<s3>,<s4>,<s5> bash diting.sh --install-agent --server ...
+```
+
+> 未提供 SHA256 时不校验（但 `--update-script` 仍会把本次下载文件的 SHA256
+> 打印到终端，便于事后留档与下次强校验）。发布流程：打 tag → 编译/打包 →
+> `sha256sum` 各产物 → 写入 Release notes。
+
 ---
 
 ## 🏗️ 架构
