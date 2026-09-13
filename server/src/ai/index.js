@@ -5,8 +5,9 @@
 //   stop()         —— 停止调度
 //   runNow()       —— 同步跑完一次生成（供内部/测试使用）
 //   triggerRun()   —— 手动触发【异步】任务（供 POST /api/ai/run）：立即返回，后台执行
-//   analyzeNode()  —— 单节点按需分析（供 POST /api/ai/analyze-node/:id），结果缓存 30 分钟
+//   analyzeNode()  —— 单节点按需分析（供 POST /api/ai/analyze-node/:id），按「节点+窗口」缓存 30 分钟
 //   getStatus()    —— 返回运行状态（供 GET /api/ai/status）
+// 另导出 clampPeriodHours / nodeCacheKey 两个纯函数，**仅供单测**（src/ai/index.test.js）。
 //
 // 运行锁（防「定时 + 手动」并发调 LLM）由 report.runExclusive 统一提供，两个触发源共用。
 // 默认关闭：start() 内部会先读 ai_config.enabled，未启用则不挂定时器。
@@ -101,25 +102,40 @@ function getStatus() {
 
 // ---- 单节点按需分析（T11）----
 // 成本控制：同一节点结果缓存 30 分钟；同一节点的并发请求合并（避免重复点击各打一次模型）。
+// 缓存键必须含时间窗口：24h 与 7d 的结果不同源，只按 agentId 缓存会互相污染。
 const NODE_CACHE_TTL_MS = 30 * 60 * 1000;
-const nodeCache = new Map();      // agentId -> { ts, payload }
-const nodeInflight = new Map();   // agentId -> Promise
+const NODE_HOURS_MIN = 24;
+const NODE_HOURS_MAX = 720;
+function clampPeriodHours(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return NODE_HOURS_MIN;
+  return Math.max(NODE_HOURS_MIN, Math.min(NODE_HOURS_MAX, Math.round(n)));
+}
+const nodeCache = new Map();      // nodeCacheKey() -> { ts, payload }
+const nodeInflight = new Map();   // nodeCacheKey() -> Promise
 
-async function analyzeNode(agentId) {
+// 缓存键：节点 + 窗口。窗口必须参与，否则 7d 的结果会命中 24h 的缓存（静默串味）。
+function nodeCacheKey(agentId, periodHours) {
+  return `${agentId}|${periodHours}`;
+}
+
+async function analyzeNode(agentId, opts) {
+  const periodHours = clampPeriodHours((opts || {}).periodHours);
   const config = db.getAiConfig();
   if (!config.enabled) return { status: 'disabled', message: 'AI 分析未启用，请先在配置中开启' };
 
-  const cached = nodeCache.get(agentId);
+  const cacheKey = nodeCacheKey(agentId, periodHours);
+  const cached = nodeCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < NODE_CACHE_TTL_MS) {
     return Object.assign({ cached: true }, cached.payload);
   }
-  if (nodeInflight.has(agentId)) return nodeInflight.get(agentId);
+  if (nodeInflight.has(cacheKey)) return nodeInflight.get(cacheKey);
 
   const task = (async () => {
     const agent = db.getAgent(agentId);
     if (!agent) return { status: 'not_found', message: '节点不存在' };
 
-    const summary = sum.summarizeOne(agent, { periodHours: 24 });
+    const summary = sum.summarizeOne(agent, { periodHours });
     const t0 = Date.now();
     try {
       const r = await provider.analyze(config, summary, {
@@ -130,20 +146,22 @@ async function analyzeNode(agentId) {
       const payload = {
         status: 'ok',
         agent: { id: agent.id, name: summary.name, online: summary.online },
+        period_hours: periodHours,
         analysis: parsed || { _parse_error: true, raw: String(r.text || '').slice(0, 1000) },
         usage: r.usage || null,
         duration_ms: Date.now() - t0,
         prompt_version: NODE_PROMPT_VERSION
       };
-      nodeCache.set(agentId, { ts: Date.now(), payload });
+      nodeCache.set(cacheKey, { ts: Date.now(), payload });
       return payload;
     } catch (e) {
       return { status: 'error', message: e.message || String(e) };
     }
-  })().finally(() => { nodeInflight.delete(agentId); });
+  })().finally(() => { nodeInflight.delete(cacheKey); });
 
-  nodeInflight.set(agentId, task);
+  nodeInflight.set(cacheKey, task);
   return task;
 }
 
-module.exports = { start, stop, runNow, triggerRun, analyzeNode, getStatus };
+// clampPeriodHours / nodeCacheKey 为纯函数，随门面导出**仅供单测使用**（src/ai/index.test.js）。
+module.exports = { start, stop, runNow, triggerRun, analyzeNode, getStatus, clampPeriodHours, nodeCacheKey };

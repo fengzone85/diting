@@ -82,8 +82,10 @@ export const adminApi = {
   aiReport: (id: number) => api.get<AiReport>(`/api/ai/reports/${encodeURIComponent(String(id))}`),
   // AI 用量趋势（按 UTC 日聚合 token 消耗）
   aiUsage: (days = 7) => api.get<AiUsage>(`/api/ai/usage?days=${days}`),
-  // 单节点按需分析（服务端缓存 30 分钟，重复点击不会重复计费）
-  aiAnalyzeNode: (id: string) => api.post<AiNodeAnalysis>(`/api/ai/analyze-node/${encodeURIComponent(id)}`, {}),
+  // 单节点按需分析（服务端按「节点+窗口」缓存 30 分钟，重复点击不会重复计费）
+  // hours：24（默认）/ 168（7 天）/ 720（30 天）
+  aiAnalyzeNode: (id: string, hours = 24) =>
+    api.post<AiNodeAnalysis>(`/api/ai/analyze-node/${encodeURIComponent(id)}?hours=${encodeURIComponent(String(hours))}`, {}),
 
   // 批量时序（所有受控端），避免前端 N+1
   sparklines: (range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
