@@ -17,6 +17,13 @@ limit_req_zone $binary_remote_addr zone=report:10m rate=1r/s;
 # apilimit：后台管理 / 读取类接口，严格一些（2r/s，突发 10），用于挡 admin token 爆破与高频重放
 limit_req_zone $binary_remote_addr zone=apilimit:10m rate=2r/s;
 
+# WebSocket /api/clients 与 /api/rpc2 需要升级头（体检 L-16）；
+# '' 时回退 close，普通 HTTP 请求可正常复用连接。
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 80;
     server_name monitor.yourdomain.com;
@@ -36,6 +43,23 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         client_max_body_size 16k;
+    }
+
+    # 实时端点（Komari 兼容层）：必须放在 location / 之前 —— 正则 location 优先于前缀 location。
+    # 不走 apilimit：长连接每次只占 1 次请求，限流无意义，且 SSE 被限流会静默断流。
+    # 注意路径：SSE 是 /api/clients/sse（子路径，非 /api/clients-sse）；rpc2 为 POST 而非升级连接。
+    location ~ ^/api/(clients(/sse)?|rpc2)$ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;   # 长连接：默认 60s 会让 WS 每分钟被切断
+        proxy_send_timeout 3600s;
+        proxy_buffering off;        # SSE 需实时下发，缓冲会导致事件堆积延迟
     }
 
     # 其余所有请求（含 /api/overview、/api/test-alert 等后台接口）
@@ -72,6 +96,21 @@ server {
 #         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 #         proxy_set_header X-Forwarded-Proto $scheme;
 #         client_max_body_size 16k;
+#     }
+#
+#     # 与上方 80 端口块保持一致：实时端点（WS/SSE）需升级头与长超时
+#     location ~ ^/api/(clients(/sse)?|rpc2)$ {
+#         proxy_pass http://127.0.0.1:8081;
+#         proxy_http_version 1.1;
+#         proxy_set_header Upgrade $http_upgrade;
+#         proxy_set_header Connection $connection_upgrade;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_read_timeout 3600s;
+#         proxy_send_timeout 3600s;
+#         proxy_buffering off;
 #     }
 #
 #     location / {
