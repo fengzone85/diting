@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiUsage, BackupState, BackupList } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -86,6 +86,11 @@ export const adminApi = {
   // hours：24（默认）/ 168（7 天）/ 720（30 天）
   aiAnalyzeNode: (id: string, hours = 24) =>
     api.post<AiNodeAnalysis>(`/api/ai/analyze-node/${encodeURIComponent(id)}?hours=${encodeURIComponent(String(hours))}`, {}),
+  // 单节点分析历史（§8 T17）：列表不含 report_json，仅渲染所需字段
+  aiNodeReports: (id: string, limit = 10) =>
+    api.get<{ agent_id: string; limit: number; list: AiNodeReportItem[] }>(
+      `/api/ai/node-reports?agent_id=${encodeURIComponent(id)}&limit=${limit}`
+    ),
 
   // 批量时序（所有受控端），避免前端 N+1
   sparklines: (range: '1h' | '6h' | '24h' | '7d' | '30d' = '6h') =>
