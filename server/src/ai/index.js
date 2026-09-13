@@ -111,6 +111,14 @@ function clampPeriodHours(v) {
   if (!Number.isFinite(n)) return NODE_HOURS_MIN;
   return Math.max(NODE_HOURS_MIN, Math.min(NODE_HOURS_MAX, Math.round(n)));
 }
+// 缓存 TTL 可上调（有了历史落库后，长 TTL 也不会让用户失去上下文）；
+// 下限与默认都保持 30 分钟——不允许调到更小，成本护栏不削弱（§8 T17）。
+const NODE_TTL_MIN_MINUTES = 30;
+function nodeCacheTtlMs(config) {
+  const raw = Number((config || {}).node_cache_ttl_minutes);
+  const minutes = Number.isFinite(raw) && raw > 0 ? Math.max(NODE_TTL_MIN_MINUTES, Math.round(raw)) : NODE_TTL_MIN_MINUTES;
+  return minutes * 60 * 1000;
+}
 const nodeCache = new Map();      // nodeCacheKey() -> { ts, payload }
 const nodeInflight = new Map();   // nodeCacheKey() -> Promise
 
@@ -126,7 +134,7 @@ async function analyzeNode(agentId, opts) {
 
   const cacheKey = nodeCacheKey(agentId, periodHours);
   const cached = nodeCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < NODE_CACHE_TTL_MS) {
+  if (cached && Date.now() - cached.ts < nodeCacheTtlMs(config)) {
     return Object.assign({ cached: true }, cached.payload);
   }
   if (nodeInflight.has(cacheKey)) return nodeInflight.get(cacheKey);
@@ -153,6 +161,25 @@ async function analyzeNode(agentId, opts) {
         prompt_version: NODE_PROMPT_VERSION
       };
       nodeCache.set(cacheKey, { ts: Date.now(), payload });
+      // 历史落库（§8 T17）：只落「真实调用模型并成功」这一次；缓存命中不落。
+      // 落库失败绝不影响返回——历史是附加价值，不该让分析整体失败。
+      try {
+        db.insertAiNodeReport({
+          agent_id: agent.id,
+          period_hours: periodHours,
+          status: 'ok',
+          risk_level: (parsed && parsed.risk_level) || '',
+          report_json: JSON.stringify({ analysis: payload.analysis, usage: payload.usage || null }),
+          prompt_version: NODE_PROMPT_VERSION,
+          created_at: Date.now(),
+          prompt_tokens: (r.usage && r.usage.prompt_tokens) || 0,
+          completion_tokens: (r.usage && r.usage.completion_tokens) || 0,
+          total_tokens: (r.usage && r.usage.total_tokens) || 0,
+          duration_ms: payload.duration_ms
+        });
+      } catch (e) {
+        console.warn('[ai] 单节点分析历史落库失败（不影响本次返回）：', e.message);
+      }
       return payload;
     } catch (e) {
       return { status: 'error', message: e.message || String(e) };
@@ -163,5 +190,8 @@ async function analyzeNode(agentId, opts) {
   return task;
 }
 
-// clampPeriodHours / nodeCacheKey 为纯函数，随门面导出**仅供单测使用**（src/ai/index.test.js）。
-module.exports = { start, stop, runNow, triggerRun, analyzeNode, getStatus, clampPeriodHours, nodeCacheKey };
+// clampPeriodHours / nodeCacheKey / nodeCacheTtlMs 为纯函数，随门面导出**仅供单测使用**（src/ai/index.test.js）。
+module.exports = {
+  start, stop, runNow, triggerRun, analyzeNode, getStatus,
+  clampPeriodHours, nodeCacheKey, nodeCacheTtlMs
+};
