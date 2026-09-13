@@ -407,6 +407,9 @@ function runPrune() {
     const aiRetention = db.getAiConfig().log_retention_days || 30;
     const na = db.pruneAiReports(aiRetention);
     if (na > 0) console.log(`[prune] removed ${na} old ai_reports (retention ${aiRetention}d)`);
+    // 单节点分析历史共用同一保留期（§8 T17）
+    const nn = db.pruneAiNodeReports(aiRetention);
+    if (nn > 0) console.log(`[prune] removed ${nn} old ai_node_reports (retention ${aiRetention}d)`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);

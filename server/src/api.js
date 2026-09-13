@@ -1033,6 +1033,8 @@ router.put('/ai/config', adminOnly, (req, res) => {
   if (typeof b.locale === 'string' && ['zh-CN', 'en'].includes(b.locale)) allowed.locale = b.locale;
   if (typeof b.log_retention_days === 'number' && Number.isFinite(b.log_retention_days)) allowed.log_retention_days = Math.max(7, Math.min(3650, Math.floor(b.log_retention_days)));
   if (typeof b.silent_days === 'number' && Number.isFinite(b.silent_days)) allowed.silent_days = Math.max(0, Math.min(90, Math.floor(b.silent_days)));
+  // 单节点分析缓存 TTL（分钟）：下限 30（成本护栏，不允许更小）、上限 1440
+  if (typeof b.node_cache_ttl_minutes === 'number' && Number.isFinite(b.node_cache_ttl_minutes)) allowed.node_cache_ttl_minutes = Math.max(30, Math.min(1440, Math.floor(b.node_cache_ttl_minutes)));
   // 启用时校验：必须有 model；api_key 要么本次传入非空，要么之前已配置
   if (allowed.enabled) {
     // AI_KEY_FROM_ENV=1 时以环境变量为准，DB 中的 Key 不参与校验
@@ -1093,6 +1095,16 @@ router.get('/ai/usage', adminOrReadonly, (req, res) => {
     total_tokens: Number(r.total_tokens) || 0
   }));
   res.json({ days, total_tokens: list.reduce((s, x) => s + x.total_tokens, 0), list });
+});
+
+// 单节点分析历史（§8 T17）：?agent_id=&limit=1..50（默认 10）。
+// 列表刻意不含 report_json（单条可达数十 KB），只给渲染历史条目所需字段。
+router.get('/ai/node-reports', adminOrReadonly, (req, res) => {
+  const agentId = String(req.query.agent_id || '').trim();
+  if (!agentId) return res.status(400).json({ error: 'agent_id required' });
+  if (!db.getAgent(agentId)) return res.status(404).json({ error: 'agent not found' });
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+  res.json({ agent_id: agentId, limit, list: db.listAiNodeReports(agentId, limit) });
 });
 
 // 运行状态（前端展示 last_run / last_status）

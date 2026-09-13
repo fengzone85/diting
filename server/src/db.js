@@ -93,6 +93,25 @@ CREATE TABLE IF NOT EXISTS ai_reports (
   duration_ms       INTEGER DEFAULT 0,
   degraded          INTEGER DEFAULT 0
 );
+
+-- 单节点按需分析的历史（§8 T17）。每次「真实调用模型」成功后落一条，
+-- 供弹窗展示「上次分析 X 分钟前」与历史列表；缓存命中不重复落库（避免历史被同一次结果刷屏）。
+-- report_json 存该次返回的 payload 子集（analysis/usage），列表查询刻意不取该列。
+CREATE TABLE IF NOT EXISTS ai_node_reports (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id      TEXT NOT NULL,
+  period_hours  INTEGER NOT NULL,
+  status        TEXT,
+  risk_level    TEXT,
+  report_json   TEXT,
+  prompt_version TEXT,
+  created_at    INTEGER NOT NULL,
+  prompt_tokens     INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens      INTEGER DEFAULT 0,
+  duration_ms       INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ai_node_reports_agent ON ai_node_reports(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_reports_created ON ai_reports(created_at);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -353,6 +372,17 @@ const stmts = {
   listAiReports: db.prepare('SELECT id, period, risk_level, summary, suggestion, prompt_version, created_at FROM ai_reports ORDER BY created_at DESC LIMIT ? OFFSET ?'),
   countAiReports: db.prepare('SELECT COUNT(*) AS n FROM ai_reports'),
   pruneAiReports: db.prepare('DELETE FROM ai_reports WHERE created_at < ?'),
+  // ---- AI 单节点报告（§8 T17）----
+  insertAiNodeReport: db.prepare(`INSERT INTO ai_node_reports
+    (agent_id, period_hours, status, risk_level, report_json, prompt_version, created_at,
+     prompt_tokens, completion_tokens, total_tokens, duration_ms)
+    VALUES (@agent_id, @period_hours, @status, @risk_level, @report_json, @prompt_version, @created_at,
+     @prompt_tokens, @completion_tokens, @total_tokens, @duration_ms)`),
+  // 列表刻意不取 report_json（单条可达数十 KB），只给渲染历史列表所需字段
+  listAiNodeReports: db.prepare(`SELECT id, agent_id, period_hours, status, risk_level, prompt_version,
+      prompt_tokens, completion_tokens, total_tokens, duration_ms, created_at
+    FROM ai_node_reports WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?`),
+  pruneAiNodeReports: db.prepare('DELETE FROM ai_node_reports WHERE created_at < ?'),
   // AI 用量按 UTC 日聚合（day = created_at 的整数天序号），供后台展示 token 消耗趋势
   aiUsageDaily: db.prepare(`SELECT CAST(created_at / 86400000 AS INTEGER) AS day,
       COUNT(*) AS reports,
@@ -611,6 +641,7 @@ function getAiConfig() {
     locale: 'zh-CN',              // 通知正文语言：zh-CN | en（跟随后台设置，默认中文）
     log_retention_days: 30,       // AI 日报保留天数（与 metrics 保留期独立）
     silent_days: 3,               // 长期离线沉默期（天）：超过则标 stale，不逐台写进日报（0=关闭）
+    node_cache_ttl_minutes: 30,   // 单节点分析结果缓存（分钟）：下限 30，可上调（§8 T17）
     period_hours: 24              // 报告统计窗口（小时）：24=日报，168=周报
   };
   try {
@@ -698,6 +729,33 @@ function pruneAiReports(retentionDays) {
   return stmts.pruneAiReports.run(cutoff).changes;
 }
 
+// ---- AI 单节点报告（§8 T17）----
+// 只在「真实调用模型并成功」时落库；缓存命中不落（否则同一次结果会反复写历史）。
+function insertAiNodeReport(r) {
+  const info = stmts.insertAiNodeReport.run({
+    agent_id: String(r.agent_id || ''),
+    period_hours: Number(r.period_hours) || 24,
+    status: r.status || 'ok',
+    risk_level: r.risk_level || '',
+    report_json: r.report_json || '',
+    prompt_version: r.prompt_version || '',
+    created_at: r.created_at || Date.now(),
+    prompt_tokens: Number(r.prompt_tokens) || 0,
+    completion_tokens: Number(r.completion_tokens) || 0,
+    total_tokens: Number(r.total_tokens) || 0,
+    duration_ms: Number(r.duration_ms) || 0
+  });
+  return info.lastInsertRowid;
+}
+function listAiNodeReports(agentId, limit) {
+  const n = Math.max(1, Math.min(50, Number(limit) || 10));
+  return stmts.listAiNodeReports.all(String(agentId), n);
+}
+function pruneAiNodeReports(retentionDays) {
+  const cutoff = Date.now() - retentionDays * 86400000;
+  return stmts.pruneAiNodeReports.run(cutoff).changes;
+}
+
 // ---- 审计日志 ----
 const insertAuditLog = db.prepare(`INSERT INTO audit_logs (ts, admin, ip, action, detail, via)
   VALUES (@ts, @admin, @ip, @action, @detail, @via)`);
@@ -739,5 +797,6 @@ module.exports = {
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,
   insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
+  insertAiNodeReport, listAiNodeReports, pruneAiNodeReports,
   addAuditLog, getAuditLogs, countAudit, pruneAudit
 };
