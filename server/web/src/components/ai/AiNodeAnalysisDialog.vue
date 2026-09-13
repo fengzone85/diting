@@ -9,7 +9,7 @@ import { useI18n } from '../../composables/useI18n';
 import { adminApi } from '../../services/adminApi';
 import { getAuthStatus } from '../../services/auth';
 import { apiErrorMessage } from '../../utils/apiError';
-import type { AiNodeAnalysis } from '../../services/types';
+import type { AiNodeAnalysis, AiNodeReportItem } from '../../services/types';
 
 const props = defineProps<{
   agentId: string;
@@ -30,8 +30,29 @@ const needLogin = ref(false);
 const result = ref<AiNodeAnalysis | null>(null);
 const errorMsg = ref('');
 const panel = ref<HTMLElement | null>(null);
+const history = ref<AiNodeReportItem[]>([]);
 
 let prevOverflow = '';
+
+// 相对时间：历史条目与「上次分析」共用（不引入 dayjs，避免为一行文案加依赖）
+function ago(ts: number): string {
+  const minutes = Math.floor((Date.now() - Number(ts)) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return t('ai.agoJustNow');
+  if (minutes < 60) return t('ai.agoMinutes', { n: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return t('ai.agoHours', { n: hours });
+  return t('ai.agoDays', { n: Math.floor(hours / 24) });
+}
+
+// 历史是附加信息：取不到就静默为空，绝不影响分析主流程
+async function loadHistory() {
+  try {
+    const r = await adminApi.aiNodeReports(props.agentId, 10);
+    history.value = r.list || [];
+  } catch {
+    history.value = [];
+  }
+}
 
 function windowKey(h: number): string {
   if (h === 168) return 'ai.win7d';
@@ -54,6 +75,8 @@ async function run() {
   errorMsg.value = '';
   try {
     result.value = await adminApi.aiAnalyzeNode(props.agentId, hours.value);
+    // 仅在「真实跑了一次模型」时刷新历史（缓存命中不会新增历史条目）
+    if (result.value && !result.value.cached) await loadHistory();
   } catch (e) {
     result.value = null;
     // 401/403 等按服务端错误码本地化（unauthorized / admin required / ip not allowed / totp required）
@@ -77,6 +100,7 @@ async function init() {
     }
     if (needLogin.value) return;
   }
+  await loadHistory();
   await run();
 }
 
@@ -194,6 +218,22 @@ onUnmounted(() => {
             v-if="result.analysis?.raw"
             class="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-slate-950/60 p-3 text-xs text-slate-500"
           >{{ result.analysis.raw }}</pre>
+        </div>
+
+        <div v-if="!needLogin && !checking" class="mt-4 border-t border-slate-800 pt-3">
+          <div class="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+            <span>{{ t('ai.history') }}</span>
+            <span v-if="history.length">{{ t('ai.lastAnalyzed') }}: {{ ago(history[0].created_at) }}</span>
+          </div>
+          <ul v-if="history.length" class="space-y-1 text-xs">
+            <li v-for="h in history" :key="h.id" class="flex flex-wrap items-center gap-2 text-slate-400">
+              <span :class="riskClass(h.risk_level)">{{ h.risk_level || '—' }}</span>
+              <span>{{ windowLabel(h.period_hours) }}</span>
+              <span>{{ ago(h.created_at) }}</span>
+              <span v-if="h.total_tokens">{{ h.total_tokens }} tokens</span>
+            </li>
+          </ul>
+          <p v-else class="text-xs text-slate-500">{{ t('ai.noHistory') }}</p>
         </div>
       </div>
     </div>

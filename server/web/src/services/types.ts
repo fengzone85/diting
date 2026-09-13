@@ -208,6 +208,7 @@ export interface AiConfig {
   locale?: 'zh-CN' | 'en';
   log_retention_days?: number;
   silent_days?: number;
+  node_cache_ttl_minutes?: number;
   period_hours?: number;
   key_from_env?: boolean;
 }
@@ -239,6 +240,21 @@ export interface AiUsage {
   days: number;
   total_tokens: number;
   list: AiUsageDay[];
+}
+
+// GET /api/ai/node-reports 的单项：单节点分析历史（不含 report_json）
+export interface AiNodeReportItem {
+  id: number;
+  agent_id: string;
+  period_hours: number;
+  status: string;
+  risk_level?: string;
+  prompt_version?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  duration_ms?: number;
+  created_at: number;
 }
 
 // POST /api/ai/analyze-node/:id 的返回值：单节点按需分析（结果缓存 30 分钟）
