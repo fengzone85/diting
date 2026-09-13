@@ -232,6 +232,8 @@ router.post('/report', agentAuth, (req, res) => {
   const ts = Date.now();
   db.insertMetric(req.agent.id, Object.assign({ ts }, m));
   db.touchAgent(req.agent.id, m.os, m.hostname);
+  // CPU 核数（§9 T18）：老 agent 不带该字段 → m.cores = 0 → 不写，库中保持 0 = 未知
+  if (m.cores > 0) db.setAgentCores(req.agent.id, m.cores);
   res.json({ ok: true });
 });
 
