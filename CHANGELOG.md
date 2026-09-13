@@ -2,6 +2,68 @@
 
 > **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
 
+## 2026-09-13 安全体检整改（10 个 PR，含行为变更）
+
+> 来源：`dev-docs/AUDIT_REMEDIATION_PLAN_2026-09-13.md`（独立安全/代码审计 F1–F8 之后的
+> 又一轮体检）。共 10 个 PR，后端测试 113 → 162。以下按「用户能否感知」排序。
+
+### ⚠️ 行为变更（升级后可见）
+
+1. **Windows 受控端负载不再显示数值**：`load1` 此前用**进程数**近似上报（进程列表属指纹
+   字段，是审计认定的红线污染），现恒为 `0.0`。Windows 节点的「负载」列将显示 0。
+   Linux 端不受影响（读 `/proc/loadavg`）。
+2. **审计日志现在会被自动清理**：此前 `pruneAudit` 实现完整但**从未被调用**，
+   `audit_logs` 无限增长。现随每小时 prune 清理，默认保留 **90 天**
+   （新增环境变量 `AUDIT_RETENTION_DAYS`，下限 7）。**升级后首次 prune 会删掉
+   90 天前的历史审计记录**——如需留档请在升级前导出。
+3. **`GET /api/agents/:id/metrics` 返回行数大幅减少**：改走 SQL 层均匀采样
+   （30d 实测 135,500 行 → 362 行，1.4MB → 352KB）。响应**字段结构不变**，
+   但点数变少；新增 `X-Sampled: 1` 响应头，可用 `?points=` 覆盖（60–1440）。
+   注意仍为全列（含 `probes`/`disks`），要再压体积需改显式列（后续优化）。
+4. **社区主题（Komari 兼容）：Swap 图变为正确值**：`swap.used/total` 此前**错映射到
+   内存列**，Swap 图一直在显示内存值；现改为真实 `swap_used/swap_total`。
+5. **社区主题：5 个指标不再出图**：`process.count`、`connections.tcp`、
+   `connections.udp`、`gpu.usage`、`gpu.device.usage` 此前都映射到 CPU 列
+   （用 CPU 值冒充），现断开映射 → 这些图不再渲染。**宁可缺图，不可错值。**
+6. **TOTP 一次性化**：同一 6 位码在一个时间步内只能成功一次（原可重放约 90 秒）。
+   另外同一 IP 10 分钟内 5 次 TOTP 失败后进入锁定（返回 `429`）。
+7. **Go 受控端新增 `loss` 字段**：纯 TCP 探测无 ICMP 丢包统计，故只给二值
+   （成功 0 / 三轮全失败 100），不伪造中间值。Python 版仍为真实丢包率。
+8. **`/api/agents/:id/renew` 日期计算修正**：此前用 `toISOString()`（UTC）格式化，
+   在 UTC+8 下**每次续费提前 1 天且逐次累积**（实测 30 天周期变成 30/29/29 天）。
+   现走本地日历日，严格 +N 天。
+9. **`--install-agent` 会先校验 SERVER_URL**：`--setup-token` 配 `http://` 非本地地址时，
+   现在会在**凭据外发之前**报错退出（此前会先把一次性注册凭据 POST 到明文地址）。
+10. **`--install-server` 生成 `/etc/diting/host.env` 骨架**：避免
+    `BACKUP_VISIBLE_DIR` 未配导致后台「恢复」静默失效（已存在则**不覆盖**）。
+11. **Nginx 示例新增 WebSocket/SSE 支持**：`/api/clients`、`/api/clients/sse`、
+    `/api/rpc2` 现在有正确的升级头与 3600s 长连接超时（此前用默认 60s，
+    长连接每分钟被切断）。**已在生产用自定义 nginx 配置的实例需手动同步。**
+
+### 安全与加固
+
+- **审计粒度**：`update_agent` / `update_settings` / `update_ai_config` 的审计
+  从「静态标签」升级为**记录变更字段名**（敏感键打码为 `k=*`，不记值）。
+- **systemd 能力**：`diting-agent.service` 新增 `AmbientCapabilities=CAP_NET_RAW`
+  + `CapabilityBoundingSet=CAP_NET_RAW`（`NoNewPrivileges=true` 下文件 capabilities
+  会被忽略，此前 ping 探测可能静默退化）。
+- **指纹收敛**：Linux `os_name` 兜底不再拼 `platform.release()`（内核版本属指纹）。
+- **发布可复现**：`diting.sh` 新增 `REPO_BRANCH`（可钉 tag）；
+  `--update-script` 下载后打印本次文件 SHA256，便于留档与强校验。
+
+### 性能
+
+- **`/api/agents/:id/metrics`**：30d 单节点 135,500 行 → 362 行。
+- **公开快照共享缓存**：`/api/clients`（WS）、`/api/clients/sse`（SSE）、
+  `/api/rpc2`（WS）此前**每个连接**各自每 5s 全量构造并序列化一次快照，
+  现改为全局每 5s 只构造一次、所有连接复用。实测 5 连接 30s 的 CPU 增量
+  由 46 ticks 降至 11 ticks（约 -76%）。
+
+### 兼容层修复
+
+- `/api/clients` 的 ping/探针数据改为**按实体独立采样**（此前跨节点取全局配额）；
+  `entity_ids` 上限 50、`metric_keys` 上限 32（防单请求触发 N 次 SQL）。
+
 ## 2026-09-07 安全与健壮性修复（含 Breaking 变更）
 
 ### ⚠️ Breaking：安装命令类接口要求显式配置服务器地址
