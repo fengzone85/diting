@@ -410,6 +410,11 @@ function runPrune() {
     // 单节点分析历史共用同一保留期（§8 T17）
     const nn = db.pruneAiNodeReports(aiRetention);
     if (nn > 0) console.log(`[prune] removed ${nn} old ai_node_reports (retention ${aiRetention}d)`);
+    // 审计日志独立保留期（体检 L-3）：默认 90 天，AUDIT_RETENTION_DAYS 可调（下限 7）。
+    // 此前 pruneAudit 已实现且已导出但全仓无调用方 → audit_logs 无限增长，违背 90 天承诺。
+    const auditDays = Math.max(7, Number(process.env.AUDIT_RETENTION_DAYS || 90));
+    const nAud = db.pruneAudit(auditDays);
+    if (nAud > 0) console.log(`[prune] removed ${nAud} old audit_logs (retention ${auditDays}d)`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);
