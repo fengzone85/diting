@@ -9,7 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk } = require('./stats');
+const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes } = require('./stats');
 
 const H = 3600000;          // 1h 桶
 const DAY = 24 * H;
@@ -180,4 +180,90 @@ test('clampRisk: 模型判定只能偏离本地 baseline 一级', () => {
   assert.strictEqual(clampRisk('LOW', 'low'), 'low', '大小写应容错');
   assert.strictEqual(clampRisk('bogus', 'low'), 'bogus', '非法值原样返回，由渲染层兜底');
   assert.strictEqual(clampRisk('high', undefined), 'high', 'baseline 缺失时不干预');
+});
+
+// ---- §9 T19：周期对比 ----
+function rowOf(ts, { cpu = 10, mem = 50, disk = 60, rx = 1000, load = 1 } = {}) {
+  return { ts, cpu, mem_pct: mem, disk_pct: disk, net_rx_rate: rx, load1: load };
+}
+
+test('compareWindows：差值符号为「当期 − 前一期」，磁盘用两侧各自末样本', () => {
+  const cur = [rowOf(1000, { cpu: 20, mem: 60, disk: 70, rx: 2000, load: 3 }), rowOf(2000, { cpu: 22, mem: 61, disk: 71.5, rx: 2100, load: 3.5 })];
+  const prev = [rowOf(500, { cpu: 10, mem: 50, disk: 60, rx: 1000, load: 1 }), rowOf(900, { cpu: 12, mem: 52, disk: 68.5, rx: 1100, load: 1.5 })];
+  const r = compareWindows(cur, prev, { periodHours: 24 });
+  assert.strictEqual(r.compare_insufficient, false);
+  assert.strictEqual(r.compare.window, '24h');
+  assert.strictEqual(r.compare.samples_prev, 2);
+  assert.strictEqual(r.compare.cpu_avg_delta, 10, '(20+22)/2 − (10+12)/2 = 10');
+  assert.strictEqual(r.compare.mem_avg_delta, 9.5);
+  assert.strictEqual(r.compare.disk_pct_delta, 3, '末样本 71.5 − 68.5');
+  assert.strictEqual(r.compare.net_rx_avg_delta, 1000);
+  assert.strictEqual(r.compare.load_avg1_delta, 2);
+});
+
+test('compareWindows：前窗样本不足 → compare=null 且标记 insufficient（禁止模型推断趋势）', () => {
+  const cur = Array.from({ length: 10 }, (_, i) => rowOf(1000 + i));
+  const thin = [rowOf(500)];                       // 1/10 < 20%
+  const r1 = compareWindows(cur, thin, { periodHours: 24 });
+  assert.strictEqual(r1.compare, null);
+  assert.strictEqual(r1.compare_insufficient, true);
+
+  const r2 = compareWindows(cur, [], { periodHours: 24 });
+  assert.strictEqual(r2.compare, null);
+  assert.strictEqual(r2.compare_insufficient, true);
+
+  const r3 = compareWindows([], [rowOf(500)], { periodHours: 24 });
+  assert.strictEqual(r3.compare, null);
+  assert.strictEqual(r3.compare_insufficient, true);
+});
+
+test('compareWindows：单字段缺失只让该字段为 null，其余照常给出', () => {
+  const cur = [rowOf(1000, { disk: 70 })];
+  const prev = [{ ts: 500, cpu: 10, mem_pct: 50, net_rx_rate: 1000, load1: 1 }];  // 无 disk_pct
+  const r = compareWindows(cur, prev, { periodHours: 24 });
+  assert.strictEqual(r.compare.disk_pct_delta, null);
+  assert.strictEqual(r.compare.cpu_avg_delta, 0);
+});
+
+// ---- §9 T20：探针聚合 ----
+function pRow(ts, obj) { return { ts, probes: JSON.stringify(obj) }; }
+
+test('aggregateProbes：按 task 汇总成功率/丢包/延迟，并按样本数排序取前 N', () => {
+  const rows = [
+    pRow(1, { 移动: { ms: 10, ok: true, loss: 0 }, 联通: { ms: 30, ok: false, loss: 100 } }),
+    pRow(2, { 移动: { ms: 20, ok: true, loss: 0 }, 联通: { ms: 40, ok: true, loss: 0 } }),
+    pRow(3, { 移动: { ms: 30, ok: false, loss: 50 } })
+  ];
+  const out = aggregateProbes(rows, { maxTasks: 6 });
+  assert.strictEqual(out.length, 2);
+  assert.strictEqual(out[0].task, '移动', '样本多的 task 优先');
+  assert.strictEqual(out[0].samples, 3);
+  assert.strictEqual(out[0].ok_rate, 66.7, '2/3 成功');
+  assert.strictEqual(out[0].ms_avg, 20);
+  assert.strictEqual(out[0].loss_avg, 16.67);
+  assert.strictEqual(out[1].task, '联通');
+  assert.strictEqual(out[1].ok_rate, 50);
+
+  assert.strictEqual(aggregateProbes(rows, { maxTasks: 1 }).length, 1, 'maxTasks 生效');
+  assert.deepStrictEqual(aggregateProbes([], {}), []);
+});
+
+test('aggregateProbes：畸形 JSON / 非对象 / 非法字段一律跳过，不抛异常', () => {
+  const rows = [
+    { ts: 1, probes: '{broken json' },
+    { ts: 2, probes: '' },
+    { ts: 3, probes: null },
+    { ts: 4, probes: '[1,2,3]' },
+    pRow(5, { 电信: 'not-an-object' }),
+    pRow(6, { 电信: { ms: 'slow', ok: true, loss: null } }),
+    pRow(7, { 电信: { ms: 12.5, ok: true, loss: 0 } })
+  ];
+  const out = aggregateProbes(rows, {});
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].task, '电信');
+  assert.strictEqual(out[0].samples, 2, '非对象条目（第 5 行字符串）整条跳过；ms=slow 那条算样本但不计入延迟统计');
+  assert.strictEqual(out[0].ok_rate, 100);
+  assert.strictEqual(out[0].ms_avg, 12.5);
+  assert.strictEqual(out[0].ms_p95, 12.5, '单样本 p95 即该样本');
+  assert.strictEqual(out[0].loss_avg, 0);
 });
