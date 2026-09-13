@@ -17,7 +17,7 @@ const db = require('../db');
 const { daysUntil, cycleLabel } = require('../util');
 const {
   stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk,
-  compareWindows, aggregateProbes
+  compareWindows, aggregateProbes, trafficInfo, costInfo
 } = require('./stats');
 
 // 周期对比开关（§9 T19）：AI_COMPARE=0 关闭（省一次同规模采样查询）；默认开启。
@@ -63,12 +63,13 @@ function buildDisk(latest, rows, series, trendDays) {
     ? diskTrend(series, { maxDays: trendDays })
     : null;
   if (t) {
-    out.trend_note = t.note;
+    // 区间过宽（§9.7）：不给单点天数，改标 range_too_wide —— 报告与 prompt 据此只讲趋势与区间
+    out.trend_note = t.too_wide ? 'range_too_wide' : t.note;
     // 与预测同源：current_pct 改用「近 24h 桶中位」，避免「当前 73.1% + 斜率×天数 ≠ 90%」的自相矛盾
     if (typeof t.level === 'number') out.current_pct = +t.level.toFixed(2);
   }
   if (t && t.note === 'ok') {
-    out.estimated_full_days = Math.round(t.days_to_90);
+    out.estimated_full_days = t.too_wide || t.days_to_90 == null ? null : Math.round(t.days_to_90);
     out.estimated_full_days_range = t.range
       ? [Math.round(t.range[0]), t.range[1] == null ? null : Math.round(t.range[1])]
       : null;
@@ -108,7 +109,7 @@ function summarizeAgent(agent, rows, opts) {
   // 7/14 天桶序列（由 summarize 一次查出后按 agent 分组下发）
   const series = o.diskSeriesByAgent ? o.diskSeriesByAgent[agent.id] : null;
 
-  return {
+  const out = {
     id: agent.id,
     name: safeName(agent.name),
     online,
@@ -148,6 +149,18 @@ function summarizeAgent(agent, rows, opts) {
       days_until_expire: daysUntil(agent.expire_at)
     }
   };
+
+  // 月流量与配额（§9.7 项一）：仅当末样本带月累计（net_rx_month/net_tx_month）时给出；
+  // quota_gb = 0 表示未设配额 → 不输出 quota_pct，prompt 也不得编造限额。
+  const traffic = trafficInfo(latest, agent.monthly_quota_gb, { tzOffsetHours: o.tzOffsetHours });
+  if (traffic) out.traffic = traffic;
+
+  // 成本效率（§9.7 项二）：仅付费节点（price > 0）。low_utilization 是保守规则，
+  // 命中时 prompt 只允许给"可评估降配/合并"这类业务层提示，不得涉及任何具体操作。
+  const cost = costInfo(out, agent);
+  if (cost) out.cost = cost;
+
+  return out;
 }
 
 // 全量聚合：默认取过去 24h 数据，按 agent 分组聚合。
@@ -197,8 +210,11 @@ function summarize(options) {
     }
   }
 
-  const silentDays = Number(db.getAiConfig().silent_days) || 0;
-  const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays };
+  const aiCfg = db.getAiConfig();
+  const silentDays = Number(aiCfg.silent_days) || 0;
+  // 月流量「距月末天数」按 AI 配置的时区偏移算（默认 +8），与报告时间口径一致
+  const tzOffsetHours = Number.isFinite(Number(aiCfg.tz_offset_hours)) ? Number(aiCfg.tz_offset_hours) : 8;
+  const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays, tzOffsetHours };
   const out = agents.map((a) => {
     const s = summarizeAgent(a, byAgent[a.id] || [], sumOpts);
     // compare 不参与 baseline_risk（避免风险等级因新增字段发生行为突变）
@@ -240,7 +256,9 @@ function summarizeOne(agent, options) {
   const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
   const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
   const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
-  const silentDays = Number(db.getAiConfig().silent_days) || 0;
+  const aiCfg = db.getAiConfig();
+  const silentDays = Number(aiCfg.silent_days) || 0;
+  const tzOffsetHours = Number.isFinite(Number(aiCfg.tz_offset_hours)) ? Number(aiCfg.tz_offset_hours) : 8;
 
   const rows = db.getMetricsSparklinesOne(agent.id, sinceTs, 1000);
   const trendDays = resolveTrendDays();
@@ -253,7 +271,7 @@ function summarizeOne(agent, options) {
   }
 
   const summary = summarizeAgent(agent, rows, {
-    intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays
+    intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays, tzOffsetHours
   });
 
   // 周期对比（§9 T19）：单节点再取一次同长的前窗（单节点查询成本可忽略）

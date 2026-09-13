@@ -11,6 +11,10 @@
 
 'use strict';
 
+// 磁盘趋势「区间过宽」阈值（§9.7）：命中则抑制单点天数，只报趋势与区间
+const RANGE_WIDE_RATIO = 5;      // 上界 ≥ 下界 × 5（跨度 5 倍以上）
+const RANGE_WIDE_ABS_DAYS = 30;  // 或绝对跨度 ≥ 30 天
+
 // 数值安全化：剔除 null/undefined/NaN，避免污染统计。
 function nums(arr) {
   const out = [];
@@ -160,10 +164,19 @@ function diskTrend(series, opts) {
   const allUp = pool.every((c) => c.m > 0);
   const range = fast == null ? [null, null] : [Math.min(fast, slow == null ? fast : slow), slow == null ? null : Math.max(fast, slow)];
 
+  // 区间过宽时抑制单点天数（§9.7）。实测 report #57：同一台机器给出「约 13 天（3–226 天）」——
+  // 数字虽然"有"，但跨度 75 倍，对用户是弱信息，而 AI 容易把它复述成一个确定的结论。
+  // 规则：上下界都有限且（上界 ≥ 下界 × RANGE_WIDE_RATIO 或 跨度 ≥ RANGE_WIDE_ABS_DAYS 天）→ 不给单点天数。
+  // 注意区分：上界为 null（p25 ≤ 0，"可能存在回落"）走既有 has_drop 文案，不在本规则内。
+  const lo = range[0], hi = range[1];
+  const tooWide = Number.isFinite(lo) && Number.isFinite(hi) && lo > 0
+    && (hi >= lo * RANGE_WIDE_RATIO || (hi - lo) >= RANGE_WIDE_ABS_DAYS);
+
   return {
     note: 'ok',
     level: +level.toFixed(2),
-    days_to_90: toDays(slope),
+    days_to_90: tooWide ? null : toDays(slope),
+    too_wide: tooWide,
     range,
     slope_pct_per_day: slope,
     confidence: (allUp && !hasDrop && spanDays >= 7) ? 'medium' : 'low',
@@ -319,7 +332,75 @@ function aggregateProbes(rows, opts) {
     .slice(0, maxTasks);
 }
 
+// ---- 月流量与配额（§9.7 项一）----
+// 数据来源：metrics.net_rx_month / net_tx_month（受控端按自然月累计，跨月清零）
+//          + agents.monthly_quota_gb（0 = 未设配额，不得据此编造限额）。
+// days_to_cycle_end：距「下一个月 1 号」的天数（按 AI 配置的时区偏移算，默认 +8），
+// 用于判断"配额还剩很多天就用完了"这类风险；不引入真实计费周期语义（受控端就是自然月）。
+function trafficInfo(metrics, quotaGb, opts) {
+  const o = opts || {};
+  // 严格类型守卫：metrics 缺失或两个月累计字段都不是有限数字 → null（没有流量数据可言）。
+  // 不能用 Number(null)=0 兜底，否则"没有数据"会被误读成"本月 0 流量"。
+  const rxRaw = metrics ? metrics.net_rx_month : undefined;
+  const txRaw = metrics ? metrics.net_tx_month : undefined;
+  const hasRx = typeof rxRaw === 'number' && Number.isFinite(rxRaw);
+  const hasTx = typeof txRaw === 'number' && Number.isFinite(txRaw);
+  if (!hasRx && !hasTx) return null;
+  const rxGb = hasRx ? +(rxRaw / 1073741824).toFixed(2) : 0;
+  const txGb = hasTx ? +(txRaw / 1073741824).toFixed(2) : 0;
+  const totalGb = +(rxGb + txGb).toFixed(2);
+  const quota = Number(quotaGb) > 0 ? +Number(quotaGb).toFixed(2) : 0;
+
+  const tzMs = (Number.isFinite(Number(o.tzOffsetHours)) ? Number(o.tzOffsetHours) : 8) * 3600000;
+  const now = Number.isFinite(Number(o.now)) ? Number(o.now) : Date.now();
+  const local = now + tzMs;
+  const d = new Date(local);
+  const nextMonthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+  const daysToCycleEnd = Math.max(0, Math.ceil((nextMonthStart - local) / 86400000));
+
+  const out = {
+    rx_month_gb: rxGb,
+    tx_month_gb: txGb,
+    total_month_gb: totalGb,
+    quota_gb: quota,
+    days_to_cycle_end: daysToCycleEnd
+  };
+  if (quota > 0) out.quota_pct = +((totalGb / quota) * 100).toFixed(1);
+  return out;
+}
+
+// ---- 成本效率（§9.7 项二）----
+// 只对**付费节点**（price > 0）计算。monthly_cost 用「按周期折算到 30 天」，
+// 仅用于横向比较，不是账单口径。low_utilization 是保守规则（CPU 均值 < 10% 且内存均值 < 40%
+// 且磁盘占用 < 50%），命中才允许 prompt 提示"可评估降配/合并"——这是概率性判断，
+// 而且**只允许业务层建议**，不得出现任何具体命令/配置操作（与既有安全边界一致）。
+function costInfo(summary, agent, opts) {
+  const o = opts || {};
+  // 无摘要（没有任何统计）或非付费节点 → null：不产出"成本效率"，避免模型据此编造
+  if (!summary) return null;
+  const price = Number(agent && agent.price);
+  if (!(price > 0)) return null;
+  const cycle = Number(agent && agent.billing_cycle) > 0 ? Number(agent.billing_cycle) : 30;
+  const cpuAvg = summary && summary.cpu ? summary.cpu.avg : null;
+  const memAvg = summary && summary.memory ? summary.memory.avg : null;
+  const diskPct = summary && summary.disk ? summary.disk.current_pct : null;
+  const monthlyCost = +((price / cycle) * 30).toFixed(2);
+  const lowUtil = Number.isFinite(cpuAvg) && Number.isFinite(memAvg)
+    && cpuAvg < 10 && memAvg < 40
+    && (!Number.isFinite(diskPct) || diskPct < 50);
+  return {
+    currency: (agent && agent.currency) || '¥',
+    price,
+    billing_cycle: cycle,
+    monthly_cost: monthlyCost,
+    cpu_avg_pct: cpuAvg,
+    mem_avg_pct: memAvg,
+    low_utilization: lowUtil
+  };
+}
+
 module.exports = {
   nums, stats, overThresholdMinutes, median, quantile, diskFullDays, diskTrend, memSlope,
-  computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes
+  computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes,
+  trafficInfo, costInfo
 };
