@@ -16,6 +16,13 @@ StandardError=journal
 Restart=on-failure
 RestartSec=10s
 
+# ping 需要 CAP_NET_RAW。NoNewPrivileges=true 下文件 capabilities 会被忽略，
+# 必须用 AmbientCapabilities 把能力真正传进进程（体检 L-12）。
+# CapabilityBoundingSet 同步收窄，防止 Ambient 之外的隐式能力。
+# Docker 形态的等价项是 --cap-add=NET_RAW（保持不变）。
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
 # ── Security hardening ────────────────────────────────────────────────────────
 NoNewPrivileges=true
 ProtectSystem=strict

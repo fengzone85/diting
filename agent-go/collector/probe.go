@@ -74,13 +74,18 @@ func ParseProbeTargets(spec string) []ProbeTarget {
 	return out
 }
 
-// probeOne 对单个目标做 TCP 探测，返回 (ms, ok)。
+// probeOne 对单个目标做 TCP 探测，返回 (ms, ok, loss)。
 //
 // 策略（对齐 Python collector.py:302-354）：
 //   - 依次尝试 443/80/目标端口（443/80 最常被放行）
 //   - 重试 3 次吸收抖动
 //   - 纯 TCP 握手时延，不采任何主机指纹
-func probeOne(host string, port int, timeout time.Duration) (ms *float64, ok bool) {
+//
+// loss 口径：纯 TCP 无 ICMP 丢包统计，故只给二值 ——
+// 握手成功 → 0，三轮全部失败 → 100。不伪造中间值（如 33/66），
+// 因为「三轮重试中有几次失败」不代表链路丢包率。
+func probeOne(host string, port int, timeout time.Duration) (ms *float64, ok bool, loss *float64) {
+	zero, hundred := 0.0, 100.0
 	ports := []int{443, 80}
 	if port != 443 && port != 80 {
 		ports = append(ports, port)
@@ -95,10 +100,10 @@ func probeOne(host string, port int, timeout time.Duration) (ms *float64, ok boo
 			elapsed := time.Since(start).Seconds() * 1000
 			conn.Close()
 			v := round1(elapsed)
-			return &v, true
+			return &v, true, &zero
 		}
 	}
-	return nil, false
+	return nil, false, &hundred
 }
 
 // ProbeAll 并发探测所有目标（sync.WaitGroup + goroutine，参考 Pulse 模式）。
@@ -115,9 +120,9 @@ func ProbeAll(targets []ProbeTarget) map[string]Probe {
 		wg.Add(1)
 		go func(tgt ProbeTarget) {
 			defer wg.Done()
-			ms, ok := probeOne(tgt.Host, tgt.Port, 2500*time.Millisecond) // 2.5s
+			ms, ok, loss := probeOne(tgt.Host, tgt.Port, 2500*time.Millisecond) // 2.5s
 			mu.Lock()
-			results[tgt.Label] = Probe{Ok: ok, Ms: ms}
+			results[tgt.Label] = Probe{Ok: ok, Ms: ms, Loss: loss}
 			mu.Unlock()
 		}(t)
 	}

@@ -235,7 +235,8 @@ def os_name():
                     return line.split('=', 1)[1].strip().strip('"')
     except Exception as e:
         log.debug("os-release parse failed: %s", e)
-    return ' '.join([platform.system(), platform.release()])
+    # L-8：兜底不拼 platform.release()（内核版本属主机指纹），与 Go 版口径一致
+    return platform.system() or 'Linux'
 
 
 def uptime_sec():
