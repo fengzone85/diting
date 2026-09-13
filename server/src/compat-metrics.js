@@ -30,14 +30,23 @@ const METRIC_DEFINITIONS = [
   { name: 'ping.loss', description: '丢包率', type: 'percent', unit: '%', retention_days: 30 }
 ];
 
-// diting 内部字段名（metrics 表列）映射：键为 Komari 点分命名
+// diting 内部字段名（metrics 表列）映射：键为 Komari 点分命名。
+//
+// 只保留【diting 真实采集】的字段。此前 5 条占位映射
+// （process.count/connections.tcp/connections.udp/gpu.usage/gpu.device.usage → 'cpu'）
+// 会让 CPU 值冒充 GPU/进程/连接数渲染成图 —— 属「错值」，比缺图更危险（体检 L-5）。
+// 已删除：无映射 → queryMetrics 不生成该 series（宁可缺图，不可错值）。
+// METRIC_DEFINITIONS 中对应定义【保留】：前端按 definitions 匹配 le 白名单，
+// 删定义可能引发空渲染异常，故仅断开数据映射。
 const METRIC_FIELD_MAP = {
   'cpu.usage': 'cpu',
   'load.average': 'load1',
   'memory.used': 'mem_used',
   'memory.total': 'mem_total',
-  'swap.used': 'mem_used',
-  'swap.total': 'mem_total',
+  // swap 修正（体检复核新发现）：原先错映射到 memory 列，导致 Swap 图渲染内存值。
+  // swap_used / swap_total 是 metrics 表真实列（diting 一直在采），属真实映射修复。
+  'swap.used': 'swap_used',
+  'swap.total': 'swap_total',
   'temperature': 'temp',
   'disk.used': 'disk_used',
   'disk.total': 'disk_total',
@@ -46,12 +55,7 @@ const METRIC_FIELD_MAP = {
   'net.total.down': 'net_rx_month',
   'net.total.up': 'net_tx_month',
   'traffic.down': 'net_rx_month',
-  'traffic.up': 'net_tx_month',
-  'process.count': 'cpu',
-  'connections.tcp': 'cpu',
-  'connections.udp': 'cpu',
-  'gpu.usage': 'cpu',
-  'gpu.device.usage': 'cpu'
+  'traffic.up': 'net_tx_month'
 };
 
 function getValue(row, key) {
@@ -85,6 +89,12 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   if (max_points != null) maxPoints = max_points;
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxPoints = clamp(Math.floor(Number(maxPoints) || 0), 0, 5000);
+  // 长度钳制（体检 L-5 附带项）：防单请求携带超大数组导致 N 次 SQL 循环。
+  // 50 = Komari 官方 UI 单页节点上限；32 = 单次查询的合理指标数上限。
+  if (!Array.isArray(entity_ids)) entity_ids = [];
+  if (!Array.isArray(metric_keys)) metric_keys = [];
+  entity_ids = entity_ids.slice(0, 50);
+  metric_keys = metric_keys.slice(0, 32);
   const since = Date.now() - hours * 3600 * 1000;
   const end = new Date().toISOString();
   const start = new Date(since).toISOString();
@@ -98,9 +108,11 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   // 以对齐 Komari 社区主题 PingChart 的期望结构（series 每项需含 task_id + points:[{time,value}]）。
   // diting 的 probes JSON 形如 { "移动": {ms, ok, loss}, "联通": {...}, ... }，每个 key 即一个 task。
   for (const entityId of entity_ids) {
-    // 只取探针三列并按 agent 时间桶降采样（每 agent 最多 maxPoints*10 点），规避 SELECT * 全表 OOM。
-    const rows = (db.metricsProbesAll(since, Math.max(200, maxPoints * 10)) || [])
-      .filter(r => r.agent_id === entityId && r.probes != null)
+    // L-7：按实体【独立】在 SQL 层采样（替代「全局采样 + JS filter」）。
+    // 旧实现先跨节点取 maxPoints*10 行再 filter 本实体，多节点时本实体只分到零头 →
+    // 单节点曲线稀疏甚至为空。改走 getMetricsProbesOne 后每个实体各自拿满配额。
+    const rows = (db.getMetricsProbesOne(entityId, since, Math.max(200, maxPoints * 10)) || [])
+      .filter(r => r.probes != null)
       .slice(0, maxPoints * 10);
     // 收集该 entity 所有 task 名称
     const taskNames = new Set();
@@ -153,6 +165,13 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
         if (ditingName) def = METRIC_DEFINITIONS.find(d => d.name === ditingName);
       }
       if (!def) continue;
+      // 无真实数据源：不生成 series（体检 L-5）。
+      // 宁可缺图，不可错值 —— v1.js CAPABILITY 已声明 process/connections/gpu 能力为 false。
+      const field = METRIC_FIELD_MAP[key];
+      if (!field) continue;
+      // 该字段在所有采样行上均无有效值（如缺温度传感器）→ 不生成全 0 的假曲线
+      const hasValue = rows.some(r => r[field] != null);
+      if (!hasValue) continue;
       series.push({
         metric_key: METRIC_KEY_TO_KOMARI[key] || key,
         entity_id: entityId,
