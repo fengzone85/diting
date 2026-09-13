@@ -51,6 +51,20 @@ const rateLimit = (req, res, next) => {
   if (rec.count > RATE_MAX) return res.status(429).json({ error: 'too many requests' });
   next();
 };
+
+// 审计 diff 粒度（体检 L-4）：只记「改了哪些字段名」，不记值；敏感键打码为 k=*。
+// 一律用 String 比较口径：'0' 与 0 视为相同（避免纯类型差异产生噪声告警）。
+// 导出供测试直接断言（api.js 的 router 不便单测）。
+const SENSITIVE_RE = /(token|secret|pass|key)/i;
+function diffKeys(before, after) {
+  const b = before || {};
+  const a = after || {};
+  const keys = new Set([...Object.keys(b), ...Object.keys(a)]);
+  return [...keys]
+    .filter((k) => String(b[k] ?? '') !== String(a[k] ?? ''))
+    .map((k) => (SENSITIVE_RE.test(k) ? `${k}=*` : k))
+    .join(',');
+}
 router.use(rateLimit);
 
 // ---- 登录专项限流（M-5 修复）----
@@ -821,7 +835,11 @@ router.put('/agents/:id', adminOnly, (req, res) => {
   if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
   db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
-  auditLog(req, 'update_agent', `id=${req.params.id}`);
+  // a 为更新前快照（:818 已取）。注意 updates 是【部分字段】，
+  // 直接 diff(a, updates) 会把未提交的列也误判为「变更」（缺失 vs 有值）→
+  // 故先取更新后的完整行再比较。
+  const aAfter = db.getAgent(req.params.id) || {};
+  auditLog(req, 'update_agent', `id=${req.params.id} fields=${diffKeys(a, aAfter)}`);
 });
 
 // ---- Admin: delete agent ----
@@ -986,6 +1004,9 @@ router.get('/settings', adminOrReadonly, (req, res) => {
 });
 router.put('/settings', adminOnly, (req, res) => {
   const b = req.body || {};
+  // 写库前取旧值快照，供审计记录变更字段名（体检 L-4）
+  const uiBefore = db.getUiSettings();
+  const notifyBefore = db.getNotifyConfig();
   if (b.ui && typeof b.ui === 'object') {
     // M-1：自定义 CSS 在落库前清洗，杜绝 @import/url()/外链字体/脚本注入。
     if (typeof b.ui.custom_css === 'string') b.ui.custom_css = sanitizeCss(b.ui.custom_css);
@@ -994,7 +1015,12 @@ router.put('/settings', adminOnly, (req, res) => {
   }
   if (b.notify && typeof b.notify === 'object') db.setNotifyConfig(b.notify);
   res.json({ ok: true });
-  auditLog(req, 'update_settings', b.ui ? 'ui updated' : '' + (b.notify ? ' notify updated' : ''));
+  // 保留原有标签拼接，追加变更字段名（敏感键已打码）
+  const tags = (b.ui ? 'ui updated ' : '') + (b.notify ? 'notify updated ' : '');
+  const changed = [];
+  if (b.ui) changed.push(`ui:${diffKeys(uiBefore, db.getUiSettings())}`);
+  if (b.notify) changed.push(`notify:${diffKeys(notifyBefore, db.getNotifyConfig())}`);
+  auditLog(req, 'update_settings', (tags + changed.join(' ')).trim());
 });
 
 
@@ -1055,9 +1081,12 @@ router.put('/ai/config', adminOnly, (req, res) => {
     if (!hasModel) return res.status(400).json({ error: '启用 AI 分析需先配置模型名称（model）' });
     if (!hasKey) return res.status(400).json({ error: '启用 AI 分析需先配置 API Key' });
   }
+  const aiBefore = db.getAiConfig();
   db.setAiConfig(allowed);
   res.json({ ok: true });
-  auditLog(req, 'update_ai_config', allowed.enabled != null ? `enabled=${allowed.enabled}` : '');
+  // 记录变更字段名（api_key 等敏感键打码为 k=*），并保留 enabled 显式标签
+  const enabledTag = allowed.enabled != null ? `enabled=${allowed.enabled} ` : '';
+  auditLog(req, 'update_ai_config', (enabledTag + `fields=${diffKeys(aiBefore, db.getAiConfig())}`).trim());
 });
 // 手动触发一次日报生成（不等调度时刻）：【异步任务】—— 立即返回，任务在后台跑。
 // 状态码：202 已受理 / 400 未启用 / 409 已有任务在执行 / 429 冷却中（带 Retry-After）。
@@ -1237,3 +1266,5 @@ router.get('/admin/audit-logs', adminOnly, (req, res) => {
 });
 
 module.exports = router;
+// 供单测直接断言（router 本身不便测纯函数）：体检 L-4
+module.exports.diffKeys = diffKeys;
