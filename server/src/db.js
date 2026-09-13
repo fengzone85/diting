@@ -322,12 +322,14 @@ const stmts = {
     return db.prepare(`
       WITH numbered AS (
         SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               net_rx_month, net_tx_month,
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
                ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
                COUNT(*) OVER (PARTITION BY agent_id) AS cnt
         FROM metrics WHERE ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             net_rx_month, net_tx_month,
              load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
@@ -343,12 +345,14 @@ const stmts = {
     return db.prepare(`
       WITH numbered AS (
         SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+               net_rx_month, net_tx_month,
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
                ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
                COUNT(*) OVER () AS cnt
         FROM metrics WHERE agent_id=@agentId AND ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
+             net_rx_month, net_tx_month,
              load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0

@@ -9,7 +9,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes } = require('./stats');
+const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes, trafficInfo, costInfo } = require('./stats');
 
 const H = 3600000;          // 1h 桶
 const DAY = 24 * H;
@@ -266,4 +266,76 @@ test('aggregateProbes：畸形 JSON / 非对象 / 非法字段一律跳过，不
   assert.strictEqual(out[0].ms_avg, 12.5);
   assert.strictEqual(out[0].ms_p95, 12.5, '单样本 p95 即该样本');
   assert.strictEqual(out[0].loss_avg, 0);
+});
+
+// ---- §9.7 项三：磁盘区间过宽抑制单点天数 ----
+function mkSeries(days, fn) {
+  const out = [];
+  const n = days * 24;
+  for (let i = 0; i <= n; i++) out.push({ ts: i * 3600000, pct: fn(i / 24) });
+  return out;
+}
+
+test('diskTrend: 区间过宽（跨度 ≥5 倍或 ≥30 天）→ 抑制单点天数，只留区间（§9.7 项三）', () => {
+  // 平稳线性增长：各窗口斜率一致 → 区间极窄，不触发抑制
+  const steady = diskTrend(mkSeries(7, (d) => 50 + 0.3 * d));
+  assert.strictEqual(steady.note, 'ok');
+  assert.strictEqual(steady.too_wide, false);
+  assert.ok(steady.days_to_90 > 0, '平稳增长应给出单点天数');
+
+  // 前慢后快：不同窗口斜率差异巨大（实测区间 [10.7, 644.8]，跨度 60 倍）→ 抑制
+  const twoPhase = diskTrend(mkSeries(7, (d) => (d < 4 ? 50 + 0.05 * d : 50.2 + 3 * (d - 4))));
+  assert.strictEqual(twoPhase.note, 'ok');
+  assert.strictEqual(twoPhase.too_wide, true);
+  assert.strictEqual(twoPhase.days_to_90, null, '过宽时不得给单点天数');
+  assert.ok(twoPhase.range[0] > 0 && twoPhase.range[1] > twoPhase.range[0] * 5, '区间保留，报告写「区间过宽」');
+  // 「可能更久」（上界 null）是另一种情形，不受本规则影响：too_wide 只对双端有限的区间判定
+});
+
+// ---- §9.7 项一：月流量与配额 ----
+const GB = 1073741824;
+
+test('trafficInfo: GB 换算、配额百分比、距月末天数（时区敏感、确定性）', () => {
+  const now = Date.UTC(2026, 2, 15, 12, 0, 0);  // 2026-03-15 12:00 UTC
+  const r = trafficInfo({ net_rx_month: 10 * GB, net_tx_month: 2 * GB }, 100, { tzOffsetHours: 8, now });
+  assert.strictEqual(r.rx_month_gb, 10);
+  assert.strictEqual(r.tx_month_gb, 2);
+  assert.strictEqual(r.total_month_gb, 12);
+  assert.strictEqual(r.quota_gb, 100);
+  assert.strictEqual(r.quota_pct, 12);
+  assert.strictEqual(r.days_to_cycle_end, 17, '当地 3-15 20:00 → 距 4-1 还有 16.7 天，向上取整 17');
+});
+
+test('trafficInfo: 未设配额不输出 quota_pct；无月累计字段返回 null', () => {
+  const r = trafficInfo({ net_rx_month: 1 * GB, net_tx_month: 1 * GB }, 0, { tzOffsetHours: 8, now: Date.UTC(2026, 2, 15) });
+  assert.strictEqual(r.quota_gb, 0);
+  assert.ok(!Object.prototype.hasOwnProperty.call(r, 'quota_pct'), '无配额不得编造百分比');
+  assert.strictEqual(trafficInfo({ cpu: 1 }, 0), null);
+  assert.strictEqual(trafficInfo(null, 100), null);
+});
+
+// ---- §9.7 项二：成本效率 ----
+test('costInfo: 仅付费节点；月成本按周期折算；低利用率为保守规则', () => {
+  const s = { cpu: { avg: 3 }, memory: { avg: 30 }, disk: { current_pct: 40 } };
+  const paid = { price: 10, billing_cycle: 30, currency: '¥' };
+
+  const c = costInfo(s, paid);
+  assert.strictEqual(c.monthly_cost, 10, '月付 10 元 → 10');
+  assert.strictEqual(c.currency, '¥');
+  assert.strictEqual(c.low_utilization, true, 'cpu 3%<10、mem 30%<40、disk 40%<50');
+
+  assert.strictEqual(costInfo(s, { price: 10, billing_cycle: 180 }).monthly_cost, 1.67, '半年付折算到 30 天');
+
+  // 任一维度不满足 → false
+  assert.strictEqual(costInfo({ cpu: { avg: 50 }, memory: { avg: 30 }, disk: { current_pct: 40 } }, paid).low_utilization, false, 'CPU 偏高');
+  assert.strictEqual(costInfo({ cpu: { avg: 3 }, memory: { avg: 90 }, disk: { current_pct: 40 } }, paid).low_utilization, false, '内存偏高');
+  // 磁盘缺失时按「不构成障碍」处理（纯计算节点磁盘占用无意义）
+  assert.strictEqual(costInfo({ cpu: { avg: 3 }, memory: { avg: 30 }, disk: { current_pct: null } }, paid).low_utilization, true);
+});
+
+test('costInfo: 白嫖节点（price=0）返回 null，不产出成本效率', () => {
+  const s = { cpu: { avg: 3 }, memory: { avg: 30 }, disk: { current_pct: 40 } };
+  assert.strictEqual(costInfo(s, { price: 0, billing_cycle: 30 }), null);
+  assert.strictEqual(costInfo(s, {}), null);
+  assert.strictEqual(costInfo(null, { price: 10 }), null);
 });
