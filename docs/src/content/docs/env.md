@@ -25,6 +25,7 @@ description: 服务端与受控端环境变量参考
 | `AI_API_KEY` | 否 | — | 配合 `AI_KEY_FROM_ENV=1` 使用：模型服务的 API Key |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |
+| `AUDIT_RETENTION_DAYS` | 否 | `90` | 管理员操作审计日志保留天数（下限 7）。独立于 `RETENTION_DAYS`：审计属安全记录，默认保留更久 |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭） |
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | `90` | CPU / 内存告警阈值（%） |
