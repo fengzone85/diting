@@ -13,7 +13,7 @@ DiTing 受控端支持三种部署形态，数据格式与上报契约完全相�
 |---|---|---|---|
 | 内存占用 | 65-150MB | 12-25MB | <10MB |
 | 前置依赖 | Docker Engine | Python 3.8+ | Go 工具链（仅构建期） |
-| 安全隔离 | 容器 + diting 用户 + cap-drop(仅NET_RAW) + 只读挂载 | systemd 14 项加固 | scratch + USER 1000 + cap-drop（规划中） |
+| 安全隔离 | 容器 + diting 用户 + cap-drop(仅NET_RAW) + 只读挂载 | systemd 13 项隔离 + CAP_NET_RAW 能力收窄 | scratch + USER 1000 + cap-drop（规划中） |
 | 部署复杂度 | 一条命令 | 交互脚本 | 编译二进制 / 待发布镜像 |
 | 适用场景 | 已有 Docker 环境 | 精简系统 / 小内存 | 极小体积 / 纯 Go 工具链 |
 | 实现 | `agent.py` + `collector.py` | 同左 | `agent-go/`（直读 /proc，零依赖） |
@@ -45,30 +45,35 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/inst
 
 脚本会：
 1. 检查 Python 3 环境
-2. 创建 `/opt/diting-agent/` 目录（权限 700）
+2. 创建 `/opt/diting/` 目录（权限 700）
 3. 复制 `agent.py` + `collector.py`
 4. 生成 `agent.env`（权限 600，含 Token 和 Server URL）
-5. 注册 systemd 服务（14 项安全加固）
+5. 注册 systemd 服务（13 项隔离 + CAP_NET_RAW 能力收窄）
 6. 启动并设置开机自启
 
 ### systemd 安全加固项
 
+以下为 `agent/diting-agent.service` 的**实际**内容（13 项隔离 + 1 项能力收窄，逐条与 unit 对齐）：
+
 | 加固项 | 说明 |
 |---|---|
-| `NoNewPrivileges=yes` | 禁止提权 |
+| `NoNewPrivileges=true` | 禁止提权 |
 | `ProtectSystem=strict` | 文件系统只读 |
-| `ProtectHome=yes` | 隔离 /home |
-| `PrivateTmp=yes` | 隔离 /tmp |
-| `ProtectKernelTunables=yes` | 隔离内核参数 |
-| `ProtectKernelModules=yes` | 禁止加载内核模块 |
-| `ProtectControlGroups=yes` | 隔离 cgroup |
-| `RestrictNamespaces=yes` | 禁止创建命名空间 |
-| `RestrictRealtime=yes` | 禁止实时调度 |
-| `RestrictSUIDSGID=yes` | 禁止 setuid/sgid |
-| `MemoryDenyWriteExecute=yes` | 禁止可写可执行内存 |
-| `LockPersonality=yes` | 锁定进程特性 |
-| `SystemCallArchitectures=native` | 限制系统调用架构 |
-| `CapabilityBoundingSet=` | 清空所有 capabilities |
+| `ProtectHome=read-only` | /home 只读 |
+| `ReadWritePaths=/var/lib/diting` | 仅放行状态目录可写（月流量累计） |
+| `PrivateTmp=true` | 隔离 /tmp |
+| `ProtectKernelTunables=true` | 隔离内核参数 |
+| `ProtectKernelLogs=true` | 隔离内核日志 |
+| `ProtectClock=true` | 禁止修改系统时钟 |
+| `ProtectHostname=true` | 禁止修改主机名 |
+| `ProtectControlGroups=true` | 隔离 cgroup |
+| `LockPersonality=true` | 锁定进程特性 |
+| `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` | 限制 socket 族 |
+| `SystemCallFilter=@system-service` | 限制系统调用集合 |
+| `AmbientCapabilities=CAP_NET_RAW` + `CapabilityBoundingSet=CAP_NET_RAW` | 仅保留 ping 所需能力（L-12：`NoNewPrivileges=true` 下文件 capabilities 被忽略，必须用 Ambient 传递） |
+
+> `RestrictAddressFamilies` 使用 `AF_` 前缀短名是刻意的：短形式 `inet/inet6/unix`
+> 仅在 systemd ≥ 254 可用，在更旧版本上会被静默忽略（并丢弃整条限制）。
 
 ## Go 受控端（二进制）
 
@@ -186,9 +191,14 @@ SERVER_URL=https://1.2.3.4:4443
 | 温度 | `/sys/class/thermal/` | psutil |
 | Swap | `/proc/meminfo` | psutil |
 | 开机时长 | `/proc/uptime` | psutil |
-| 网络质量 | ICMP/TCP ping | ICMP/TCP ping |
+| 网络质量 | ICMP/TCP ping（ICMP 优先，可算真实丢包率） | 纯 TCP 握手（无 ICMP 权限依赖），loss 为 **0/100 二值** |
 
 > Go 受控端当前仅支持 Linux，指标来源与 Python 版 Linux 完全一致（直读 `/proc`），两者上报数据可并排对比。Windows 暂仅由 Python 版支持。
+>
+> 网络质量探测（`probes`）两版口径差异：Python 版 ICMP 优先、可算**真实丢包率**；
+> Go 版为**纯 TCP 握手**（不需 `CAP_NET_RAW`，但也没有 ICMP 丢包统计），
+> `loss` 只取 **0（握手成功）/ 100（三轮全失败）** 二值，不伪造中间值——
+> 「三轮重试中几次失败」不代表链路丢包率。两侧字段名与结构一致，服务端无需改动。
 
 ## 卸载
 

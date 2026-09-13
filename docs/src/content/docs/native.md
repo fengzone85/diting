@@ -33,7 +33,7 @@ curl -fsSL ... | bash -s -- --token "YOUR_TOKEN" --url "https://monitor.example.
 ## 文件布局
 
 ```
-/opt/diting-agent/     (700 root:root)
+/opt/diting/           (700 root:root)
 ├── agent.py
 ├── collector.py
 └── agent.env                (600 root:root)
@@ -43,35 +43,46 @@ curl -fsSL ... | bash -s -- --token "YOUR_TOKEN" --url "https://monitor.example.
 
 ## systemd 服务
 
+以下与仓库内 `agent/diting-agent.service` 一致：
+
 ```ini
 [Unit]
-Description=DiTing Agent
+Description=Diting Agent
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/diting-agent
-EnvironmentFile=/opt/diting-agent/agent.env
-ExecStart=/usr/bin/python3 agent.py
-Restart=always
-RestartSec=30
+User=diting
+Group=diting
+EnvironmentFile=/etc/diting/agent.env
+ExecStart=/usr/bin/python3 /opt/diting/agent.py
+WorkingDirectory=/opt/diting
+SyslogIdentifier=diting-agent
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=10s
 
-# 14 项安全加固
-NoNewPrivileges=yes
+# ping 需要 CAP_NET_RAW；NoNewPrivileges=true 下文件 capabilities 会被忽略，
+# 必须用 AmbientCapabilities 传递，并用 CapabilityBoundingSet 收窄范围。
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# ── 隔离加固 ──
+NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-MemoryDenyWriteExecute=yes
-LockPersonality=yes
-SystemCallArchitectures=native
-CapabilityBoundingSet=
+ProtectHome=read-only
+ReadWritePaths=/var/lib/diting
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
 
 [Install]
 WantedBy=multi-user.target
