@@ -51,15 +51,23 @@ function totp(secretBase32, opts = {}) {
   return hotp(secretBase32, counter, digits);
 }
 
-function verifyTOTP(secretBase32, code, opts = {}) {
+// 返回匹配的 counter（number）或 null。
+// 供重放防护使用：调用方需要拿到「命中的时间步」做已消费记账，
+// 故从 verifyTOTP 中抽出核心逻辑（verifyTOTP 保留为薄封装，兼容旧调用点）。
+function matchCounter(secretBase32, code, opts = {}) {
   const { digits = 6, period = 30, window = 1, timestamp = Date.now() } = opts;
   code = String(code || '').replace(/\s/g, '');
-  if (!/^\d+$/.test(code)) return false;
+  if (!/^\d+$/.test(code)) return null;
   const counter = Math.floor(timestamp / 1000 / period);
   for (let i = -window; i <= window; i++) {
-    if (hotp(secretBase32, counter + i, digits) === code) return true;
+    const c = counter + i;
+    if (hotp(secretBase32, c, digits) === code) return { counter: c, period };
   }
-  return false;
+  return null;
+}
+
+function verifyTOTP(secretBase32, code, opts = {}) {
+  return matchCounter(secretBase32, code, opts) !== null;
 }
 
 function generateSecret(bytes = 20) {
@@ -74,4 +82,4 @@ function otpauthUri(secretBase32, account = 'admin', issuer = 'HostMonitor') {
   return 'otpauth://totp/' + label + '?' + params.toString();
 }
 
-module.exports = { generateSecret, totp, verifyTOTP, otpauthUri, base32Encode, base32Decode };
+module.exports = { generateSecret, totp, verifyTOTP, matchCounter, otpauthUri, base32Encode, base32Decode };
