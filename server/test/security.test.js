@@ -6,7 +6,7 @@ process.env.DB_PATH = process.env.DB_PATH || ':memory:';
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { totp, verifyTOTP, generateSecret } = require('../src/totp');
+const { totp, verifyTOTP, matchCounter, generateSecret } = require('../src/totp');
 const auth = require('../src/auth');
 const { validateReport, num, str, sanitizeCss } = require('../src/validate');
 
@@ -45,6 +45,23 @@ test('verifyTOTP: 接受当前码、±1 窗口，拒绝越界/非数字', () => 
   assert.ok(!verifyTOTP(SECRET, 'abcdef'));
   // 含空格被去除后仍匹配
   assert.ok(verifyTOTP(SECRET, code + ' ', { timestamp: t * 1000 }));
+});
+
+test('matchCounter: 返回命中 counter / null，供重放防护记账（L-2）', () => {
+  const t = 100000;
+  const code = totp(SECRET, { timestamp: t * 1000 });
+  const hit = matchCounter(SECRET, code, { timestamp: t * 1000 });
+  assert.ok(hit, '正确码应命中');
+  assert.strictEqual(hit.counter, Math.floor(t / 30));
+  assert.strictEqual(hit.period, 30);
+  // 错码 / 非数字 / 空 → null
+  assert.strictEqual(matchCounter(SECRET, '000000', { timestamp: t * 1000 }), null);
+  assert.strictEqual(matchCounter(SECRET, 'abcdef', { timestamp: t * 1000 }), null);
+  assert.strictEqual(matchCounter(SECRET, '', { timestamp: t * 1000 }), null);
+  // 越界窗口 → null
+  assert.strictEqual(matchCounter(SECRET, code, { timestamp: (t + 90) * 1000 }), null);
+  // 返回值不得含 secret 明文
+  assert.ok(!JSON.stringify(hit).includes(SECRET));
 });
 
 test('generateSecret: 返回合法 base32', () => {

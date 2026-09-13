@@ -154,8 +154,15 @@ function adminOnly(req, res, next) {
   if (!r) return res.status(401).json({ error: 'unauthorized' });
   if (r.role !== 'admin') return res.status(403).json({ error: 'admin required' });
   if (db.is2FAEnabled()) {
+    // 失败节流（L-2）：锁定期内直接 429，避免在线枚举 TOTP。
+    if (!totpGuard(req)) {
+      return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+    }
     const ok = r.totp || verifyTotpHeader(req);
-    if (!ok) return res.status(401).json({ error: 'totp required', need_totp: true });
+    if (!ok) {
+      recordTotpFailure(req);
+      return res.status(401).json({ error: 'totp required', need_totp: true });
+    }
   }
   if (!requireProto(req, res)) return;
   req.role = r.role;
@@ -172,11 +179,82 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// ── TOTP 重放防护 + 失败节流（体检 L-2）───────────────────────────────────────────
+// 问题 1：verifyTOTP 只遍历 counter±1 比对，同一 6 位码在 ~90s 窗口内可被重放。
+//         修复：记录「已消费的 (secret, counter)」，同一码只能用一次。
+// 问题 2：X-TOTP 头路径无失败限流，凭据泄露时可在线枚举。修复：按 IP 计失败次数并锁定。
+const USED_TOTP_MAX = 1000;          // 已消费表上限（超限整表清，防内存滥用）
+const TOTP_FAIL_WINDOW = 10 * 60 * 1000; // 失败统计窗口 10 分钟
+const TOTP_FAIL_MAX = 5;             // 窗口内允许的失败次数
+const usedTotp = new Map();          // `${secretFp}:${counter}` -> 过期时刻(ms)
+const totpFails = new Map();         // ip -> { n, reset }
+
+// 只对 secret 取指纹入键，避免明文密钥驻留在 Map 键中。
+function secretFingerprint(secret) {
+  return crypto.createHash('sha256').update(String(secret)).digest('hex').slice(0, 8);
+}
+
+function pruneUsedTotp(now) {
+  for (const [k, exp] of usedTotp) {
+    if (exp <= now) usedTotp.delete(k);
+  }
+}
+
+// 定期清理过期条目（unref 避免阻止进程退出）。
+const usedTotpTimer = setInterval(() => pruneUsedTotp(Date.now()), 60 * 1000);
+if (usedTotpTimer.unref) usedTotpTimer.unref();
+
+/**
+ * 校验 TOTP 且保证同一时间步只成功一次（防重放）。
+ * @returns {boolean} 通过返回 true；码错误、已消费、已锁定均返回 false
+ */
+function verifyTotpOnce(secretBase32, code, opts = {}) {
+  if (!secretBase32 || !code) return false;
+  const hit = totp.matchCounter(secretBase32, code, opts);
+  if (!hit) return false;
+  const key = secretFingerprint(secretBase32) + ':' + hit.counter;
+  if (usedTotp.has(key)) return false;          // 已消费 → 拒绝重放
+  if (usedTotp.size >= USED_TOTP_MAX) usedTotp.clear(); // 上限保护
+  // 该时间步的有效期：counter 窗口结束后再多保留一个周期，覆盖 ±1 窗口
+  const expiresAt = (hit.counter + 2) * hit.period * 1000;
+  usedTotp.set(key, expiresAt);
+  return true;
+}
+
+/**
+ * TOTP 失败节流：同一 IP 在 TOTP_FAIL_WINDOW 内失败达 TOTP_FAIL_MAX 次即锁定。
+ * 进入时检查（返回 false 表示已锁定）；调用方在失败分支调 recordTotpFailure(req)。
+ * @returns {boolean} true = 允许继续校验；false = 已锁定
+ */
+function totpGuard(req) {
+  const ip = (req && req.ip) || '';
+  const rec = totpFails.get(ip);
+  if (!rec) return true;
+  if (Date.now() > rec.reset) { totpFails.delete(ip); return true; }
+  return rec.n < TOTP_FAIL_MAX;
+}
+
+function recordTotpFailure(req) {
+  const ip = (req && req.ip) || '';
+  const now = Date.now();
+  const rec = totpFails.get(ip);
+  if (!rec || now > rec.reset) {
+    totpFails.set(ip, { n: 1, reset: now + TOTP_FAIL_WINDOW });
+    return;
+  }
+  rec.n += 1;
+}
+
+function clearTotpFailures(req) {
+  const ip = (req && req.ip) || '';
+  totpFails.delete(ip);
+}
+
 function verifyTotpHeader(req) {
   const code = req.header('X-TOTP');
   const secret = db.get2FASecret();
   if (!code || !secret) return false;
-  return totp.verifyTOTP(secret, code);
+  return verifyTotpOnce(secret, code);
 }
 
 // IP 白名单中间件。从 DB uiSettings.admin_allow_ips 读取，支持逗号分隔 IP/CIDR，空则全放行。
@@ -294,4 +372,5 @@ module.exports = {
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog,
+  verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
 };
