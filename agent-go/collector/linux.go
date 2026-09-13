@@ -124,6 +124,7 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 		Load1:    l1,
 		Load5:    l5,
 		Load15:   l15,
+		Cores:    cpuCores(),
 		Temp:     temp,
 		SwapUsed:  uint64(swapUsed),
 		SwapTotal: uint64(swapTotal),

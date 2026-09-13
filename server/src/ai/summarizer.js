@@ -99,6 +99,9 @@ function summarizeAgent(agent, rows, opts) {
   const memStats = stats(rows.map(r => r.mem_pct));
   const loadStats = stats(rows.map(r => r.load1));
   const swapStats = stats(rows.map(r => r.swap_pct));
+  // CPU 核数（§9 T18）：0 = 未上报（老 agent 或尚未升级）。**绝不当 1 用**——
+  // 负载必须除以真实核数，否则 1 核机的 0.18 与 8 核机的 0.18 会被模型当成同一件事。
+  const cores = Math.floor(Number(agent.cores)) || 0;
 
   // 末样本（最新一份）用于「当前状态」
   const latest = rows.length ? rows[rows.length - 1] : null;
@@ -113,6 +116,7 @@ function summarizeAgent(agent, rows, opts) {
     samples: rows.length,
     cpu: {
       avg: cpuStats.avg, max: cpuStats.max, p95: cpuStats.p95,
+      cores: cores > 0 ? cores : null,
       over_threshold_minutes: overThresholdMinutes(rows.map(r => r.cpu), cpuAlert, intervalSec)
     },
     memory: {
@@ -121,7 +125,14 @@ function summarizeAgent(agent, rows, opts) {
       over_threshold_minutes: overThresholdMinutes(rows.map(r => r.mem_pct), memAlert, intervalSec)
     },
     disk: buildDisk(latest, rows, series, Number(o.trendDays) || 0),
-    load: { avg1: loadStats.avg },
+    // 负载：有核数时给出每核负载（真正的"忙不忙"）；没有核数时**缺席 + 显式标记**，
+    // 让 prompt 能明确禁止模型对负载高低下结论（而不是拿一个没有分母的数字去猜）。
+    load: cores > 0
+      ? {
+        avg1: loadStats.avg,
+        avg1_per_core: loadStats.avg == null ? null : +(loadStats.avg / cores).toFixed(2)
+      }
+      : { avg1: loadStats.avg, cores_unknown: true },
     swap: { avg: swapStats.avg, max: swapStats.max },
     network: {
       rx_rate_avg: stats(rows.map(r => r.net_rx_rate)).avg,
