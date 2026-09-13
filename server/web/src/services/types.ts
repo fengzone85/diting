@@ -246,6 +246,7 @@ export interface AiNodeAnalysis {
   status: 'ok' | 'cached' | 'disabled' | 'not_found' | 'error';
   cached?: boolean;
   agent?: { id: string; name: string; online?: boolean };
+  period_hours?: number;
   analysis?: {
     risk_level?: string;
     summary?: string;

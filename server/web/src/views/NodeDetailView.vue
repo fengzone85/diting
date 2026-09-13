@@ -8,6 +8,7 @@ import ChartLatencyDual from '../components/ChartLatencyDual.vue';
 import Loading from '../components/ui/Loading.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
+import AiNodeAnalysisDialog from '../components/ai/AiNodeAnalysisDialog.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
@@ -44,6 +45,11 @@ const agentId = computed(() => route.params.id as string);
 const probes = ref<Probes>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+// AI 单节点分析（§8 T15）：按钮对访客可见，但弹窗内先探测登录态——
+// 未登录只提示「需要管理员登录」并发「去登录」，不发请求（不消耗限流配额）；
+// 接口本身是 adminOnly，匿名请求即便发出也会被服务端拦下（不触发模型调用、零费用）。
+const showAiDialog = ref(false);
 
 // 本节点时序历史（CPU/内存/磁盘 IO/负载/温度/swap 六图）。
 // 刻意【不复用 useApp 的全局 state.sparklines】：首页 full 模板会按 5s 轮询刷新该全局对象，
@@ -379,7 +385,13 @@ onMounted(load);
               class="rounded-full px-3 py-1 text-xs"
               :class="agent.online ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'"
             >{{ agent.online ? t('common.online') : t('common.offline') }}</span>
-            <span v-if="agent.version" class="ml-auto rounded-full bg-surface px-3 py-1 text-xs text-secondary">v{{ agent.version }}</span>
+            <div class="ml-auto flex items-center gap-2">
+              <span v-if="agent.version" class="rounded-full bg-surface px-3 py-1 text-xs text-secondary">v{{ agent.version }}</span>
+              <button
+                class="rounded-lg bg-sky-600 px-3 py-1 text-xs font-medium text-white hover:bg-sky-500"
+                @click="showAiDialog = true"
+              >{{ t('ai.analyzeNode') }}</button>
+            </div>
           </div>
           <p class="mt-2 text-sm text-muted">{{ agent.os }} · {{ agent.id }}</p>
         </div>
@@ -669,6 +681,13 @@ onMounted(load);
           <ChartLatencyMulti :title="t('node.chart.latency')" :series="probeSeriesList" />
         </div>
       </div>
+      <AiNodeAnalysisDialog
+        v-if="showAiDialog && agent"
+        :agent-id="agent.id"
+        :agent-name="agent.name"
+        guard-auth
+        @close="showAiDialog = false"
+      />
     </main>
   </div>
 </template>
