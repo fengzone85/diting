@@ -65,6 +65,8 @@ const validateReport = (b) => {
     disk_total: num(b.disk_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     disk_pct: num(b.disk_pct, 0, 100),
     load1: num(b.load1, 0, 1e6),
+    // CPU 核数（§9 T18）：1–1024 的整数；非法或缺省 → 0（"未上报"，不可当 1 用）
+    cores: Math.floor(num(b.cores, 1, 1024) || 0),
     load5: num(b.load5, 0, 1e6),
     load15: num(b.load15, 0, 1e6),
     net_rx_rate: num(b.net_rx_rate, 0, 1e15),

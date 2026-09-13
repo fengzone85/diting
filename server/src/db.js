@@ -168,6 +168,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   if (!existing.has('currency')) db.exec("ALTER TABLE agents ADD COLUMN currency TEXT DEFAULT '¥'");
   if (!existing.has('auto_renewal')) db.exec("ALTER TABLE agents ADD COLUMN auto_renewal INTEGER DEFAULT 1");
 }
+// schema migration: agents 增加 CPU 核数列（受控端上报的静态硬件属性，§9 T18）。
+// 语义：0 = 未上报/未知（老 agent 不带该字段）——**不可当作 1 用**，摘要侧会标 cores_unknown。
+// 放 agents 表而不是 metrics 表：静态属性，避免给 2200 万行的 metrics 加列。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('cores')) db.exec('ALTER TABLE agents ADD COLUMN cores INTEGER DEFAULT 0');
+}
 
 // schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
 {
@@ -201,6 +208,8 @@ const stmts = {
     WHERE id=@id`),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
   touch: db.prepare('UPDATE agents SET last_seen=?, os=?, hostname=? WHERE id=?'),
+  // 仅当核数变化时才写（静态属性，避免每次上报都触发写事务）；cores<=0 不写入
+  setAgentCores: db.prepare('UPDATE agents SET cores=? WHERE id=? AND cores<>?'),
   insertMetric: db.prepare(`INSERT INTO metrics
     (agent_id, ts, cpu, mem_used, mem_total, mem_pct, disk_used, disk_total, disk_pct,
      load1, load5, load15, net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, uptime,
@@ -489,6 +498,14 @@ const deleteAgent = (id) => {
 };
 
 const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
+
+// 记录受控端核数（§9 T18）：仅接受 1–1024 的整数；其余（含老 agent 的缺失）一律忽略，
+// 保持库中为 0 = 未知——摘要侧据此输出 cores_unknown，绝不用 0/1 冒充分母。
+const setAgentCores = (id, cores) => {
+  const n = Math.floor(Number(cores));
+  if (!Number.isFinite(n) || n < 1 || n > 1024) return 0;
+  return stmts.setAgentCores.run(n, id, n).changes;
+};
 
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ agent_id }, m));
 
@@ -789,7 +806,7 @@ function getDbFileSize() {
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
+  touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll, getMetricsSparklinesOne,
   prune, getAlertState, setAlertState, clearAlertState,
