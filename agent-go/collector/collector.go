@@ -17,6 +17,10 @@ type Collector interface {
 type Probe struct {
 	Ok bool     `json:"ok"`
 	Ms *float64 `json:"ms"`
+	// Loss 为丢包率（0 或 100）。Go 版为纯 TCP 探测，无 ICMP 丢包统计能力，
+	// 故只取二值口径：TCP 握手成功 → 0，三轮全失败 → 100。
+	// 与 Python 版（ICMP 优先、可算真实丢包率）口径不同但字段一致，服务端无需改动。
+	Loss *float64 `json:"loss"`
 }
 
 // DiskInfo 是单块真实磁盘的使用情况（多盘展示用）。
