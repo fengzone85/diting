@@ -447,6 +447,16 @@ const WS_MAP_CAP = 10000;      // wsHits Map 最大条目数，防大量不同 I
 const wsConns = new Map();     // ip -> Set(ws)
 const wsHits = new Map();      // ip -> { reset, count }
 setInterval(() => wsHits.clear(), 60000).unref?.();
+
+// ── 公开快照共享缓存（PR-10 / 体检 Section 06）─────────────────────────────
+// 原先 /api/clients（每连接 5s）、/api/clients/sse（每连接 5s）各自调用并序列化
+// compat.snapshot()：N 个连接 = N 次 DB 读取 + N 次 JSON.stringify。
+// 现提升到模块级，全局每 5s 只构造一次，所有消费者（WS 广播 + SSE 各自 write）复用。
+let publicSnapStr = '';
+setInterval(() => {
+  try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch (_) { /* 保留上次快照 */ }
+}, 5000).unref?.();
+try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch (_) { /* 首连前构造失败则等下次定时器 */ }
 function wsClientIp(req) {
   // 只用 TCP 源地址，不读 X-Forwarded-For。XFF 可被直连攻击者伪造，
   // 用于绕过 WebSocket 并发/速率限制。req.socket.remoteAddress 是真实连接源，不可伪造。
@@ -490,21 +500,46 @@ try {
     return set;
   }
 
+  // /api/clients 专用连接集合（与 /api/rpc2 隔离：后者收到 clients 快照会解析出错）。
+  const clientsSockets = new Set();
+  // 全局广播：替代原先「每连接一个 5s 定时器」，连接数增长时成本恒定。
+  const clientsBroadcastTimer = setInterval(() => {
+    if (!publicSnapStr) return;
+    for (const c of clientsSockets) {
+      try { c.send(publicSnapStr); } catch (_) {}
+    }
+  }, 5000);
+  if (clientsBroadcastTimer.unref) clientsBroadcastTimer.unref();
+
   // /api/clients：社区主题公开快照（发送 "get" 触发刷新）
   wss.on('connection', (ws, req, pathname) => {
     if (pathname !== '/api/clients') return;
     const set = attachCommon(ws, req);
     if (!set) return;
-    const send = () => { try { ws.send(JSON.stringify(compat.snapshot())); } catch (_) {} };
+    // 发送共享快照字符串（零序列化成本）；空字符串表示尚未构造成功，跳过本轮
+    const send = () => { if (publicSnapStr) { try { ws.send(publicSnapStr); } catch (_) {} } };
+    clientsSockets.add(ws);
     send();
     ws.on('message', () => send());
-    const timer = setInterval(send, 5000);
     ws.on('close', () => {
-      clearInterval(timer);
+      clientsSockets.delete(ws);
       set.delete(ws);
       if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
   });
+
+  // /api/rpc2 的状态推送同样改为共享快照（PR-10）：
+  // 原实现每连接每 5s 调一次 getNodesLatestStatus() + 序列化，连接数 × 全量构造。
+  let statusSnapStr = '';
+  const statusSnapTimer = setInterval(() => {
+    try {
+      statusSnapStr = JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null });
+    } catch (_) { /* 保留上次快照 */ }
+  }, 5000);
+  if (statusSnapTimer.unref) statusSnapTimer.unref();
+  try {
+    statusSnapStr = JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null });
+  } catch (_) { /* 首连前构造失败时保持空串，下次定时器再试 */ }
 
   // /api/rpc2：社区主题 JSON-RPC 网关
   wss.on('connection', (ws, req, pathname) => {
@@ -512,13 +547,8 @@ try {
     const set = attachCommon(ws, req);
     if (!set) return;
 
-    const pushStatus = () => {
-      try {
-        ws.send(JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null }));
-      } catch (_) {}
-    };
+    const pushStatus = () => { if (statusSnapStr) { try { ws.send(statusSnapStr); } catch (_) {} } };
     pushStatus();
-    const timer = setInterval(pushStatus, 5000);
 
     ws.on('message', (data) => {
       let msg = null;
@@ -539,8 +569,8 @@ try {
       }
     });
 
+    // 无每连接定时器需清理（状态推送已改由模块级 statusSnapTimer 广播）
     ws.on('close', () => {
-      clearInterval(timer);
       set.delete(ws);
       if (set.size === 0) wsConns.delete(wsClientIp(req));
     });
@@ -578,8 +608,10 @@ try {
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no' // 禁用 Nginx 缓冲，确保实时推送
     });
+    // PR-10：复用模块级共享快照，不再每连接独立序列化（N 连接 = N 次构造）
     const send = () => {
-      try { res.write('data: ' + JSON.stringify(compat.snapshot()) + '\n\n'); } catch (_) {}
+      if (!publicSnapStr) return;
+      try { res.write('data: ' + publicSnapStr + '\n\n'); } catch (_) {}
     };
     send();
     const timer = setInterval(send, 5000);
