@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     Windows Monitor Agent 安装脚本：安装依赖，可选注册为开机启动的计划任务。
@@ -98,8 +98,9 @@ if ($RegisterTask) {
     }
     $bat = Join-Path $InstallDir 'run_scheduled.bat'
     $probeLine = if ($ProbeTargets) { "set PROBE_TARGETS=$ProbeTargets" } else { "" }
-    @"
+    $content = @"
 @echo off
+chcp 65001 >nul
 set SERVER_URL=$ServerUrl
 set AGENT_ID=$AgentId
 set AGENT_TOKEN=$AgentToken
@@ -107,7 +108,11 @@ set DISK_PATH=$DiskPath
 set INTERVAL=$Interval
 $probeLine
 python "$InstallDir\windows_agent.py"
-"@ | Out-File -FilePath $bat -Encoding ascii
+"@
+    # 中文 PROBE_TARGETS 的编码链：bat 必须无 BOM UTF-8 + 首行 chcp 65001。
+    # 此前 -Encoding ascii 把中文写成 '?'（实测 probes 标签变 '??' 且四家去重剩一个）；
+    # PS5.1 的 -Encoding utf8 带 BOM 会让 cmd 首行报错，故用 WriteAllText 无 BOM 落盘。
+    [IO.File]::WriteAllText($bat, $content, (New-Object System.Text.UTF8Encoding($false)))
 
     $action = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $InstallDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn

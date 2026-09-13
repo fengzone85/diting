@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 REM ============================================================
 REM  Windows Monitor Agent 便捷启动脚本
