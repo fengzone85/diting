@@ -6,13 +6,18 @@ import { t } from '../composables/useI18n';
 // services/api.ts 已把 error 字段挂到 Error.detail 上（详见该文件 request()）。
 // 这里做的是「机器可读码 → 本地化文案」的最后一步，避免把服务端原文直接甩给用户、
 // 也避免各视图重复写死同一批判断。
-const ERROR_CODE_KEYS: Record<string, string> = {
+// 导出仅供单测做「映射键 ↔ i18n 词典」一致性校验（见 utils/apiError.test.ts）
+export const ERROR_CODE_KEYS: Record<string, string> = {
   server_url_not_configured: 'errors.serverUrlNotConfigured',
   https_required: 'errors.httpsRequired',
   already_initialized: 'errors.alreadyInitialized',
   unauthorized: 'errors.unauthorized',
-  admin_required: 'errors.adminRequired',
+  // 注意：键必须与服务端 auth.js:155 返回的原始 error 字符串逐字一致（含空格）——
+  // 早期误写为 admin_required（下划线）导致该映射永不命中，403 只能落到通用兜底。
+  'admin required': 'errors.adminRequired',
   'ip not allowed': 'errors.ipNotAllowed',
+  // 2FA 已启用但本次会话未完成 TOTP 验证（服务端同时返回 need_totp:true）
+  'totp required': 'errors.totpRequired',
   'too many requests': 'errors.tooManyRequests',
   'too many login attempts, retry in 60s': 'errors.loginRateLimited',
   'invalid token': 'errors.invalidToken',
