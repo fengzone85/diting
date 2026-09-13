@@ -35,6 +35,10 @@ const I18N = {
     disk_forecast_fast: (days, fast, win) => ` / 按近 ${win} 天趋势综合估计约 ${days} 天达 90%（最快 ${fast} 天；存在回落，可能更久）`,
     disk_no_trend: (win) => ` / 近 ${win} 天无增长趋势`,
     disk_insufficient: ' / 趋势数据不足，暂不预测',
+    // 区间过宽（§9.7 项三）：不给单点天数，只讲趋势与区间（原「约 13 天（3–226 天）」对用户是弱信息）
+    disk_range_wide: (lo, hi, win) => ` / 近 ${win} 天持续上升，但外推区间过宽（${lo}–${hi} 天），暂不给单点天数`,
+    // 月流量与配额（§9.7 项一）：仅在设了配额时输出
+    traffic_line: (used, quota, p, days) => `  月流量：${used} / ${quota} GB（${p}%${days != null ? `，距月末 ${days} 天` : ''}）`,
     conf_low: '低',
     conf_medium: '中',
     conf_high: '高',
@@ -67,6 +71,8 @@ const I18N = {
     disk_forecast_fast: (days, fast, win) => ` / ~${days} days to 90% by the ${win}-day trend estimate (fastest ${fast} days; recent dip, could be longer)`,
     disk_no_trend: (win) => ` / no growth trend over the last ${win} days`,
     disk_insufficient: ' / not enough trend data to forecast',
+    disk_range_wide: (lo, hi, win) => ` / rising over the last ${win} days, but the projection range is too wide (${lo}–${hi} days) — no single estimate given`,
+    traffic_line: (used, quota, p, days) => `  Monthly traffic: ${used} / ${quota} GB (${p}%${days != null ? `, ${days} days to month end` : ''})`,
     conf_low: 'low',
     conf_medium: 'medium',
     conf_high: 'high',
@@ -123,6 +129,8 @@ function renderStatsText(summary, locale) {
     if (s.cpu && (s.cpu.avg >= 70 || (s.cpu.max || 0) >= 90)) return true;
     if (s.memory && (s.memory.avg >= 70 || (s.memory.max || 0) >= 90)) return true;
     if (s.disk && (s.disk.current_pct || 0) >= 80) return true;
+    // 月流量接近配额（§9.7 项一）：超量会直接断网或产生费用，纳入关注
+    if (s.traffic && s.traffic.quota_gb > 0 && (s.traffic.quota_pct || 0) >= 80) return true;
     // 临期(<=7天)或已过期也纳入关注，避免续费风险被忽略。
     if (s.billing && s.billing.days_until_expire != null && s.billing.days_until_expire <= 7) return true;
     return false;
@@ -144,6 +152,9 @@ function renderStatsText(summary, locale) {
       lines.push(t('mem_line', locale, pct(s.memory.avg), pct(s.memory.max), slope));
     }
     if (s.disk && s.disk.current_pct != null) lines.push(renderDiskLine(s.disk, locale));
+    if (s.traffic && s.traffic.quota_gb > 0) {
+      lines.push(t('traffic_line', locale, s.traffic.total_month_gb, s.traffic.quota_gb, pct(s.traffic.quota_pct), s.traffic.days_to_cycle_end));
+    }
     const expireLine = renderExpireSection(s, locale);
     if (expireLine) lines.push(expireLine);
   }
@@ -194,6 +205,13 @@ function renderDiskLine(disk, locale) {
   const win = disk.trend_window_days || 7;
   if (note === 'insufficient') return head + t('disk_insufficient', locale);
   if (note === 'no_growth') return head + t('disk_no_trend', locale, win);
+  // 区间过宽（§9.7 项三）：只报趋势与区间，不给单点天数——与 prompt 的规则一致
+  if (note === 'range_too_wide') {
+    const r = Array.isArray(disk.estimated_full_days_range) ? disk.estimated_full_days_range : [];
+    const rlo = Number.isFinite(r[0]) ? Math.round(r[0]) : null;
+    const rhi = Number.isFinite(r[1]) ? Math.round(r[1]) : null;
+    return head + t('disk_range_wide', locale, rlo == null ? '?' : rlo, rhi == null ? '?' : rhi, win);
+  }
   const days = disk.estimated_full_days;
   if (typeof days !== 'number' || days <= 0) return head;
   const rng = Array.isArray(disk.estimated_full_days_range) ? disk.estimated_full_days_range : [];
