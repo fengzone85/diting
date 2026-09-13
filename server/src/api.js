@@ -9,6 +9,7 @@ const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
 const { daysUntil, asyncHandler } = require('./util');
+const { nextExpire } = require('./renew');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
 // 纯 IP / 无点则原样，避免误截。例：pt5.521.be -> pt5；192.168.1.10 -> 原样。
@@ -843,11 +844,10 @@ router.post('/agents/:id/renew', adminOnly, (req, res) => {
   if (!a) return res.status(404).json({ error: 'not found' });
   // billing_cycle=0 表示白嫖/免费（无计费周期），须显式保留 0，不能用 || 30 吞掉。
   const cycle = (a.billing_cycle === undefined || a.billing_cycle === null || isNaN(Number(a.billing_cycle))) ? 30 : Number(a.billing_cycle);
-  const base = (a.expire_at && new Date(a.expire_at + 'T00:00:00') > new Date())
-    ? new Date(a.expire_at + 'T00:00:00') : new Date();
+  // 全程「本地日历日」口径（体检 L-1）：旧实现用 toISOString()（UTC）格式化，
+  // 在 UTC+8 下每次续期早 1 天且逐次累积。计算逻辑抽到 src/renew.js（纯函数，便于 TZ 子进程测试）。
   // cycle<=0（白嫖）续费不改变到期日（保持当前/今天），仅刷新为今天以标识「已确认」。
-  const next = new Date(base.getTime() + Math.max(0, cycle) * 86400000);
-  const newExpire = next.toISOString().slice(0, 10);
+  const newExpire = nextExpire(a.expire_at, Date.now(), cycle);
   db.updateAgent(a.id, Object.assign({}, a, { expire_at: newExpire }));
   res.json({ ok: true, expire_at: newExpire });
   auditLog(req, 'renew_agent', `id=${a.id} expire_at=${newExpire}`);
