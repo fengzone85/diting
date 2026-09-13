@@ -4,8 +4,8 @@
 The returned dict shape mirrors agent/collector.py so the server treats reports
 from Windows and Linux agents identically (no server-side changes required).
 
-Windows has no load average; load1 is approximated by the process count,
-while load5/load15 are reported as 0.0 placeholders.
+Windows has no load average; load1/load5/load15 are reported as 0.0
+(not collected — process count is a forbidden fingerprint field).
 """
 import os
 import re
@@ -151,11 +151,13 @@ def os_name():
     except Exception as e:
         log.debug("winreg os name failed: %s", e)
     try:
+        # L-9：兜底只取产品名（如 "Windows 10"），不带 build 号——
+        # ver[1] 是 build 号、platform.platform() 含内核版本，同属主机指纹范围。
         ver = platform.win32_ver()
-        return ' '.join([platform.system(), ver[0], ver[1]]).strip()
+        return ' '.join([platform.system(), ver[0]]).strip()
     except Exception as e:
         log.debug("win32_ver failed: %s", e)
-        return platform.platform()
+        return platform.system()
 
 
 class WinCollector:
@@ -328,8 +330,9 @@ class WinCollector:
             'disk_used': disk_used,
             'disk_total': disk_total,
             'disk_pct': round(disk_pct, 2),
-            # Windows has no load average concept — use process count as a meaningful proxy.
-            'load1': len(psutil.pids()), 'load5': 0.0, 'load15': 0.0,
+            # Windows has no load average concept; 0.0 = 未采集。
+            # 禁止用进程数（len(psutil.pids())）近似：进程列表属指纹字段（红线）。
+            'load1': 0.0, 'load5': 0.0, 'load15': 0.0,
             # 逻辑核数（§9 T18）：服务端据此换算每核负载；拿不到则为 0（视为未上报）
             'cores': psutil.cpu_count(logical=True) or 0,
             'temp': temp,
