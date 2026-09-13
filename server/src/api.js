@@ -1068,10 +1068,12 @@ router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
     throw e;
   }
 }));
-// 单节点按需分析（T11）：同一节点结果缓存 30 分钟，避免重复点击重复计费。
+// 单节点按需分析（T11）：同一节点+同一窗口的结果缓存 30 分钟，避免重复点击重复计费。
+// ?hours= 窗口可选：24（默认）/ 168（7 天）/ 720（30 天），clamp 到 24–720（与 ai/index.js 同界）。
 router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => {
-  const r = await ai.analyzeNode(String(req.params.id));
-  auditLog(req, 'ai_analyze_node', `agent=${req.params.id} status=${r.status}`);
+  const periodHours = Math.max(24, Math.min(720, Math.round(Number(req.query.hours)) || 24));
+  const r = await ai.analyzeNode(String(req.params.id), { periodHours });
+  auditLog(req, 'ai_analyze_node', `agent=${req.params.id} status=${r.status} hours=${periodHours}`);
   if (r.status === 'not_found') return res.status(404).json(r);
   if (r.status === 'disabled') return res.status(400).json(r);
   if (r.status === 'error') return res.status(502).json(r);
