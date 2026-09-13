@@ -111,6 +111,22 @@ test('validateReport: 正常负载', () => {
   assert.deepStrictEqual(JSON.parse(m.probes), { '移动': { ms: 12, ok: true, loss: 0 } });
 });
 
+test('validateReport: CPU 核数（§9 T18）——合法取整、越界与缺失一律为 0（表示未上报）', () => {
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 4 }).cores, 4);
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 4.7 }).cores, 4, '应向下取整');
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: '8' }).cores, 8, '数字字符串可接受');
+
+  // 0 / 负数 / 超大 / 非数字 / 缺失 → 0（未知），绝不回退成 1
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 0 }).cores, 0);
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: -4 }).cores, 0);
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 99999 }).cores, 0);
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 'many' }).cores, 0);
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1 }).cores, 0, '老 agent 不带该字段');
+
+  // 校验为受控对象：多余字段不会破坏 /report → insertMetric 的写入（better-sqlite3 忽略未用到的键）
+  assert.strictEqual(validateReport({ cpu: 10, mem_total: 1, cores: 4, evil: 'x' }).cores, 4);
+});
+
 test('validateReport: 缺失核心字段 → 该字段为 null（/report 路由据此拒收）', () => {
   // validateReport 本身始终返回对象，缺 cpu/mem_total 时对应字段为 null；
   // 真正的「整包拒绝」逻辑在 api.js 的 /report 路由（m.cpu===null || m.mem_total===null）。
