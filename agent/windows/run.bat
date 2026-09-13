@@ -1,4 +1,5 @@
-@echo off
+﻿@echo off
+chcp 65001 >nul
 REM ============================================================
 REM  Windows Monitor Agent 便捷启动脚本
 REM  1) 修改下面三个变量（在监控后台「添加 Agent」后获得）
