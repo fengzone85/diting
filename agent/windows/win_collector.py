@@ -330,6 +330,8 @@ class WinCollector:
             'disk_pct': round(disk_pct, 2),
             # Windows has no load average concept — use process count as a meaningful proxy.
             'load1': len(psutil.pids()), 'load5': 0.0, 'load15': 0.0,
+            # 逻辑核数（§9 T18）：服务端据此换算每核负载；拿不到则为 0（视为未上报）
+            'cores': psutil.cpu_count(logical=True) or 0,
             'temp': temp,
             'swap_used': swap_used,
             'swap_total': swap_total,
