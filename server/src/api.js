@@ -330,9 +330,18 @@ router.get('/agents/:id', adminOrReadonly, (req, res) => {
 
 // ---- Admin: metrics time-series ----
 const RANGES = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+// 各档默认点数（体检 L-6）：原先走 getMetrics(metricsRange=SELECT *) 全量拉取，
+// 30d 约 12.9 万行且含 probes/disks 大 JSON。改用 SQL 层均匀采样（保留首尾点）。
+const RANGE_POINTS = { '1h': 180, '6h': 360, '24h': 360, '7d': 360, '30d': 360 };
 router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
   const sec = RANGES[req.query.range] || 3600;
-  const rows = db.getMetrics(req.params.id, Date.now() - sec * 1000);
+  // points 可显式覆盖（60–1440），供前端按需调整密度
+  const points = Math.min(1440, Math.max(60, Number(req.query.points) || RANGE_POINTS[req.query.range] || 360));
+  // getMetricsSampled 内部为 metricsRangeSampled，同为 SELECT *（全列，含 probes/disks），
+  // 故响应 shape 与旧实现一致、前端零改动；收益来自行数下降而非列裁剪
+  // （若需进一步压单行字节，须改显式列，但那会破坏 shape 兼容 —— 留作后续独立优化）。
+  const rows = db.getMetricsSampled(req.params.id, Date.now() - sec * 1000, points);
+  res.set('X-Sampled', '1');
   res.json(rows);
 });
 

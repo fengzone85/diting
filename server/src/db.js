@@ -220,7 +220,9 @@ const stmts = {
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
-  metricsRange: db.prepare('SELECT * FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // metricsRange（SELECT * 单节点全量）已于 2026-09-13 删除：
+  // 唯一调用方 /api/agents/:id/metrics 已改走 metricsRangeSampled（见 getMetricsSampled）。
+  // 该路由此前会全量拉取（30d 约 12.9 万行 + probes/disks 大 JSON），apdex 极差。
   // 单节点全字段 SQL 层采样（兼容层 /records/load 与 /api/v1 历史专用）。
   // 此前这些接口走 metricsRange 全量拉取（100 台 × 720h 可达百万行）后在 JS 层 sort/slice，
   // 单次请求数百万次行物化 + 大数组排序，是典型的 DoS 放大器。
@@ -298,7 +300,6 @@ const stmts = {
   clearAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=? AND type=?'),
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
-  metricsRangeAll: db.prepare('SELECT * FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
   // 调用方用 last.ts - first.ts 求跨度会得到 NaN → 趋势分析静默失效。
@@ -314,7 +315,6 @@ const stmts = {
     ORDER BY agent_id, ts`).all({ since: sinceTs, bucket: Math.max(1, bucketMs) }),
   // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
   metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
-  metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
   // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
   // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
   metricsSparklinesAllSampled: (sinceTs, maxPoints, untilTs) => {
@@ -451,11 +451,7 @@ const resetAgentToken = (id) => {
   stmts.resetToken.run(hashToken(token), id);
   return token;
 };
-// 批量取所有 Agent 的时序指标（sparkline 用），按 agent_id 升序返回原始行。
-const getMetricsAll = (sinceTs) => stmts.metricsRangeAll.all(sinceTs);
 
-// 仅取 ts+probes 两列（探针延迟历史接口专用），规避 SELECT * 对全行列物化的开销。
-const getMetricsProbes = (agentId, sinceTs) => stmts.metricsProbes.all(agentId, sinceTs);
 
 // 单节点探针 SQL 层采样（详情页延迟波形）：只返回 maxPoints 行，规避 9.5 万次 JSON.parse。
 const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbesOne(agentId, sinceTs, maxPoints);
@@ -478,7 +474,6 @@ const metricsProbesAll = (sinceTs, maxPoints) => {
 
 // sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
 const getMetricsSparklines = (agentId, sinceTs) => stmts.metricsSparklines.all(agentId, sinceTs);
-const getMetricsSparklinesAll = (sinceTs) => stmts.metricsSparklinesAll.all(sinceTs);
 
 const updateAgent = (id, f) => stmts.updateAgent.run({
   id,
@@ -525,8 +520,6 @@ const getMetricsSampled = (agent_id, sinceTs, maxPoints) =>
 const getMetricsLoadOne = (agent_id, sinceTs, maxPoints) =>
   stmts.metricsLoadOne(agent_id, sinceTs, maxPoints);
 const getMetricsLoadAll = (sinceTs, maxPoints) => stmts.metricsLoadAll(sinceTs, maxPoints);
-
-const getMetrics = (agent_id, sinceTs) => stmts.metricsRange.all(agent_id, sinceTs);
 
 const prune = (retentionDays) => {
   const cutoff = Date.now() - retentionDays * 86400000;
@@ -810,9 +803,10 @@ function getDbFileSize() {
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetrics, getMetricsSampled, getMetricsProbes, getMetricsProbesOne,
+  touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
-  getMetricsSparklines, getMetricsSparklinesAll, metricsSparklinesAllSampled, getMetricsAll, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll, getMetricsSparklinesOne,
+  // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
+  getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
