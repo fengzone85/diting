@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Windows Monitor Agent 安装脚本：安装依赖，可选注册为开机启动的计划任务。
