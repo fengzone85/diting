@@ -308,7 +308,7 @@ const stmts = {
   metricsSparklinesAll: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE ts>=? ORDER BY agent_id, ts ASC'),
   // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
   // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
-  metricsSparklinesAllSampled: (sinceTs, maxPoints) => {
+  metricsSparklinesAllSampled: (sinceTs, maxPoints, untilTs) => {
     const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
     return db.prepare(`
       WITH numbered AS (
@@ -316,19 +316,20 @@ const stmts = {
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
                ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
                COUNT(*) OVER (PARTITION BY agent_id) AS cnt
-        FROM metrics WHERE ts>=@since
+        FROM metrics WHERE ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
              load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-      ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step });
+      ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
   },
   // 单节点 sparklines SQL 层采样（节点详情页专用）：与全量版同构，但按 agent_id 过滤。
   // 此前详情页单节点走「全量拉取 10.8 万行 → Node 侧 downsampleSparklines 降到 2000 点」，
   // 每次请求 2.77s + 220MB 峰值，30s 缓存一过就卡/偶发超时。SQL 层直接只返回 maxPoints 行。
   // 必须保留首尾点（rn=1 OR rn=cnt）：详情页磁盘耗尽预测依赖 disk_used 首末值做线性外推。
-  metricsSparklinesOne: (agentId, sinceTs, maxPoints) => {
+  // untilTs（可选）：取「前一等长窗口」时的上界——ts < untilTs。null 表示不设上界（现状行为）。
+  metricsSparklinesOne: (agentId, sinceTs, maxPoints, untilTs) => {
     const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
     return db.prepare(`
       WITH numbered AS (
@@ -336,13 +337,13 @@ const stmts = {
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
                ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
                COUNT(*) OVER () AS cnt
-        FROM metrics WHERE agent_id=@agentId AND ts>=@since
+        FROM metrics WHERE agent_id=@agentId AND ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
              load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
+      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
   },
   // 集群级时间桶聚合（仪表盘平均 CPU/内存趋势专用）：跨所有 agent 按固定时间桶 GROUP BY，
   // 直接算出每个桶的 cpu/mem 平均值。返回行数=桶数（≤maxPoints），彻底规避「62 台 × 每 agent 2000 点
@@ -418,7 +419,7 @@ const createAgent = (fields) => {
 const getAgent = (id) => stmts.getAgent.get(id);
 const getAgents = () => stmts.getAgents.all();
 // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点。
-const metricsSparklinesAllSampled = (sinceTs, maxPoints) => stmts.metricsSparklinesAllSampled(sinceTs, maxPoints);
+const metricsSparklinesAllSampled = (sinceTs, maxPoints, untilTs) => stmts.metricsSparklinesAllSampled(sinceTs, maxPoints, untilTs);
 
 // 集群级时间桶聚合（仪表盘平均曲线）：跨所有 agent 按时间桶求 cpu/mem 平均，返回行数≤maxPoints。
 const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAvg(sinceTs, spanMs, maxPoints);
@@ -427,7 +428,7 @@ const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAv
 const metricsDiskTrendAll = (sinceTs, bucketMs) => stmts.metricsDiskTrendAll(sinceTs, bucketMs);
 
 // 单节点 sparklines SQL 层采样（节点详情页）：只返回 maxPoints 行，保留首尾点供磁盘耗尽预测。
-const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints);
+const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints, untilTs) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints, untilTs);
 
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {

@@ -230,7 +230,96 @@ function clampRisk(raw, baseline) {
   return Object.keys(RISK_ORDER).find((k) => RISK_ORDER[k] === capped);
 }
 
+// ---- 周期对比（§9 T19）----
+// 输出「当期 − 前一等长窗口」的同单位差值，供 prompt 引用（模型只可说「较前一期上升 X 单位」）。
+// 刻意不做百分比：分母可能为 0，且百分比会诱发模型自行换算（prompt 明确禁止重算数字）。
+// 同源性：disk 用两个窗口各自的**末样本**，不与磁盘趋势的桶中位混用。
+const COMPARE_MIN_RATIO = 0.2;
+
+function liteWindow(rows) {
+  const a = rows || [];
+  const latest = a.length ? a[a.length - 1] : null;
+  const cpu = stats(a.map(r => r.cpu));
+  const mem = stats(a.map(r => r.mem_pct));
+  const net = stats(a.map(r => r.net_rx_rate));
+  const load = stats(a.map(r => r.load1));
+  return {
+    samples: a.length,
+    cpu_avg: cpu.avg,
+    cpu_p95: cpu.p95,
+    mem_avg: mem.avg,
+    mem_p95: mem.p95,
+    disk_pct: latest && typeof latest.disk_pct === 'number' ? +latest.disk_pct.toFixed(2) : null,
+    net_rx_avg: net.avg,
+    load_avg1: load.avg
+  };
+}
+
+// 返回 { compare, compare_insufficient }：
+//   - 前窗样本 < 当期 20%（或任一侧为空）→ compare=null + insufficient=true（禁止模型据此推断趋势）
+//   - 单字段任一侧缺失 → 该字段为 null，其余字段照常给出
+function compareWindows(curRows, prevRows, opts) {
+  const o = opts || {};
+  const ratio = Number.isFinite(o.minRatio) ? o.minRatio : COMPARE_MIN_RATIO;
+  const cur = liteWindow(curRows);
+  const prev = liteWindow(prevRows);
+  if (!cur.samples || !prev.samples || prev.samples < Math.max(1, Math.floor(cur.samples * ratio))) {
+    return { compare: null, compare_insufficient: true };
+  }
+  const d = (a, b) => (Number.isFinite(a) && Number.isFinite(b)) ? +(a - b).toFixed(2) : null;
+  return {
+    compare: {
+      window: o.window || `${o.periodHours || 24}h`,
+      samples_prev: prev.samples,
+      cpu_avg_delta: d(cur.cpu_avg, prev.cpu_avg),
+      cpu_p95_delta: d(cur.cpu_p95, prev.cpu_p95),
+      mem_avg_delta: d(cur.mem_avg, prev.mem_avg),
+      mem_p95_delta: d(cur.mem_p95, prev.mem_p95),
+      disk_pct_delta: d(cur.disk_pct, prev.disk_pct),
+      net_rx_avg_delta: d(cur.net_rx_avg, prev.net_rx_avg),
+      load_avg1_delta: d(cur.load_avg1, prev.load_avg1)
+    },
+    compare_insufficient: false
+  };
+}
+
+// ---- 探针质量聚合（§9 T20，仅单节点分析启用）----
+// 输入 metrics.probes 采样行 [{ ts, probes }]，probes 形如 {"移动":{"ms":13.5,"ok":true,"loss":0},...}
+// 输出按 task 汇总并按样本数取前 maxTasks：{ task, samples, ok_rate(%), loss_avg, ms_avg, ms_p95 }
+// 容错：畸形 JSON / 非对象 / 非法字段一律跳过，不抛异常（探针是附加信息，不能拖垮分析）。
+function aggregateProbes(rows, opts) {
+  const o = opts || {};
+  const maxTasks = Math.max(1, Math.min(12, Number(o.maxTasks) || 6));
+  const acc = new Map();
+  for (const r of rows || []) {
+    let obj;
+    try { obj = JSON.parse((r && r.probes) || '{}'); } catch { continue; }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+    for (const key of Object.keys(obj)) {
+      const v = obj[key];
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+      const slot = acc.get(key) || { samples: 0, ok: 0, loss: [], ms: [] };
+      slot.samples++;
+      if (v.ok) slot.ok++;
+      if (typeof v.loss === 'number' && Number.isFinite(v.loss)) slot.loss.push(v.loss);
+      if (typeof v.ms === 'number' && Number.isFinite(v.ms)) slot.ms.push(v.ms);
+      acc.set(key, slot);
+    }
+  }
+  return [...acc.entries()]
+    .map(([task, s]) => ({
+      task: String(task).slice(0, 40),
+      samples: s.samples,
+      ok_rate: s.samples ? +((s.ok / s.samples) * 100).toFixed(1) : null,
+      loss_avg: s.loss.length ? +(s.loss.reduce((a, b) => a + b, 0) / s.loss.length).toFixed(2) : null,
+      ms_avg: s.ms.length ? +(s.ms.reduce((a, b) => a + b, 0) / s.ms.length).toFixed(1) : null,
+      ms_p95: s.ms.length ? +(quantile(s.ms, 0.95)).toFixed(1) : null
+    }))
+    .sort((a, b) => b.samples - a.samples)
+    .slice(0, maxTasks);
+}
+
 module.exports = {
   nums, stats, overThresholdMinutes, median, quantile, diskFullDays, diskTrend, memSlope,
-  computeSignals, baselineRisk, clampRisk
+  computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes
 };
