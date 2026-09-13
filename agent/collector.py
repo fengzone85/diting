@@ -195,6 +195,23 @@ def load_avg():
     return 0.0, 0.0, 0.0
 
 
+def cpu_cores():
+    """逻辑核数（§9 T18）：供服务端把 load1 换算成「每核负载」。
+
+    口径：load_avg() 读的是宿主 /proc/loadavg，故分母也用宿主 /proc/cpuinfo 的
+    processor 行数（容器内不加 lxcfs 时即为宿主核数，与负载同源）。
+    回退 os.cpu_count()，再拿不到返回 0 —— 服务端把 0 当「未上报」，
+    标记 cores_unknown，绝不用 0/1 冒充分母。
+    """
+    n = 0
+    for line in _read('/proc/cpuinfo').splitlines():
+        if line.startswith('processor'):
+            n += 1
+    if n:
+        return n
+    return os.cpu_count() or 0
+
+
 def net_totals():
     """Sum rx/tx bytes across non-loopback interfaces from /proc/net/dev."""
     rx = tx = 0
@@ -494,6 +511,7 @@ class Collector:
             'disk_total': disk_total,
             'disk_pct': round(disk_pct, 2),
             'load1': l1, 'load5': l5, 'load15': l15,
+            'cores': cpu_cores(),
             'temp': temp,
             'swap_used': swap_used,
             'swap_total': swap_total,
