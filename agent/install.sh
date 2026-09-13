@@ -54,6 +54,28 @@ download_list() {
     done
 }
 
+# ── SERVER_URL scheme 校验（L-13）──────────────────────────────────────────────
+# agent 拒绝向非 localhost 的 http 明文发送令牌；必须在【任何凭据外发之前】校验。
+# 此前该校验只在 4b（收集完参数后）执行，导致 --setup-token 场景下
+# 一次性注册凭据会先被 POST 到 http:// 明文地址、之后才报错退出。
+validate_server_url() {
+    case "${1:-}" in
+        https://*) ;;
+        http://localhost*|http://127.0.0.1*|http://\[::1\]*)
+            echo -e "${YELLOW}[警告] 检测到 localhost 的 http，仅本地测试允许；生产环境请用 https${NC}" >&2
+            ;;
+        http://*)
+            echo -e "${RED}[错误] SERVER_URL 必须使用 https（agent 拒绝向非 localhost 的 http 明文发送令牌）${NC}" >&2
+            return 1
+            ;;
+        *)
+            echo -e "${RED}[错误] SERVER_URL 必须以 http(s):// 开头${NC}" >&2
+            return 1
+            ;;
+    esac
+    return 0
+}
+
 # ── Defaults ─────────────────────────────────────────────────────────────────
 INTERVAL=20
 REPO="https://raw.githubusercontent.com/fengzone85/diting/master/agent"
@@ -185,6 +207,9 @@ if [[ -n "${SETUP_TOKEN:-}" ]]; then
         echo -e "${RED}[错误] 使用 --setup-token 必须同时提供 --server${NC}" >&2
         exit 1
     fi
+    # L-13：scheme 必须【在凭据外发之前】校验。SETUP_TOKEN 是一次性注册凭据，
+    # 若先 POST 到 http:// 明文地址再报错，凭据已经泄漏（且无法撤回）。
+    validate_server_url "$SERVER_URL" || exit 1
     echo -e "${YELLOW}[信息] 正在通过 SETUP_TOKEN 向服务端自助注册客户端…${NC}"
     # 用 Python 标准库发 HTTPS 请求（无需额外依赖）
     REG_JSON="$("$PYTHON" - "$SERVER_URL" "$SETUP_TOKEN" "${SETUP_NAME:-}" <<'PYEOF'
@@ -259,20 +284,8 @@ if [[ -z "${AGENT_TOKEN}" ]]; then
 fi
 
 # ── 4b. Validate SERVER_URL scheme (agent refuses non-localhost http) ──────
-case "$SERVER_URL" in
-    https://*) ;;
-    http://localhost*|http://127.0.0.1*|http://\[::1\]*)
-        echo -e "${YELLOW}[警告] 检测到 localhost 的 http，仅本地测试允许；生产环境请用 https${NC}" >&2
-        ;;
-    http://*)
-        echo -e "${RED}[错误] SERVER_URL 必须使用 https（agent 拒绝向非 localhost 的 http 明文发送令牌）${NC}" >&2
-        exit 1
-        ;;
-    *)
-        echo -e "${RED}[错误] SERVER_URL 必须以 http(s):// 开头${NC}" >&2
-        exit 1
-        ;;
-esac
+# 校验逻辑已抽为 validate_server_url()（3c 注册前也会调用，见上）
+validate_server_url "$SERVER_URL" || exit 1
 
 # ── 5. Create system user ─────────────────────────────────────────────────────
 if id diting >/dev/null 2>&1; then
@@ -322,7 +335,8 @@ INTERVAL=${INTERVAL}
 DISK_PATH=/
 STATE_FILE=/var/lib/diting/state.json
 "
-# 探测目标（网络质量自测 DNS）：服务端下发的 label:host 列表；为空则受控端回退内置默认。
+# 探测目标（网络质量自测 DNS）：label:host 列表由【安装者在本机指定】（--probe-targets）；
+# 服务端永不下发（diting 无指令通道）。为空则受控端回退内置默认目标。
 if [[ -n "${PROBE_TARGETS:-}" ]]; then
   ENV_CONTENT="${ENV_CONTENT}PROBE_TARGETS=${PROBE_TARGETS}
 "

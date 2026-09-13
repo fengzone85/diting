@@ -65,7 +65,11 @@ SCRIPT_NOTES="新增 --process-restore：消费后台「恢复」请求（cron �
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fengzone85/diting/master}"
+# ── 仓库来源（L-17：REPO_BRANCH 可钉 tag，便于可复现安装）─────────────────────
+# 发布时用 `REPO_BRANCH=v1.2.0 sudo bash diting.sh --install-server` 即可锁定版本；
+# 默认 master 保持「跟随最新」的行为不变。REPO_RAW/REPO_GIT 仍可被显式覆盖。
+REPO_BRANCH="${REPO_BRANCH:-master}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fengzone85/diting/${REPO_BRANCH}}"
 REPO_GIT="${REPO_GIT:-https://github.com/fengzone85/diting.git}"
 SRC_DIR="/opt/diting-src"
 
@@ -455,6 +459,32 @@ install_server() {
     docker compose down 2>/dev/null || true
     docker compose up -d --build
 
+    # L-15：写入 /etc/diting/host.env 骨架，避免「备份可见目录未配」
+    # 导致 --process-restore 静默退化到 /restore.request（:982 的兜底路径）。
+    # 已存在则完全不覆盖（用户可能已填过真实路径），仅提示。
+    local host_env="/etc/diting/host.env"
+    if [[ -f "$host_env" ]]; then
+        echo -e "${YELLOW}[信息] $host_env 已存在，保持原内容不变${NC}"
+    else
+        mkdir -p /etc/diting 2>/dev/null || true
+        cat > "$host_env" <<'HOSTENV'
+# Diting 宿主侧环境（由 diting.sh --install-server 生成的骨架）
+# 被 diting.sh 自身与 cron 行 source；改完即时生效，无需重启服务端。
+#
+# 备份可见目录：宿主侧的备份存放路径。服务端容器通过 HOST_BACKUP_DIR
+# 挂载同一目录，后台才能在「备份」页列出/下载/恢复备份文件。
+# 留空会导致 --process-restore 退化为读取 /restore.request。
+BACKUP_VISIBLE_DIR=/var/backups/diting
+# 恢复请求文件：后台点「恢复」时写入，由 cron 每 5 分钟轮询消费。
+RESTORE_REQUEST_FILE=/var/backups/diting/restore.request
+
+# 让服务端容器能看到上述目录（compose 用它做 bind mount）。
+HOST_BACKUP_DIR=/var/backups/diting
+HOSTENV
+        echo -e "${GREEN}[OK]   已生成 $host_env（请按需修改 BACKUP_VISIBLE_DIR）${NC}"
+        echo -e "       如需后台可见备份，请确保 docker-compose 挂载 HOST_BACKUP_DIR"
+    fi
+
     echo ""
     echo -e "${GREEN}✅ 服务端已启动${NC}"
     echo -e "   仪表盘: http://localhost:8081  （当前为明文测试端口）"
@@ -475,6 +505,15 @@ update_script() {
     if ! bash -n "$new" >/dev/null 2>&1; then
         echo -e "${RED}[错误] 下载到的 diting.sh 语法校验未通过，已放弃覆盖，当前脚本保持不变${NC}" >&2
         rm -f "$new"; return 1
+    fi
+    # L-17：把本次下载文件的 SHA256 打印出来，便于用户留档 / 在 Release notes 核对。
+    # 未设 SP_INSTALL_SHA256 时 download() 不做校验（静默跳过），此处输出是唯一的
+    # 事后可追溯点 —— 机制已备，剩余价值在于「可见可复制」。
+    local _sha
+    _sha="$(sha256_of "$new" 2>/dev/null || true)"
+    if [[ -n "$_sha" ]]; then
+        echo -e "${BLUE}[信息] 本次下载 diting.sh SHA256:${NC} ${_sha}"
+        echo -e "       如需强校验，下次可执行：SP_INSTALL_SHA256=${_sha} sudo bash diting.sh --update-script"
     fi
     # 展示版本变化与新版要点，让用户直观了解本次更新内容
     local newver newnotes
@@ -983,6 +1022,13 @@ RESTORE_REQUEST_FILE="${RESTORE_REQUEST_FILE:-${BACKUP_VISIBLE_DIR:-}/restore.re
 
 # 处理前台（后台 UI）投递的恢复请求。仅 ADMIN 从后台发起才可能生成该文件。
 process_restore_request() {
+    # L-15：BACKUP_VISIBLE_DIR 未配时 RESTORE_REQUEST_FILE 会退化到 /restore.request
+    # （:1020 的兜底），后台写入的请求文件根本不会被读到 —— 表现为「点了恢复没反应」。
+    # 这里显式告警，避免静默失效。
+    if [[ -z "${BACKUP_VISIBLE_DIR:-}" ]]; then
+        echo -e "${YELLOW}[警告] BACKUP_VISIBLE_DIR 未设置，恢复请求路径已退化为 ${RESTORE_REQUEST_FILE:-/restore.request}；${NC}" >&2
+        echo -e "${YELLOW}       若后台「备份」页的恢复无响应，请在 /etc/diting/host.env 配置 BACKUP_VISIBLE_DIR（--install-server 已生成骨架）${NC}" >&2
+    fi
     local reqf="${RESTORE_REQUEST_FILE:-}"
     [[ -n "$reqf" && -f "$reqf" ]] || return 1
     local file name

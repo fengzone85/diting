@@ -84,6 +84,8 @@ function toNode(a, showBusiness) {
     weight: 0,
     price: -1,
     billing_cycle: 30,
+    // 协议占位：仅表示「支持该标记」，diting 没有自动续费周期任务。
+    // 主题据此渲染「自动续费」徽标，不代表服务端会真的自动延期。
     auto_renewal: true,
     currency: '$',
     // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值

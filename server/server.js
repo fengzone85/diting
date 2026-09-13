@@ -419,7 +419,7 @@ function runPrune() {
   } catch (e) {
     console.error('[prune] error', e.message);
     pruneFails++;
-    // 持续失败（默认每 3 小时一次）才发告警，避免瞬态失败刷屏；长期不清理会导致 metrics 表无限膨胀。
+    // 持续失败（每小时一次，第 3 次）才发告警，避免瞬态失败刷屏；长期不清理会导致 metrics 表无限膨胀。
     if (pruneFails >= 3) {
       alerts.sendAlert('[监控] 数据清理(prune)持续失败', `metrics 清理已连续 ${pruneFails} 次失败：${e.message}。若长期不清理，metrics 表将持续膨胀，请检查数据库权限/磁盘空间。`);
       pruneFails = 0;

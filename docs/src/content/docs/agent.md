@@ -186,7 +186,7 @@ SERVER_URL=https://1.2.3.4:4443
 | CPU 使用率 | `/proc/stat` | psutil |
 | 内存使用率 | `/proc/meminfo` | psutil |
 | 磁盘使用率 | `os.statvfs` | psutil |
-| 系统负载 | `/proc/loadavg` | — |
+| 系统负载 | `/proc/loadavg` | 恒为 `0.0`（Windows 无 load 概念；**不用进程数近似**——进程列表属指纹字段） |
 | 网络流量 | `/proc/net/dev` | psutil |
 | 温度 | `/sys/class/thermal/` | psutil |
 | Swap | `/proc/meminfo` | psutil |
@@ -199,6 +199,25 @@ SERVER_URL=https://1.2.3.4:4443
 > Go 版为**纯 TCP 握手**（不需 `CAP_NET_RAW`，但也没有 ICMP 丢包统计），
 > `loss` 只取 **0（握手成功）/ 100（三轮全失败）** 二值，不伪造中间值——
 > 「三轮重试中几次失败」不代表链路丢包率。两侧字段名与结构一致，服务端无需改动。
+
+### 月流量清零口径
+
+月流量（`net_rx_month` / `net_tx_month`）按 **agent 本地时区**的月初清零，
+累计值持久化在 `STATE_FILE`（默认 `/var/lib/diting/state.json`），跨重启不丢。
+
+Docker 容器内默认为 **UTC**：若希望「北京时间月初」清零，需显式注入时区——
+
+```bash
+docker run -e TZ=Asia/Shanghai ...
+```
+
+否则清零时刻会比北京时间早 8 小时（即在月末最后一天 16:00 就归零）。
+
+### Windows 上报间隔差异
+
+Windows 版 `INTERVAL` 默认 **15s**，其余三端为 **20s**。这是历史遗留差异，
+**不修复**：Windows 受控端（Python）已进入冻结期，新装走 Go 版（20s），
+存量节点将随 Python 版本下线一并统一。
 
 ## 卸载
 
