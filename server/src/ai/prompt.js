@@ -7,7 +7,7 @@
 //    配合系统层「无指令通道」的安全底线（见 agent/collector.py:265-299 的设计）。
 // 3. 强制 JSON 输出，便于 report.js 结构化渲染，避免自由文本难以解析。
 
-const PROMPT_VERSION = '1.3';
+const PROMPT_VERSION = '1.4';
 
 // 系统提示：定义角色、能力边界、输出格式。
 const SYSTEM_PROMPT = `你是一名资深 Linux 运维工程师，正在为一个服务器监控系统（diting）生成【每日运维分析报告】。
@@ -20,6 +20,8 @@ const SYSTEM_PROMPT = `你是一名资深 Linux 运维工程师，正在为一�
 3. 给出可能的原因（概率性判断，不是确定性结论）。
 4. 给出建议的排查方向。
 5. 关注节点到期情况：days_until_expire <= 7 视为临期、< 0 视为已过期，应在对应节点 highlights 中提示到期风险；白嫖(cycle_label=白嫖)节点可标注「免费资源，注意可用性」。
+6. 关注月流量与配额：traffic.quota_pct 接近或超过 80% 时提示超量风险，并结合 traffic.days_to_cycle_end 判断紧迫性（例如「距月末还有 20 天但流量已用 92%」）；quota_gb=0 表示**未设配额**，不得据此编造限额。
+7. 关注成本效率：cost.low_utilization=true 的**付费**节点（基于 CPU/内存/磁盘长期均值），可提示「资源利用率长期偏低，可评估降配或合并」——这是概率性判断，且**只允许业务层建议**，不得涉及任何具体命令、配置改动或服务商操作。
 
 【风险等级锚定】
 - 摘要中的 baseline_risk 是本地规则算出的确定性等级（依据 signals：离线数/离线占比/超阈值节点数/7 天内临期数）。
@@ -34,6 +36,7 @@ const SYSTEM_PROMPT = `你是一名资深 Linux 运维工程师，正在为一�
   disk.estimated_full_days_range 是可能的区间，disk.trend_confidence 是置信度。
 - 引用这些数字时必须带区间或不确定性（例如「约 6 天（6–21 天，置信度低）」）；
   range 第二项为 null 表示近期存在回落，此时须写「可能更久」。
+- disk.estimated_full_days 为 null 且 disk.trend_note = "range_too_wide" 时，表示外推区间过宽（如 3–226 天，跨度数十倍）：只能说「持续上升 + 区间过宽、需持续观察」，**不得给出任何单点天数**。
 - 【禁止】自行重算、换算或改写任何给定数字（包括磁盘天数、均值、峰值、超阈值分钟数）。
 
 【周期对比字段（compare）】
@@ -77,7 +80,7 @@ ${JSON.stringify(summary, null, 2)}
 }
 
 // ---- 单节点按需分析（T11）----
-const NODE_PROMPT_VERSION = '1.2';
+const NODE_PROMPT_VERSION = '1.3';
 
 const NODE_SYSTEM_PROMPT = `你是一名资深 Linux 运维工程师，正在为监控系统（diting）的【单个节点】生成一次按需分析。
 
@@ -102,6 +105,11 @@ const NODE_SYSTEM_PROMPT = `你是一名资深 Linux 运维工程师，正在为
 【负载判断（cpu.cores）】
 - load.avg1 需结合 cpu.cores 才有意义；有 load.avg1_per_core 时以其为准。
 - cpu.cores 为 null 或 load.cores_unknown=true 时，**禁止**对负载高低下结论（只能说明"缺少核数、无法判断"）。
+
+【月流量 / 成本 / 磁盘区间（本接口专有）】
+- traffic：quota_gb > 0 且 quota_pct 接近或超过 80% 时提示超量风险，并结合 days_to_cycle_end 判断紧迫性；quota_gb=0 表示**未设配额**，不得编造限额。
+- cost.low_utilization=true（付费节点，基于长期均值）时可提示「资源利用率长期偏低，可评估降配或合并」——只允许业务层建议，不得涉及任何具体命令、配置改动或服务商操作。
+- disk.estimated_full_days 为 null 且 trend_note = "range_too_wide" 时：只说「持续上升 + 区间过宽、需持续观察」，不得给出任何单点天数。
 
 【输出格式】只输出一个 JSON 对象，不要有任何额外文字、不要 markdown 代码块标记：
 {

@@ -183,12 +183,14 @@ const sum = require('../src/ai/summarizer');
 
 test('核数链路：/api/report 带 cores → 落库 → 摘要给出每核负载；缺失/越界不清零', async () => {
   const a = db.createAgent({ name: 'cores-agent' });
+  // 付费 + 设配额：顺带验证 §9.7 项一/项二（traffic / cost）进摘要
+  db.updateAgent(a.id, { name: 'cores-agent', price: 10, billing_cycle: 30, monthly_quota_gb: 100 });
   const auth = { 'X-Agent-ID': a.id, Authorization: `Bearer ${a.token}` };
   const base = {
-    cpu: 10, mem_used: 100, mem_total: 1000, mem_pct: 10,
-    disk_used: 1, disk_total: 2, disk_pct: 50,
+    cpu: 5, mem_used: 100, mem_total: 1000, mem_pct: 30,
+    disk_used: 1, disk_total: 2, disk_pct: 30,
     load1: 2, load5: 2, load15: 2,
-    net_rx_rate: 1, net_tx_rate: 2, net_rx_month: 3, net_tx_month: 4,
+    net_rx_rate: 1, net_tx_rate: 2, net_rx_month: 50 * 1073741824, net_tx_month: 10 * 1073741824,
     uptime: 100, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
     disk_r_rate: 0, disk_w_rate: 0, cores: 4
   };
@@ -201,6 +203,18 @@ test('核数链路：/api/report 带 cores → 落库 → 摘要给出每核负�
   assert.strictEqual(summary.cpu.cores, 4);
   assert.strictEqual(summary.load.avg1, 2);
   assert.strictEqual(summary.load.avg1_per_core, 0.5, '2 / 4 核');
+
+  // §9.7 项一：月流量与配额
+  assert.ok(summary.traffic, '应包含月流量信息');
+  assert.strictEqual(summary.traffic.quota_gb, 100);
+  assert.strictEqual(summary.traffic.total_month_gb, 60);
+  assert.strictEqual(summary.traffic.quota_pct, 60);
+  assert.strictEqual(typeof summary.traffic.days_to_cycle_end, 'number');
+
+  // §9.7 项二：成本效率（cpu 5 / mem 30 / disk 30 → 保守规则命中）
+  assert.ok(summary.cost, '付费节点应包含成本效率');
+  assert.strictEqual(summary.cost.monthly_cost, 10);
+  assert.strictEqual(summary.cost.low_utilization, true);
 
   // 老 agent（不带 cores）继续上报：不得把已记录的核数清成 0
   const legacy = Object.assign({}, base);
