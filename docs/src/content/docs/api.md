@@ -27,14 +27,18 @@ Content-Type: application/json
 
 {
   "cpu": 45.2,
-  "mem": { "used": 1234, "total": 8192 },
-  "disks": [ { "mount": "/", "used": 71.0, "total": 100 } ],
-  "net": { "rx": 1234567, "tx": 987654, "rx_rate": 1024, "tx_rate": 512 },
-  "load": { "load1": 0.52, "load5": 0.48, "load15": 0.50 },
-  "swap": { "used": 0, "total": 2048 },
+  "mem_used": 1234, "mem_total": 8192, "mem_pct": 15.1,
+  "disk_used": 71, "disk_total": 100, "disk_pct": 71.0,
+  "load1": 0.52, "load5": 0.48, "load15": 0.50,
+  "cores": 4,
+  "swap_used": 0, "swap_total": 2048, "swap_pct": 0.0,
+  "net_rx_rate": 1024, "net_tx_rate": 512, "net_rx_month": 1234567, "net_tx_month": 987654,
+  "disk_r_rate": 0, "disk_w_rate": 0,
   "temp": 52.0,
   "uptime": 86400,
-  "probes": [ { "label": "移动", "rtt": 12.3, "loss": 0 } ]
+  "probes": { "移动": { "ms": 12.3, "ok": true, "loss": 0 } },
+  "disks": [ { "mount": "/", "used": 71.0, "total": 100 } ],
+  "os": "Debian GNU/Linux 13", "hostname": "srv1"
 }
 ```
 

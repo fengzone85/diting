@@ -8,6 +8,8 @@ export interface Agent {
   online?: boolean;
   cpu?: number;
   cpu_percent?: number;
+  // 受控端上报的 CPU 核数（§9 T18）：0/null = 未上报（老 agent），不可当 1 用
+  cores?: number;
   mem_pct?: number;
   mem_used?: number;
   mem_total?: number;

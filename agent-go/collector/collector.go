@@ -53,6 +53,10 @@ type Metrics struct {
 	Load5  float64 `json:"load5"`
 	Load15 float64 `json:"load15"`
 
+	// CPU 核数（§9 T18）：服务端据此把 load1 换算成「每核负载」。
+	// 0 = 未上报（服务端标记 cores_unknown，不会用 0/1 冒充分母）。
+	Cores int `json:"cores"`
+
 	// 温度（无传感器时 nil，唯一可空标量）
 	Temp *float64 `json:"temp"`
 
