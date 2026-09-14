@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -79,25 +80,31 @@ func ParseProbeTargets(spec string) []ProbeTarget {
 // 策略（对齐 Python collector.py:302-354）：
 //   - 依次尝试 443/80/目标端口（443/80 最常被放行）
 //   - 重试 3 次吸收抖动
+//   - budget 总预算：累计耗时达到预算立即放弃，防止不可达目标以
+//     3轮×3端口×timeout 满额超时（默认口径 22.5s）拖累后台探测周期
 //   - 纯 TCP 握手时延，不采任何主机指纹
 //
 // loss 口径：纯 TCP 无 ICMP 丢包统计，故只给二值 ——
-// 握手成功 → 0，三轮全部失败 → 100。不伪造中间值（如 33/66），
+// 握手成功 → 0，预算内全部失败 → 100。不伪造中间值（如 33/66），
 // 因为「三轮重试中有几次失败」不代表链路丢包率。
-func probeOne(host string, port int, timeout time.Duration) (ms *float64, ok bool, loss *float64) {
+func probeOne(host string, port int, timeout time.Duration, budget time.Duration) (ms *float64, ok bool, loss *float64) {
 	zero, hundred := 0.0, 100.0
 	ports := []int{443, 80}
 	if port != 443 && port != 80 {
 		ports = append(ports, port)
 	}
+	start := time.Now()
 	for attempt := 0; attempt < 3; attempt++ {
 		for _, p := range ports {
-			start := time.Now()
+			if time.Since(start) >= budget {
+				return nil, false, &hundred
+			}
+			dialStart := time.Now()
 			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, p), timeout)
 			if err != nil {
 				continue
 			}
-			elapsed := time.Since(start).Seconds() * 1000
+			elapsed := time.Since(dialStart).Seconds() * 1000
 			conn.Close()
 			v := round1(elapsed)
 			return &v, true, &zero
@@ -106,28 +113,91 @@ func probeOne(host string, port int, timeout time.Duration) (ms *float64, ok boo
 	return nil, false, &hundred
 }
 
-// ProbeAll 并发探测所有目标（sync.WaitGroup + goroutine，参考 Pulse 模式）。
-// 与 Python ThreadPoolExecutor 等价。
-func ProbeAll(targets []ProbeTarget) map[string]Probe {
-	if len(targets) == 0 {
-		return nil
+// DefaultProbeInterval 探测缓存刷新周期（与 Linux Python 版 collector.py 的
+// _probes_cache 60s 间隔对齐）。
+const DefaultProbeInterval = 60 * time.Second
+
+// probeTimeout / probeBudget 单次拨号超时与单目标总预算。
+// 最坏情况：预算检查在每轮拨号前做，实际耗时 ≤ budget + timeout − ε；
+// 默认 budget=5s、timeout=2.5s 时不可达目标约 5s 内出结果（旧实现 22.5s）。
+const (
+	probeTimeout = 2500 * time.Millisecond
+	probeBudget  = 5 * time.Second
+)
+
+// ProbeRunner 后台探测缓存：以独立节奏并发探测所有目标，上报方取最近一轮快照。
+//
+// 对齐 Linux Python 版 _probes_cache 设计（探测独立 60s 间隔，不阻塞上报主循环）：
+// 不可达目标（如对 TCP 443/80/53 全拒的运营商 DNS）只影响自身结果为 loss=100，
+// 绝不拖慢上报节奏。零依赖，goroutine + sync.RWMutex 实现。
+type ProbeRunner struct {
+	targets  []ProbeTarget
+	interval time.Duration
+
+	mu   sync.RWMutex
+	snap map[string]Probe
+}
+
+// NewProbeRunner 创建探测器。targets 为空时 Start 为 no-op，Snapshot 恒 nil。
+func NewProbeRunner(targets []ProbeTarget) *ProbeRunner {
+	return &ProbeRunner{targets: targets, interval: DefaultProbeInterval}
+}
+
+// Start 启动后台探测：立即并发跑首轮（预算内最多 ~5s），随后每 interval 刷新。
+// ctx 取消即退出。调用方不需等待——上报侧用 Snapshot() 拿最近结果即可。
+func (r *ProbeRunner) Start(ctx context.Context) {
+	if len(r.targets) == 0 {
+		return
 	}
-	results := make(map[string]Probe, len(targets))
+	go func() {
+		r.refresh()
+		ticker := time.NewTicker(r.interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				r.refresh()
+			}
+		}
+	}()
+}
+
+// refresh 并发探测一轮，整体写回快照（读方要么看到上一轮完整结果，要么 nil，
+// 不存在半新半旧的混合）。
+func (r *ProbeRunner) refresh() {
+	results := make(map[string]Probe, len(r.targets))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-
-	for _, t := range targets {
+	for _, t := range r.targets {
 		wg.Add(1)
 		go func(tgt ProbeTarget) {
 			defer wg.Done()
-			ms, ok, loss := probeOne(tgt.Host, tgt.Port, 2500*time.Millisecond) // 2.5s
+			ms, ok, loss := probeOne(tgt.Host, tgt.Port, probeTimeout, probeBudget)
 			mu.Lock()
 			results[tgt.Label] = Probe{Ok: ok, Ms: ms, Loss: loss}
 			mu.Unlock()
 		}(t)
 	}
 	wg.Wait()
-	return results
+	r.mu.Lock()
+	r.snap = results
+	r.mu.Unlock()
+}
+
+// Snapshot 返回最近一轮探测结果的拷贝；首轮完成前返回 nil（上报不带 probes 字段）。
+func (r *ProbeRunner) Snapshot() map[string]Probe {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.snap) == 0 {
+		return nil
+	}
+	out := make(map[string]Probe, len(r.snap))
+	for k, v := range r.snap {
+		out[k] = v
+	}
+	return out
 }
 
 // round1 四舍五入到 1 位小数（对齐 Python round(ms, 1)）。

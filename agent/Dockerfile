@@ -22,7 +22,7 @@ ENV SERVER_URL="" \
     INTERVAL=15 \
     DISK_PATH=/ \
     STATE_FILE=/data/state.json \
-    PROBE_TARGETS="移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
+    PROBE_TARGETS="CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 
 # 月度流量计数状态落盘（建议挂卷持久化）；
 # 目录在切用户前创建并 chown，保证 diting 用户可读写
