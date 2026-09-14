@@ -77,11 +77,14 @@ func ParseProbeTargets(spec string) []ProbeTarget {
 
 // probeOne 对单个目标做 TCP 探测，返回 (ms, ok, loss)。
 //
-// 策略（对齐 Python collector.py:302-354）：
-//   - 依次尝试 443/80/目标端口（443/80 最常被放行）
+// 策略（对齐 Python collector.py:302-354，端口序按 Go 纯 TCP 特性调整）：
+//   - 端口序：目标端口优先，再 443/80。DNS 目标的 TCP:53 几乎必通且 RTT 最有
+//     代表性——若 443/80 排前面且被 DROP（各吃满 timeout），预算内 53 会永远
+//     轮不到（实测 CU/GG 误报离线的根因），故目标端口必须排最前。
 //   - 重试 3 次吸收抖动
-//   - budget 总预算：累计耗时达到预算立即放弃，防止不可达目标以
-//     3轮×3端口×timeout 满额超时（默认口径 22.5s）拖累后台探测周期
+//   - budget 总预算：累计耗时达到预算立即放弃，防不可达目标无限重试；
+//     默认 8s = 3轮×3端口×2.5s 全覆盖 + 防呆余量（探测已后台化，预算
+//     不再影响上报节奏，仅封顶单目标耗时）
 //   - 纯 TCP 握手时延，不采任何主机指纹
 //
 // loss 口径：纯 TCP 无 ICMP 丢包统计，故只给二值 ——
@@ -89,9 +92,9 @@ func ParseProbeTargets(spec string) []ProbeTarget {
 // 因为「三轮重试中有几次失败」不代表链路丢包率。
 func probeOne(host string, port int, timeout time.Duration, budget time.Duration) (ms *float64, ok bool, loss *float64) {
 	zero, hundred := 0.0, 100.0
-	ports := []int{443, 80}
+	ports := []int{port}
 	if port != 443 && port != 80 {
-		ports = append(ports, port)
+		ports = append(ports, 443, 80)
 	}
 	start := time.Now()
 	for attempt := 0; attempt < 3; attempt++ {
@@ -118,11 +121,11 @@ func probeOne(host string, port int, timeout time.Duration, budget time.Duration
 const DefaultProbeInterval = 60 * time.Second
 
 // probeTimeout / probeBudget 单次拨号超时与单目标总预算。
-// 最坏情况：预算检查在每轮拨号前做，实际耗时 ≤ budget + timeout − ε；
-// 默认 budget=5s、timeout=2.5s 时不可达目标约 5s 内出结果（旧实现 22.5s）。
+// 预算 8s = 3轮×3端口×2.5s 全覆盖 + 余量：探测在后台独立节奏跑，预算只是
+// 防呆封顶（旧同步实现里 22.5s 会直接拖慢上报，现已无此问题）。
 const (
 	probeTimeout = 2500 * time.Millisecond
-	probeBudget  = 5 * time.Second
+	probeBudget  = 8 * time.Second
 )
 
 // ProbeRunner 后台探测缓存：以独立节奏并发探测所有目标，上报方取最近一轮快照。
