@@ -13,7 +13,7 @@ set DISK_PATH=C:\
 set INTERVAL=15
 REM 网络质量自测目标（可选，不填则用默认三家运营商 DNS + 8.8.8.8；置空则关闭）
 REM 格式：label:host[:port]，逗号分隔。目标写在本地，服务端不可下发。
-set PROBE_TARGETS=移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8
+set PROBE_TARGETS=CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8
 
 python "%~dp0windows_agent.py"
 pause
