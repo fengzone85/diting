@@ -57,8 +57,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// 探测后台化：独立 60s 节奏刷新缓存，上报只取最近快照（不可达目标不拖慢上报）
+	probes := collector.NewProbeRunner(targets)
+	probes.Start(ctx)
+
 	// 首次立即上报
-	prevM := runOnce(ctx, c, r, st, targets, cfg)
+	prevM := runOnce(ctx, c, r, st, probes, cfg)
 
 	// 自适应状态：首报后强制 3 轮快档建基线
 	var fastStreak int
@@ -84,7 +88,7 @@ func main() {
 			return
 		case <-time.After(wait):
 			t0 := time.Now()
-			m := runOnce(ctx, c, r, st, targets, cfg)
+			m := runOnce(ctx, c, r, st, probes, cfg)
 			d := time.Since(t0)
 			if cfg.Adaptive {
 				decided := adaptiveInterval(prevM, m, cfg.FastInterval, cfg.SlowInterval, &fastStreak)
@@ -99,7 +103,7 @@ func main() {
 }
 
 // runOnce 执行一次采集 + 上报，返回本轮指标（用于自适应判断；采集失败返回 nil）。
-func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, st *state.State, targets []collector.ProbeTarget, cfg *config.Config) *collector.Metrics {
+func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, st *state.State, probes *collector.ProbeRunner, cfg *config.Config) *collector.Metrics {
 	t0 := time.Now()
 	m, err := c.Collect()
 	if err != nil {
@@ -108,12 +112,10 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, s
 	}
 	tCollect := time.Since(t0)
 
-	// 流量累计 + 探测 + 序列化
+	// 流量累计 + 探测快照 + 序列化
 	tA := time.Now()
 	st.Accumulate(m.NetRx, m.NetTx)
-	if len(targets) > 0 {
-		m.Probes = collector.ProbeAll(targets)
-	}
+	m.Probes = probes.Snapshot()
 	m.NetRxMonth = st.MonthRx
 	m.NetTxMonth = st.MonthTx
 	payload, err := json.Marshal(m)
