@@ -2,6 +2,30 @@
 
 > **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
 
+## 2026-09-14 受控端探测后台化 + 探测标签两字母化（含行为变更）
+
+### ⚠️ 行为变更（升级后可见）
+
+1. **探测标签默认值改为两字母缩写**：`CM`=移动 / `CT`=电信 / `CU`=联通 / `GG`=谷歌公共 DNS
+   （此前为中文「移动/电信/联通/公共」）。原因：状态卡片宽度有限，中文标签溢出；
+   且中文经 Windows 安装链 ascii 编码会吞成 `?`。**已入库的历史数据保留旧标签键**，
+   新数据从新键起画（时间序列在标签变更点自然分段）。
+2. **Go 受控端探测改为后台缓存架构**：探测以独立 60s 节奏在后台 goroutine 并发刷新，
+   上报主循环只取最近一轮快照（对齐 Linux Python 版 `_probes_cache` 设计）。不可达目标
+   （如对 TCP 443/80/53 全拒的运营商 DNS）只体现为该目标 `loss=100` 离线，
+   **不再把每轮上报拖慢最多 22.5s**；首个探测周期内上报暂不带 `probes` 字段。
+3. **单目标探测新增 5s 总预算**：拨号重试累计超预算立即放弃（旧口径最坏
+   3轮×3端口×2.5s=22.5s）。
+
+### 改动文件
+
+- `agent-go/`：`collector/probe.go`（`ProbeRunner` + budget `probeOne`，删同步 `ProbeAll`）、
+  `main.go`（接线）、`config/config.go`（默认标签）、新增 `collector/probe_test.go`（4 组单测）。
+- `agent/`：`agent.py`、`windows/windows_agent.py`、`windows/run.bat`、`Dockerfile`、
+  `docker-compose.yml` 默认标签同步。
+- `server/src/db.js`：新装实例 `ui_settings.probe_targets` 默认值同步。
+- 文档：`README_EN.md`、`docs/src/content/docs/env.md`、`agent/windows/README.md`。
+
 ## 2026-09-13 安全体检整改（10 个 PR，含行为变更）
 
 > 来源：`dev-docs/AUDIT_REMEDIATION_PLAN_2026-09-13.md`（独立安全/代码审计 F1–F8 之后的

@@ -35,7 +35,7 @@ DEFAULT_STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'state.
 STATE_FILE = os.environ.get('STATE_FILE', DEFAULT_STATE)
 # 网络质量自测目标（固定公共基础设施，写死在本地，服务端不可下发）。
 # 格式：label:host[:port]，逗号分隔。置空则关闭探测。仅测延迟/可达性，不采任何指纹。
-PROBE_TARGETS = os.environ.get('PROBE_TARGETS', '移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8')
+PROBE_TARGETS = os.environ.get('PROBE_TARGETS', 'CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8')
 
 if not SERVER_URL or not AGENT_ID or not AGENT_TOKEN:
     print('ERROR: SERVER_URL, AGENT_ID and AGENT_TOKEN must be set', file=sys.stderr)

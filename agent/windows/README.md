@@ -72,10 +72,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1 `
   -ServerUrl https://your-monitor-server.example.com `
   -AgentId win-pc-01 `
   -AgentToken your-agent-token-here `
-  -ProbeTargets "移动:211.136.192.6,电信:101.226.4.6,联通:202.106.0.20,公共:8.8.8.8"
+  -ProbeTargets "CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 ```
 
-> `-ProbeTargets` 可选：自定义网络质量自测目标（格式 `label:host[:port]`，逗号分隔）。不传则用默认三家运营商 DNS + 8.8.8.8；传空字符串 `""` 则关闭探测。目标写在本地，服务端不可下发。
+> `-ProbeTargets` 可选：自定义网络质量自测目标（格式 `label:host[:port]`，逗号分隔）。不传则用默认三家运营商 DNS + 8.8.8.8（`CM`/`CT`/`CU`/`GG` 两字母标签，适配状态卡片宽度）；传空字符串 `""` 则关闭探测。目标写在本地，服务端不可下发。
 
 注册后在「任务计划程序」中可查看/管理任务 `HostMonitorAgent-<AgentId>`。
 （脚本会额外生成 `run_scheduled.bat` 用于承载环境变量，请勿删除。）
