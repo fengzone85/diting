@@ -113,9 +113,9 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 
 	targets := []ProbeTarget{
 		{Label: "UP", Host: "127.0.0.1", Port: port},
-		// DOWN 用立即拒绝的本地地址（黑洞地址在 8s 全口径预算下 refresh 要 ~10s，
-		// 预算场景已由 TestProbeOneBudget 覆盖；此处只验快照就绪与拷贝语义）
-		{Label: "DOWN", Host: "127.0.0.1", Port: 1},
+		// 不放 DOWN 目标：模拟"必失败"的本地地址依赖具体环境（127.0.0.1:1
+		// 在有进程监听 port 1 的机器上会成功）；失败路径由 TestProbeOneBudget
+		// 与 TestProbeOneTargetPortFirst 在单元级覆盖，此处只验快照就绪与拷贝语义。
 	}
 	r := NewProbeRunner(targets)
 	r.interval = 50 * time.Millisecond // 测试用短周期
@@ -123,16 +123,13 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 	defer cancel()
 	r.Start(ctx)
 
-	// 等首轮就绪（UP 目标端口优先即中；DOWN 立即 RST 快速失败）
+	// 等首轮就绪（UP 目标端口优先即中）
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		snap := r.Snapshot()
 		if snap != nil {
 			if v, ok := snap["UP"]; !ok || !v.Ok || v.Ms == nil {
 				t.Fatalf("UP probe = %+v, want ok", v)
-			}
-			if v, ok := snap["DOWN"]; !ok || v.Ok || v.Loss == nil || *v.Loss != 100 {
-				t.Fatalf("DOWN probe = %+v, want loss=100", v)
 			}
 			// 拷贝语义：改动返回值不影响内部快照
 			snap["UP"] = Probe{}
