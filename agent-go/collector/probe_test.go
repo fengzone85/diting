@@ -46,7 +46,7 @@ func repeat(ch byte, n int) string {
 	return string(b)
 }
 
-// TestProbeOneSuccess 本地起监听，验证可达目标返回成功（443/80 先失败后落到目标端口）。
+// TestProbeOneSuccess 本地起监听，验证可达目标返回成功（目标端口优先，首轮即中）。
 func TestProbeOneSuccess(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -61,6 +61,25 @@ func TestProbeOneSuccess(t *testing.T) {
 	}
 	if *ms < 0 || *ms > 1000 {
 		t.Fatalf("rtt %v ms out of sane range", *ms)
+	}
+}
+
+// TestProbeOneTargetPortFirst 回归：目标端口必须排在 443/80 之前——
+// 否则对 443/80 全 DROP 的 DNS 目标（真实运营商网络行为），预算内
+// 443/80 各吃满 timeout，TCP:53 几乎必通却永远轮不到（CU/GG 误报离线根因）。
+func TestProbeOneTargetPortFirst(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot listen on loopback: %v", err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	// 预算恰好只够 1 次拨号：若目标端口在首位则立即成功；
+	// 若回归（443 在首位），首次 dial 100ms 超时耗尽预算 → 失败。
+	ms, ok, loss := probeOne("127.0.0.1", port, 100*time.Millisecond, 120*time.Millisecond)
+	if !ok || ms == nil || loss == nil || *loss != 0 {
+		t.Fatalf("target port must be tried first: ok=%v ms=%v loss=%v", ok, ms, loss)
 	}
 }
 
@@ -94,7 +113,9 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 
 	targets := []ProbeTarget{
 		{Label: "UP", Host: "127.0.0.1", Port: port},
-		{Label: "DOWN", Host: "192.0.2.1", Port: 53},
+		// DOWN 用立即拒绝的本地地址（黑洞地址在 8s 全口径预算下 refresh 要 ~10s，
+		// 预算场景已由 TestProbeOneBudget 覆盖；此处只验快照就绪与拷贝语义）
+		{Label: "DOWN", Host: "127.0.0.1", Port: 1},
 	}
 	r := NewProbeRunner(targets)
 	r.interval = 50 * time.Millisecond // 测试用短周期
@@ -102,7 +123,7 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 	defer cancel()
 	r.Start(ctx)
 
-	// 等首轮就绪（UP 走 443/80 两次快速拒绝后落到目标端口；DOWN 吃满预算 ~300ms）
+	// 等首轮就绪（UP 目标端口优先即中；DOWN 立即 RST 快速失败）
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		snap := r.Snapshot()
