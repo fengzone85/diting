@@ -82,7 +82,7 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="1.1.7"
 SCRIPT_DATE="2026-09-15"
 SCRIPT_NOTES="界面语言可持久化：首次交互运行选择 中文/English，菜单新增「11 切换语言」随时切换（/etc/diting/ui.lang，优先级高于 LANG/LC_ALL 自动判定）"
 
@@ -1720,6 +1720,7 @@ declare -A I18N_ZH=(
     [menu.switch_lang]="切换语言 / Switch Language"
     [menu.switch_lang.current]="当前界面语言:"
     [menu.switch_lang.done]="✓ 已保存，重启脚本或返回菜单即时生效"
+    [menu.press_enter]="按回车返回菜单"
     [menu.clear_whitelist]="清除 IP 白名单（误配锁门时救援）"
     [menu.exit]="退出"
     [menu.prompt]="请选择 [0-10]: "
@@ -1812,6 +1813,7 @@ declare -A I18N_EN=(
     [menu.switch_lang]="Switch Language / 切换语言"
     [menu.switch_lang.current]="Current UI language:"
     [menu.switch_lang.done]="✓ Saved; takes effect on menu redraw / restart"
+    [menu.press_enter]="Press Enter to return to menu"
     [menu.clear_whitelist]="Clear IP Whitelist (rescue from lockout)"
     [menu.exit]="Exit"
     [menu.prompt]="Select [0-10]: "
@@ -1996,6 +1998,14 @@ ui_msg() {
 }
 
 # ── 菜单 ───────────────────────────────────────────────────────────────────────
+# pause_return 输出型动作（如「查看状态」）执行完后的暂停：TUI 下 whiptail 菜单
+# 会立刻重绘覆盖屏幕，status_all 这类纯 echo 输出一闪而过（用户只见"秒退回菜单"），
+# 故执行后强制等一次回车；文本回退模式下同样保持一致的交互节奏。
+pause_return() {
+    echo ""
+    read -rp "—— $(msg "menu.press_enter") ——"
+}
+
 # switch_lang 菜单项动作：切换界面语言并持久化（不依赖 dialog/whiptail，纯 read，
 # 保证任何环境下可用）。
 switch_lang() {
@@ -2052,7 +2062,7 @@ show_menu() {
         3) update_agent ;;
         4) update_script ;;
         5) update_server ;;
-        6) status_all ;;
+        6) status_all; pause_return ;;
         7) uninstall_all ;;
         8) db_manage_menu ;;
         9) do_reset_admin_token ;;
