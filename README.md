@@ -261,7 +261,7 @@ diting/
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
 | `INTERVAL` | 否 | `15` | 上报间隔（秒） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
-| `PROBE_TARGETS` | 否 | 移动/电信/联通 DNS + 8.8.8.8 | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
+| `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
 | `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `GZIP` | 否 | off | 启用 Gzip 压缩上报（需服务端支持解压） |
