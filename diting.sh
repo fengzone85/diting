@@ -40,12 +40,35 @@ _pick_lang() {
         *) echo "zh"; return 0 ;;
     esac
 }
+# ── 语言持久化（/etc/diting/ui.lang）───────────────────────────────────────────
+# 优先级：用户显式选择（持久化文件）> LC_ALL/LANG 环境判定 > 默认中文。
+# 首次交互运行会询问一次并写入；菜单内可随时切换。写失败（如非 root）静默降级
+# 为环境判定，仅本次会话生效。
+UI_LANG_FILE="${DITING_UI_LANG_FILE:-/etc/diting/ui.lang}"
+_valid_lang() {
+    case "$1" in
+        zh|en) echo "$1" ;;
+        *) return 1 ;;
+    esac
+}
+load_saved_lang() {
+    [[ -r "$UI_LANG_FILE" ]] || return 1
+    _valid_lang "$(head -c 8 "$UI_LANG_FILE" 2>/dev/null | tr -d '[:space:]')"
+}
+save_lang() {
+    mkdir -p "$(dirname "$UI_LANG_FILE")" 2>/dev/null || true
+    printf '%s\n' "$1" > "$UI_LANG_FILE" 2>/dev/null || true
+}
 I18N_LANG="zh"
-if _pick_lang "${LC_ALL:-}" >/dev/null 2>&1; then
+_saved_lang="$(load_saved_lang 2>/dev/null || true)"
+if [[ -n "$_saved_lang" ]]; then
+    I18N_LANG="$_saved_lang"
+elif _pick_lang "${LC_ALL:-}" >/dev/null 2>&1; then
     I18N_LANG="$( _pick_lang "${LC_ALL:-}" )"
 elif _pick_lang "${LANG:-}" >/dev/null 2>&1; then
     I18N_LANG="$( _pick_lang "${LANG:-}" )"
 fi
+unset _saved_lang
 # 消息函数：msg "key" → 输出对应语言的文本
 msg() {
     local key="$1"
@@ -59,9 +82,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.5"
-SCRIPT_DATE="2026-09-11"
-SCRIPT_NOTES="新增 --process-restore：消费后台「恢复」请求（cron 每 5 分钟轮询）；备份自动同步到 BACKUP_VISIBLE_DIR 供后台列表/下载；备份压缩（pigz，约 20% 体积）与空间预检自愈；修复 --backup <路径>、备份保留轮转与每日自动备份"
+SCRIPT_VERSION="1.1.6"
+SCRIPT_DATE="2026-09-15"
+SCRIPT_NOTES="界面语言可持久化：首次交互运行选择 中文/English，菜单新增「11 切换语言」随时切换（/etc/diting/ui.lang，优先级高于 LANG/LC_ALL 自动判定）"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -1694,6 +1717,9 @@ declare -A I18N_ZH=(
     [menu.uninstall]="卸载"
     [menu.db_manage]="数据库管理（备份/恢复/统计）"
     [menu.reset_token]="重置管理员 Token（丢失 Token 时救援）"
+    [menu.switch_lang]="切换语言 / Switch Language"
+    [menu.switch_lang.current]="当前界面语言:"
+    [menu.switch_lang.done]="✓ 已保存，重启脚本或返回菜单即时生效"
     [menu.clear_whitelist]="清除 IP 白名单（误配锁门时救援）"
     [menu.exit]="退出"
     [menu.prompt]="请选择 [0-10]: "
@@ -1783,6 +1809,9 @@ declare -A I18N_EN=(
     [menu.uninstall]="Uninstall"
     [menu.db_manage]="Database (backup/restore/stats)"
     [menu.reset_token]="Reset Admin Token (rescue when lost)"
+    [menu.switch_lang]="Switch Language / 切换语言"
+    [menu.switch_lang.current]="Current UI language:"
+    [menu.switch_lang.done]="✓ Saved; takes effect on menu redraw / restart"
     [menu.clear_whitelist]="Clear IP Whitelist (rescue from lockout)"
     [menu.exit]="Exit"
     [menu.prompt]="Select [0-10]: "
@@ -1967,6 +1996,21 @@ ui_msg() {
 }
 
 # ── 菜单 ───────────────────────────────────────────────────────────────────────
+# switch_lang 菜单项动作：切换界面语言并持久化（不依赖 dialog/whiptail，纯 read，
+# 保证任何环境下可用）。
+switch_lang() {
+    local cur="中文"; [[ "$I18N_LANG" == "en" ]] && cur="English"
+    echo ""
+    echo -e "$(msg "menu.switch_lang.current") ${GREEN}${cur}${NC}"
+    local _c
+    read -rp "  [1] 中文  [2] English (回车取消/Enter to cancel): " _c
+    case "$_c" in
+        1) I18N_LANG="zh"; save_lang zh; echo -e "${GREEN}$(msg "menu.switch_lang.done")${NC}" ;;
+        2) I18N_LANG="en"; save_lang en; echo -e "${GREEN}$(msg "menu.switch_lang.done")${NC}" ;;
+        *) return ;;
+    esac
+}
+
 show_menu() {
     # 顶部信息（TUI 下用 msgbox 会打断流程，故信息仅回退文本模式展示；TUI 标题已含版本）
     if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
@@ -1999,6 +2043,7 @@ show_menu() {
         "8" "$(msg "menu.db_manage")" \
         "9" "$(msg "menu.reset_token")" \
         "10" "$(msg "menu.clear_whitelist")" \
+        "11" "$(msg "menu.switch_lang")" \
         "0" "$(msg "menu.exit")" )"
     [[ -z "$c" ]] && exit 0
     case "$c" in
@@ -2012,6 +2057,7 @@ show_menu() {
         8) db_manage_menu ;;
         9) do_reset_admin_token ;;
         10) do_clear_ip_whitelist ;;
+        11) switch_lang ;;
         *) echo "$(msg "menu.exit_msg")"; exit 0 ;;
     esac
 }
@@ -2090,6 +2136,19 @@ if [[ -n "$ACTION" ]]; then
         process-restore) process_restore_request || true ;;
     esac
 elif [[ -t 0 ]]; then
+    # 首次交互运行（无持久化语言选择）时询问一次；回车 = 采用环境判定结果。
+    # 非交互（--action 命令行）模式不打扰，直接用环境判定。
+    if ! load_saved_lang >/dev/null 2>&1; then
+        echo "━━━ 请选择界面语言 / Select UI language ━━━"
+        _c=""
+        read -rp "  [1] 中文 (默认)  [2] English: " _c || _c=""
+        case "$_c" in
+            1) I18N_LANG="zh" ;;
+            2) I18N_LANG="en" ;;
+            *) : ;;
+        esac
+        save_lang "$I18N_LANG"   # 无论回车与否都落盘，避免每次启动重复询问
+    fi
     while true; do show_menu; done
 else
     show_usage
