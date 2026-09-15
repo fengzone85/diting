@@ -42,14 +42,16 @@ func Load() (*Config, error) {
 		StateFile:    getEnvDefault("STATE_FILE", "/data/state.json"),
 	}
 
-	// ProbeTargets：未设用默认目标（三家运营商 DNS 短标签 + 谷歌 DNS；标签 ≤2 字符，
-	// 适配状态卡片宽度；不可达目标由后台探测缓存机制隔离，不拖慢上报）。
+	// ProbeTargets：未设用默认目标（两字母标签适配状态卡片；目标为移动门户 + 电信/联通
+	// DNS + 谷歌 DNS——运营商 DNS（含移动全系）对 TCP 53/443/80 全拒（全网实测，
+	// J4125 电信出口与 Windows 机器一致），故 CM 用移动自家门户 www.10086.cn:443 表达
+	// "移动入口可达性"；不可达目标由后台探测缓存隔离，不拖慢上报）。
 	// 显式设空（PROBE_TARGETS=""）则关闭探测。
 	// 用 LookupEnv 区分"未设"与"空"，避免 getEnvDefault 把空当作未设而回退默认导致无法关探测。
 	if v, ok := os.LookupEnv("PROBE_TARGETS"); ok {
 		cfg.ProbeTargets = v
 	} else {
-		cfg.ProbeTargets = "CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
+		cfg.ProbeTargets = "CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 	}
 
 	// 解析 interval（默认 20s，最小 5s；ADAPTIVE=false 时的固定间隔）

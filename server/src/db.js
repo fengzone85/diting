@@ -558,7 +558,7 @@ function getUiSettings() {
     // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；
     // 若公开页面向外部访客、不希望暴露经营信息，在后台设置里关闭即可，公开页会自动隐藏相关模块。
     public_show_business: true,
-    home_layout: 'grid', public_theme: 'default', probe_targets: 'CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
+    home_layout: 'grid', public_theme: 'default', probe_targets: 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
     // 主题可视化配置（对齐 komari-theme-Glassmorphism）
     glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
     glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
