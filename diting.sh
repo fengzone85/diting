@@ -299,10 +299,10 @@ install_agent() {
     [[ -n "$A_INTERVAL" ]]   && args+=(--interval "$A_INTERVAL")
     [[ -n "$A_PROBE_TARGETS" ]] && args+=(--probe-targets "$A_PROBE_TARGETS")
 
-    # 仓库内运行：直接复用本地 agent/install.sh（已充分测试）
-    if [[ -f "$SCRIPT_DIR/agent/install.sh" ]]; then
-        echo -e "${GREEN}[OK]   使用本地 agent/install.sh${NC}"
-        bash "$SCRIPT_DIR/agent/install.sh" "${args[@]}"
+    # 仓库内运行：直接复用本地 agent-go/install.sh（M3 起为 Go 版）
+    if [[ -f "$SCRIPT_DIR/agent-go/install.sh" ]]; then
+        echo -e "${GREEN}[OK]   使用本地 agent-go/install.sh${NC}"
+        bash "$SCRIPT_DIR/agent-go/install.sh" "${args[@]}"
         return
     fi
 
