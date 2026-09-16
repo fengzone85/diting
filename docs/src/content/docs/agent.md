@@ -37,19 +37,22 @@ docker run -d \
 
 > `--network host` 让容器共享宿主网络命名空间，`/proc/net/dev` 才能反映真实流量；`-v /:/host:ro` + `DISK_PATH=/host` 让磁盘统计针对 VPS 真实根盘而非容器 overlay。
 
-## 原生 systemd 部署
+## 原生 systemd 部署（Go 版，推荐）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
+# 后台「添加 Agent」生成的一键命令（含服务端地址与凭据），或：
+sudo bash diting.sh --install-agent --server https://your-server --id <id> --token <token>
 ```
 
-脚本会：
-1. 检查 Python 3 环境
-2. 创建 `/opt/diting/` 目录（权限 700）
-3. 复制 `agent.py` + `collector.py`
-4. 生成 `agent.env`（权限 600，含 Token 和 Server URL）
-5. 注册 systemd 服务（13 项隔离 + CAP_NET_RAW 能力收窄）
-6. 启动并设置开机自启
+脚本会（`agent-go/install.sh`）：
+1. 从 GitHub Release 下载单二进制并用 **SHA256 强制校验**（`diting-agent-linux-amd64/arm64`）
+2. 创建 `/opt/diting/` 目录（权限 700）并安装 `/opt/diting/diting-agent`
+3. 生成 `agent.env`（权限 600，含 Token 和 Server URL；`PROBE_TARGETS` 可选）
+4. 注册 systemd 服务（只读系统加固 + 状态目录可写）
+5. 启动并设置开机自启
+
+> **历史路径（Python 版，已弃用）**：`curl .../agent/install.sh | bash` 仍可用但不再更新，
+> 见下文「Go 受控端」与 deprecation 公告。
 
 ### systemd 安全加固项
 
@@ -75,11 +78,15 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/inst
 > `RestrictAddressFamilies` 使用 `AF_` 前缀短名是刻意的：短形式 `inet/inet6/unix`
 > 仅在 systemd ≥ 254 可用，在更旧版本上会被静默忽略（并丢弃整条限制）。
 
-## Go 受控端（二进制）
+## Go 受控端（唯一受控端）
 
-Go 受控端是 Python 版的**等价原生重写**：数据格式、上报契约、安全模型完全一致（直读 `/proc`、零外部依赖、强制 HTTPS、单向上报、零入站端口、无指令通道），仅实现语言不同。适合需要更小体积（~5MB 静态二进制、内存 <10MB）或纯 Go 工具链的场景。
+Go 受控端是 Python 版的**等价原生重写**：数据格式、上报契约、安全模型完全一致（直读 `/proc`、零外部依赖、强制 HTTPS、单向上报、零入站端口、无指令通道）。体积 ~5MB 静态二进制、内存 <10MB。
 
-> 当前以源码 / 二进制方式提供，官方 Docker 镜像与一键脚本待发布（设计上提供 scratch + `USER 1000` + `--cap-drop=ALL`）。以下以从源码构建为例。
+> **自 M3（2026-09）起 Go 是默认且唯一受控端**：`diting.sh --install-agent`、Windows 一键命令
+> 都已切换为 Go 版；Python 端（`agent/`）已挂 deprecation 公告，将在观察期后（M4）移除。
+> Docker 形态目前仍使用 Python 镜像（Go 容器形态随后发布）。
+> 存量 Python 节点执行 `--update-agent` 即迁移到 Go（身份与月流量状态保留）。
+> 以下为从源码构建（一般在开发时使用；生产部署走上面的安装脚本）。
 
 ### 构建
 
@@ -127,11 +134,11 @@ Go 受控端默认根据**本地指标变化率**自动切换快慢档：CPU / �
 
 **配套服务端配置（必须）**：慢档 60s 会撞服务端默认 `OFFLINE_THRESHOLD_SEC=60`，需将服务端 `.env` 设为 `OFFLINE_THRESHOLD_SEC=120`（或大于慢档），否则平稳期会因 `last_seen` 间隔过大被误判离线。该改动不涉及 agent 侧。
 
-### 与 Python 版的关系
+### 与 Python 版的关系（迁移中）
 
-- **不得共用同一 `AGENT_ID`**（否则 `last_seen` / 指标互相覆盖）；注册两个独立 agent 并排对比。
-- 数据格式、服务端契约、安全模型完全一致，已本机实测验证（`mem_total` / `disk_total` / `swap_*` 完全相同）。
-- 现有 Python 版保留，可随时切回。
+- **不得共用同一 `AGENT_ID`**（否则 `last_seen` / 指标互相覆盖）；如需并行对比，注册两个独立 agent。
+- 数据格式、服务端契约、安全模型完全一致；本机 22.6h 双端并行实测：速率序列中位数比值 0.999/1.001、Pearson r=0.91。
+- Python 版已弃用（deprecation），`--update-agent` 迁移到 Go 后身份与月流量状态保留；观察期后（M4）`agent/` 目录整体移除。
 
 ## 连接地址（SERVER_URL / Agent 专用连接地址）选型
 

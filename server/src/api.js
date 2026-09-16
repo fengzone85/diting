@@ -230,13 +230,20 @@ Environment="PROBE_TARGETS=${pt}"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart diting-agent`;
+  // 无 PROBE_TARGETS 行时插入到「启动行（python/exe）之前」——旧实现 Add-Content
+  // 追到文件末尾（启动行之后），该 set 永远不会生效。Go/Python 安装器都保证该行
+  // 存在，此处仅作存量/手改 bat 的兜底。
   const win = `$id=${psQuote(agentId)}; $pt=${psQuote(pt)}
 $bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"
-$lines=Get-Content $bat
+$lines=@(Get-Content $bat)
 if ($lines -match '^set PROBE_TARGETS=') {
   ($lines -replace '^set PROBE_TARGETS=.*', "set PROBE_TARGETS=$pt") | Set-Content $bat
 } else {
-  Add-Content $bat "set PROBE_TARGETS=$pt"
+  $idx=[array]::FindIndex($lines, [Predicate[string]]{param($l) $l -match 'windows_agent\\.py|diting-agent(-windows-amd64)?\\.exe'})
+  if ($idx -gt 0) { $out=@($lines[0..($idx-1)]) + @("set PROBE_TARGETS=$pt") + @($lines[$idx..($lines.Count-1)]) }
+  elseif ($idx -eq 0) { $out=@("set PROBE_TARGETS=$pt") + @($lines) }
+  else { $out=@($lines) + @("set PROBE_TARGETS=$pt") }
+  $out | Set-Content $bat
 }
 Stop-ScheduledTask -TaskName "HostMonitorAgent-$id"; Start-ScheduledTask -TaskName "HostMonitorAgent-$id"`;
   return { linux_cmd: linux, windows_cmd: win, probe_targets: pt };

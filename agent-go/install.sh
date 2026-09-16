@@ -119,6 +119,11 @@ else
     curl -fsSL "https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/diting-agent.service" -o /etc/systemd/system/diting-agent.service
 fi
 chmod 644 /etc/systemd/system/diting-agent.service
+# 部署卸载脚本（diting.sh 的 uninstall_all 依赖 /opt/diting/uninstall.sh）
+if [[ -f "${SCRIPT_DIR}/uninstall.sh" ]]; then
+    cp "${SCRIPT_DIR}/uninstall.sh" /opt/diting/uninstall.sh
+    chmod 644 /opt/diting/uninstall.sh
+fi
 systemctl daemon-reload
 systemctl enable --now diting-agent
 sleep 2

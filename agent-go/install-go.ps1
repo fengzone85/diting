@@ -10,8 +10,14 @@
 .PARAMETER ServerUrl / AgentId / AgentToken  (required)
 .PARAMETER Interval       Report interval seconds (default 20)
 .PARAMETER ProbeTargets   label:host[:port] comma-separated (optional)
-.PARAMETER InstallDir     Default C:\diting-agent
+.PARAMETER InstallDir     Default %ProgramData%\diting-agent (same as the Python agent,
+                          so upgrades reuse the same directory)
 .PARAMETER RepoBase       Release download base (default latest/download)
+.NOTES
+    Deliberately reuses the Python agent's task name (HostMonitorAgent-<id>) and
+    run_scheduled.bat name/path so the server's Token-free 「修改探测目标」 command
+    (buildModifyCommands, api.js) keeps working after a Python -> Go upgrade.
+    This closes the "half-switch window" flagged in the consolidation roadmap §4.2.
 #>
 param(
     [string]$ServerUrl,
@@ -19,7 +25,7 @@ param(
     [string]$AgentToken,
     [int]$Interval = 20,
     [string]$ProbeTargets = '',
-    [string]$InstallDir = 'C:\diting-agent',
+    [string]$InstallDir = (Join-Path $env:ProgramData 'diting-agent'),
     [string]$RepoBase = 'https://github.com/fengzone85/diting/releases/latest/download'
 )
 $ErrorActionPreference = 'Stop'
@@ -49,8 +55,14 @@ if ($actual -ne $expected) {
 Write-Host '[OK] SHA256 verified'
 
 # 2. run.bat with single-instance guard (belt and braces alongside IgnoreNew)
-$ptLine = if ($ProbeTargets) { "set PROBE_TARGETS=$ProbeTargets" } else { "" }
-$bat = Join-Path $InstallDir 'run-agent.bat'
+# Keep the Python agent's file name run_scheduled.bat: the server's modify-probe
+# command rewrites the "set PROBE_TARGETS=" line in this exact file.
+# When --ProbeTargets is omitted, write the server-side default target list so
+# the line ALWAYS exists (otherwise the modify command would append it after
+# the exe launch line, where it would never take effect).
+$ptValue = if ($ProbeTargets) { $ProbeTargets } else { 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8' }
+$ptLine = "set PROBE_TARGETS=$ptValue"
+$bat = Join-Path $InstallDir 'run_scheduled.bat'
 $cont = @"
 @echo off
 chcp 65001 >nul
@@ -67,23 +79,26 @@ $ptLine
 [IO.File]::WriteAllText($bat, $cont, (New-Object Text.UTF8Encoding($false)))
 Write-Host "[OK] run.bat written"
 
-# 3. Scheduled task: AtStartup + SYSTEM + auto-restart + single instance
+# 3. Scheduled task: AtStartup + SYSTEM + auto-restart + single instance.
+# Task name stays HostMonitorAgent-<id> (same as the Python installer) so the
+# server-side modify command's Stop/Start-ScheduledTask keeps targeting it.
+$taskName = "HostMonitorAgent-$AgentId"
 $action   = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $InstallDir
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 10 -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
     -MultipleInstances IgnoreNew -Hidden
-Register-ScheduledTask -TaskName 'diting-agent' -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -User 'SYSTEM' -RunLevel Highest -Settings $settings -Force | Out-Null
-Write-Host "[OK] scheduled task 'diting-agent' registered (AtStartup/SYSTEM, restart 10x1min, single-instance)"
+Write-Host "[OK] scheduled task '$taskName' registered (AtStartup/SYSTEM, restart 10x1min, single-instance)"
 
 # 4. Start now
-Start-ScheduledTask -TaskName 'diting-agent'
+Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 3
-$info = Get-ScheduledTaskInfo -TaskName 'diting-agent'
-Write-Host ("task state: {0}  lastRun: {1}" -f (Get-ScheduledTask -TaskName 'diting-agent').State, $info.LastRunTime)
+$info = Get-ScheduledTaskInfo -TaskName $taskName
+Write-Host ("task state: {0}  lastRun: {1}" -f (Get-ScheduledTask -TaskName $taskName).State, $info.LastRunTime)
 Write-Host ''
 Write-Host '=== install done (Go) ==='
 Write-Host "  config: $bat   exe: $exe"
-Write-Host '  uninstall: sudo equivalent -> Unregister-ScheduledTask -TaskName diting-agent; Remove-Item -Recurse InstallDir'
+Write-Host "  uninstall: Unregister-ScheduledTask -TaskName $taskName; Remove-Item -Recurse '$InstallDir'"
