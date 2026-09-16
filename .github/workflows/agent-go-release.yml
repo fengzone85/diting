@@ -1,0 +1,57 @@
+# Go 受控端（agent-go）发布流水线：
+#   推送 agent-go-v* 标签 -> 三平台交叉编译 -> SHA256 -> 附加到 GitHub Release。
+# Linux 安装器（agent-go/install.sh）与 Windows 安装器（agent-go/install-go.ps1）
+# 从 releases/latest/download 拉取产物；钉版本部署用 releases/download/<tag>。
+# 构建前先跑 go test，测试不过不出包。
+name: agent-go-release
+
+on:
+  push:
+    tags:
+      - 'agent-go-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, ext: '' }
+          - { goos: linux,   goarch: arm64, ext: '' }
+          - { goos: windows, goarch: amd64, ext: '.exe' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Test
+        working-directory: agent-go
+        run: go test ./...
+
+      - name: Build
+        working-directory: agent-go
+        run: |
+          V="${GITHUB_REF_NAME#agent-go-}"
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -trimpath \
+            -ldflags "-s -w -X main.version=${V}" \
+            -o "dist/diting-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
+
+      - name: SHA256
+        working-directory: agent-go/dist
+        run: |
+          F="diting-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          sha256sum "$F" | awk '{print $1}' > "$F.sha256"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            agent-go/dist/*
+          generate_release_notes: true

@@ -208,10 +208,14 @@ function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTar
 chmod +x diting.sh
 sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv}${ptArg}`;
   const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
-  // Windows 版：一条 PowerShell 命令。外层用双引号、内部一律单引号，避免引号嵌套。
-  // install.ps1 会自举下载 windows_agent.py/win_collector.py/requirements.txt 到
-  // %ProgramData%\diting-agent，并注册登录自启的计划任务。需以管理员身份运行。
-  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'sp-agent-install.ps1'; iwr '${REPO_BASE}/agent/windows/install.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RegisterTask -Repo '${REPO_BASE}/agent/windows' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv}${ptWin}"`;
+  // Windows 版（M3 起 Go 单二进制）：一条 PowerShell 命令。外层用双引号、内部一律
+  // 单引号，避免引号嵌套。install-go.ps1 从 GitHub Release 下载 diting-agent.exe
+  // （SHA256 校验）并注册计划任务（AtStartup/SYSTEM/自动重启/单实例互斥）。
+  // 需以管理员身份运行。GO_RELEASE = agent-go Release 下载基址（latest）。
+  const GO_RELEASE = 'https://github.com/fengzone85/diting/releases/latest/download';
+  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'diting-go-install.ps1'; iwr '${REPO_BASE}/agent-go/install-go.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RepoBase '${GO_RELEASE}' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv}${ptWin}"`;
+  // Docker 版暂仍为 Python 镜像：Go 容器形态需挂载宿主 /proc 并在 Go collector
+  // 内支持 hostproc 视图（后续 PR）；systemd/Windows 已切 Go。
   return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '' };
 }
 
