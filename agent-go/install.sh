@@ -125,6 +125,10 @@ if [[ -f "${SCRIPT_DIR}/uninstall.sh" ]]; then
     chmod 644 /opt/diting/uninstall.sh
 fi
 systemctl daemon-reload
+# 存量迁移/重装关键步骤（路线图 §4.1「停删旧 unit」）：若已有在跑的实例
+# （Python 版或旧 Go 版），必须先停——`enable --now` 对已 active 的 unit
+# 不会重启，会导致「装了新二进制却仍在跑旧进程」的假成功。
+systemctl stop diting-agent 2>/dev/null || true
 systemctl enable --now diting-agent
 sleep 2
 if systemctl is-active --quiet diting-agent; then
