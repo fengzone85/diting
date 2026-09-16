@@ -1,0 +1,21 @@
+[Unit]
+Description=Diting Agent (Go)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=diting
+EnvironmentFile=/etc/diting/agent.env
+ExecStart=/opt/diting/diting-agent
+Restart=always
+RestartSec=5
+# 加固：只读系统 + 仅状态目录可写（Go agent 无出站依赖外的文件需求）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/diting
+
+[Install]
+WantedBy=multi-user.target

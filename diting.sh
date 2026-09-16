@@ -306,11 +306,12 @@ install_agent() {
         return
     fi
 
-    # 单文件 curl 场景：下载 agent 载荷到临时目录后运行
+    # 单文件 curl 场景：下载 agent 载荷到临时目录后运行（M3 起为 Go 版：
+    # install.sh 自行从 GitHub Release 下载二进制并做 SHA256 校验）
     local tmp; tmp="$(mktemp -d)"
-    echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载受控端载荷…${NC}"
-    # L-6：可用 SP_AGENT_SHA256S（按序逗号串）对下载文件做 SHA256 校验
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent-go 下载受控端载荷（Go 版）…${NC}"
+    # L-6：可用 SP_AGENT_GO_SKIP_SHA256=0 且 release 附带 .sha256 时由 install.sh 强制校验
+    if ! download_list "$REPO_RAW/agent-go" "$tmp" "install.sh uninstall.sh diting-agent.service"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; exit 1
     fi
@@ -669,8 +670,8 @@ update_agent() {
 
     # 强制从 GitHub 拉取最新 agent 载荷（无论本脚本是否本地旧版），保证更新到最新
     local tmp; tmp="$(mktemp -d)"
-    echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent 下载最新受控端载荷…${NC}"
-    if ! download_list "$REPO_RAW/agent" "$tmp" "install.sh uninstall.sh agent.py collector.py diting-agent.service" "${SP_AGENT_SHA256S:-}"; then
+    echo -e "${YELLOW}[信息] 从 ${REPO_RAW}/agent-go 下载最新受控端载荷（Go 版）…${NC}"
+    if ! download_list "$REPO_RAW/agent-go" "$tmp" "install.sh uninstall.sh diting-agent.service"; then
         echo -e "${RED}[错误] 下载受控端载荷失败${NC}" >&2
         rm -rf "$tmp"; return 1
     fi
