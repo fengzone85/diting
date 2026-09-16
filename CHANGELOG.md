@@ -2,6 +2,30 @@
 
 > **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
 
+## 2026-09-16 M3：安装链路切换 Go 受控端（含行为变更）
+
+### ⚠️ 行为变更（升级后可见）
+
+1. **`diting.sh --install-agent` / `--update-agent` 现在安装 Go 版受控端**（单二进制
+   `/opt/diting/diting-agent`，从 GitHub Release 下载并强制 SHA256 校验），不再安装
+   Python 三件套。存量 Python 节点执行 `--update-agent` 会迁移到 Go 版
+   （agent.env 身份与月流量 state 保留）。
+2. **Windows 一键命令切换为 `agent-go/install-go.ps1`**：计划任务形态升级——
+   AtStartup（开机即启，无需登录）、SYSTEM 运行、自动重启 10×1min、
+   **单实例互斥**（MultipleInstances=IgnoreNew + bat 内 tasklist 守卫），
+   修复 Python 版「重复安装叠加实例 / 连崩躺平 / 重启需登录」三缺口。
+3. **Docker 形态暂仍为 Python 镜像**（Go 容器需宿主 /proc 挂载 + collector hostproc
+   支持，后续 PR 切换）。
+
+### 分发基建
+
+- `.github/workflows/agent-go-release.yml`：推送 `agent-go-v*` 标签触发三平台
+  （linux amd64/arm64 + windows amd64）构建，先 `go test` 后出包，附 SHA256，
+  自动附加到 GitHub Release。安装器默认拉 `releases/latest/download`，
+  `--repo` 可钉指定 tag 的 release 地址。
+- `agent-go/` 新增 `install.sh`（Linux systemd 安装器）、`uninstall.sh`、
+  `diting-agent.service`（只读系统加固）、`install-go.ps1`（Windows 安装器）。
+
 ## 2026-09-14 受控端探测后台化 + 探测标签两字母化（含行为变更）
 
 ### ⚠️ 行为变更（升级后可见）

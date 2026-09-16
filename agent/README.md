@@ -1,3 +1,11 @@
+> ⚠️ **Deprecation notice / 弃用预告（M4）**
+>
+> 本目录（Python 受控端）将由 Go 受控端（[`agent-go/`](../agent-go/)）取代。
+> **新部署请直接使用 Go 版**：`diting.sh --install-agent` 已默认安装 Go 版；
+> Windows 一键命令已切换为 `agent-go/install-go.ps1`（服务形态：开机自启 + 自动重启 + 单实例互斥）。
+> 例外：**Docker 形态暂仍使用本目录**（Go 容器形态需宿主 `/proc` 挂载支持，随后切换）。
+> 存量 Python 节点继续受支持至 M4（观察期 4–8 周后本目录整体移除）；`--update-agent` 会迁移到 Go 版。
+
 # DiTing Lite Agent
 
 受控端（Agent），负责在被控机器上采集系统指标并**只出站**上报给服务端。
