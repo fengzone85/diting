@@ -1,0 +1,42 @@
+# Diting Agent (Go) — Docker Compose 示例（与 agent/ 的 Python 版同约定）
+# 使用：填好 SERVER_URL / AGENT_ID / AGENT_TOKEN 后 `docker compose up -d`
+services:
+  agent:
+    # 二选一：
+    #   源码构建：docker compose up -d --build（在仓库 agent-go/ 目录下执行）
+    #   官方镜像：注释 build、用下面这行（随 agent-go-v* tag 发布）
+    build: .
+    # image: ghcr.io/fengzone85/diting-agent:latest
+    container_name: diting-agent
+    restart: unless-stopped
+    # 共享宿主机网络命名空间：/proc/net/dev 反映真实流量（默认 bridge 读到的是容器视角）
+    network_mode: host
+    # 纯 TCP 探测不需要任何 capability（无 ICMP/ping）；丢弃全部
+    cap_drop:
+      - ALL
+    # 禁止进程获取新特权（纵深防御）
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      SERVER_URL: "${SERVER_URL}"
+      AGENT_ID: "${AGENT_ID}"
+      AGENT_TOKEN: "${AGENT_TOKEN}"
+      INTERVAL: "15"
+      # 只读挂载宿主根目录到 /host，DISK_PATH 指向它，才能统计真实根盘使用率
+      DISK_PATH: "/host"
+      # 网络质量自测目标（可选；不填用代码默认：移动门户 + 电信/联通 DNS + 谷歌 DNS）
+      # PROBE_TARGETS: "CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
+    # ── 磁盘监控的结构性依赖（与 Python 版同约定）────────────────────────────
+    # /:/host:ro 不是安全欠账，而是宿主磁盘监控的架构必须：
+    #   - disk_info  → statvfs("/host") 取宿主根盘使用率
+    #   - disk_list  → 递归 bind 宿主 / 后，容器 mount 命名空间中生成 /host、
+    #                  /host/data 等条目，disk.go 逐条 statvfs 得到多盘指标
+    # 若去掉此挂载：disk_list 永远空、disk_info 回退到容器存储。
+    # agent 只做 statvfs + 只读采集 /proc，不存在可被远程利用的读取路径。
+    volumes:
+      - /:/host:ro
+      # 月流量状态持久化（state.json；与 Python 版卷通用，格式一致）
+      - diting-state:/data
+
+volumes:
+  diting-state:
