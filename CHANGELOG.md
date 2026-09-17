@@ -14,8 +14,11 @@
    AtStartup（开机即启，无需登录）、SYSTEM 运行、自动重启 10×1min、
    **单实例互斥**（MultipleInstances=IgnoreNew + bat 内 tasklist 守卫），
    修复 Python 版「重复安装叠加实例 / 连崩躺平 / 重启需登录」三缺口。
-3. **Docker 形态暂仍为 Python 镜像**（Go 容器需宿主 /proc 挂载 + collector hostproc
-   支持，后续 PR 切换）。
+3. **Docker 形态切换为 Go scratch 镜像**（~7.5MB，多阶段构建；`USER 1000` +
+   `cap_drop ALL` + `no-new-privileges`，纯 TCP 探测无需 NET_RAW，权限面比 Python
+   版更小）。`/:/host:ro` + `DISK_PATH=/host` + `--network host` 约定继承，多盘识别
+   已在 J4125 实测一致（3 盘）。ghcr 镜像随 `agent-go-v*` tag 发布；
+   `diting-state` 卷通用（state.json 格式两端一致）。
 
 ### 分发基建
 

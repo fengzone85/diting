@@ -158,7 +158,7 @@ router.post('/setup/generate', setupRateLimit, (req, res) => {
 // ③ Windows 版（PowerShell 一键：下载 install.ps1 → 自举拉取 agent 载荷 → 注册计划任务）。
 // 仓库 raw 基址（diting.sh 位于根，agent 载荷位于 <base>/agent/）；可用 AGENT_RAW_REPO 覆盖。
 const REPO_BASE = (process.env.AGENT_RAW_REPO || 'https://raw.githubusercontent.com/fengzone85/diting/master').replace(/\/+$/, '');
-const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent';
+const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent-go';
 const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 20);
 
 // 受控端接入用的服务端公网地址：优先级为
@@ -207,7 +207,10 @@ function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTar
   const native = `curl -fsSL ${REPO_BASE}/diting.sh -o diting.sh
 chmod +x diting.sh
 sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv}${ptArg}`;
-  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv}${ptEnv} \\\n     -v diting-state:/data \\\n     diting-agent`;
+  // Docker 版（M3 起 Go scratch 镜像，~7.5MB）：--network host 取真实流量；
+  // /:/host:ro 是宿主磁盘监控的结构性依赖（见 agent-go/docker-compose.yml 注释）；
+  // cap_drop ALL + no-new-privileges（纯 TCP 探测无需 NET_RAW）。
+  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     --network host --cap-drop ALL --security-opt no-new-privileges:true \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv} -e DISK_PATH=/host${ptEnv} \\\n     -v /:/host:ro -v diting-state:/data \\\n     diting-agent`;
   // Windows 版（M3 起 Go 单二进制）：一条 PowerShell 命令。外层用双引号、内部一律
   // 单引号，避免引号嵌套。install-go.ps1 从 GitHub Release 下载 diting-agent.exe
   // （SHA256 校验）并注册计划任务（AtStartup/SYSTEM/自动重启/单实例互斥）。
