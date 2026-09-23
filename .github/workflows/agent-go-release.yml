@@ -79,12 +79,18 @@ jobs:
         id: ver
         run: echo "tag=${GITHUB_REF_NAME#agent-go-}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: agent-go
-          push: true
-          build-args: |
-            VERSION=${{ steps.ver.outputs.tag }}
-          tags: |
-            ghcr.io/fengzone85/diting-agent:latest
-            ghcr.io/fengzone85/diting-agent:${{ steps.ver.outputs.tag }}
+      # 用 CLI 分步 build/push（替代 build-push-action）：
+      #   1) 失败点精确可归因（build 还是 push）
+      #   2) 规避 action 默认生成 provenance attestation 带来的额外变量
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VERSION=${{ steps.ver.outputs.tag }} \
+            -t ghcr.io/fengzone85/diting-agent:latest \
+            -t ghcr.io/fengzone85/diting-agent:${{ steps.ver.outputs.tag }} \
+            agent-go
+
+      - name: Push image
+        run: |
+          docker push ghcr.io/fengzone85/diting-agent:latest
+          docker push ghcr.io/fengzone85/diting-agent:${{ steps.ver.outputs.tag }}
