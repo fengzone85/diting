@@ -93,7 +93,22 @@ jobs:
             -t ghcr.io/fengzone85/diting-agent:${{ steps.ver.outputs.tag }} \
             agent-go
 
+      # 诊断 token 的包权限能力（write_package denied 时用于归因：是 token
+      # 权限不足，还是 registry 侧问题）。失败不影响后续步骤。
+      - name: Diagnose ghcr token permissions
+        if: always()
+        run: |
+          echo "actor=${{ github.actor }} repo=${{ github.repository }} ref=$GITHUB_REF_NAME"
+          echo "GHCR_TOKEN set: ${{ secrets.GHCR_TOKEN != '' }}"
+          curl -sS -o /dev/null -w 'api_user_packages=%{http_code}\n' \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            'https://api.github.com/user/packages?package_type=container' || true
+          curl -sS -o /dev/null -w 'api_repo=%{http_code}\n' \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            'https://api.github.com/repos/${{ github.repository }}' || true
+
       - name: Push image
         run: |
+          set -x
           docker push ghcr.io/fengzone85/diting-agent:latest
           docker push ghcr.io/fengzone85/diting-agent:${{ steps.ver.outputs.tag }}
