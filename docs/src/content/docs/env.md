@@ -83,7 +83,6 @@ description: 服务端与受控端环境变量参考
 | `PROBE_TARGETS` | 否 | 移动/电信/联通 DNS + 8.8.8.8 | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
 | `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
-| `GZIP` | 否 | off | 启用 Gzip 压缩上报（需服务端支持解压） |
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 
 ### PROBE_TARGETS 说明
