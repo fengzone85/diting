@@ -82,7 +82,7 @@ const overviewCards = computed(() => {
   const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
   // 上行/下行哪边速率大，哪边用主值大字（活跃方向自适应高亮）
   const rateBigDown = totalRxRate >= totalTxRate;
-  const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
+  const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; subBig?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
     warn: { label: t('public.highLoad'), value: String(highLoad), variant: 'warning' },
@@ -97,10 +97,12 @@ const overviewCards = computed(() => {
     // （其 value 一直是 '-' 未实现）。下行主行 + 上行副行；空闲显示 0 B/s 而非 '-'。
     instant_traffic: {
       label: t('public.instantTraffic'),
-      // 上行/下行哪边速率大，哪边用主值大字；格式无空格紧凑（如 ↓1.2M/s）
-      value: rateBigDown ? `↓${rateText(totalRxRate)}` : `↑${rateText(totalTxRate)}`,
-      sub: rateBigDown ? `↑${rateText(totalTxRate)}` : `↓${rateText(totalRxRate)}`,
+      // 位置固定：下行恒在主行、上行恒在副行；字号动态——哪边速率大哪边放大
+      // （上行活跃时 subBig 让副行放大、主值收小）。格式无空格紧凑（如 ↓1.2M/s）。
+      value: `↓${rateText(totalRxRate)}`,
+      sub: `↑${rateText(totalTxRate)}`,
       compact: true,
+      subBig: !rateBigDown,
       variant: 'default'
     },
     traffic: { label: t('public.traffic'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
@@ -174,6 +176,8 @@ const filteredAgents = computed(() => {
           :label="c.label"
           :value="c.value"
           :sub="c.sub"
+          :compact="c.compact"
+          :sub-big="c.subBig"
           :variant="c.variant"
         />
       </div>
