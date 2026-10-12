@@ -374,6 +374,7 @@ export const enUS: Record<string, string> = {
   // Y 轴已按数值自动换算，标题不再写死单位
   'node.chart.diskIo': 'Disk I/O Rate',
   'node.chart.load': 'Load 1m',
+  'node.chart.process': 'Processes',
   'node.chart.temp': 'temp (°C)',
   'node.chart.swap': 'Swap %',
   'node.chart.latency': 'Latency Waveform (ms)',
