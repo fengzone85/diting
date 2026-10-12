@@ -24,6 +24,8 @@ export interface Agent {
   load5?: number;
   load15?: number;
   load_avg?: number[];
+  // 进程总数（Windows 卡片显示；0/null = 未采集/老 agent）
+  process_count?: number;
   temp?: number;
   swap_pct?: number;
   swap_used?: number;
@@ -94,6 +96,7 @@ export interface SparklinePoint {
   net_rx_rate?: number;
   net_tx_rate?: number;
   load1?: number;
+  process_count?: number;
   temp?: number;
   swap_pct?: number;
   uptime?: number;

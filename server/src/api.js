@@ -503,6 +503,8 @@ router.get('/public/agents', (req, res) => {
       load1: m ? m.load1 : null,
       load5: m ? m.load5 : null,
       load15: m ? m.load15 : null,
+      // 进程总数（Windows 卡片显示；0/未采集 → null，前端显示 '—'）
+      process_count: m && m.process_count ? m.process_count : null,
       temp: m ? m.temp : null,
       swap_pct: m ? m.swap_pct : null,
       swap_used: m ? m.swap_used : 0,
@@ -575,6 +577,8 @@ router.get('/public/agents/sparklines', (req, res) => {
       net_rx_rate: r.net_rx_rate, net_tx_rate: r.net_tx_rate,
       load1: r.load1, temp: r.temp, swap_pct: r.swap_pct, uptime: r.uptime,
       disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate,
+      // Windows 卡片进程胶囊的迷你图（0/未采集 → null，前端显示 '—'）
+      process_count: r.process_count || null,
       // 磁盘耗尽预测用：整机已用/总字节时序（对齐 komari MetricDisk 口径）
       disk_used: r.disk_used, disk_total: r.disk_total
     }));
