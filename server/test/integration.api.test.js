@@ -191,7 +191,7 @@ db.updateAgent(bizAgent.id, {
 db.insertMetric(bizAgent.id, {
   ts: Date.now(),
   cpu: 10, mem_used: 100, mem_total: 1000, mem_pct: 10,
-  disk_used: 1, disk_total: 2, disk_pct: 50,
+  disk_used: 1, disk_total: 2, disk_pct: 50, process_count: 0,
   load1: 0.1, load5: 0.2, load15: 0.3,
   net_rx_rate: 1, net_tx_rate: 2, net_rx_month: 3, net_tx_month: 4,
   uptime: 100, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,

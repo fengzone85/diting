@@ -78,6 +78,8 @@ const validateReport = (b) => {
     uptime: num(b.uptime, 0, 1e12),
     // temp: null means "no sensor" — allowed; otherwise clamp to a plausible range.
     temp: (b.temp === null || b.temp === undefined) ? null : num(b.temp, -50, 200),
+    // 进程总数（仅计数，无进程明细；0 = 未采集/不可用；上限 10 万防异常负载）
+    process_count: Math.floor(num(b.process_count, 0, 100000) || 0),
     swap_used: num(b.swap_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_total: num(b.swap_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_pct: num(b.swap_pct, 0, 100),
