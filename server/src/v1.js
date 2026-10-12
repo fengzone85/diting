@@ -20,7 +20,8 @@ function disabled(res) {
 const CAPABILITY = {
   gpu: false,
   connections: false,
-  process: false,
+  // 2026-10-12 起 agent 真实采集进程总数（聚合计数，无个体明细）→ 能力置 true
+  process: true,
   virtualization: false,
   arch: false,
   cpu_cores: false,
@@ -52,7 +53,7 @@ function toNode(a, showBusiness) {
     swap: { total: Number(m.swap_total) || null, used: Number(m.swap_used) || null },
     disk_total: Number(m.disk_total) || null,
     connections: { tcp: null, udp: null }, // diting 不采集连接数
-    process: null,                          // diting 不采集进程数
+    process: Number.isFinite(Number(m.process_count)) && Number(m.process_count) > 0 ? Number(m.process_count) : null,
     temperature: m.temp != null ? Number(m.temp) : null,
     online: isOnline(a),
     region: a.country || null,
@@ -82,7 +83,7 @@ function toRealtime(m) {
       totalDown: Number(m.net_rx_month) || 0
     },
     connections: { tcp: null, udp: null },
-    process: null,
+    process: Number.isFinite(Number(m.process_count)) && Number(m.process_count) > 0 ? Number(m.process_count) : null,
     temperature: m.temp != null ? Number(m.temp) : null,
     uptime: Number(m.uptime) || 0
   };
@@ -160,6 +161,7 @@ router.get('/nodes/:uuid/metrics', (req, res) => {
     load1: Number(r.load1) || 0,
     load5: Number(r.load5) || 0,
     load15: Number(r.load15) || 0,
+    process_count: Number(r.process_count) || 0,
     net_rx_rate: Number(r.net_rx_rate) || 0,
     net_tx_rate: Number(r.net_tx_rate) || 0,
     net_rx_month: Number(r.net_rx_month) || 0,

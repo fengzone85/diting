@@ -22,6 +22,11 @@
   （Win10 1803+ 且有 ACPI 热区的机器才存在；多热区取最高）。**有值就报、无热区/无数据
   保持 nil，绝不造假**。此前"温度需 WMI（不引）"的结论修正为：WMI 仍不引（依赖重），
   但 PDH 路线零依赖可行；Python 版 Windows 从未上报温度，无回归语义。
+- **管理端卡片显示链路修复**（采集之外的第二处坑）：Windows 卡片"进程"胶囊此前
+  取值仍是恒定 0 的 `load1`（"进程数当负载"时代的僵尸设计），现改取 `process_count`
+  真值（含迷你图曲线）；简单卡片、列表行 hover、标准 v1 API（`process` 字段 +
+  `capability.process`）同步。三处数据通路修复：`/api/public/agents` 顶层字段、
+  public sparklines 响应白名单、sparklines SQL 列集。
 
 ### 说明
 

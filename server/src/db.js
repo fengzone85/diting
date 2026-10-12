@@ -327,13 +327,15 @@ const stmts = {
         SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
                net_rx_month, net_tx_month,
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               process_count,
                ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
                COUNT(*) OVER (PARTITION BY agent_id) AS cnt
         FROM metrics WHERE ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
              net_rx_month, net_tx_month,
-             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+             process_count
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
       ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
@@ -350,13 +352,15 @@ const stmts = {
         SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
                net_rx_month, net_tx_month,
                load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+               process_count,
                ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
                COUNT(*) OVER () AS cnt
         FROM metrics WHERE agent_id=@agentId AND ts>=@since AND (@until IS NULL OR ts<@until)
       )
       SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
              net_rx_month, net_tx_month,
-             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total
+             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
+             process_count
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
       ORDER BY ts ASC`).all({ agentId, since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });

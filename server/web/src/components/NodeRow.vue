@@ -4,12 +4,16 @@ import { RouterLink } from 'vue-router';
 import type { Agent } from '../services/types';
 import { formatDuration, formatBitsPerSecond, formatBytes } from '../utils/format';
 import { providerAlias, customTag } from '../composables/useApp';
+import { useI18n } from '../composables/useI18n';
 
+const { t } = useI18n();
 const props = defineProps<{ agent: Agent }>();
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent ?? 0);
 const memPct = computed(() => props.agent.mem_pct ?? 0);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
 const tag = computed(() => customTag(props.agent.id));
+// Windows 无 Unix load（hover 显示 load1/5/15 恒 0）：改显示进程总数
+const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('windows'));
 
 // OS 字段 -> 图标 key（diting 原生 public/os-<key>.svg，如 "Debian GNU/Linux 13" -> debian）
 function normalizeOs(os?: string): string {
@@ -186,7 +190,9 @@ const columns = '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 
         <div class="space-y-1">
           <div class="text-[11px] font-medium text-foreground/75 truncate">
             <span class="inline group-hover:hidden">{{ cpu.toFixed(1) }}%</span>
-            <span class="hidden group-hover:inline">{{ (agent.load1 ?? 0).toFixed(2) }}, {{ (agent.load5 ?? 0).toFixed(2) }}, {{ (agent.load15 ?? 0).toFixed(2) }}</span>
+            <span class="hidden group-hover:inline">{{ isWindows
+              ? `${t('card.process')}: ${agent.process_count ?? '—'}`
+              : `${(agent.load1 ?? 0).toFixed(2)}, ${(agent.load5 ?? 0).toFixed(2)}, ${(agent.load15 ?? 0).toFixed(2)}` }}</span>
           </div>
           <div class="relative w-full overflow-hidden rounded-full" style="height: 4px; background: var(--bg-surface);">
             <div class="h-full rounded-full transition-[width] duration-300 ease-out" :style="{ width: `${Math.min(cpu, 100)}%`, background: barBg(barStatus(cpu)) }"></div>
