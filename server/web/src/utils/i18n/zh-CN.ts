@@ -259,6 +259,7 @@ export const zhCN: Record<string, string> = {
   'public.offline': '离线',
   'public.avgCpu': '平均 CPU',
   'public.searchPlaceholder': '搜索节点 / 分组 / 商家...',
+  'public.search': '搜索',
   'public.nodeCount': '{n} 个节点',
   'public.layout': '布局',
   'public.card': '卡片',
