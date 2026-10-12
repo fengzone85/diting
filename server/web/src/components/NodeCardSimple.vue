@@ -23,6 +23,8 @@ const emit = defineEmits<{
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent ?? 0);
 const memPct = computed(() => props.agent.mem_pct ?? 0);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
+// Windows 无 Unix load（load1/5/15 恒 0）：卡片相应位置改显示进程总数
+const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('windows'));
 
 const memUsed = computed(() => {
   const a = props.agent;
@@ -264,7 +266,9 @@ const tags = computed(() => {
           <div class="h-full rounded-full transition-[width] duration-300 ease-out" :style="{ width: `${Math.min(cpu, 100)}%`, background: barBg(barStatus(cpu)) }"></div>
         </div>
         <div class="text-[11px] text-muted truncate">
-          {{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}, {{ agent.load5 != null ? agent.load5.toFixed(2) : '—' }}, {{ agent.load15 != null ? agent.load15.toFixed(2) : '—' }}
+          {{ isWindows
+            ? `${t('card.process')}: ${agent.process_count != null ? agent.process_count : '—'}`
+            : `${agent.load1 != null ? agent.load1.toFixed(2) : '—'}, ${agent.load5 != null ? agent.load5.toFixed(2) : '—'}, ${agent.load15 != null ? agent.load15.toFixed(2) : '—'}` }}
         </div>
       </div>
       <!-- RAM -->
@@ -336,6 +340,11 @@ const tags = computed(() => {
         <template v-if="expireDays != null">
           <div class="text-[11px] text-muted-foreground flex items-center gap-0.5 truncate">
             <span class="truncate">{{ t('card.remainingDays', { n: expireDays }) }}</span>
+          </div>
+        </template>
+        <template v-else-if="isWindows">
+          <div class="text-[11px] text-muted-foreground tabular-nums">
+            {{ t('card.process') }}: {{ agent.process_count != null ? agent.process_count : '—' }}
           </div>
         </template>
         <template v-else>
