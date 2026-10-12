@@ -78,6 +78,10 @@ const overviewCards = computed(() => {
   // 总即时流量：所有节点当前实时速率，下行/上行分开统计
   const totalRxRate = sum((a) => a.net_rx_rate || 0);
   const totalTxRate = sum((a) => a.net_tx_rate || 0);
+  // 紧凑速率文案（无空格、单位缩写）：如 "1.2M/s"、"340K/s"、"0B/s"
+  const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
+  // 上行/下行哪边速率大，哪边用主值大字（活跃方向自适应高亮）
+  const rateBigDown = totalRxRate >= totalTxRate;
   const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
@@ -93,8 +97,9 @@ const overviewCards = computed(() => {
     // （其 value 一直是 '-' 未实现）。下行主行 + 上行副行；空闲显示 0 B/s 而非 '-'。
     instant_traffic: {
       label: t('public.instantTraffic'),
-      value: `↓ ${totalRxRate > 0 ? `${fmtBytes(totalRxRate)}/s` : '0 B/s'}`,
-      sub: `↑ ${totalTxRate > 0 ? `${fmtBytes(totalTxRate)}/s` : '0 B/s'}`,
+      // 上行/下行哪边速率大，哪边用主值大字；格式无空格紧凑（如 ↓1.2M/s）
+      value: rateBigDown ? `↓${rateText(totalRxRate)}` : `↑${rateText(totalTxRate)}`,
+      sub: rateBigDown ? `↑${rateText(totalTxRate)}` : `↓${rateText(totalRxRate)}`,
       compact: true,
       variant: 'default'
     },
@@ -121,6 +126,14 @@ function fmtBytes(n: number): string {
   let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(1)} ${u[i]}`;
+}
+// 紧凑速率格式（总即时流量卡专用）：无空格、单位缩写——如 "1.2M"、"340K"、"0B"
+function fmtRateCompact(n: number): string {
+  if (!n || n <= 0) return '0B';
+  const u = ['B', 'K', 'M', 'G', 'T', 'P'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(1)}${u[i]}`;
 }
 function fmtPrice(n: number): string {
   return n ? `${state.agents[0]?.currency || '¥'}${n.toFixed(2)}` : '-';
