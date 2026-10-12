@@ -213,9 +213,15 @@ const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
 const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
 // Windows 无 Unix load（load1 恒 0，图上是一条贴底直线 = "没显示"）：
-// 该图对 Windows 节点改画进程总数曲线（与卡片进程胶囊同口径）
+// 该图对 Windows 节点改画进程总数曲线（与卡片进程胶囊同口径）。
+// 过滤无值点：process_count 从 2026-10-12 才开始采集，窗口内更早的点为 null，
+// 映射成 0 会画出一段伪造的贴底直线——曲线应从最早有值点开始。
 const isWindows = computed(() => (agent.value?.os || '').toLowerCase().includes('windows'));
-const processSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.process_count ?? 0 })));
+const processSeries = computed<ChartPoint[]>(() =>
+  sparkline.value
+    .filter(d => d.process_count != null)
+    .map(d => ({ t: d.ts, v: d.process_count as number }))
+);
 const diskReadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_r_rate ?? 0 })));
 const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_w_rate ?? 0 })));
 const tempSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.temp ?? 0 })));
