@@ -308,8 +308,8 @@ body {
 .m-spark { flex-shrink: 0; width: 100%; margin: 0; line-height: 0; }
 .m-spark .spark { width: 100%; height: 18px; margin: 0; display: block; }
 .m-info { flex: 0 0 auto; min-width: 0; margin: 0; padding: 0; display: flex; flex-wrap: nowrap; align-items: baseline; justify-content: space-between; gap: 2px 5px; }
-.m-lbl { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; line-height: 1.1; flex-shrink: 0; }
-.m-val { font-size: 9px; font-weight: 500; color: var(--text-primary); line-height: 1.2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; line-height: 1.1; flex-shrink: 0; }
+.m-val { font-size: 10px; font-weight: 500; color: var(--text-primary); line-height: 1.2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-disk-row { display: flex; align-items: center; gap: 8px; padding: 6px 15px 0; font-size: 12px; }
 .card-disk-row .m-lbl { min-width: 28px; }
 .card-disk-row .m-val { font-size: 11px; font-weight: 400; white-space: nowrap; margin-left: auto; text-align: right; min-width: 46px; }
@@ -319,7 +319,7 @@ body {
 .bar-fill.text-amber-400 { background: var(--warning); }
 .bar-fill:not(.text-rose-400):not(.text-amber-400) { background: var(--success); }
 .card-probes { display: flex; flex-wrap: nowrap; gap: 3px; margin-top: 4px; }
-.probe { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 9px; padding: 1px 2px; border-radius: 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }
+.probe { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 10px; padding: 1px 2px; border-radius: 12px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08); }
 .probe-ok { color: var(--success); }
 .probe-timeout { color: var(--danger); }
 .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 15px 12px; }

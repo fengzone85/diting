@@ -75,6 +75,8 @@ const overviewCards = computed(() => {
   const highLoad = ags.filter((a) => (a.cpu_percent ?? a.cpu ?? 0) >= 80).length;
   const totalRx = sum((a) => a.net_rx_month || 0);
   const totalTx = sum((a) => a.net_tx_month || 0);
+  // 总即时流量：所有节点当前实时速率（下行+上行）之和
+  const totalRate = sum((a) => (a.net_rx_rate || 0) + (a.net_tx_rate || 0));
   const map: Record<string, { label: string; value: string; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
@@ -86,7 +88,9 @@ const overviewCards = computed(() => {
     disk: { label: t('public.diskUsage'), value: '-', variant: 'default' },
     net: { label: t('public.netRate'), value: '-', variant: 'default' },
     swap: { label: t('public.swap'), value: '-', variant: 'default' },
-    uptime: { label: t('public.uptime'), value: '-', variant: 'default' },
+    // 总即时流量（2026-10-12 用户指定）：替换原「运行时间(uptime)」占位卡
+    // （其 value 一直是 '-' 未实现）。空闲时显示 0 B/s 而非 '-'。
+    instant_traffic: { label: t('public.instantTraffic'), value: totalRate > 0 ? `${fmtBytes(totalRate)}/s` : '0 B/s', variant: 'default' },
     traffic: { label: t('public.traffic'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     traffic_total: { label: t('public.trafficTotal'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     rx_month: { label: t('public.rxMonth'), value: fmtBytes(totalRx), variant: 'default' },
