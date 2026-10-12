@@ -374,6 +374,7 @@ export const zhCN: Record<string, string> = {
   // Y 轴已按数值自动换算 B/s / KB/s / MB/s / GB/s，标题不再写死单位
   'node.chart.diskIo': '磁盘读写速率',
   'node.chart.load': 'Load 1m',
+  'node.chart.process': '进程数',
   'node.chart.temp': '温度 (°C)',
   'node.chart.swap': 'Swap %',
   'node.chart.latency': '延迟波形 (ms)',

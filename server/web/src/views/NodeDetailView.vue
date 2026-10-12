@@ -212,6 +212,10 @@ const sparkline = computed(() => sparkRows.value);
 const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? d.cpu_percent ?? 0 })));
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
 const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
+// Windows 无 Unix load（load1 恒 0，图上是一条贴底直线 = "没显示"）：
+// 该图对 Windows 节点改画进程总数曲线（与卡片进程胶囊同口径）
+const isWindows = computed(() => (agent.value?.os || '').toLowerCase().includes('windows'));
+const processSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.process_count ?? 0 })));
 const diskReadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_r_rate ?? 0 })));
 const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_w_rate ?? 0 })));
 const tempSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.temp ?? 0 })));
@@ -580,7 +584,11 @@ onMounted(load);
               { name: t('node.write'), data: diskWriteSeries, color: '#c084fc' },
             ]"
           />
-          <ChartLatency :title="t('node.chart.load')" :data="loadSeries" color="#fb923c" />
+          <ChartLatency
+            :title="isWindows ? t('node.chart.process') : t('node.chart.load')"
+            :data="isWindows ? processSeries : loadSeries"
+            color="#fb923c"
+          />
           <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" />
           <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" />
         </div>
