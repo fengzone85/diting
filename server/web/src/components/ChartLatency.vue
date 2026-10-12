@@ -17,6 +17,8 @@ const props = defineProps<{
   title?: string;
   data: ChartPoint[];
   color?: string;
+  /** 卡片右上角的当前值（如 "18.2%"）；为空则不渲染 */
+  current?: string;
 }>();
 
 const { colors } = useChartTheme();
@@ -103,7 +105,10 @@ onUnmounted(() => { ro?.disconnect(); chart?.dispose(); });
 
 <template>
   <div class="glass p-4">
-    <h4 v-if="title" class="mb-3 text-sm font-medium text-content">{{ title }}</h4>
+    <div v-if="title || current" class="mb-3 flex items-baseline justify-between gap-2">
+      <h4 v-if="title" class="text-sm font-medium text-content">{{ title }}</h4>
+      <span v-if="current" class="truncate text-sm font-semibold tabular-nums text-content">{{ current }}</span>
+    </div>
     <div ref="chartRef" class="h-48 w-full" />
   </div>
 </template>
