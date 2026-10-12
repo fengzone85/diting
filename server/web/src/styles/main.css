@@ -231,6 +231,19 @@ body {
   pointer-events: none;
 }
 
+/* 长列表渲染优化（2026-10-12 主页性能）：视口外卡片/列表行跳过布局与绘制
+   （content-visibility: auto），contain-intrinsic-size 用 auto 关键字让浏览器
+   记住实测尺寸，避免滚动条跳动。65 台规模下滚动与刷新明显更顺滑。 */
+.node-card,
+.node-card-simple {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 400px;
+}
+.node-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
 /* 毛玻璃卡片：默认几乎全透明，hover 才显出玻璃质感 */
 .glass {
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
