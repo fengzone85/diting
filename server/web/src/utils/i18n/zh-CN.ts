@@ -249,6 +249,7 @@ export const zhCN: Record<string, string> = {
   'public.disk': '磁盘',
   'public.network': '网络',
   'public.uptime': '运行时间',
+  'public.instantTraffic': '总即时流量',
   'public.noNodes': '暂无节点',
   'public.totalAgents': '受控端总数',
   'public.online': '在线',

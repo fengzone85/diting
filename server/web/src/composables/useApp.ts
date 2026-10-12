@@ -114,15 +114,17 @@ export function customTag(agentId: string): string {
 
 // 卡片方案：返回需要展示的总览 StatCard 字段集合
 const CARD_SCHEMES: Record<string, string[]> = {
-  official: ['online', 'total', 'cpu', 'mem', 'traffic', 'uptime'],
+  // uptime → instant_traffic（2026-10-12 用户指定）：原「运行时间」卡 value 一直未实现，
+  // 改为「总即时流量」（所有节点实时速率之和）
+  official: ['online', 'total', 'cpu', 'mem', 'traffic', 'instant_traffic'],
   basic: ['online', 'total', 'cpu', 'mem'],
   ops: ['online', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
-  resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'uptime'],
+  resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'instant_traffic'],
   finance: ['total', 'price', 'expire', 'quota'],
   traffic: ['traffic_total', 'rx_month', 'tx_month', 'net'],
   gpu: ['online', 'total', 'cpu', 'mem', 'gpu'],
   asset: ['total', 'groups', 'country', 'merchant'],
-  full: ['online', 'total', 'cpu', 'mem', 'disk', 'net', 'traffic', 'uptime', 'price', 'expire', 'quota'],
+  full: ['online', 'total', 'cpu', 'mem', 'disk', 'net', 'traffic', 'instant_traffic', 'price', 'expire', 'quota'],
 };
 export function cardSchemeKeys(): string[] {
   const scheme = (state.meta?.card_scheme as string) || 'official';
