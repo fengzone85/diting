@@ -159,7 +159,7 @@ const columns = computed(() => props.dense
 <template>
   <RouterLink
     :to="`/node/${agent.id}`"
-    class="block"
+    class="block node-row"
   >
     <div
       class="grid items-center gap-2 px-2.5 py-2 rounded-lg bg-background/40 backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
