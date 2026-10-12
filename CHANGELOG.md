@@ -2,6 +2,19 @@
 
 > **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
 
+## 2026-10-12 Windows 受控端恢复磁盘 IO 速率（红线修订）
+
+### ⚠️ 行为变更
+
+- **Windows Go 受控端的 `disk_r_rate` / `disk_w_rate` 由恒 0 恢复为真实值**：
+  `pdh.dll` 直调英文性能计数器 `\PhysicalDisk(_Total)\Disk Read|Write Bytes/sec`
+  （零外部依赖，与既有 `syscall.NewLazyDLL` 模式一致；普通用户可读；失败回退 0）。
+  背景：M2 曾把磁盘 IO 列为「不抄 PDH」而砍掉，但 Python 版经 `psutil.disk_io_counters`
+  一直有真值（并行对比期 7 万+ 条记录）——属**功能回归**而非采集面扩张，本次修订恢复。
+  前端 IO 胶囊与趋势图自动生效，无需改动。
+- **温度 / 进程数维持原状（非遗漏）**：Windows 温度需 WMI（不引，且 Python 版亦从未上报）；
+  进程/连接数属零指纹红线，不采集。Linux（含 Docker）侧温度与 IO 一直正常。
+
 ## 2026-09-16 M3：安装链路切换 Go 受控端（含行为变更）
 
 ### ⚠️ 行为变更（升级后可见）
