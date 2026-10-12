@@ -510,7 +510,7 @@ onMounted(load);
                     :style="{ width: Math.min(agent.mem_pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><Memory :size="14" /><span>{{ t('node.storage.mem') }}</span></span>
-                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }}</span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(agent.mem_total, 1) }} <span class="text-muted">{{ formatPercent(agent.mem_pct) }}</span></span>
                 </div>
                 <!-- 交换 -->
                 <div class="relative flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-slate-500/5 p-2">
@@ -532,7 +532,7 @@ onMounted(load);
                     :style="{ width: Math.min(diskAgg.pct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><HardDisk :size="14" /><span>{{ t('node.storage.disk') }}</span></span>
-                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(diskAgg.total, 1) }}</span>
+                  <span class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes(diskAgg.total, 1) }} <span class="text-muted">{{ formatPercent(diskAgg.pct) }}</span></span>
                 </div>
               </div>
             </div>
@@ -550,7 +550,7 @@ onMounted(load);
                     :style="{ width: Math.min(netUsagePct, 100) + '%' }"
                   ></div>
                   <span class="relative z-10 flex gap-1 items-center text-xs text-muted-foreground"><TransferData :size="14" /><span>{{ t('node.netTotal') }}</span></span>
-                  <span v-if="agent.monthly_quota_gb != null" class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }}</span>
+                  <span v-if="agent.monthly_quota_gb != null" class="relative z-10 truncate text-xs sm:text-sm text-content">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0), 1) }} / {{ formatBytes(agent.monthly_quota_gb * 1024 ** 3, 1) }} <span class="text-muted">{{ formatPercent(netUsagePct) }}</span></span>
                   <span v-else class="relative z-10 truncate text-xs sm:text-sm text-content">{{ t('node.unlimitedTraffic') }}</span>
                 </div>
                 <!-- 网络速率块 -->
