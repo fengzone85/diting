@@ -10,7 +10,6 @@ package reporter
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
 	"net/http"
@@ -29,24 +28,23 @@ type Reporter struct {
 	agentID   string
 	token     string
 	interval  time.Duration // 上报间隔，用于退避计算
-	gzip      bool          // 是否 gzip 压缩请求体（默认关）
 	userAgent string        // User-Agent 头（diting-agent-go/<version>）
 	client    *http.Client
 }
 
 // NewReporter 创建上报器。
 // interval 是 Agent 的上报间隔，退避时长 = min(30, 2^attempt * interval)。
-// gzip=true 时对请求体做 gzip 压缩并带 Content-Encoding: gzip。
-// 注意：服务端 Express 默认 express.json() 不解压 gzip 请求体，开启 gzip
-// 前必须先给服务端配置请求体解压中间件，否则上报会被 400 拒收。
 // version 用于构造 User-Agent，与 main.version 同源，便于 ldflags 注入统一。
-func NewReporter(serverURL, agentID, token string, interval time.Duration, gzip bool, version string) *Reporter {
+//
+// 注：请求体 GZIP 选项已于 2026-10-12 移除（服务端无解压中间件，开启即被
+// 400 拒收，属从未可用的死选项；正常部署的 agent 上报体仅 ~1KB，压缩收益
+// 也有限）。若未来要重新引入需服务端配套 gunzip 中间件。
+func NewReporter(serverURL, agentID, token string, interval time.Duration, version string) *Reporter {
 	return &Reporter{
 		serverURL: serverURL + "/api/report",
 		agentID:   agentID,
 		token:     token,
 		interval:  interval,
-		gzip:      gzip,
 		userAgent: "diting-agent-go/" + version,
 		client:    &http.Client{Timeout: timeout},
 	}
@@ -101,39 +99,13 @@ func (r *Reporter) Report(ctx context.Context, payload []byte) error {
 // errAuthRejected 表示 401/403 认证失败。
 var errAuthRejected = fmt.Errorf("auth rejected")
 
-// compressPayload 用 gzip 压缩 payload，减少上行流量。
-// 仅在 gzip=true 时调用；服务端需配置请求体解压中间件。
-func (r *Reporter) compressPayload(payload []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(payload); err != nil {
-		return nil, err
-	}
-	if err := gz.Close(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// doReport 执行单次 HTTP 上报。gzip=true 时压缩请求体。
+// doReport 执行单次 HTTP 上报。
 func (r *Reporter) doReport(payload []byte) error {
-	body := payload
-	if r.gzip {
-		compressed, err := r.compressPayload(payload)
-		if err != nil {
-			return fmt.Errorf("compress: %w", err)
-		}
-		body = compressed
-	}
-
-	req, err := http.NewRequest(http.MethodPost, r.serverURL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, r.serverURL, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if r.gzip {
-		req.Header.Set("Content-Encoding", "gzip")
-	}
 	req.Header.Set("Authorization", "Bearer "+r.token)
 	req.Header.Set("X-Agent-ID", r.agentID)
 	req.Header.Set("User-Agent", r.userAgent)
