@@ -79,6 +79,9 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 	// 温度
 	temp := readTemp()
 
+	// 进程数（仅计数：/proc 下纯数字目录数）
+	procCount := processCount()
+
 	// 网络
 	rx, tx := netTotals()
 	var rxRate, txRate float64
@@ -128,6 +131,7 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 		Load15:   l15,
 		Cores:    cpuCores(),
 		Temp:     temp,
+		ProcessCount: procCount,
 		SwapUsed:  uint64(swapUsed),
 		SwapTotal: uint64(swapTotal),
 		SwapPct:   round2(swapPct),
@@ -145,6 +149,34 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 func fileNotExist(path string) bool {
 	_, err := os.Stat(path)
 	return err != nil
+}
+
+// processCount 统计 /proc 下纯数字目录数（当前进程总数）。
+// 仅计数，无任何进程明细读取（不读 stat/comm/cmdline 等任何进程信息），
+// 零指纹面。失败返回 0（= 未采集语义）。
+func processCount() int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		digits := len(name) > 0
+		for i := 0; i < len(name); i++ {
+			if name[i] < '0' || name[i] > '9' {
+				digits = false
+				break
+			}
+		}
+		if digits {
+			n++
+		}
+	}
+	return n
 }
 
 // readTemp 读 /sys/class/thermal 最高温度（°C），无传感器返回 nil。

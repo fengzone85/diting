@@ -9,11 +9,13 @@
 //     顶层 disk = 全部固定盘求和（非 DISK_PATH 单盘）；swap = GlobalMemoryStatusEx
 //     的 PageFile 语义（与 psutil.swap_memory 一致）；net 排除 loopback。
 //
-// 红线：Load1/5/15 恒 0.0（不用进程数近似）；Temp=nil（不引 WMI 依赖）；
-// 零指纹（不采进程/连接/GPU）。
+// 红线：Load1/5/15 恒 0.0（不用进程数近似负载语义）；
+// 零指纹：不采任何**个体级**信息（进程名/命令行/PID 列表、连接明细、GPU 型号）。
 //
-// 磁盘 IO：经 pdh.dll 直调（零外部依赖），恢复 Python 版 psutil 既有能力
-// （2026-10-12 修订：M2 时曾误判为"采集面扩张"而砍掉，实为功能回归）。
+// 经 pdh.dll 直调（零外部依赖）的补充采集（2026-10-12 修订，用户质疑后复盘）：
+//   - 磁盘 IO 速率（恢复 Python 版 psutil 既有能力，M2 曾误砍）
+//   - 进程总数 \System\Processes（仅一个整数计数，无明细——非指纹）
+//   - 热区温度 \Thermal Zone Information（纯硬件遥测；有 ACPI 热区才有，否则 nil）
 package collector
 
 import (
@@ -196,8 +198,11 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 		diskPct = round2(float64(diskUsed) / float64(diskTotal) * 100)
 	}
 
-	// 磁盘 IO 速率（pdh.dll，见 pdh.go；失败/无数据时返回 0）
+	// 磁盘 IO 速率 + 进程数 + 热区温度（pdh.dll，见 pdh.go；共用同一次采集；
+	// 进程数失败回退 0，温度无热区/无数据返回 nil）
 	diskRRate, diskWRate := c.pdhIO.Rates()
+	processCount := c.pdhIO.Processes()
+	temp := c.pdhIO.TempC()
 
 	// 网络：全部非 loopback 接口求和（GetIfEntry2，64 位计数）
 	rx, tx, err := winNetTotals()
@@ -241,7 +246,11 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 		Load5:  0.0,
 		Load15: 0.0,
 		Cores:  runtime.NumCPU(),
-		Temp:   nil, // Windows 温度需 WMI（第三方依赖），红线不引入
+		// 温度：PDH \Thermal Zone Information（Win10 1803+ 且有 ACPI 热区的机器
+		// 才有此计数集）；无热区/无数据保持 nil——有值就报，绝不造假。
+		Temp:   temp,
+		// 进程总数（PDH \System\Processes；仅计数，无任何进程明细）
+		ProcessCount: processCount,
 		SwapUsed:  swapUsed,
 		SwapTotal: swapTotal,
 		SwapPct:   swapPct,

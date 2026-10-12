@@ -64,6 +64,11 @@ type Metrics struct {
 	// 温度（无传感器时 nil，唯一可空标量）
 	Temp *float64 `json:"temp"`
 
+	// 进程总数（0 = 未采集/不可用；Linux 数 /proc，Windows 用 PDH \System\Processes）。
+	// 仅"数量"这一个整数——不含任何进程明细（无进程名/命令行/PID 列表），零指纹面。
+	// 前端 Komari 兼容层 process.count 图消费此字段。
+	ProcessCount int `json:"process_count"`
+
 	// Swap（始终发送，无 swap 时全 0）
 	SwapUsed  uint64  `json:"swap_used"`
 	SwapTotal uint64  `json:"swap_total"`

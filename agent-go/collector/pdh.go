@@ -26,6 +26,7 @@ var (
 	procPdhAddEnglishCounterW       = modPdh.NewProc("PdhAddEnglishCounterW")
 	procPdhCollectQueryData         = modPdh.NewProc("PdhCollectQueryData")
 	procPdhGetFormattedCounterValue = modPdh.NewProc("PdhGetFormattedCounterValue")
+	procPdhGetFormattedCounterArrayW = modPdh.NewProc("PdhGetFormattedCounterArrayW")
 	procPdhCloseQuery               = modPdh.NewProc("PdhCloseQuery")
 )
 
@@ -36,6 +37,17 @@ const (
 	pdhCStatusValidData = 0x0 // PDH_CSTATUS_VALID_DATA
 	pdhCStatusNewData   = 0x1 // PDH_CSTATUS_NEW_DATA
 )
+
+// pdhFmtCounterValueItem 对应 PDH_FMT_COUNTERVALUE_ITEM_W（多实例计数器值数组元素）：
+//
+//	LPWSTR szName;              // 偏移 0（8 字节指针）
+//	PDH_FMT_COUNTERVALUE FmtValue; // 偏移 8（16 字节）
+//
+// 每项 24 字节（x64）。
+type pdhFmtCounterValueItem struct {
+	SzName   *uint16
+	FmtValue pdhFmtCounterValue
+}
 
 // pdhFmtCounterValue 对应 PDH_FMT_COUNTERVALUE（x64 布局）：
 //   DWORD CStatus;           // 偏移 0（4 字节）
@@ -48,12 +60,18 @@ type pdhFmtCounterValue struct {
 	Value   float64
 }
 
-// pdhDiskIO 持有 _Total 磁盘读写计数器的查询句柄（进程生命周期内复用）。
+// pdhDiskIO 持有 _Total 磁盘读写计数器的查询句柄（进程生命周期内复用），
+// 并挂载进程数（\System\Processes）与热区温度（\Thermal Zone Information）两个附加计数器。
 type pdhDiskIO struct {
 	query syscall.Handle
 	rd    syscall.Handle
 	wr    syscall.Handle
 	ok    bool
+
+	proc    syscall.Handle
+	procOK  bool
+	thermal syscall.Handle
+	thermalOK bool
 }
 
 // newPdhDiskIO 打开查询、挂载两个英文计数器并采首次基线。
@@ -84,7 +102,99 @@ func newPdhDiskIO() *pdhDiskIO {
 		return p
 	}
 	p.ok = true
+	p.initExtraCounters() // 进程数 + 热区温度（可选能力，失败仅关闭对应字段）
 	return p
+}
+
+// initExtraCounters 挂载进程数与热区温度计数器（可选，失败不影响磁盘 IO）。
+// 单独函数便于阅读：任一计数器不存在（如无 ACPI 热区的机器没有 Thermal Zone
+// Information 计数集）都只是对应能力关闭，绝不报错。
+func (p *pdhDiskIO) initExtraCounters() {
+	if p == nil || p.query == 0 {
+		return
+	}
+	if name, err := syscall.UTF16PtrFromString(`\System\Processes`); err == nil {
+		if r, _, _ := procPdhAddEnglishCounterW.Call(uintptr(p.query),
+			uintptr(unsafe.Pointer(name)), 0, uintptr(unsafe.Pointer(&p.proc))); r == 0 {
+			p.procOK = true
+		}
+	}
+	// 多实例通配：不同机器热区实例名不同（TZ00/TZ01/...），(*) 一网打尽；
+	// 计数集不存在时 AddEnglishCounter 直接失败 → thermalOK=false → 温度保持 nil。
+	if name, err := syscall.UTF16PtrFromString(`\Thermal Zone Information(*)\Temperature`); err == nil {
+		if r, _, _ := procPdhAddEnglishCounterW.Call(uintptr(p.query),
+			uintptr(unsafe.Pointer(name)), 0, uintptr(unsafe.Pointer(&p.thermal))); r == 0 {
+			p.thermalOK = true
+		}
+	}
+}
+
+// Processes 返回系统进程总数（0 = 不可用；仅计数，无任何进程明细）。
+// 需在 Rates()（内含 CollectQueryData）之后调用，共用同一次采集。
+func (p *pdhDiskIO) Processes() int {
+	if p == nil || !p.procOK {
+		return 0
+	}
+	v := readPdhDouble(p.proc)
+	if v <= 0 || v > 1e6 {
+		return 0
+	}
+	return int(v + 0.5)
+}
+
+// TempC 返回各热区最高温度（℃）；无热区/无数据/超出合理区间返回 nil。
+// 需在 Rates() 之后调用（共用同一次 CollectQueryData）。
+//
+// 单位处理：微软文档标注 Kelvin，但部分平台实测返回 0.1K（如 3131 ≈ 313.1K
+// ≈ 40°C）。启发式：>1000 视为 0.1K 除 10，结果再经 -50..200℃ 区间过滤——
+// 宁可 nil（不显示），绝不产出垃圾值。
+func (p *pdhDiskIO) TempC() *float64 {
+	if p == nil || !p.thermalOK {
+		return nil
+	}
+	var bufSize, itemCount uint32
+	// 首次调用取所需 buffer 大小（返回 PDH_MORE_DATA，属预期）
+	procPdhGetFormattedCounterArrayW.Call(
+		uintptr(p.thermal), pdhFmtDouble,
+		uintptr(unsafe.Pointer(&bufSize)), uintptr(unsafe.Pointer(&itemCount)), 0)
+	if bufSize == 0 || itemCount == 0 {
+		return nil
+	}
+	buf := make([]byte, bufSize)
+	r, _, _ := procPdhGetFormattedCounterArrayW.Call(
+		uintptr(p.thermal), pdhFmtDouble,
+		uintptr(unsafe.Pointer(&bufSize)), uintptr(unsafe.Pointer(&itemCount)),
+		uintptr(unsafe.Pointer(&buf[0])))
+	if r != 0 || itemCount == 0 {
+		return nil
+	}
+	items := unsafe.Slice((*pdhFmtCounterValueItem)(unsafe.Pointer(&buf[0])), itemCount)
+	maxK, found := 0.0, false
+	for i := range items {
+		v := items[i].FmtValue
+		if v.CStatus != pdhCStatusValidData && v.CStatus != pdhCStatusNewData {
+			continue
+		}
+		k := v.Value
+		if k <= 0 {
+			continue
+		}
+		if k > 1000 {
+			k /= 10 // 0.1K 单位平台
+		}
+		if !found || k > maxK {
+			maxK, found = k, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	c := maxK - 273.15
+	if c < -50 || c > 200 {
+		return nil
+	}
+	c = round1(c)
+	return &c
 }
 
 // Rates 返回 (读 B/s, 写 B/s)；未就绪/无数据返回 0,0。
