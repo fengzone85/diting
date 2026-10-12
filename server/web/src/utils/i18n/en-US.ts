@@ -270,6 +270,7 @@ export const enUS: Record<string, string> = {
   'public.offline': 'Offline',
   'public.avgCpu': 'Avg CPU',
   'public.searchPlaceholder': 'Search node / group / provider...',
+  'public.search': 'Search',
   'public.nodeCount': '{n} nodes',
   'public.layout': 'Layout',
   'public.card': 'Card',

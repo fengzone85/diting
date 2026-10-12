@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick } from 'vue';
 import AppHeader from '../components/AppHeader.vue';
 import NodeCard from '../components/NodeCard.vue';
 import NodeCardSimple from '../components/NodeCardSimple.vue';
@@ -12,7 +12,7 @@ import { useApp, cardSchemeKeys, customTag } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
 import {
-  GridFour, ListTwo, LayoutOne, LayoutFour, ApplicationMenu, GridTwo,
+  GridFour, ListTwo, LayoutOne, LayoutFour, ApplicationMenu, GridTwo, Search,
 } from '@icon-park/vue-next';
 
 const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents } = useApp();
@@ -20,6 +20,19 @@ const { t } = useI18n();
 
 const searchInput = ref(state.search);
 watch(searchInput, (v) => setSearch(v));
+
+// 可展开搜索框（2026-10-12）：图标按钮 toggle；展开自动聚焦，收起清空
+// （避免列表仍被过滤而看不出原因；有搜索词时图标保持高亮提示）。
+const searchOpen = ref(!!state.search);
+const searchEl = ref<HTMLInputElement | null>(null);
+function toggleSearch() {
+  searchOpen.value = !searchOpen.value;
+  if (searchOpen.value) {
+    nextTick(() => searchEl.value?.focus());
+  } else {
+    searchInput.value = '';
+  }
+}
 
 const dragId = ref<string | null>(null);
 const dragOverId = ref<string | null>(null);
@@ -227,10 +240,22 @@ const filteredAgents = computed(() => {
 
       <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-center gap-2">
+          <!-- 搜索：图标按钮（点击展开/收起输入框，Esc 收起） -->
+          <button
+            class="flex h-7 w-7 items-center justify-center rounded-lg border"
+            :class="searchOpen || searchInput ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :title="t('public.search')"
+            @click="toggleSearch"
+          >
+            <Search :size="16" />
+          </button>
           <input
+            v-if="searchOpen"
+            ref="searchEl"
             v-model="searchInput"
             :placeholder="t('public.searchPlaceholder')"
-            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-64"
+            class="h-7 rounded-lg border border-slate-700 bg-slate-900/50 px-2.5 text-xs text-white outline-none focus:border-sky-500 sm:w-52"
+            @keydown.esc="toggleSearch"
           />
           <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: filteredAgents.length }) }}</span>
         </div>
