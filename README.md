@@ -264,7 +264,7 @@ diting/
 | `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
 | `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
-| `GZIP` | 否 | off | 启用 Gzip 压缩上报（需服务端支持解压） |
+
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 
 ---
@@ -408,7 +408,7 @@ cd server/web && npm install && npm run build
 
 - **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / supervisord）
 - **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 10s ↔ 60s 自动调整（需服务端 `OFFLINE_THRESHOLD_SEC ≥ 120`）
-- **压缩上报**：可选 `GZIP=1`；**月流量**：`STATE_FILE` 与 Python 同格式可平滑切换
+- **月流量**：`STATE_FILE` 与 Python 同格式可平滑切换
 - **资源占用**：常驻内存约 10MB（Python 约 80MB），不依赖 Python / Docker
 
 ---

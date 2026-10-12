@@ -24,7 +24,6 @@ type Config struct {
 	StateFile    string
 	ProbeTargets string
 	Debug        bool
-	Gzip         bool
 	Adaptive     bool          // 纯本地自适应（不解析响应）：变化大→快档，平稳→慢档
 	FastInterval time.Duration // 自适应快档间隔
 	SlowInterval time.Duration // 自适应慢档间隔
@@ -70,11 +69,9 @@ func Load() (*Config, error) {
 		cfg.Debug = true
 	}
 
-	// 解析 gzip（默认关：服务端 Express 默认 express.json() 不解压 gzip 请求体，
-	// 开启需服务端先配置请求体解压中间件，否则上报会被 400 拒收）
-	if v := os.Getenv("GZIP"); v == "1" || v == "true" || v == "yes" {
-		cfg.Gzip = true
-	}
+	// 注：请求体 GZIP 选项已于 2026-10-12 移除（服务端无解压中间件，开启即
+	// 被 400 拒收，属从未可用的死选项）。若存量部署设置了 GZIP=1 环境变量，
+	// 现已被忽略、上报恢复正常——无需任何操作。
 
 	// 解析自适应（默认开启：纯本地决策，不解析服务端响应，守单向安全模型）
 	// 慢档需服务端 OFFLINE_THRESHOLD_SEC > SLOW_INTERVAL（建议慢档 60s 配阈值 120s），

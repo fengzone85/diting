@@ -124,7 +124,6 @@ STATE_FILE=/var/lib/diting-agent-go/state.json \
 | `ADAPTIVE` | `1`（开） | `0`/`false` 关闭自适应，改用固定 `INTERVAL` |
 | `FAST_INTERVAL` | `10` | 自适应快档间隔秒（指标显著变化时） |
 | `SLOW_INTERVAL` | `60` | 自适应慢档间隔秒（平稳时） |
-| `GZIP` | `0`（关） | `1`/`true` 开启请求体 gzip（**需服务端先配解压中间件，否则上报被 400 拒收**） |
 
 ### 自适应上报（默认开启）
 
