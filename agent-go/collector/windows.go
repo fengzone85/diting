@@ -11,6 +11,9 @@
 //
 // 红线：Load1/5/15 恒 0.0（不用进程数近似）；Temp=nil（不引 WMI 依赖）；
 // 零指纹（不采进程/连接/GPU）。
+//
+// 磁盘 IO：经 pdh.dll 直调（零外部依赖），恢复 Python 版 psutil 既有能力
+// （2026-10-12 修订：M2 时曾误判为"采集面扩张"而砍掉，实为功能回归）。
 package collector
 
 import (
@@ -139,18 +142,19 @@ type netSample struct {
 	rx, tx uint64
 }
 
-// windowsCollector 是 Windows 平台采集器，内部持有 CPU/网络前次样本。
+// windowsCollector 是 Windows 平台采集器，内部持有 CPU/网络前次样本与 PDH 句柄。
 type windowsCollector struct {
 	diskPath    string // 仅保留签名兼容；Windows 顶层盘 = 全部固定盘求和（对齐 Python），不用此字段
 	prevCPU     cpuSample
 	prevNet     *netSample
 	prevNetTime time.Time
+	pdhIO       *pdhDiskIO // 磁盘 IO 速率（pdh.dll，见 pdh.go）
 }
 
 // NewCollector 创建 Windows 采集器（与 linux.go 同名，build tag 互斥）。
 // 构造时 prime 一次 CPU 样本（阻塞 ~100ms），与 Python Collector.__init__ 一致。
 func NewCollector(diskPath string) Collector {
-	c := &windowsCollector{diskPath: diskPath}
+	c := &windowsCollector{diskPath: diskPath, pdhIO: newPdhDiskIO()}
 	c.prevCPU, _ = readWinCPUSample()
 	if c.prevCPU.total() > 0 {
 		time.Sleep(100 * time.Millisecond)
@@ -191,6 +195,9 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 	if diskTotal > 0 {
 		diskPct = round2(float64(diskUsed) / float64(diskTotal) * 100)
 	}
+
+	// 磁盘 IO 速率（pdh.dll，见 pdh.go；失败/无数据时返回 0）
+	diskRRate, diskWRate := c.pdhIO.Rates()
 
 	// 网络：全部非 loopback 接口求和（GetIfEntry2，64 位计数）
 	rx, tx, err := winNetTotals()
@@ -242,10 +249,11 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 		NetTxRate: txRate,
 		NetRx:     rx,
 		NetTx:     tx,
-		// Win32 直采无磁盘 IO 计数（PDH 属性能计数器面，路线图明确不抄）。
-		// Python 版经 psutil.disk_io_counters 有真值——并行对比时的已知差异。
-		DiskRRate: 0,
-		DiskWRate: 0,
+		// 磁盘 IO 速率：pdh.dll 直调 \PhysicalDisk(_Total)\Disk Read|Write
+		// Bytes/sec（零依赖，恢复 Python psutil.disk_io_counters 既有能力；
+		// 2026-10-12 修订 M2 时的"不抄 PDH"决策——彼时误判为采集面扩张）。
+		DiskRRate: diskRRate,
+		DiskWRate: diskWRate,
 		Disks:     disks,
 	}, nil
 }
