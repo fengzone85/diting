@@ -84,7 +84,13 @@ function ptsString(values: (number | undefined | null)[], w = 60, h = 32, fixedM
 // 若后续需要跨胶囊 0-100 可比性,可在设置中增加统一尺度开关。
 const sparkCpuPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.cpu ?? x.cpu_percent) : [cpu.value]));
 const sparkMemPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.mem_pct) : [props.agent.mem_pct]));
-const sparkLoadPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.load1) : [props.agent.load1]));
+// 负载/进程胶囊：Windows 无 Unix load（load1 恒 0），改显示进程总数 sparkline；
+// 非 Windows 维持 load1。与下方 value 展示的 isWindows 分支保持同一口径。
+const sparkLoadPts = computed(() => ptsString(
+  histOk.value
+    ? hist.value.map((x: SparklinePoint) => (isWindows.value ? x.process_count : x.load1))
+    : [isWindows.value ? props.agent.process_count : props.agent.load1]
+));
 const sparkTempPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.temp) : [props.agent.temp]));
 const sparkSwapPts = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => x.swap_pct) : [props.agent.swap_pct]));
 const sparkIOPtsR = computed(() => ptsString(histOk.value ? hist.value.map((x: SparklinePoint) => +(x.disk_r_rate!/1048576).toFixed(1)) : [0]));
@@ -133,7 +139,7 @@ const trafficPct = computed(() => {
       </div>
       <div class="card-metric">
         <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkLoadPts" :points="sparkLoadPts" fill="none" stroke="#ffce5c" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
-        <div class="m-info"><span class="m-lbl">{{ isWindows ? t('card.process') : t('card.load') }}</span><span class="m-val">{{ agent.load1 != null ? agent.load1.toFixed(2) : '—' }}</span></div>
+        <div class="m-info"><span class="m-lbl">{{ isWindows ? t('card.process') : t('card.load') }}</span><span class="m-val">{{ isWindows ? (agent.process_count != null ? String(agent.process_count) : '—') : (agent.load1 != null ? agent.load1.toFixed(2) : '—') }}</span></div>
       </div>
       <div class="card-metric">
         <div class="m-spark"><svg class="spark" viewBox="0 0 60 32" preserveAspectRatio="none"><polyline v-if="sparkIOPtsR" :points="sparkIOPtsR" fill="none" stroke="#4ea5d9" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /><polyline v-if="sparkIOPtsW" :points="sparkIOPtsW" fill="none" stroke="#ff9f59" stroke-width="0.75" stroke-opacity="0.72" vector-effect="non-scaling-stroke" /></svg></div>
