@@ -13,10 +13,11 @@ const DB_PATH = process.env.DB_PATH || (() => {
 })();
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-// 负载曲线列集（不含 probes / disks 大字段），供 metricsLoadOne / metricsLoadAll 复用
+// 负载曲线列集（不含 probes / disks 大字段），供 metricsLoadOne / metricsLoadAll 复用。
+// process_count：2026-10-12 新增（Komari 兼容层 process.count 图消费）。
 const LOAD_COLS = `ts, agent_id, cpu, mem_used, mem_total, mem_pct, load1, load5, load15,
   net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, disk_used, disk_total,
-  disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp`;
+  disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp, process_count`;
 
 const db = new Database(DB_PATH);
 // 收紧数据库文件权限：仅属主可读写（默认 umask 常为 644，其他用户可读）。
@@ -139,6 +140,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
     ['disk_r_rate', 'REAL'],
     ['disk_w_rate', 'REAL'],
     ['disks', 'TEXT'],
+    // 进程总数（聚合计数，非指纹；0 = 未采集/老 agent 不带该字段）
+    ['process_count', 'INTEGER DEFAULT 0'],
   ];
   for (const [col, type] of cols) {
     if (!existing.has(col)) db.exec(`ALTER TABLE metrics ADD COLUMN ${col} ${type};`);
@@ -213,10 +216,10 @@ const stmts = {
   insertMetric: db.prepare(`INSERT INTO metrics
     (agent_id, ts, cpu, mem_used, mem_total, mem_pct, disk_used, disk_total, disk_pct,
      load1, load5, load15, net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, uptime,
-     temp, swap_used, swap_total, swap_pct, disk_r_rate, disk_w_rate, probes, disks)
+     temp, swap_used, swap_total, swap_pct, disk_r_rate, disk_w_rate, probes, disks, process_count)
     VALUES (@agent_id, @ts, @cpu, @mem_used, @mem_total, @mem_pct, @disk_used, @disk_total, @disk_pct,
      @load1, @load5, @load15, @net_rx_rate, @net_tx_rate, @net_rx_month, @net_tx_month, @uptime,
-     @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks)`),
+     @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks, @process_count)`),
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
@@ -506,7 +509,9 @@ const setAgentCores = (id, cores) => {
   return stmts.setAgentCores.run(n, id, n).changes;
 };
 
-const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ agent_id }, m));
+// 兜底默认值：process_count 为 0（= 未采集/老 agent 不带该字段）。
+// 先展开默认值再展开 m，保证 m 中的真实值覆盖默认。
+const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ process_count: 0 }, m, { agent_id }));
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
 

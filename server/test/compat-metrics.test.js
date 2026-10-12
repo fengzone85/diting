@@ -30,6 +30,7 @@ function row(agentId, ts, extra = {}) {
     load1: 0.5,
     load5: 0.4,
     load15: 0.3,
+    process_count: 0,
     net_rx_rate: 100,
     net_tx_rate: 50,
     net_rx_month: 1e6,
@@ -78,15 +79,31 @@ test('L-5: swap series 返回真实 swap 值（而非 mem 值）', () => {
   assert.strictEqual(total.points[0].value, 2000, '应为 swap_total(2000) 而非 mem_total(8000)');
 });
 
-// ── L-5：删除 5 条占位映射，不生成错值 series ────────────────────
-test('L-5: 5 条占位映射已删除，请求时不生成 series', () => {
-  const placeholders = ['process.count', 'connections.tcp', 'connections.udp', 'gpu.usage', 'gpu.device.usage'];
+// ── L-5：删除 4 条占位映射（process.count 于 2026-10-12 恢复真值采集）──
+test('L-5: 4 条占位映射已删除，请求时不生成 series；process.count 为真值映射', () => {
+  const placeholders = ['connections.tcp', 'connections.udp', 'gpu.usage', 'gpu.device.usage'];
   for (const k of placeholders) {
     assert.strictEqual(METRIC_FIELD_MAP[k], undefined, `${k} 不应再有字段映射`);
   }
   const out = queryMetrics({ metric_keys: placeholders, entity_ids: [A1], hours: 1, maxPoints: 100 });
   assert.strictEqual(out.series.length, 0, '占位指标不得生成任何 series（宁可缺图不可错值）');
   assert.strictEqual(out.count, 0);
+  // process.count：2026-10-12 起 agent 真实采集（聚合计数非指纹），映射指向
+  // metrics.process_count 真列——不再是 CPU 冒充，属恢复真值。
+  assert.strictEqual(METRIC_FIELD_MAP['process.count'], 'process_count');
+});
+
+// ── process.count：2026-10-12 恢复真值采集后的渲染验证 ─────────────
+test('process.count 真值映射：process_count 列渲染出图', () => {
+  const A4 = db.createAgent({ name: 'test-pc' }).id;
+  for (let i = 0; i < 5; i++) {
+    db.insertMetric(A4, row(A4, NOW - i * 60 * 1000, { process_count: 120 + i }));
+  }
+  const out = queryMetrics({ metric_keys: ['process.count'], entity_ids: [A4], hours: 1, maxPoints: 100 });
+  assert.strictEqual(out.series.length, 1, 'process.count 应生成 series');
+  // points 按时间升序：末点 = i=0（最新，值 120）；首点 = i=4（最旧，值 124）
+  const pts = out.series[0].points;
+  assert.strictEqual(pts[pts.length - 1].value, 120, '应为 process_count 真值而非 CPU');
 });
 
 test('L-5: METRIC_DEFINITIONS 仍保留占位定义（前端 le 白名单依赖）', () => {
