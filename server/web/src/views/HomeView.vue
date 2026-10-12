@@ -11,6 +11,9 @@ import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { useApp, cardSchemeKeys, customTag } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
+import {
+  GridFour, ListTwo, GridNine, LayoutOne, LayoutFour, ApplicationMenu, GridTwo,
+} from '@icon-park/vue-next';
 
 const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents } = useApp();
 const { t } = useI18n();
@@ -160,6 +163,21 @@ function setListCols(n: 1 | 2) {
   listCols.value = n;
   localStorage.setItem('diting-list-cols', String(n));
 }
+
+// 布局控制栏（2026-10-12 图标化）：去掉文字标签，按钮仅图标 + hover 提示（title）
+const LAYOUT_OPTS = [
+  { key: 'grid' as const, icon: GridFour, label: 'public.grid' },
+  { key: 'list' as const, icon: ListTwo, label: 'public.list' },
+  { key: 'compact' as const, icon: GridNine, label: 'public.compact' },
+];
+const TEMPLATE_OPTS = [
+  { key: 'simple' as const, icon: LayoutOne, label: 'public.card_simple' },
+  { key: 'full' as const, icon: LayoutFour, label: 'public.card_full' },
+];
+const COLS_OPTS = [
+  { key: 1 as const, icon: ApplicationMenu, label: 'public.cols1' },
+  { key: 2 as const, icon: GridTwo, label: 'public.cols2' },
+];
 const filteredAgents = computed(() => {
   if (!activeQuick.value || activeQuick.value === 'total' || activeQuick.value === 'fav') return visibleAgents.value;
   const ags = visibleAgents.value;
@@ -215,38 +233,42 @@ const filteredAgents = computed(() => {
           />
           <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: filteredAgents.length }) }}</span>
         </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs text-slate-500">{{ t('public.layout') }}</span>
+        <div class="flex flex-wrap items-center gap-1">
+          <!-- 布局：网格 / 列表 / 紧凑（图标控制，hover 显示名称） -->
           <button
-            v-for="l in ['grid', 'list', 'compact'] as const"
-            :key="l"
-            class="rounded-lg border px-2 py-1 text-xs"
-            :class="state.layout === l ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-            @click="setLayout(l)"
+            v-for="o in LAYOUT_OPTS"
+            :key="o.key"
+            class="flex h-7 w-7 items-center justify-center rounded-lg border"
+            :class="state.layout === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :title="t(o.label)"
+            @click="setLayout(o.key)"
           >
-            {{ t(`public.${l}`) }}
+            <component :is="o.icon" :size="16" />
           </button>
-          <span class="ml-2 text-xs text-slate-500">{{ t('public.card') }}</span>
+          <span class="mx-1 h-4 w-px bg-slate-700"></span>
+          <!-- 卡片模板：简约 / 完整 -->
           <button
-            v-for="tpl in ['simple', 'full'] as const"
-            :key="tpl"
-            class="rounded-lg border px-2 py-1 text-xs"
-            :class="state.template === tpl ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-            @click="setTemplate(tpl)"
+            v-for="o in TEMPLATE_OPTS"
+            :key="o.key"
+            class="flex h-7 w-7 items-center justify-center rounded-lg border"
+            :class="state.template === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :title="t(o.label)"
+            @click="setTemplate(o.key)"
           >
-            {{ t(`public.card_${tpl}`) }}
+            <component :is="o.icon" :size="16" />
           </button>
           <!-- 列表模式专属：横排 1 列 / 2 列 形态切换 -->
           <template v-if="state.layout === 'list'">
-            <span class="ml-2 text-xs text-slate-500">{{ t('public.listCols') }}</span>
+            <span class="mx-1 h-4 w-px bg-slate-700"></span>
             <button
-              v-for="n in [1, 2] as const"
-              :key="n"
-              class="rounded-lg border px-2 py-1 text-xs"
-              :class="listCols === n ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
-              @click="setListCols(n)"
+              v-for="o in COLS_OPTS"
+              :key="o.key"
+              class="flex h-7 w-7 items-center justify-center rounded-lg border"
+              :class="listCols === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+              :title="t(o.label)"
+              @click="setListCols(o.key)"
             >
-              {{ t(`public.cols${n}`) }}
+              <component :is="o.icon" :size="16" />
             </button>
           </template>
         </div>
