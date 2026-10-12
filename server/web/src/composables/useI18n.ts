@@ -18,6 +18,13 @@ function detectLocale(): Locale {
 
 export const locale = ref<Locale>(detectLocale());
 
+// 初始化即同步 <html lang>（index.html 静态兜底已是 zh-CN，此处按 detectLocale
+// 结果覆盖）：CJK 字体回退的 per-language 优先级与读屏发音都依赖它。
+// 此前只有手动切换语言（setLocale）时才更新，默认加载路径下 DOM lang 一直不对。
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = locale.value === 'zh-CN' ? 'zh-CN' : 'en';
+}
+
 function lookup(key: string): string {
   return dictionaries[locale.value][key] ?? dictionaries['zh-CN'][key] ?? key;
 }
