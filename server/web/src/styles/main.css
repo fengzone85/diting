@@ -231,24 +231,30 @@ body {
   pointer-events: none;
 }
 
-/* 长列表渲染优化（2026-10-12 主页性能）：视口外卡片/列表行跳过布局与绘制
-   （content-visibility: auto），contain-intrinsic-size 用 auto 关键字让浏览器
-   记住实测尺寸，避免滚动条跳动。65 台规模下滚动与刷新明显更顺滑。 */
+/* 长列表渲染优化（2026-10-12 主页性能，100+ 卡片设计目标）：
+   ① content-visibility: auto——视口外卡片/行跳过布局与绘制，
+      contain-intrinsic-size: auto 让浏览器记住实测尺寸，避免滚动条跳动；
+   ② contain: layout style——视口内卡片同样限制重排范围，10s 周期数值刷新
+      的布局计算不外溢到整页（大列表刷新时更稳）。 */
 .node-card,
 .node-card-simple {
   content-visibility: auto;
   contain-intrinsic-size: auto 400px;
+  contain: layout style;
 }
 .node-row {
   content-visibility: auto;
   contain-intrinsic-size: auto 64px;
+  contain: layout style;
 }
 
-/* 毛玻璃卡片：默认几乎全透明，hover 才显出玻璃质感 */
+/* 毛玻璃卡片。
+   滚动性能改造（2026-10-12，为 100+ 卡片设计目标）：backdrop-filter 常驻会让
+   滚动时每帧对每张可见卡片重算背景模糊（掉帧主因）；且卡片背景 82% 不透明，
+   模糊在视觉上本就几乎不可见——性价比极低。默认静态卡片改为纯半透明色块
+   （零模糊成本），仅 hover 单卡时启用轻量 blur(8px) 保留玻璃质感。 */
 .glass {
   background-color: var(--glass-tint, var(--bg-secondary)) !important;
-  backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
-  -webkit-backdrop-filter: saturate(var(--glass-saturate, 145%)) blur(var(--glass-blur, 14px)) !important;
   border: 1px solid rgb(255 255 255 / 0.06) !important;   /* 默认极淡边框，几乎隐形 */
   border-radius: var(--radius, 0.625rem);
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.06);
@@ -257,6 +263,8 @@ body {
 .glass:hover {
   background-color: var(--glass-tint-hover, var(--bg-secondary)) !important;
   border-color: var(--glass-border, var(--border)) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
   box-shadow: 0 12px 38px var(--glass-shadow, rgb(0 0 0 / 0.55));
 }
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
