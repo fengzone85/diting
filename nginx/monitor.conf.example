@@ -17,6 +17,21 @@ limit_req_zone $binary_remote_addr zone=report:10m rate=1r/s;
 # apilimit：后台管理 / 读取类接口，严格一些（2r/s，突发 10），用于挡 admin token 爆破与高频重放
 limit_req_zone $binary_remote_addr zone=apilimit:10m rate=2r/s;
 
+# === http 级别：gzip 响应压缩（2026-10-12 实测：sparklines 103KB→26KB（-74%）、
+#     agents 38KB→2.8KB（-93%）、静态 JS 221KB→83KB（-62%）；10s 轮询总传输降 80%）===
+# 两个关键点（缺一不可，否则 API 不压缩）：
+#   ① application/json 必须列入 gzip_types；
+#   ② diting 全站走 proxy_pass，gzip_proxied 白名单方式会漏掉"无缓存头"的 API 响应，用 any。
+# SSE（text/event-stream）不在压缩类型表中，不受影响。
+# 若同机多站点不希望全局生效，可把本段移入各 server {} 块。
+gzip on;
+gzip_min_length 1k;
+gzip_comp_level 2;
+gzip_types text/plain application/javascript application/x-javascript text/javascript text/css application/xml application/json;
+gzip_proxied any;
+gzip_vary on;
+gzip_disable "MSIE [1-6]\.";
+
 # WebSocket /api/clients 与 /api/rpc2 需要升级头（体检 L-16）；
 # '' 时回退 close，普通 HTTP 请求可正常复用连接。
 map $http_upgrade $connection_upgrade {
