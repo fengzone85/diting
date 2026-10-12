@@ -222,6 +222,27 @@ const processSeries = computed<ChartPoint[]>(() =>
     .filter(d => d.process_count != null)
     .map(d => ({ t: d.ts, v: d.process_count as number }))
 );
+
+// —— 图表卡右上角当前值（对齐 Komari「标题 + 当前值」卡片风格）——
+// 数据取实时 agent（与首页卡片同源）；agent 未加载/字段缺失返回 undefined → 不渲染。
+const cpuCurrent = computed(() => (agent.value ? formatPercent(agent.value.cpu ?? agent.value.cpu_percent) : undefined));
+const memCurrent = computed(() => (agent.value ? formatPercent(agent.value.mem_pct) : undefined));
+const swapCurrent = computed(() => (agent.value ? formatPercent(agent.value.swap_pct) : undefined));
+const tempCurrent = computed(() => {
+  const a = agent.value;
+  return a && a.temp != null ? `${a.temp.toFixed(1)} °C` : undefined;
+});
+const diskIoCurrent = computed(() => {
+  const a = agent.value;
+  if (!a) return undefined;
+  return `R ${formatBytes(a.disk_r_rate || 0, 1)}/s · W ${formatBytes(a.disk_w_rate || 0, 1)}/s`;
+});
+const loadCurrent = computed(() => {
+  const a = agent.value;
+  if (!a) return undefined;
+  if (isWindows.value) return a.process_count != null ? String(a.process_count) : undefined;
+  return a.load1 != null ? a.load1.toFixed(2) : undefined;
+});
 const diskReadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_r_rate ?? 0 })));
 const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.disk_w_rate ?? 0 })));
 const tempSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.temp ?? 0 })));
@@ -581,22 +602,24 @@ onMounted(load);
           </div>
 
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <ChartLatency :title="t('node.chart.cpu')" :data="cpuSeries" color="#38bdf8" />
-          <ChartLatency :title="t('node.chart.mem')" :data="memSeries" color="#a78bfa" />
+          <ChartLatency :title="t('node.chart.cpu')" :data="cpuSeries" color="#38bdf8" :current="cpuCurrent" />
+          <ChartLatency :title="t('node.chart.mem')" :data="memSeries" color="#a78bfa" :current="memCurrent" />
           <ChartLatencyDual
             :title="t('node.chart.diskIo')"
             :series="[
               { name: t('node.read'), data: diskReadSeries, color: '#22d3ee' },
               { name: t('node.write'), data: diskWriteSeries, color: '#c084fc' },
             ]"
+            :current="diskIoCurrent"
           />
           <ChartLatency
             :title="isWindows ? t('node.chart.process') : t('node.chart.load')"
             :data="isWindows ? processSeries : loadSeries"
             color="#fb923c"
+            :current="loadCurrent"
           />
-          <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" />
-          <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" />
+          <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" :current="tempCurrent" />
+          <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
         </div>
         </div>
 
