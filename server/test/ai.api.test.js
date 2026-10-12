@@ -141,7 +141,7 @@ function mkMetric(agentId, ts, over) {
     disk_used: 50, disk_total: 100, disk_pct: 50, load1: 1, load5: 1, load15: 1,
     net_rx_rate: 1000, net_tx_rate: 1000, net_rx_month: 1, net_tx_month: 1, uptime: 1,
     temp: 40, swap_used: 0, swap_total: 0, swap_pct: 0, disk_r_rate: 0, disk_w_rate: 0,
-    probes: null, disks: null
+    process_count: 0, probes: null, disks: null
   }, over || {});
 }
 

@@ -38,8 +38,12 @@ const METRIC_DEFINITIONS = [
 // 已删除：无映射 → queryMetrics 不生成该 series（宁可缺图，不可错值）。
 // METRIC_DEFINITIONS 中对应定义【保留】：前端按 definitions 匹配 le 白名单，
 // 删定义可能引发空渲染异常，故仅断开数据映射。
+//
+// 2026-10-12 恢复真值映射：process.count → process_count（agent 侧新增真实采集，
+// 非冒充——聚合计数而非个体明细，不涉指纹；cap：老 agent/老库该列为 0）。
 const METRIC_FIELD_MAP = {
   'cpu.usage': 'cpu',
+  'process.count': 'process_count',
   'load.average': 'load1',
   'memory.used': 'mem_used',
   'memory.total': 'mem_total',
