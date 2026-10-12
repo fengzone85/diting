@@ -12,7 +12,7 @@ import { useApp, cardSchemeKeys, customTag } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
 import {
-  GridFour, ListTwo, GridNine, LayoutOne, LayoutFour, ApplicationMenu, GridTwo,
+  GridFour, ListTwo, LayoutOne, LayoutFour, ApplicationMenu, GridTwo,
 } from '@icon-park/vue-next';
 
 const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents } = useApp();
@@ -164,11 +164,12 @@ function setListCols(n: 1 | 2) {
   localStorage.setItem('diting-list-cols', String(n));
 }
 
-// 布局控制栏（2026-10-12 图标化）：去掉文字标签，按钮仅图标 + hover 提示（title）
+// 布局控制栏（2026-10-12 图标化 + 对齐 Komari 精简）：去掉文字标签，按钮仅图标；
+// compact 布局按钮已移除——其渲染与 grid 完全相同（cardSizeClass 只读 meta.card_size，
+// 与 layout 无关），属与实现脱钩的死按钮。state.layout 类型保留 'compact' 兼容存量配置。
 const LAYOUT_OPTS = [
   { key: 'grid' as const, icon: GridFour, label: 'public.grid' },
   { key: 'list' as const, icon: ListTwo, label: 'public.list' },
-  { key: 'compact' as const, icon: GridNine, label: 'public.compact' },
 ];
 const TEMPLATE_OPTS = [
   { key: 'simple' as const, icon: LayoutOne, label: 'public.card_simple' },
