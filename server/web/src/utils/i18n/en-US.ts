@@ -260,6 +260,7 @@ export const enUS: Record<string, string> = {
   'public.disk': 'Disk',
   'public.network': 'Network',
   'public.uptime': 'Uptime',
+  'public.instantTraffic': 'Live Traffic',
   'public.noNodes': 'No nodes',
   'public.totalAgents': 'Total agents',
   'public.online': 'Online',
