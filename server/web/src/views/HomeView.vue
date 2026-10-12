@@ -173,12 +173,11 @@ const filteredAgents = computed(() => {
 <template>
   <div class="min-h-screen">
     <AppHeader :title="state.meta?.site_title" :meta="state.meta" />
-    <!-- 列表·横排 2 列时放宽容器上限（1720px）：max-w-7xl(1280px) 下双列每列仅 ~616px，
-         精简行最小约 562px+间距仍会挤压错乱——放宽后每列 ≥740px 留足余量 -->
-    <main
-      class="mx-auto px-4 pt-4 sm:px-6"
-      :class="state.layout === 'list' && listCols === 2 ? 'max-w-7xl 2xl:max-w-[1720px]' : 'max-w-7xl'"
-    >
+    <!-- 列表·横排 2 列在统一 max-w-7xl 容器内适配（用户要求：不改网页宽度）：
+         2xl 视口下内容区 1232px，双列每列 612px、扣行内边距后可用 ~592px；
+         dense 列集已压至 ~562px（固定/弹性最小 514 + gaps 48），由列集压缩
+         而非放宽容器保证不溢出（余量 ~30px） -->
+    <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
       <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
