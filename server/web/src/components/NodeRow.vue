@@ -7,7 +7,12 @@ import { providerAlias, customTag } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
 
 const { t } = useI18n();
-const props = defineProps<{ agent: Agent }>();
+const props = defineProps<{
+  agent: Agent;
+  /** 横排 2 列形态：隐藏「信息/Uptime」与「速率+探测柱」两列（精简列集约 640px），
+      保证在 2xl 屏双列并排时不溢出 */
+  dense?: boolean;
+}>();
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent ?? 0);
 const memPct = computed(() => props.agent.mem_pct ?? 0);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
@@ -142,7 +147,13 @@ const trafficPct = computed(() => {
 });
 
 // 列定义 - 对齐 Komari NodeList grid-template-columns
-const columns = '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 100px 100px 104px 88px';
+// dense（横排 2 列形态）：去掉「信息」「速率+探测柱」两列（见模板 v-if），
+// 固定列宽整体压缩（合计最小约 560px，见下方求和），配合 HomeView 双列容器
+// 放宽（2xl:max-w-[1720px]，每列 ≥740px）保证不挤压错乱。
+// 36+36+130+84+76+76+76 = 514px 固定/弹性最小 + gaps(6×8=48) ≈ 562px
+const columns = computed(() => props.dense
+  ? '36px 36px minmax(130px,1fr) 84px 76px 76px 76px'
+  : '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 100px 100px 104px 88px');
 </script>
 
 <template>
@@ -177,8 +188,8 @@ const columns = '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 
         <span v-if="tag" class="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-300 shrink-0">{{ tag }}</span>
       </div>
 
-      <!-- 信息：uptime + 群组/系统副标题 -->
-      <div class="flex flex-col gap-0.5 min-w-0">
+      <!-- 信息：uptime + 群组/系统副标题（dense 形态隐藏） -->
+      <div v-if="!dense" class="flex flex-col gap-0.5 min-w-0">
         <div class="text-[11px] font-medium text-foreground/70 truncate">{{ formatDuration(agent.uptime) }}</div>
         <div class="text-[11px] font-medium text-foreground/60 truncate">
           {{ agent.group || agent.grp || '' }}{{ (agent.group || agent.grp) && agent.hostname ? ' · ' : '' }}{{ agent.hostname || agent.os || '' }}
@@ -239,13 +250,13 @@ const columns = '40px 44px minmax(180px,0.85fr) minmax(240px,1.1fr) 116px 100px 
         </div>
       </div>
 
-      <!-- 速率 + 延迟/丢包迷你柱 -->
-      <div class="flex flex-col gap-1 min-w-0">
+      <!-- 速率 + 延迟/丢包迷你柱（dense 形态隐藏） -->
+      <div v-if="!dense" class="flex flex-col gap-1 min-w-0">
         <div class="text-[11px] font-medium flex flex-col">
           <span class="text-success flex flex-row gap-1 items-center truncate">
             ↓ {{ formatBitsPerSecond(agent.net_rx_rate) }}
           </span>
-          <span class="text-blue-600 dark:text-blue-400 flex flex-row gap-1 items-center truncate">
+          <span class="text-sky-400 flex flex-row gap-1 items-center truncate">
             ↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}
           </span>
         </div>

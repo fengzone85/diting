@@ -153,6 +153,13 @@ const quickFilters = computed(() => {
   ];
 });
 const activeQuick = ref<string | null>(null);
+
+// 列表模式形态：横排 1 列（全列宽行）/ 横排 2 列（精简行，2xl 屏并排两列）
+const listCols = ref<1 | 2>(localStorage.getItem('diting-list-cols') === '2' ? 2 : 1);
+function setListCols(n: 1 | 2) {
+  listCols.value = n;
+  localStorage.setItem('diting-list-cols', String(n));
+}
 const filteredAgents = computed(() => {
   if (!activeQuick.value || activeQuick.value === 'total' || activeQuick.value === 'fav') return visibleAgents.value;
   const ags = visibleAgents.value;
@@ -166,7 +173,12 @@ const filteredAgents = computed(() => {
 <template>
   <div class="min-h-screen">
     <AppHeader :title="state.meta?.site_title" :meta="state.meta" />
-    <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
+    <!-- 列表·横排 2 列时放宽容器上限（1720px）：max-w-7xl(1280px) 下双列每列仅 ~616px，
+         精简行最小约 562px+间距仍会挤压错乱——放宽后每列 ≥740px 留足余量 -->
+    <main
+      class="mx-auto px-4 pt-4 sm:px-6"
+      :class="state.layout === 'list' && listCols === 2 ? 'max-w-7xl 2xl:max-w-[1720px]' : 'max-w-7xl'"
+    >
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
       <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
@@ -225,6 +237,19 @@ const filteredAgents = computed(() => {
           >
             {{ t(`public.card_${tpl}`) }}
           </button>
+          <!-- 列表模式专属：横排 1 列 / 2 列 形态切换 -->
+          <template v-if="state.layout === 'list'">
+            <span class="ml-2 text-xs text-slate-500">{{ t('public.listCols') }}</span>
+            <button
+              v-for="n in [1, 2] as const"
+              :key="n"
+              class="rounded-lg border px-2 py-1 text-xs"
+              :class="listCols === n ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+              @click="setListCols(n)"
+            >
+              {{ t(`public.cols${n}`) }}
+            </button>
+          </template>
         </div>
       </div>
 
@@ -232,8 +257,12 @@ const filteredAgents = computed(() => {
       <EmptyState v-else-if="filteredAgents.length === 0" />
 
       <template v-else>
-        <div v-if="state.layout === 'list'" class="space-y-2">
-          <NodeRow v-for="agent in filteredAgents" :key="agent.id" :agent="agent" />
+        <div
+          v-if="state.layout === 'list'"
+          class="grid grid-cols-1 gap-2"
+          :class="listCols === 2 ? '2xl:grid-cols-2' : ''"
+        >
+          <NodeRow v-for="agent in filteredAgents" :key="agent.id" :agent="agent" :dense="listCols === 2" />
         </div>
 
         <template v-else>

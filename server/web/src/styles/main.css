@@ -163,6 +163,24 @@
 .text-secondary { color: var(--text-secondary); }
 .text-muted { color: var(--text-muted); }
 .text-accent { color: var(--accent); }
+
+/* ---- Komari 类名兼容层（2026-10-12 列表模式审计发现并补齐）----
+   部分组件移植自 glassmorphism 主题，残留 text-foreground / text-muted-foreground /
+   bg-background 等 Komari 类名；本项目 Tailwind v4 默认色板不含这些名字（构建产物
+   零匹配），导致：
+     ① 列表模式（NodeRow）文字层级全部失效（/60 /70 /75 不生效）、行无玻璃背景；
+     ② text-muted-foreground（简约卡片/详情页 26 处）在暗色主题下失效（亮色有手写覆盖）。
+   此处按 diting 语义变量补齐映射；透明度变体用 color-mix 还原（对应 /NN 后缀）。
+   bg-background/* 直接映射 --bg-secondary（= .glass 卡片同款底色），保证列表与卡片同观感。 */
+.text-foreground { color: var(--text-primary); }
+.text-foreground\/60 { color: color-mix(in srgb, var(--text-primary) 60%, transparent); }
+.text-foreground\/70 { color: color-mix(in srgb, var(--text-primary) 70%, transparent); }
+.text-foreground\/75 { color: color-mix(in srgb, var(--text-primary) 75%, transparent); }
+.text-muted-foreground { color: var(--text-secondary); }
+.text-success { color: var(--success); }
+.bg-background\/40,
+.bg-background\/70,
+.hover\:bg-background\/70:hover { background-color: var(--bg-secondary); }
 .hover\:text-accent:hover { color: var(--accent); }
 .bg-surface { background-color: var(--bg-surface); }
 .border-divider { border-color: var(--border-divider); }
