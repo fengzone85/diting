@@ -78,7 +78,7 @@ const overviewCards = computed(() => {
   // 总即时流量：所有节点当前实时速率，下行/上行分开统计
   const totalRxRate = sum((a) => a.net_rx_rate || 0);
   const totalTxRate = sum((a) => a.net_tx_rate || 0);
-  const map: Record<string, { label: string; value: string; sub?: string; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
+  const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
     warn: { label: t('public.highLoad'), value: String(highLoad), variant: 'warning' },
@@ -95,6 +95,7 @@ const overviewCards = computed(() => {
       label: t('public.instantTraffic'),
       value: `↓ ${totalRxRate > 0 ? `${fmtBytes(totalRxRate)}/s` : '0 B/s'}`,
       sub: `↑ ${totalTxRate > 0 ? `${fmtBytes(totalTxRate)}/s` : '0 B/s'}`,
+      compact: true,
       variant: 'default'
     },
     traffic: { label: t('public.traffic'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
