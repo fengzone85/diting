@@ -169,29 +169,72 @@ class WinCollector:
         self._net_prev_ts = 0
         self._disk_io_prev = None
         self._disk_io_prev_ts = 0
-        self._state = self._load_state()
+        # 告警限流时间戳必须先于 _load_state 初始化：_load_state 失败时会走
+        # _warn_state，若此处顺序颠倒会在构造期抛 AttributeError 导致 agent 起不来。
+        self._state_warn_ts = 0.0
+        # 状态加载结果：self._state_mode ∈ {'ok','first-run','corrupt','blocked'}
+        self._state, self._state_mode = self._load_state()
         # Prime the CPU sample so the first collect() returns a real percentage.
         try:
             psutil.cpu_percent(interval=0.1)
         except Exception as e:
             log.debug("cpu primer failed: %s", e)
 
+    def _warn_state(self, msg):
+        """状态文件异常告警：首条立即打，其后同一小时内最多一条（不刷屏）。
+
+        用 warning 而非 debug：默认日志级别是 WARNING，debug 会让「state.json
+        写不进去」这类持续错误在日志里完全不可见（2026-10-13 真机复盘：写入自
+        09-15 起持续失败 28 天，月流量每次重启静默归零，日志里零线索）。
+        """
+        now = time.time()
+        if now - self._state_warn_ts >= 3600:
+            self._state_warn_ts = now
+            log.warning("%s: %s", self.state_file, msg)
+
     def _load_state(self):
+        """读取月流量状态，返回 (state, mode)。
+
+        mode 语义（关键：「读不到」不能当成「新月」或「首跑」）：
+          ok        读到合法状态 → 正常续算
+          first-run 文件不存在（首次运行）→ 从 0 起算
+          corrupt   文件存在但不是合法 JSON 对象 → 内容不可恢复，告警后重建
+          blocked   文件存在但读不出来（权限/占用/IO 错误）→ 不清零、不写盘，
+                    每轮 collect() 重试，恢复后自动接上历史月值
+        """
         try:
             with open(self.state_file) as f:
-                return json.load(f)
-        except Exception as e:
-            log.debug("load state failed: %s", e)
-            return {}
+                data = json.load(f)
+        except FileNotFoundError:
+            return {}, 'first-run'
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self._warn_state('内容损坏无法解析，将重建（原月累计已丢失）')
+            return {}, 'corrupt'
+        except OSError as e:
+            self._warn_state("读取失败（%s）；月累计暂存内存并自动重试" % e)
+            return {}, 'blocked'
+        if not isinstance(data, dict):
+            self._warn_state('内容不是 JSON 对象，将重建（原月累计已丢失）')
+            return {}, 'corrupt'
+        return data, 'ok'
 
     def _save_state(self):
+        """原子写入状态文件：先写同目录 .tmp，再 os.replace 覆盖（L-14）。
+
+        与 Linux 版 collector.py:421-429 及 Go 版 state.go 一致。原实现直接
+        open(w) 覆写，断电/进程被杀时可能留下空文件；且失败只打 debug 日志。
+        此处写失败仅告警不抛出——采集/上报主流程不因状态文件不可写而中断
+        （月累计此时退化为进程内存内累计，并在日志中明确可见）。
+        """
         try:
             d = os.path.dirname(self.state_file) or '.'
             os.makedirs(d, exist_ok=True)
-            with open(self.state_file, 'w') as f:
+            tmp = self.state_file + '.tmp'
+            with open(tmp, 'w') as f:
                 json.dump(self._state, f)
+            os.replace(tmp, self.state_file)
         except Exception as e:
-            log.debug("save state failed: %s", e)
+            self._warn_state("写入失败（%s）；本轮月累计未落盘，下轮重试" % e)
 
     def _net_totals(self):
         """Total rx/tx bytes across all interfaces (excludes loopback by psutil)."""
@@ -266,9 +309,14 @@ class WinCollector:
             log.debug("disk io rate failed: %s", e)
 
         # Monthly cumulative traffic (persisted, survives restart, resets on month rollover).
+        # 'blocked'（文件存在但读不出来）时每轮重试一次读取：既不写盘也不做跨月
+        # 判定，避免把可能完好的历史月值覆盖成「从 0 开始的新状态」；读取一旦恢复，
+        # 本轮的差值累加会自动补上这段时间的流量（rx - 文件里的 last_rx）。
+        if self._state_mode == 'blocked':
+            self._state, self._state_mode = self._load_state()
         month_key = datetime.now().strftime('%Y-%m')
         st = self._state
-        if st.get('month_key') != month_key:
+        if self._state_mode != 'blocked' and st.get('month_key') != month_key:
             st['month_key'] = month_key
             st['month_rx'] = 0
             st['month_tx'] = 0
@@ -277,7 +325,8 @@ class WinCollector:
             st['month_tx'] = st.get('month_tx', 0) + max(0, tx - st['last_tx'])
         st['last_rx'] = rx
         st['last_tx'] = tx
-        self._save_state()
+        if self._state_mode != 'blocked':
+            self._save_state()
 
         # Network self-test (fixed public targets from local config; no server command).
         probes = {}

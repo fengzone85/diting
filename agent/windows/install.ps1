@@ -6,6 +6,7 @@
     1) 检查 Python 3.9+
     2) pip install -r requirements.txt
     3) (可选 -RegisterTask) 注册登录即启动的计划任务，使 agent 后台常驻
+    4) 授予当前用户对安装目录的读写权限（agent 需写 state.json 月流量状态文件）
 .PARAMETER ServerUrl   监控服务端地址，如 https://monitor.example.com
 .PARAMETER AgentId     在后台「添加 Agent」获得的 ID
 .PARAMETER AgentToken  在后台「添加 Agent」获得的 Token
@@ -75,6 +76,21 @@ if (-not (Test-Path (Join-Path $ScriptDir 'windows_agent.py'))) {
     Write-Host '配套文件下载完成。'
 }
 
+# ── 0b) 权限：确保运行 agent 的账户能写状态文件 ─────────────────────────────────
+# 背景（2026-10-13 真机事故）：在管理员会话里安装时，自举目录与其中文件属主是
+# Administrators、ACL 只给 BUILTIN\Users 读权限；而 agent 由计划任务以登录用户的
+# **常规权限**常驻，于是 state.json 每次写入都 PermissionError，月流量累计静默
+# 归零数周（旧实现只打 debug 日志，默认级别看不见）。安装期（此处有管理员权限）
+# 把本目录树的 Modify 授予当前用户——最小授权：只给这一个目录，不动其它路径。
+$GrantUser = "$env:USERDOMAIN\$env:USERNAME"
+& icacls $InstallDir /grant "${GrantUser}:(OI)(CI)M" /T | Out-Null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[OK]  已授予 $GrantUser 对 $InstallDir 的读写权限（state.json 需可写）"
+} else {
+    Write-Warning "授予 $GrantUser 对 $InstallDir 的写权限失败，agent 可能无法保存月流量状态。"
+    Write-Warning "请以管理员身份重跑本脚本，或手动执行：icacls `"$InstallDir`" /grant `"$GrantUser:(OI)(CI)M`" /T"
+}
+
 # 1) 检查 Python
 $py = Get-Command python -ErrorAction SilentlyContinue
 if (-not $py) {
@@ -132,6 +148,27 @@ Write-Host "  - 临时运行：python `"$InstallDir\windows_agent.py`""
 if (-not $RegisterTask) {
     Write-Host '  - 注册为服务：powershell -ExecutionPolicy Bypass -File install.ps1 -RegisterTask -ServerUrl <url> -AgentId <id> -AgentToken <token>'
 }
-# 立即启动 Agent（后台运行，隐藏窗口）
-Write-Host '正在启动 Agent ...'
-Start-Process -WindowStyle Hidden -FilePath "$InstallDir\run_scheduled.bat"
+# ── 启动 Agent ────────────────────────────────────────────────────────────────
+# 关键：不要在管理员会话里用 Start-Process 直接拉起 agent —— 子进程会继承提权
+# token，agent 以管理员身份常驻（违背受控端最小权限），且它写出的 state.json
+# 属主是 Administrators，之后普通权限的计划任务实例再也写不进去，月流量静默归零
+# （2026-10-13 真机事故的成因之一）。注册了任务就从任务启动（任务以登录用户的
+# 常规权限运行）；未注册任务则提示用户手动以普通权限启动。
+if ($RegisterTask) {
+    Write-Host '正在通过计划任务启动 Agent（常规权限）...'
+    & schtasks /run /tn "HostMonitorAgent-$AgentId" | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[OK]  已启动：HostMonitorAgent-$AgentId"
+    } else {
+        Write-Warning "计划任务启动失败，请手动运行：$InstallDir\run_scheduled.bat"
+    }
+} else {
+    $IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if ($IsElevated) {
+        Write-Host "提示：当前是管理员会话，请以普通权限双击运行 $InstallDir\run_scheduled.bat 启动 agent"
+        Write-Host '（在管理员会话里启动会让 agent 提权常驻，且写出的状态文件普通权限改不动。）'
+    } else {
+        Write-Host '正在启动 Agent（后台运行，隐藏窗口）...'
+        Start-Process -WindowStyle Hidden -FilePath "$InstallDir\run_scheduled.bat"
+    }
+}
