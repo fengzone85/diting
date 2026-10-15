@@ -7,17 +7,20 @@
 
 > **状态说明**：按 Agent 单一化决策（见 `dev-docs/AGENT_CONSOLIDATION_ROADMAP_2026-09-13.md`），
 > Go 受控端将成为唯一受控端，本 Python Windows 版处于**冻结期**——只修红线问题，
-> 不再接受非必要改动。以下三项属已知差异，**将随 Go 版 Windows 支持一并解决**，
+> 不再接受非必要改动。以下两项属已知差异，**将随 Go 版 Windows 支持一并解决**，
 > 冻结期内不修（改动会引入未经真机验证的行为变更，风险大于收益）。
 
 | # | 问题 | 影响 | 为何不在冻结期修 |
 |---|---|---|---|
 | L-10 | `probe_one` 返回值不含 `loss`（丢包率） | Windows 节点探测结果缺丢包字段，与 Linux/Go 上报口径不一致 | 需移植 ICMP 丢包解析 + TCP 失败比例统计，无法在本机（Linux）验证，须真机回归 |
 | L-11 | 探测无 60s 独立间隔缓存，每轮上报都重新探测 | 上报间隔 20s 时探测频率偏高（Linux 版有缓存，见 `agent/collector.py:481-500`） | 涉及探测节奏行为变更，须真机观察 |
-| L-14 | `_save_state` 非原子写（无 `.tmp` + `os.replace`） | 断电瞬间可能写坏 `state.json`，导致月流量累计归零 | 属数据面改动，须真机断电场景验证 |
 
 > 已在冻结期内修复的红线项：**M-1**（`load1` 曾用进程数近似 → 已改为 `0.0` 占位，
-> 进程数属指纹字段）、**L-9**（`os_name` 兜底曾含 build 号/内核版本 → 已只取产品名）。
+> 进程数属指纹字段）、**L-9**（`os_name` 兜底曾含 build 号/内核版本 → 已只取产品名）、
+> **L-14**（`_save_state` 非原子写 → 已改 `.tmp` + `os.replace` 原子写；读写失败从
+> `log.debug` 提升为 `log.warning`；「文件存在但读不出来」时不再清零月累计、也不再
+> 覆盖该文件，改为每轮重试）。L-14 破例在冻结期修复的理由：2026-10-13 真机复盘确认
+> 它已造成 **28 天静默数据丢失**（月流量每次进程重启归零），属数据面红线。
 
 
 > 设计沿用主项目安全原则：受控端零入站、无远程执行接口、全程 `HTTPS + Token` 鉴权。
@@ -91,6 +94,38 @@ powershell -ExecutionPolicy Bypass -File install.ps1 `
 | `INTERVAL` | 上报间隔（秒，最小 5） | `15` |
 | `PROBE_TARGETS` | 网络质量自测目标，格式 `label:host[:port]`，逗号分隔；不填用默认三家运营商 DNS + 8.8.8.8，置空关闭。目标写在本地，服务端不可下发 | 默认开启 |
 | `STATE_FILE` | 月流量累计状态文件 | 脚本目录 `state.json` |
+
+## 排障：月流量每到重启就归零 / `state.json` 写不进去
+
+**症状**：仪表盘上该节点的 `net_rx_month` / `net_tx_month` 每次 agent 进程重启（含开机重启）
+都从小数值重新增长；`state.json` 的修改时间长期不变。
+
+**根因（2026-10-13 真机确认）**：以**管理员** PowerShell 运行 `install.ps1` 时，自举创建的
+`%ProgramData%\diting-agent` 及其中的文件属主是 `Administrators`、ACL 只给 `BUILTIN\Users`
+读权限；而 agent 由计划任务以登录用户的**常规权限**运行 → 每次写 `state.json` 都是
+`PermissionError`。旧实现的写失败只打 `log.debug`（默认日志级别 WARNING），因此无声无息。
+
+**自查**（cmd）：
+
+```cmd
+type C:\ProgramData\diting-agent\state.json
+dir /q C:\ProgramData\diting-agent\state.json
+icacls C:\ProgramData\diting-agent\state.json
+python -c "open(r'C:\ProgramData\diting-agent\state.json','a').close(); print('WRITE OK')"
+```
+
+**修复**（管理员 cmd，一次性；只授权这一个目录，不改变 agent 的运行身份）：
+
+```cmd
+icacls "C:\ProgramData\diting-agent" /grant "%USERDOMAIN%\%USERNAME%:(OI)(CI)M" /T
+```
+
+随后重启任务：`schtasks /end /tn HostMonitorAgent-<AgentId>` → `schtasks /run /tn HostMonitorAgent-<AgentId>`。
+修复后首次启动若读到已跨月的旧状态会清零一次（预期行为），此后跨重启应保持连续。
+
+> 权限口径与 Linux 版一致：`install.sh` 是 `chown -R diting:diting /var/lib/diting`
+> （安装期提权、运行期非提权），Windows 侧对应「安装期 `icacls` 授权 + 计划任务常规权限运行」。
+> 本仓库的 `install.ps1` 已内置这一步（第 0b 步）；老安装按上面命令手动补一次即可。
 
 ## 网络与防火墙
 
