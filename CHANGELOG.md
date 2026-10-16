@@ -18,6 +18,10 @@
   在 Windows 被解析为 `C:\data\state.json`（不在授权目录内、非管理员亦无权写入）。
   现显式设 `STATE_FILE=%ProgramData%\diting-agent\state.json`，与 Python 版同路径、可复用。
   **升级既有 Go Windows 节点会有一次月流量归零**（状态文件路径迁移，属预期一次性）。
+- **新增隐藏启动器 `run_hidden.vbs`**：解决"手动启动弹窗、关窗即停"。计划任务已在
+  session 0 运行（无窗口）；但直接双击 `run_scheduled.bat` 会留下 cmd 窗口，关窗即杀
+  agent。现安装器额外生成 `run_hidden.vbs`（`WScript.Shell.Run "cmd /c …", 0` 隐藏窗口），
+  手动启动请用它或 `Start-ScheduledTask`，**勿直接双击 bat**。
 
 > 待 Windows 真机验证：任务以 LocalService 注册并启动成功、agent 能写 state.json、
 > 磁盘IO/进程数/温度三个 PDH 字段有值、OS 名称正常。
