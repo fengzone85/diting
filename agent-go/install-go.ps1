@@ -102,6 +102,7 @@ set SERVER_URL=$ServerUrl
 set AGENT_ID=$AgentId
 set AGENT_TOKEN=$AgentToken
 set INTERVAL=$Interval
+set STATE_FILE=$InstallDir\state.json
 $ptLine
 "$exe"
 "@
