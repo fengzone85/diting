@@ -3,7 +3,8 @@
 .SYNOPSIS
     Diting Agent (Go) Windows installer: download exe + scheduled task.
 .DESCRIPTION
-    Scheduled task with -AtStartup (boots without login) running as SYSTEM,
+    Scheduled task with -AtStartup (boots without login) running as LocalService
+    (least-privilege; dir ACL granted via icacls at install time),
     auto-restart (10 x 1min), single-instance (IgnoreNew + in-bat guard).
     This fixes all three flaws of the Python installer (instance stacking,
     crash exhaustion, login-required startup).
@@ -42,6 +43,15 @@ if ($ServerUrl -notmatch '^https://') {
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
+# M3 §4.6: explicitly grant the scheduled-task run account Modify on the install
+# dir. The dir is created by this (elevated) installer, so by default only
+# SYSTEM/Administrators can write it — a non-admin run account would hit the same
+# silent state-write failure that broke the Python agent. Granting LocalService
+# here closes that class of bug regardless of how the dir was created.
+# S-1-5-19 = NT AUTHORITY\LocalService. (OI)(CI) = inherit to subfiles/subdirs.
+icacls "$InstallDir" /grant "*S-1-5-19:(OI)(CI)(M)" /Q | Out-Null
+Write-Host '[OK] ACL: LocalService granted Modify on install dir'
+
 # 1. Download exe + SHA256 verify
 $exe = Join-Path $InstallDir 'diting-agent.exe'
 Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
@@ -79,7 +89,7 @@ $ptLine
 [IO.File]::WriteAllText($bat, $cont, (New-Object Text.UTF8Encoding($false)))
 Write-Host "[OK] run.bat written"
 
-# 3. Scheduled task: AtStartup + SYSTEM + auto-restart + single instance.
+# 3. Scheduled task: AtStartup + LocalService + auto-restart + single instance.
 # Task name stays HostMonitorAgent-<id> (same as the Python installer) so the
 # server-side modify command's Stop/Start-ScheduledTask keeps targeting it.
 $taskName = "HostMonitorAgent-$AgentId"
@@ -90,8 +100,8 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
     -MultipleInstances IgnoreNew -Hidden
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -User 'SYSTEM' -RunLevel Highest -Settings $settings -Force | Out-Null
-Write-Host "[OK] scheduled task '$taskName' registered (AtStartup/SYSTEM, restart 10x1min, single-instance)"
+    -User 'LocalService' -RunLevel Limited -Settings $settings -Force | Out-Null
+Write-Host "[OK] scheduled task '$taskName' registered (AtStartup/LocalService, restart 10x1min, single-instance)"
 
 # 4. Start now
 Start-ScheduledTask -TaskName $taskName
