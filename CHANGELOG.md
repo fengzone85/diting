@@ -2,6 +2,26 @@
 
 > **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
 
+## 2026-10-16 Windows 受控端安装器：最小权限运行（LocalService）+ 状态文件路径修正
+
+### ⚠️ 行为变更
+
+- **Go Windows 安装器的计划任务运行账户由 `SYSTEM` 改为 `LocalService`（最小权限）**。
+  原因：以完整 SYSTEM 常驻违背「提权只用于安装、agent 只在自身权限内运行」的原则。
+  做法对齐 Linux 版（安装期以 root 建目录/授权 → 运行时以非 root `diting` 跑）：
+  安装期由管理员 `icacls` 显式授予 LocalService 对 `%ProgramData%\diting-agent` 的
+  Modify 权限（`(OI)(CI)(M)`），并加入系统内置「Performance Monitor Users」组，
+  以保证 PDH 计数器（`\PhysicalDisk`、`\System\Processes`、`\Thermal Zone Information`）可读。
+  **不新建专用本地账户**：专用账户需口令管理、「作为批处理作业登录」权、卸载残留清理，
+  反而增加用户排障成本（对照：Komari 的 Windows 受控端直接以 SYSTEM 运行，无专用账户先例）。
+- **修复状态文件路径**：安装器此前未设 `STATE_FILE`，Go 端默认 `/data/state.json`
+  在 Windows 被解析为 `C:\data\state.json`（不在授权目录内、非管理员亦无权写入）。
+  现显式设 `STATE_FILE=%ProgramData%\diting-agent\state.json`，与 Python 版同路径、可复用。
+  **升级既有 Go Windows 节点会有一次月流量归零**（状态文件路径迁移，属预期一次性）。
+
+> 待 Windows 真机验证：任务以 LocalService 注册并启动成功、agent 能写 state.json、
+> 磁盘IO/进程数/温度三个 PDH 字段有值、OS 名称正常。
+
 ## 2026-10-12 Windows 受控端：磁盘 IO 恢复 + 新增进程数/温度采集（红线修订）
 
 ### ⚠️ 行为变更
@@ -45,7 +65,7 @@
    Python 三件套。存量 Python 节点执行 `--update-agent` 会迁移到 Go 版
    （agent.env 身份与月流量 state 保留）。
 2. **Windows 一键命令切换为 `agent-go/install-go.ps1`**：计划任务形态升级——
-   AtStartup（开机即启，无需登录）、SYSTEM 运行、自动重启 10×1min、
+   AtStartup（开机即启，无需登录）、LocalService 最小权限运行（2026-10-16 起修正，原为 SYSTEM）、自动重启 10×1min、
    **单实例互斥**（MultipleInstances=IgnoreNew + bat 内 tasklist 守卫），
    修复 Python 版「重复安装叠加实例 / 连崩躺平 / 重启需登录」三缺口。
 3. **Docker 形态切换为 Go scratch 镜像**（~7.5MB，多阶段构建；`USER 1000` +
