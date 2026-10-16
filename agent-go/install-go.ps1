@@ -52,6 +52,26 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 icacls "$InstallDir" /grant "*S-1-5-19:(OI)(CI)(M)" /Q | Out-Null
 Write-Host '[OK] ACL: LocalService granted Modify on install dir'
 
+# Least-privilege parity with the Linux agent (which reads /proc as a normal user):
+# the run account also needs read access to the PDH performance counters the agent
+# uses (\PhysicalDisk, \System\Processes, \Thermal Zone Information). Standard users
+# can read these, but LocalService is not a member of "Users", so grant the
+# purpose-built "Performance Monitor Users" role (well-known SID S-1-5-32-558,
+# locale-independent). Idempotent and non-fatal: any counter that still can't be
+# read degrades gracefully to 0/nil rather than failing the install.
+try {
+    $perfGroup = Get-LocalGroup -SID 'S-1-5-32-558' -ErrorAction Stop
+    $alreadyMember = Get-LocalGroupMember -Group $perfGroup.Name -ErrorAction Stop |
+        Where-Object { $_.SID.Value -eq 'S-1-5-19' }
+    if (-not $alreadyMember) {
+        $lsName = (New-Object System.Security.Principal.SecurityIdentifier('S-1-5-19')).Translate([System.Security.Principal.NTAccount]).Value
+        Add-LocalGroupMember -Group $perfGroup.Name -Member $lsName -ErrorAction Stop
+        Write-Host '[OK] LocalService granted perf-counter read (Performance Monitor Users)'
+    }
+} catch {
+    Write-Warning "Could not grant LocalService perf-counter read: $($_.Exception.Message)"
+}
+
 # 1. Download exe + SHA256 verify
 $exe = Join-Path $InstallDir 'diting-agent.exe'
 Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
