@@ -110,6 +110,16 @@ $ptLine
 [IO.File]::WriteAllText($bat, $cont, (New-Object Text.UTF8Encoding($false)))
 Write-Host "[OK] run.bat written"
 
+# Convenience hidden launcher for MANUAL starts. The scheduled task already runs in
+# session 0 (no console window); this is only for the "double-click to start" case.
+# Running run_scheduled.bat directly opens a cmd window, and closing it kills the
+# agent (console close = CTRL_CLOSE to the whole process tree). run_hidden.vbs
+# launches it with window style 0 (hidden).
+$vbs = Join-Path $InstallDir 'run_hidden.vbs'
+$vbsCont = 'CreateObject("WScript.Shell").Run "cmd /c ""{0}""", 0, False' -f $bat
+[IO.File]::WriteAllText($vbs, $vbsCont, (New-Object Text.UTF8Encoding($false)))
+Write-Host "[OK] hidden launcher written: $vbs"
+
 # 3. Scheduled task: AtStartup + LocalService + auto-restart + single instance.
 # Task name stays HostMonitorAgent-<id> (same as the Python installer) so the
 # server-side modify command's Stop/Start-ScheduledTask keeps targeting it.
@@ -133,3 +143,4 @@ Write-Host ''
 Write-Host '=== install done (Go) ==='
 Write-Host "  config: $bat   exe: $exe"
 Write-Host "  uninstall: Unregister-ScheduledTask -TaskName $taskName; Remove-Item -Recurse '$InstallDir'"
+Write-Host "  manual start: wscript '$vbs'   (do NOT double-click run_scheduled.bat)"
