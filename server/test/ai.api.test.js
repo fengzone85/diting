@@ -17,6 +17,14 @@ process.env.PORT = '0';
 process.env.ADMIN_ALLOW_HTTP = '1';
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'itest-admin-token-0123456789abcdef';
 process.env.DB_PATH = '/tmp/diting-ai-api-test.db';
+// 禁服真实通知：.env 的 SMTP 占位符经 dotenv 注入后会激活邮件通道，使测试真实
+// 联网连接 smtp.qq.com。dotenv 不覆盖已设 env，显式置空即可关闭邮件通道。
+process.env.SMTP_USER = '';
+process.env.SMTP_PASS = '';
+// 显式隔离：dotenv 会加载仓库 .env，若其中设置了 AI_KEY_FROM_ENV=1 且无
+// AI_API_KEY，PUT /api/ai/config 的启用校验会走 env 分支而 400。测试固定用
+// DB 密钥路径，不依赖 .env 内容。
+process.env.AI_KEY_FROM_ENV = '0';
 
 const { test, after } = require('node:test');
 const assert = require('node:assert');
