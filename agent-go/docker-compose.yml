@@ -33,6 +33,15 @@ services:
     #                  /host/data 等条目，disk.go 逐条 statvfs 得到多盘指标
     # 若去掉此挂载：disk_list 永远空、disk_info 回退到容器存储。
     # agent 只做 statvfs + 只读采集 /proc，不存在可被远程利用的读取路径。
+    #
+    # 安全说明（审查 B1）：该挂载使 agent（uid 1000、cap_drop ALL）可读宿主任一
+    # uid≤1000 可读文件；利用前提是 agent 自身被攻破，属纵深防御缺口而非直接
+    # 利用面。需进一步收窄时可改用「按 /hostproc/mounts 逐盘 bind」：
+    #   -v /proc:/hostproc:ro -v /:/host:ro → -v /proc:/hostproc:ro \
+    #   -v /data:/host/data:ro -v /boot:/host/boot:ro …
+    #   （disk.go 在 DISK_PATH=/host 时优先读 /hostproc/mounts，各 /host/... 路径
+    #     bind 可达即可正常统计多盘；切勿改用 /proc/1/mounts——无 pid:host 时
+    #     读到的是容器自己的 init，拿不到宿主挂载表）
     volumes:
       - /:/host:ro
       # 月流量状态持久化（state.json；与 Python 版卷通用，格式一致）

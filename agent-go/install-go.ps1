@@ -52,6 +52,21 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 icacls "$InstallDir" /grant "*S-1-5-19:(OI)(CI)(M)" /Q | Out-Null
 Write-Host '[OK] ACL: LocalService granted Modify on install dir'
 
+# 审查 B2：移除本地用户对安装目录的读取权。run_scheduled.bat 明文存放 AGENT_TOKEN
+# （见下方写入），而 %ProgramData% 子目录默认继承的 ACL 允许任意本地交互用户
+# （Users / Authenticated Users）读取——等同把令牌交给同机所有用户，可借此伪装
+# agent 向服务端上报伪造指标。做法：禁用继承后显式只授予三个账号（均含 (OI)(CI)
+# 继承到子文件，保证后续写入的 bat/exe 同样受保护），再移除 Users 与
+# Authenticated Users。SID：S-1-5-18=SYSTEM，S-1-5-32-544=Administrators，
+# S-1-5-19=LocalService，S-1-5-11=Authenticated Users，S-1-5-32-545=Users。
+icacls "$InstallDir" /inheritance:r /Q | Out-Null
+icacls "$InstallDir" /grant "*S-1-5-18:(OI)(CI)(F)" /Q | Out-Null
+icacls "$InstallDir" /grant "*S-1-5-32-544:(OI)(CI)(F)" /Q | Out-Null
+icacls "$InstallDir" /grant "*S-1-5-19:(OI)(CI)(M)" /Q | Out-Null
+icacls "$InstallDir" /remove:g "*S-1-5-11" /Q | Out-Null
+icacls "$InstallDir" /remove:g "*S-1-5-32-545" /Q | Out-Null
+Write-Host '[OK] ACL: Users/Authenticated Users read removed (SYSTEM/Administrators/LocalService only)'
+
 # Least-privilege parity with the Linux agent (which reads /proc as a normal user):
 # the run account also needs read access to the PDH performance counters the agent
 # uses (\PhysicalDisk, \System\Processes, \Thermal Zone Information). Standard users

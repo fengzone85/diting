@@ -30,6 +30,7 @@ Usage: sudo bash install.sh [OPTIONS]
   --token TOKEN          Agent token (required unless --setup-token)
   --token-file FILE      Read token from file
   --setup-token SECRET   One-click self-registration (needs python3)
+  --setup-token-file FILE  Read setup token from FILE (avoids ps/history exposure)
   --setup-name NAME      Node display name
   --interval SECONDS     Report interval (default 20)
   --probe-targets LIST   label:host[:port] comma-separated
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
         --token) AGENT_TOKEN="$2"; shift 2 ;;
         --token-file) AGENT_TOKEN_FILE="$2"; shift 2 ;;
         --setup-token) SETUP_TOKEN="$2"; shift 2 ;;
+        --setup-token-file) SETUP_TOKEN_FILE="$2"; shift 2 ;;
         --setup-name) SETUP_NAME="$2"; shift 2 ;;
         --interval) INTERVAL="$2"; shift 2 ;;
         --probe-targets) PROBE_TARGETS="$2"; shift 2 ;;
@@ -79,12 +81,26 @@ if [[ -z "${AGENT_TOKEN:-}" && -n "${AGENT_TOKEN_FILE:-}" ]]; then
     [[ -f "$AGENT_TOKEN_FILE" ]] || { echo -e "${RED}[error] token file missing${NC}" >&2; exit 1; }
     AGENT_TOKEN="$(tr -d '[:space:]' < "$AGENT_TOKEN_FILE")"
 fi
+if [[ -z "${SETUP_TOKEN:-}" && -n "${SETUP_TOKEN_FILE:-}" ]]; then
+    [[ -f "$SETUP_TOKEN_FILE" ]] || { echo -e "${RED}[error] setup token file missing${NC}" >&2; exit 1; }
+    SETUP_TOKEN="$(tr -d '[:space:]' < "$SETUP_TOKEN_FILE")"
+fi
 if [[ -n "${SETUP_TOKEN:-}" ]]; then
     [[ -n "${SERVER_URL:-}" ]] || { echo -e "${RED}[error] --setup-token needs --server${NC}" >&2; exit 1; }
     validate_server_url "$SERVER_URL" || exit 1
     command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[error] --setup-token needs python3${NC}" >&2; exit 1; }
     echo -e "${YELLOW}[info] self-registering...${NC}"
-    REG_JSON="$(curl -fsSL -X POST -H 'Content-Type: application/json' -d "{\"setup_token\":\"${SETUP_TOKEN}\",\"name\":\"${SETUP_NAME:-}\"}" "${SERVER_URL%/}/api/setup/register")"
+    # 审查 B4：SETUP_TOKEN 不再出现在 curl 命令行（ps 对同机所有用户可见）。
+    # 改为经环境变量交给 python 写入 600 权限临时文件，curl 以 --data @file 发送，
+    # 用完即删。环境变量只存在于 /proc/PID/environ（同 uid/root 可读），不进 ps。
+    REGFILE="$(mktemp)"; chmod 600 "$REGFILE"
+    SETUP_TOKEN="$SETUP_TOKEN" SETUP_NAME="${SETUP_NAME:-}" REGFILE="$REGFILE" python3 - <<'PYEOF'
+import json, os
+with open(os.environ["REGFILE"], "w") as f:
+    json.dump({"setup_token": os.environ["SETUP_TOKEN"], "name": os.environ.get("SETUP_NAME", "")}, f)
+PYEOF
+    REG_JSON="$(curl -fsSL -X POST -H 'Content-Type: application/json' --data @"$REGFILE" "${SERVER_URL%/}/api/setup/register")"
+    rm -f "$REGFILE"
     AGENT_ID="$(echo "$REG_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("agent_id",""))')"
     AGENT_TOKEN="$(echo "$REG_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("agent_token",""))')"
     [[ -n "$AGENT_ID" && -n "$AGENT_TOKEN" ]] || { echo -e "${RED}[error] registration failed: ${REG_JSON}${NC}" >&2; exit 1; }
