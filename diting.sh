@@ -879,6 +879,10 @@ do_backup() {
         echo -e "       $(msg "bk.space_hint")" >&2
         return 1
     fi
+    # 审查 G3：备份含 2FA secret / SMTP 密码 / Telegram token / AI key 等全部凭据
+    # （monitor.db 不加密），cp/docker cp 产物默认跟随 umask（常为 644，同机其他
+    # 用户可读）。落盘即收紧为仅属主可读写。
+    chmod 600 "$out_path" 2>/dev/null || true
 
     # ── 压缩（A）：SQLite 含大量空闲页且内容为高重复数值，实测压到约 20% ────
     # 压缩器选择（实测 200MB 采样 / 4 核）：pigz -6 = 2.0s/41M，gzip -6 = 7.2s/41M，
@@ -906,6 +910,8 @@ do_backup() {
     fi
 
     local sz; sz="$(du -h "$final_path" | cut -f1)"
+    # 压缩产物（gzip -c > 重定向创建）同样收紧为 600
+    chmod 600 "$final_path" 2>/dev/null || true
     echo -e "${GREEN}[OK]   备份完成: ${final_path} (${sz})${NC}"
     echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
     # 同步一份到后台可见目录（供网页列表/下载），未配置则跳过
@@ -1088,6 +1094,8 @@ sync_to_visible_dir() {
     # 且它只服务于「宿主侧手动回滚」这一场景，无需在网页里下载。
     [[ "$(basename "$src")" == pre_restore_* ]] && return 0
     cp -f "$src" "$dst/" 2>/dev/null || true
+    # 审查 G3：可见目录副本同样含全部凭据，权限与源一致收紧为 600
+    chmod 600 "$dst/$(basename "$src")" 2>/dev/null || true
 }
 
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
