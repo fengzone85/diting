@@ -2,6 +2,27 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-18 Token 强度判定收敛：弱 ADMIN_TOKEN 全入口失效 + READONLY_TOKEN 告警
+
+### ⚠️ 行为变更
+
+- **弱 `ADMIN_TOKEN` 现在在所有入口都失效**：示例占位符 `change-me-admin-token` 与短于 16 位的值，
+  统一由新增的 `server/src/token-policy.js` 判定为「未设置」。此前管理接口已拒绝，但
+  `GET /metrics` 直接比对原始 `process.env.ADMIN_TOKEN`，弱值仍可拉取指标；现两者一致返回 `401`。
+  若线上确在使用 <16 位 Token，升级后 `/metrics` 需改用强值：
+  `sudo bash diting.sh --reset-admin-token`（生成 `adm_` + 48 位 hex，并重启服务）。
+- **启动日志分档**：不再把「占位符 / 过短」误报成「未设置」，明确提示已被忽略、将走 Web
+  初始化向导，并给出 `openssl rand -hex 32`。日志只打印长度，不打印 Token 内容。
+
+### 改进
+
+- `READONLY_TOKEN` 增加启动期强度告警（占位符 / <16 位），仍保持「生效但不阻断」，
+  避免存量部署升级后突然失去只读访问；该 Token 可读全部节点指标、备份列表与客户端 IP
+  诊断，弱值应尽快轮换。
+- Token 判定由 `server.js` / `auth.js` / `api.js` 三份副本收敛为 `src/token-policy.js`；
+  新增 `test/token-policy.test.js`（判定四态、阈值、断言复用同一函数引用）与
+  `test/metrics-token.test.js`（`/metrics` 拒绝弱值与占位符）。
+
 ## 2026-10-16 Windows 受控端安装器：最小权限运行（LocalService）+ 状态文件路径修正
 
 ### ⚠️ 行为变更

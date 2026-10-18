@@ -15,7 +15,7 @@ description: 服务端与受控端环境变量参考
 | `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**——未设或过弱时首次访问走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥。⚠️ 生产务必设为随机长字符串（`openssl rand -hex 32`），留空则每次重启随机、所有已登录会话失效 |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口） |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口）。建议 ≥16 位随机值；占位符 / 过短时启动告警（仍生效），因其可读全部节点指标与备份列表 |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌（`--setup-token` 用） |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 数据库路径 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |

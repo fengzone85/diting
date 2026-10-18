@@ -13,7 +13,7 @@ const ai = require('./src/ai');
 const { safeEqual, ipWhitelist, resolveRole } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
-const { tokenIssue, MIN_LEN } = require('./src/token-policy');
+const { getAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
 // 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
 // 真正的修复是把 async 路由套 asyncHandler（见 src/util.js）；此处只是最后兜底。
@@ -106,6 +106,16 @@ if (!ADMIN_TOKEN_ISSUE) {
   console.warn(`[warn] ADMIN_TOKEN 长度不足 ${MIN_LEN} 位（当前 ${String(process.env.ADMIN_TOKEN).length} 位），已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。`);
 }
 
+// READONLY_TOKEN（可选）：鉴权侧目前接受任意非空值（auth.js 只做恒定时间比较），
+// 因此过短/占位符仍会生效。此处只告警、不阻断，避免存量部署升级后突然失去只读访问；
+// 但它能读取全部节点指标与备份列表，弱值等于公开数据，必须提示轮换。
+const READONLY_TOKEN_ISSUE = tokenIssue(process.env.READONLY_TOKEN);
+if (READONLY_TOKEN_ISSUE === 'placeholder') {
+  console.warn('[warn] READONLY_TOKEN 仍是示例占位符 change-me-admin-token：虽会生效，但等于公开只读数据，请改为随机强值（openssl rand -hex 32）。');
+} else if (READONLY_TOKEN_ISSUE === 'too_short') {
+  console.warn(`[warn] READONLY_TOKEN 强度不足（仅 ${String(process.env.READONLY_TOKEN).length} 位）：虽会生效，但存在被枚举风险，建议改为随机强值（openssl rand -hex 32）。`);
+}
+
 // 启动期安全校验（审查 G1/G2）：
 //   G2 — ADMIN_ALLOW_HTTP=1 会放行非 HTTPS 管理请求并去掉会话 Cookie 的 Secure 标志
 //        （见 src/auth.js requireProto / setSessionCookie），仅限本地开发临时使用。
@@ -164,12 +174,15 @@ app.get('/metrics', (req, res) => {
   });
 });
 function _metricsHandler(req, res) {
-  if (!process.env.ADMIN_TOKEN) {
+  // 与后台管理接口同一口径：占位符 / <16 位视为不可用，不能只在这里接受原始 env，
+  // 否则弱 ADMIN_TOKEN 仍可凭 /metrics 枚举数据（后台却已拒绝）。
+  const adminToken = getAdminToken();
+  if (!adminToken) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 ADMIN_TOKEN not configured');
   }
   const auth = req.header('Authorization') || '';
   const t = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!t || !safeEqual(t, process.env.ADMIN_TOKEN)) {
+  if (!t || !safeEqual(t, adminToken)) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 Unauthorized');
   }
   const agents = db.getAgents();
@@ -317,7 +330,6 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
 
 // 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
 app.get('/setup.html', (req, res) => {
-  const { getAdminToken } = require('./src/auth');
   if (getAdminToken()) {
     return res.redirect(302, '/admin');
   }
