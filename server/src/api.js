@@ -12,6 +12,8 @@ const alerts = require('./alerts');
 const backups = require('./backups');
 const { daysUntil, asyncHandler } = require('./util');
 const { nextExpire } = require('./renew');
+// Admin Token 唯一来源与强度判定：统一在 ./token-policy（与 auth.js / server.js 共用）。
+const { getAdminToken } = require('./token-policy');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
 // 纯 IP / 无点则原样，避免误截。例：pt5.521.be -> pt5；192.168.1.10 -> 原样。
@@ -75,12 +77,6 @@ const loginRateLimit = (req, res, next) => {
 
 // ---- helpers ----
 const { num, str, validateReport, sanitizeCss } = require('./validate');
-// Admin Token 唯一来源：环境变量 ADMIN_TOKEN（与 auth.js 保持一致）。
-function getAdminToken() {
-  const t = process.env.ADMIN_TOKEN;
-  if (t && t !== 'change-me-admin-token' && t.length >= 16) return t;
-  return '';
-}
 
 // ---- 首次部署初始化向导 ----
 router.get('/setup/status', (req, res) => {
