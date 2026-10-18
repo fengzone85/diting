@@ -1,6 +1,6 @@
 # Changelog
 
-> **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
+> **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
 ## 2026-10-16 Windows 受控端安装器：最小权限运行（LocalService）+ 状态文件路径修正
 
@@ -384,15 +384,18 @@
 ## P3：Prometheus /metrics 导出（2026-07-09）
 
 - **`GET /metrics`（Prometheus 文本格式）**（`server/server.js`）：导出每个 Agent 的最新 CPU / 内存 / 磁盘 / 负载 / 网络速率与累计量 / 运行时长，以及 `monitor_up`（复用 `OFFLINE_THRESHOLD_SEC` 判定在线）。便于直接喂给 Grafana + Prometheus 做仪表盘与告警，无需轮询 JSON API。
-- **鉴权**：`/metrics` 与后台一致使用 `Authorization: Bearer <ADMIN_TOKEN>`（恒定时间比较），不强制 https，方便内网抓取；未携带有效 Token 返回 401。
+- **鉴权**：`/metrics` 与后台一致使用 `Authorization: Bearer <ADMIN_TOKEN>`（恒定时间比较），未携带有效 Token 返回 401。
+  > **后续修订**：该端点现已**默认强制 HTTPS**（M-2 修复，`server/server.js:151-157`，仅 `ADMIN_ALLOW_HTTP=1` 放行明文），并受管理端 IP 白名单约束（M-4）；本条「不强制 https，方便内网抓取」的描述已过时。另 `/metrics` **不认** `READONLY_TOKEN`。
 - 指标名带单位后缀（`_bytes` / `_percent` / `_seconds`），label 为 `agent` 与 `name`（已转义），符合 Prometheus exposition 规范。
 
 ## P2 改进：Express 5 / 镜像固定 / 变量化邮箱 / 应用层限流（2026-07-09）
 
 - **升级 Express 5**（`server/package.json`）：`express` 由 `^4.19.2` 升到 `^5.0.0`（Express 4 已 EOL）。本项目仅使用稳定 API（简单 `:id` 路由、`express.json`、静态托管），迁移无破坏性改动；需 `npm install` 重新安装依赖并重建镜像。
+  > **勘误（2026-10-16 核对）**：该升级**实际未落地**——`server/package.json` 仍为 `"express": "^4.21.0"`。如需升级请作为独立变更重新评估。
 - **Dockerfile 固定基础镜像版本**（`server/Dockerfile`）：`FROM node:22-slim` → `node:22.21.1-slim`，避免不同时间构建的镜像 Node 小版本漂移。
 - **compose 邮箱占位符变量化**（`server/docker-compose.yml`）：`SMTP_USER/ALERT_FROM/ALERT_TO` 改为 `${...}`（与现有 `ADMIN_TOKEN` 一致），由运行环境 / `.env` 注入，消除硬编码占位。`cp .env.example .env` 后 compose 会自动插值，行为不变。
 - **应用层 Admin 限流（兜底）**（`server/src/api.js` + `server.js`）：新增每 IP 每 10s 20 次的固定窗口限流，作用于除 `/report` 外的全部 `/api` 路由；并设 `app.set('trust proxy', true)` 使 `req.ip` 在 Nginx 后取真实客户端 IP，不再完全依赖 Nginx 限流（S7）。
+  > **后续修订（H-02，2026-09-10）**：`trust proxy` 已由 `true` 收紧为**默认只信任 loopback**（含 `::ffff:` 映射形态的自研判定），反代在其它主机 / 容器时须显式设 `TRUST_PROXY`。原因是 `8081` 可被直连时，客户端可自造 `X-Forwarded-For` 绕过 IP 白名单与限流、自造 `X-Forwarded-Proto: https` 让管理接口走明文 HTTP。详见 `server/server.js:44-76` 与文档《环境变量》。
 
 ## P1 改进：Token 重置 / 告警态清理 / sparkline 批量（2026-07-09）
 

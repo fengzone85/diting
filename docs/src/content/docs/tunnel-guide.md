@@ -90,7 +90,7 @@ sudo ufw enable
 Tailscale 流量经其 DERP 中继或 P2P，依赖**出站** UDP（及到 `derp.tailscale.com` 的出站），不占用入站端口。
 
 ### 3. 访问与上报都走 Tailscale 地址
-- 仪表盘：浏览器打开 `http://<vps-magic-dns>:8081`（如 `http://vps-monitor.tailnet-name.ts.net:8081`）。
+- 仪表盘：浏览器打开 `http://<vps-magic-dns>:8081`（如 `http://vps-monitor.tailnet-name.ts.net:8081`）。注意根目录 `docker-compose.yml` 把 8081 绑在 `127.0.0.1` 上，Tailscale 网卡地址不在回环，需二选一：① 按本文前面的反代方案让 Nginx 监听 Tailscale 接口并加 TLS；② 把 compose 端口改成 `"<tailscale-ip>:8081:8081"` 显式绑到网卡（不建议对公网开放）。
 - 受控端 agent：上报地址用 Tailscale 地址即可，但 **agent 强制 HTTPS**（非 localhost 的 `http://` 会直接拒绝启动），需配证书。推荐让 Nginx + TLS 监听 Tailscale 接口，agent 用 `https://<vps-magic-dns>` 上报；或直接用 `--network host` + `SERVER_URL=http://localhost:8081`（仅本机 agent 适用）。
 - admin token、agent token 照常填，认证逻辑不变。
 
