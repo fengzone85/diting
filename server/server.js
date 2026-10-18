@@ -13,7 +13,7 @@ const ai = require('./src/ai');
 const { safeEqual, ipWhitelist, resolveRole } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
-
+const { tokenIssue, MIN_LEN } = require('./src/token-policy');
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
 // 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
 // 真正的修复是把 async 路由套 asyncHandler（见 src/util.js）；此处只是最后兜底。
@@ -93,12 +93,17 @@ app.use((req, res, next) => {
 });
 
 // 启动期安全校验：Admin Token 过弱等于把后台钥匙留在门上。
-// 如果 .env 未设 ADMIN_TOKEN，首次访问时走 Web 初始化向导生成 Token（保存到 ./data/admin_token.txt）。
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-if (ADMIN_TOKEN && ADMIN_TOKEN !== 'change-me-admin-token' && ADMIN_TOKEN.length >= 16) {
+// 判定口径见 src/token-policy（示例占位符 / 短于 16 位一律视为不可用，等同未设置）。
+// 未设置或不可用时，首次访问走 Web 初始化向导；向导生成的 Token 会写入 .env（600）。
+const ADMIN_TOKEN_ISSUE = tokenIssue(process.env.ADMIN_TOKEN);
+if (!ADMIN_TOKEN_ISSUE) {
   console.log('[info] ADMIN_TOKEN 已从 .env 读取');
+} else if (ADMIN_TOKEN_ISSUE === 'missing') {
+  console.warn('[warn] 未设置 ADMIN_TOKEN：首次访问将走 Web 初始化向导生成。');
+} else if (ADMIN_TOKEN_ISSUE === 'placeholder') {
+  console.warn('[warn] ADMIN_TOKEN 仍是示例占位符 change-me-admin-token，已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。');
 } else {
-  console.warn('[warn] .env 中未设置 ADMIN_TOKEN，首次访问将走 Web 初始化向导。');
+  console.warn(`[warn] ADMIN_TOKEN 长度不足 ${MIN_LEN} 位（当前 ${String(process.env.ADMIN_TOKEN).length} 位），已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。`);
 }
 
 // 启动期安全校验（审查 G1/G2）：

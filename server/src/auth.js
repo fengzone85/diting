@@ -4,11 +4,8 @@ const db = require('./db');
 const totp = require('./totp');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
-function getAdminToken() {
-  const t = process.env.ADMIN_TOKEN;
-  if (t && t !== 'change-me-admin-token' && t.length >= 16) return t;
-  return '';
-}
+// 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
+const { getAdminToken } = require('./token-policy');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
