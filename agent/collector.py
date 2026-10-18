@@ -322,6 +322,21 @@ def parse_probe_targets(spec):
     return out
 
 
+def _valid_probe_host(host):
+    """探测目标主机名/IP 格式校验（审查 B5）。
+
+    host 来自本地 PROBE_TARGETS 配置（服务端不可下发），注入面小，但以 `-`
+    开头的误配值会被 ping 当作选项解析（如 `-n` 改变行为、`--help` 等）。
+    放行：域名（字母数字点连字符）、IPv4、IPv6（含冒号）；拒绝：空、超长、
+    以 `-` 开头、含空白/Shell 元字符/其他非法字符。
+    """
+    if not host or len(host) > 253:
+        return False
+    if host.startswith('-'):
+        return False
+    return re.fullmatch(r'[A-Za-z0-9._:\-]+', host) is not None
+
+
 def probe_one(host, port=443, timeout=2.5, retries=3):
     """Measure RTT (ms) + packet loss to host. Prefer ICMP (system ping); fall back to TCP.
 
@@ -330,6 +345,11 @@ def probe_one(host, port=443, timeout=2.5, retries=3):
     即视为可达并返回平均延迟，避免单次抖动把运营商 DNS 判为中断。
     TCP 回退依次尝试 443 / 80 / 目标端口，loss 按重试失败比例计。
     返回 (ms: float|None, ok: bool, loss: int)。纯网络自测，只采 RTT/可达性/丢包，不采主机指纹。"""
+    # 审查 B5：主机名格式非法（如以 - 开头会被 ping 当选项解析）直接判不可达，
+    # 不进入 ICMP/TCP 路径。host 来自本地配置，此处防的是操作员误配。
+    if not _valid_probe_host(host):
+        log.debug("invalid probe host %r", host)
+        return None, False, 100
     def _icmp():
         if shutil.which('ping'):
             try:

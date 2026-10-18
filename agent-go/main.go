@@ -102,6 +102,9 @@ func main() {
 	}
 }
 
+// lastReportAt 记录上一次上报时刻，用于计算并上报本机的实际上报间隔（审查 C-1/E2）。
+var lastReportAt time.Time
+
 // runOnce 执行一次采集 + 上报，返回本轮指标（用于自适应判断；采集失败返回 nil）。
 func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, st *state.State, probes *collector.ProbeRunner, cfg *config.Config) *collector.Metrics {
 	t0 := time.Now()
@@ -110,6 +113,15 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, s
 		log.Printf("[error] collect: %v", err)
 		return nil
 	}
+	// 审查 C-1/E2：上报本机实际上报间隔（距上次上报的秒数）。服务端用它
+	// （并结合相邻 ts 观测）校正离线阈值与 AI 超阈值时长估算；首轮无上次
+	// 时刻时留 0，服务端按"未上报"处理并回退到相邻 ts 观测。
+	if !lastReportAt.IsZero() {
+		if sec := int(time.Since(lastReportAt).Seconds()); sec > 0 {
+			m.Interval = sec
+		}
+	}
+	lastReportAt = time.Now()
 	tCollect := time.Since(t0)
 
 	// 流量累计 + 探测快照 + 序列化

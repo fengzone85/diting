@@ -69,6 +69,11 @@ type Metrics struct {
 	// 前端 Komari 兼容层 process.count 图消费此字段。
 	ProcessCount int `json:"process_count"`
 
+	// 实际上报间隔（秒；0 = 未设置，如首轮）。审查 C-1/E2：服务端据此（并结合
+	// 相邻 ts 中位数观测）校正离线阈值与 AI 超阈值时长估算——自适应模式下实际
+	// 间隔在快/慢档间变化，按 AGENT_INTERVAL 固定值估算最多偏差 3 倍。
+	Interval int `json:"interval"`
+
 	// Swap（始终发送，无 swap 时全 0）
 	SwapUsed  uint64  `json:"swap_used"`
 	SwapTotal uint64  `json:"swap_total"`

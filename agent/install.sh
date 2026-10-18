@@ -12,17 +12,23 @@ set -euo pipefail
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 
-# ── 供应链完整性（L-6）────────────────────────────────────────────────────────
-# 下载后可选 SHA256 校验，防止 GitHub CDN / 中间人投毒。
-#   download <url> <out> [expected_sha256]   期望哈希缺省则跳过校验
+# ── 供应链完整性（L-6 / 审查 B3：缺省强制）────────────────────────────────────
+# 下载后强制 SHA256 校验（缺省即失败，fail closed），防止 GitHub CDN / 中间人投毒。
+#   download <url> <out> [expected_sha256]   期望哈希缺省 = 校验失败（拒绝）
 #   download_list <base> <dir> "<f1 f2 ...>" [<"exp1,exp2,...">]
-#     —— exps 与 files 按位置一一对应；缺失/留空则该文件不校验。
+#     —— exps 与 files 按位置一一对应；缺失/留空 = 该校验失败（拒绝）。
 # 用法示例（先对已知良好版本算好哈希）：
 #   SP_AGENT_SHA256S=$(sha256sum agent.py collector.py uninstall.sh | awk '{print $1}' | paste -sd,)
+# 更强的方式（推荐）：发布物附 cosign/gpg 签名，先验签再验哈希（见 docs/agent.md）。
 sha256_of() { local f="$1"; (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | awk '{print $1}'; }
+# 审查 B3：期望哈希缺省 = 校验失败（fail closed）。此前缺省静默跳过校验，
+# 而本脚本以 root 执行（curl|sudo bash），等于对下载链路完全信任。
 verify_sha256() {
     local f="$1" exp="$2"
-    [[ -z "$exp" ]] && return 0
+    if [[ -z "$exp" ]]; then
+        echo -e "${RED}[错误] 未提供期望 SHA256，拒绝信任下载文件: $f${NC}" >&2
+        return 1
+    fi
     local got; got="$(sha256_of "$f")"
     if [[ "$got" != "$exp" ]]; then
         echo -e "${RED}[错误] 校验和不符：期望 ${exp}，实际 ${got}${NC}" >&2
@@ -93,6 +99,7 @@ Required (interactive if not given):
   --token  AGENT_TOKEN  Authentication token (visible in process list — prefer --token-file)
   --token-file FILE     Read token from FILE (recommended; avoids leaking via ps/shell history)
   --setup-token SECRET  One-click register with server SETUP_TOKEN (no need for --id/--token)
+  --setup-token-file FILE  Read setup token from FILE (avoids leaking via ps/shell history)
   --setup-name NAME     Node display name for self-registration (optional)
   --interval SECONDS    Report interval in seconds (default: 20)
   --install-agent       （兼容一键命令语义标记；本脚本即受控端安装，忽略即可）
@@ -131,6 +138,8 @@ while [[ $# -gt 0 ]]; do
             AGENT_TOKEN_FILE="$2"; shift 2 ;;
         --setup-token)
             SETUP_TOKEN="$2"; shift 2 ;;
+        --setup-token-file)
+            SETUP_TOKEN_FILE="$2"; shift 2 ;;
         --setup-name)
             SETUP_NAME="$2"; shift 2 ;;
         --help|-h) usage ;;
@@ -198,6 +207,14 @@ fi
 if [[ -z "${AGENT_TOKEN:-}" && -n "${SIMPP_TOKEN:-}" ]]; then
     AGENT_TOKEN="$SIMPP_TOKEN"
 fi
+if [[ -z "${SETUP_TOKEN:-}" && -n "${SETUP_TOKEN_FILE:-}" ]]; then
+    if [[ -f "$SETUP_TOKEN_FILE" ]]; then
+        SETUP_TOKEN="$(tr -d '[:space:]' < "$SETUP_TOKEN_FILE")"
+    else
+        echo -e "${RED}[错误] --setup-token-file 指定的文件不存在: ${SETUP_TOKEN_FILE}${NC}" >&2
+        exit 1
+    fi
+fi
 
 # ── 3c. One-click self-registration via SETUP_TOKEN ─────────────────────────────
 # 若提供 --setup-token，则向服务端自助注册，自动获得 AGENT_ID / AGENT_TOKEN，
@@ -211,10 +228,14 @@ if [[ -n "${SETUP_TOKEN:-}" ]]; then
     # 若先 POST 到 http:// 明文地址再报错，凭据已经泄漏（且无法撤回）。
     validate_server_url "$SERVER_URL" || exit 1
     echo -e "${YELLOW}[信息] 正在通过 SETUP_TOKEN 向服务端自助注册客户端…${NC}"
-    # 用 Python 标准库发 HTTPS 请求（无需额外依赖）
-    REG_JSON="$("$PYTHON" - "$SERVER_URL" "$SETUP_TOKEN" "${SETUP_NAME:-}" <<'PYEOF'
-import sys, json, urllib.request, urllib.error
-server, token, name = sys.argv[1], sys.argv[2], sys.argv[3]
+    # 用 Python 标准库发 HTTPS 请求（无需额外依赖）。
+    # 审查 B4：SETUP_TOKEN 经环境变量传入（不进 python argv——ps 对同机所有用户
+    # 可见 argv，环境变量只在 /proc/PID/environ，同 uid/root 可读）。
+    REG_JSON="$(SETUP_TOKEN="$SETUP_TOKEN" SETUP_NAME="${SETUP_NAME:-}" "$PYTHON" - "$SERVER_URL" <<'PYEOF'
+import sys, os, json, urllib.request, urllib.error
+server = sys.argv[1]
+token = os.environ["SETUP_TOKEN"]
+name = os.environ.get("SETUP_NAME", "")
 url = server.rstrip('/') + '/api/setup/register'
 payload = {"setup_token": token}
 if name:
@@ -303,8 +324,19 @@ mkdir -p /etc/diting
 # ── 6b. 自举：经管道执行时同目录无 agent.py，从仓库下载配套文件 ──────────────
 if [[ ! -f "${SCRIPT_DIR}/agent.py" ]]; then
     echo -e "${YELLOW}[信息] 同目录未找到 agent.py，将从 ${REPO} 下载配套文件…${NC}"
-    # L-6：可用 SP_AGENT_SHA256S（按 "agent.py,collector.py,uninstall.sh" 顺序的哈希逗号串）校验
-    if ! download_list "$REPO" "$SCRIPT_DIR" "agent.py collector.py uninstall.sh" "${SP_AGENT_SHA256S:-}"; then
+    # 审查 B3：供应链完整性缺省强制——未提供期望哈希串则拒绝下载。
+    # 本脚本以 root 执行，静默跳过校验等于把机器交给下载链路上任一环节。
+    # 更强的方式（推荐，见 docs/agent.md「供应链完整性」）：发布物附 cosign/gpg
+    # 签名，安装时先验签再验哈希。
+    if [[ -z "${SP_AGENT_SHA256S:-}" ]]; then
+        echo -e "${RED}[错误] 拒绝下载：未提供 SP_AGENT_SHA256S 期望校验和。${NC}" >&2
+        echo -e "       请先在可信网络下对已知良好版本计算（顺序 agent.py,collector.py,uninstall.sh）：" >&2
+        echo -e "       SP_AGENT_SHA256S=\$(sha256sum agent.py collector.py uninstall.sh | awk '{print \$1}' | paste -sd,)" >&2
+        echo -e "       然后以 SP_AGENT_SHA256S=<哈希串> sudo -E bash install.sh … 重试；" >&2
+        echo -e "       或先把仓库文件下载到本地、审阅后在本目录执行安装。${NC}" >&2
+        exit 1
+    fi
+    if ! download_list "$REPO" "$SCRIPT_DIR" "agent.py collector.py uninstall.sh" "${SP_AGENT_SHA256S}"; then
         exit 1
     fi
     echo -e "${GREEN}[OK]   已下载 agent.py / collector.py / uninstall.sh${NC}"
