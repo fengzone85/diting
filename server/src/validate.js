@@ -80,6 +80,9 @@ const validateReport = (b) => {
     temp: (b.temp === null || b.temp === undefined) ? null : num(b.temp, -50, 200),
     // 进程总数（仅计数，无进程明细；0 = 未采集/不可用；上限 10 万防异常负载）
     process_count: Math.floor(num(b.process_count, 0, 100000) || 0),
+    // 审查 C-1/E2：受控端上报的实际上报间隔（秒）。0 = 未上报（老 agent）。
+    // 服务端另有相邻 ts 中位数观测（db.observedIntervalSec）作交叉/回退源。
+    interval: Math.floor(num(b.interval, 0, 86400) || 0),
     swap_used: num(b.swap_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_total: num(b.swap_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_pct: num(b.swap_pct, 0, 100),

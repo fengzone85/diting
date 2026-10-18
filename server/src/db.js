@@ -2,6 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+// 审查 C4：重聚合 SQL 与 db 句柄解耦后放这里——主线程（db.js 委派）与
+// worker 线程（dbworker.js 只读连接）共用同一份实现，避免两条路径语义分叉。
+const heavyQueries = require('./heavy-queries');
 
 // 数据库默认落盘位置：容器内若挂载了持久卷 /data（docker-compose 的 server-data），
 // 则写入 /data/monitor.db，确保重建容器后数据仍在；否则回退到本地 server/data（开发/裸跑）。
@@ -13,11 +16,9 @@ const DB_PATH = process.env.DB_PATH || (() => {
 })();
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-// 负载曲线列集（不含 probes / disks 大字段），供 metricsLoadOne / metricsLoadAll 复用。
-// process_count：2026-10-12 新增（Komari 兼容层 process.count 图消费）。
-const LOAD_COLS = `ts, agent_id, cpu, mem_used, mem_total, mem_pct, load1, load5, load15,
-  net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, disk_used, disk_total,
-  disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp, process_count`;
+// 负载曲线列集（不含 probes / disks 大字段）——统一定义在 heavy-queries.js，
+// 主线程与 worker 共用（process_count：2026-10-12 新增，Komari 兼容层消费）。
+const LOAD_COLS = heavyQueries.LOAD_COLS;
 
 const db = new Database(DB_PATH);
 // 收紧数据库文件权限：仅属主可读写（默认 umask 常为 644，其他用户可读）。
@@ -142,6 +143,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
     ['disks', 'TEXT'],
     // 进程总数（聚合计数，非指纹；0 = 未采集/老 agent 不带该字段）
     ['process_count', 'INTEGER DEFAULT 0'],
+    // 审查 C-1/E2：受控端上报的实际上报间隔（秒），0 = 未上报/老 agent
+    ['interval', 'INTEGER DEFAULT 0'],
   ];
   for (const [col, type] of cols) {
     if (!existing.has(col)) db.exec(`ALTER TABLE metrics ADD COLUMN ${col} ${type};`);
@@ -178,6 +181,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('cores')) db.exec('ALTER TABLE agents ADD COLUMN cores INTEGER DEFAULT 0');
 }
+// schema migration: agents 增加 pending 列（审查 G4：自助注册的 agent 默认待管理员确认）。
+// 语义：0 = 已确认（ADD COLUMN 默认值即 0，所有历史 agent 不受影响）；1 = 待确认。
+// 待确认期间禁止上报（auth.js agentAuth 拒绝），且不进入看板/公开页/告警/AI 统计
+// （getMonitoredAgents 过滤）——防 SETUP_TOKEN 泄露后被批量注册污染数据与看板。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('pending')) db.exec('ALTER TABLE agents ADD COLUMN pending INTEGER DEFAULT 0');
+}
 
 // schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
 {
@@ -202,24 +213,28 @@ const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
   getAgents: db.prepare('SELECT * FROM agents ORDER BY created_at DESC'),
   insertAgent: db.prepare(`INSERT INTO agents
-    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, created_at, last_seen)
-    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @created_at, 0)`),
+    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, pending, created_at, last_seen)
+    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @pending, @created_at, 0)`),
   updateAgent: db.prepare(`UPDATE agents SET
     name=@name, merchant=@merchant, note=@note, expire_at=@expire_at, monthly_quota_gb=@monthly_quota_gb,
     price=@price, billing_cycle=@billing_cycle, currency=@currency, auto_renewal=@auto_renewal,
     grp=@grp, country=@country, probe_targets=@probe_targets
     WHERE id=@id`),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
+  // 审查 G4：批准自助注册的待确认 agent（pending 1→0）
+  approveAgent: db.prepare('UPDATE agents SET pending=0 WHERE id=?'),
+  // 审查 E1：最近 N 条指标（旧→新），供告警"连续 N 个采样超限"判定
+  recentMetrics: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT ?'),
   touch: db.prepare('UPDATE agents SET last_seen=?, os=?, hostname=? WHERE id=?'),
   // 仅当核数变化时才写（静态属性，避免每次上报都触发写事务）；cores<=0 不写入
   setAgentCores: db.prepare('UPDATE agents SET cores=? WHERE id=? AND cores<>?'),
   insertMetric: db.prepare(`INSERT INTO metrics
     (agent_id, ts, cpu, mem_used, mem_total, mem_pct, disk_used, disk_total, disk_pct,
      load1, load5, load15, net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, uptime,
-     temp, swap_used, swap_total, swap_pct, disk_r_rate, disk_w_rate, probes, disks, process_count)
+     temp, swap_used, swap_total, swap_pct, disk_r_rate, disk_w_rate, probes, disks, process_count, interval)
     VALUES (@agent_id, @ts, @cpu, @mem_used, @mem_total, @mem_pct, @disk_used, @disk_total, @disk_pct,
      @load1, @load5, @load15, @net_rx_rate, @net_tx_rate, @net_rx_month, @net_tx_month, @uptime,
-     @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks, @process_count)`),
+     @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks, @process_count, @interval)`),
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
@@ -247,34 +262,14 @@ const stmts = {
   // 这两列是 JSON 文本（probes 常 100B+、disks 可达数百 B），在窗口函数 CTE 里
   // 会被整行物化——720h 单节点 13.5 万行 × 大字段 ⇒ 数百 MB 临时集 + 25s 响应时间。
   // 实测：/api/records/load?hours=720 从 25.5s 降到亚秒级。
-  metricsLoadOne: (agentId, sinceTs, maxPoints) => {
-    const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
-    return db.prepare(`
-      WITH numbered AS (
-        SELECT ${LOAD_COLS},
-               ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
-               COUNT(*) OVER () AS cnt
-        FROM metrics WHERE agent_id=@agentId AND ts>=@since
-      )
-      SELECT ${LOAD_COLS} FROM numbered
-      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-      ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
-  },
+  // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+  metricsLoadOne: (agentId, sinceTs, maxPoints) => heavyQueries.loadOne(db, agentId, sinceTs, maxPoints),
   // 跨节点版本：按「时间桶 + 取桶内最早一行」采样（每节点约 maxPoints 点）。
   // 不用窗口函数：实测 720h 全库（191 万行）窗口版 23.6s，分桶版 2.2s——
   // 窗口函数要把整段匹配行进临时 B-TREE 排序两遍（ROW_NUMBER 分区 + 最终 ORDER BY），
   // 分桶只做一次覆盖索引扫描 + 分组（同样保留首尾桶，不丢首尾点语义）。
-  metricsLoadAll: (sinceTs, maxPoints) => {
-    const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
-    return db.prepare(`
-      SELECT ${LOAD_COLS.replace(/\b(ts|agent_id)\b/g, 'm.$1')} FROM metrics m
-      JOIN (
-        SELECT agent_id, MIN(ts) AS ts
-        FROM metrics WHERE ts>=@since
-        GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-      ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
-      ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
-  },
+  // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+  metricsLoadAll: (sinceTs, maxPoints) => heavyQueries.loadAll(db, sinceTs, maxPoints),
   // probes 接口只需 ts+probes 两列；避免 SELECT * 物化全行（24 列，30d 近 9.5 万行）拖慢查询
   metricsProbes: db.prepare('SELECT ts, probes FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // 单节点探针 SQL 层采样（详情页延迟波形专用）：只返回 maxPoints 行，保留首尾点。
@@ -308,38 +303,14 @@ const stmts = {
   // 调用方用 last.ts - first.ts 求跨度会得到 NaN → 趋势分析静默失效。
   // 复刻 metricsClusterAvg 的 CAST 整数地板除法：绑定 number 会被 better-sqlite3 绑成 REAL，
   // 浮点除法会让每个值自成一组。
-  metricsDiskTrendAll: (sinceTs, bucketMs) => db.prepare(`
-    SELECT agent_id,
-           MIN(ts) AS ts,
-           AVG(disk_pct) AS pct
-    FROM metrics
-    WHERE ts >= @since AND disk_pct IS NOT NULL
-    GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-    ORDER BY agent_id, ts`).all({ since: sinceTs, bucket: Math.max(1, bucketMs) }),
+  // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+  metricsDiskTrendAll: (sinceTs, bucketMs) => heavyQueries.diskTrendAll(db, sinceTs, bucketMs),
   // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
   metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
   // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
   // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
-  metricsSparklinesAllSampled: (sinceTs, maxPoints, untilTs) => {
-    const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
-    return db.prepare(`
-      WITH numbered AS (
-        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-               net_rx_month, net_tx_month,
-               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-               process_count,
-               ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
-               COUNT(*) OVER (PARTITION BY agent_id) AS cnt
-        FROM metrics WHERE ts>=@since AND (@until IS NULL OR ts<@until)
-      )
-      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-             net_rx_month, net_tx_month,
-             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-             process_count
-      FROM numbered
-      WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-      ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
-  },
+  // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+  metricsSparklinesAllSampled: (sinceTs, maxPoints, untilTs) => heavyQueries.sparklinesAllSampled(db, sinceTs, maxPoints, untilTs),
   // 单节点 sparklines SQL 层采样（节点详情页专用）：与全量版同构，但按 agent_id 过滤。
   // 此前详情页单节点走「全量拉取 10.8 万行 → Node 侧 downsampleSparklines 降到 2000 点」，
   // 每次请求 2.77s + 220MB 峰值，30s 缓存一过就卡/偶发超时。SQL 层直接只返回 maxPoints 行。
@@ -371,18 +342,8 @@ const stmts = {
   // spanMs: 窗口总时长（毫秒），用于按目标点数反推桶宽 = spanMs/maxPoints。
   // 注意：better-sqlite3 对绑定对象里的 number 默认绑成 REAL，导致 (ts-@since)/@bucket 变浮点除法、
   // 每个浮点值自成一组。故用 CAST(... AS INTEGER) 强制整数地板除法，保证分组数≈maxPoints。
-  metricsClusterAvg: (sinceTs, spanMs, maxPoints) => {
-    const bucket = Math.max(1, Math.ceil(spanMs / Math.max(1, maxPoints)));
-    return db.prepare(`
-      WITH agg AS (
-        SELECT CAST((ts - @since) / @bucket AS INTEGER) AS b,
-               AVG(cpu) AS cpu, AVG(mem_pct) AS mem_pct
-        FROM metrics WHERE ts>=@since AND cpu IS NOT NULL
-        GROUP BY b
-      )
-      SELECT (@since + CAST(b AS INTEGER) * @bucket) AS ts, cpu, mem_pct
-      FROM agg ORDER BY b ASC`).all({ since: sinceTs, bucket });
-  },
+  // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+  metricsClusterAvg: (sinceTs, spanMs, maxPoints) => heavyQueries.clusterAvg(db, sinceTs, spanMs, maxPoints),
   // ---- AI 报告 ----
   insertAiReport: db.prepare(`INSERT INTO ai_reports
     (period, risk_level, summary, suggestion, report_json, prompt_version, created_at,
@@ -431,9 +392,53 @@ const createAgent = (fields) => {
     grp: fields.grp || '',
     country: (fields.country || '').toUpperCase().slice(0, 2),
     probe_targets: fields.probe_targets || '',
+    // 审查 G4：自助注册默认待确认（pending=1）；后台手动创建不传即为 0
+    pending: fields.pending ? 1 : 0,
     created_at: Date.now()
   });
   return { id, token };
+};
+
+// 审查 E1：取最近 N 条指标，按时间正序（旧→新）返回。
+const getRecentMetrics = (agentId, n) => stmts.recentMetrics.all(agentId, Math.max(1, Math.floor(Number(n)) || 1)).reverse();
+
+// 审查 G4：批准待确认 agent（管理员后台一键放行）。返回是否确有更新。
+const approveAgent = (id) => stmts.approveAgent.run(id).changes > 0;
+
+// 审查 E5：服务端侧月流量估算——按小时桶聚合 net_rx/tx_rate 后积分，
+// 用于交叉校验受控端上报的月累计（接口计数重置 / state.json 丢失时上报值被
+// 钳零而静默漏报）。桶聚合而非逐行积分：30 天原始行可达 17 万行/台，桶化后
+// ≤720 行/台，成本可忽略；间隔异常（>1h，如断连）的桶间不计。
+function trafficEstimateBucketed(agentId, sinceTs) {
+  const rows = db.prepare(`
+    SELECT CAST(ts/3600000 AS INTEGER) AS bucket,
+           AVG(net_rx_rate) AS rx, AVG(net_tx_rate) AS tx
+    FROM metrics WHERE agent_id=? AND ts>=?
+    GROUP BY bucket ORDER BY bucket ASC`).all(agentId, sinceTs);
+  let rx = 0, tx = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const gapSec = (rows[i].bucket - rows[i - 1].bucket) * 3600;
+    if (gapSec <= 0 || gapSec > 3600) continue;
+    rx += (rows[i - 1].rx || 0) * gapSec;
+    tx += (rows[i - 1].tx || 0) * gapSec;
+  }
+  return { rx, tx };
+}
+
+// 审查 G4：监控面 agent 列表——排除待确认（pending=1）的 agent。
+// 待确认 agent 尚未获准上报，若进入统计会被误判为"离线节点"（刷误报）、
+// 污染看板/公开页/AI 摘要。后台管理列表（GET /agents）仍用全量 getAgents()，
+// 以便管理员看到待确认项并批准。
+const getMonitoredAgents = () => stmts.getAgents.all().filter((a) => !a.pending);
+
+// 审查 G4：自助注册累计计数（单 SETUP_TOKEN 可创建的 agent 数上限）。
+// 存 admin_config（进程重启不丢）；令牌泄露时限制 rogue agent 批量注册。
+const SELF_REG_COUNT_KEY = 'self_registered_count';
+const getSelfRegisteredCount = () => Number(getConfig(SELF_REG_COUNT_KEY) || 0);
+const bumpSelfRegisteredCount = () => {
+  const n = getSelfRegisteredCount() + 1;
+  setConfig(SELF_REG_COUNT_KEY, String(n));
+  return n;
 };
 
 const getAgent = (id) => stmts.getAgent.get(id);
@@ -465,18 +470,22 @@ const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbes
 
 // 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
 // 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
-const metricsProbesAll = (sinceTs, maxPoints) => {
-  // 与 metricsLoadAll 同思路：改用「时间桶 + 桶内最早一行」替代窗口函数，
-  // 720h 全库下从 ~16s 降到 ~2s，且同样保留首尾桶。
-  const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
-  return db.prepare(`
-    SELECT m.ts, m.agent_id, m.probes FROM metrics m
-    JOIN (
-      SELECT agent_id, MIN(ts) AS ts
-      FROM metrics WHERE ts>=@since AND probes IS NOT NULL
-      GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-    ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
-    ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
+// 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
+const metricsProbesAll = (sinceTs, maxPoints) => heavyQueries.probesAll(db, sinceTs, maxPoints);
+
+// 审查 C4：重查询的主线程同步路径——worker 不可用（启动失败/崩溃/超时）时由
+// heavy-db.js 回调至此，行为与改造前完全一致（可用性优先）。
+const heavyQuerySync = (fn, args) => {
+  const fns = {
+    loadOne: (...a) => heavyQueries.loadOne(db, ...a),
+    loadAll: (...a) => heavyQueries.loadAll(db, ...a),
+    sparklinesAllSampled: (...a) => heavyQueries.sparklinesAllSampled(db, ...a),
+    clusterAvg: (...a) => heavyQueries.clusterAvg(db, ...a),
+    diskTrendAll: (...a) => heavyQueries.diskTrendAll(db, ...a),
+    probesAll: (...a) => heavyQueries.probesAll(db, ...a),
+  };
+  if (!fns[fn]) throw new Error('unknown heavy fn: ' + fn);
+  return fns[fn](...(args || []));
 };
 
 // sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
@@ -515,7 +524,20 @@ const setAgentCores = (id, cores) => {
 
 // 兜底默认值：process_count 为 0（= 未采集/老 agent 不带该字段）。
 // 先展开默认值再展开 m，保证 m 中的真实值覆盖默认。
-const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({ process_count: 0 }, m, { agent_id }));
+// insertMetric 列默认值：新列（interval 等）与老调用方（测试/脚本）字段不齐全时
+// 统一补默认，避免 better-sqlite3 "Missing named parameter" 直接抛错。
+// 生产路径由 validateReport 始终提供齐全字段，此处仅为兜底（曾只给 process_count
+// 补默认，新增 interval 列时测试即暴露了其余列仍会抛错的调用方陷阱）。
+const METRIC_DEFAULTS = {
+  cpu: 0, mem_used: 0, mem_total: 0, mem_pct: 0,
+  disk_used: 0, disk_total: 0, disk_pct: 0,
+  load1: 0, load5: 0, load15: 0,
+  net_rx_rate: 0, net_tx_rate: 0, net_rx_month: 0, net_tx_month: 0, uptime: 0,
+  temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
+  disk_r_rate: 0, disk_w_rate: 0, probes: '{}', disks: '[]',
+  process_count: 0, interval: 0
+};
+const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({}, METRIC_DEFAULTS, m, { agent_id }));
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
 
@@ -644,6 +666,70 @@ function getRetentionDays() {
   if (Number.isFinite(env) && env > 0) return Math.min(3650, Math.max(7, Math.floor(env)));
   // ③ 最终默认
   return 30;
+}
+
+// 审查 C-1/E2：告警阈值单一取值函数（收敛此前的"双源分裂"）。
+// 修复前：alerts.js 用 `alertCfg.xxx || env || 默认`，而 getUiSettings() 的嵌套合并
+// （merged.alert = Object.assign(def.alert, …）使 alertCfg.xxx 恒为真值（默认 60），
+// env 分支永远不可达——看板/兼容层直读 env（.env 设 120）判在线，告警按 60 判离线，
+// 同一节点两套口径，平稳期周期性误报。ALERT_CPU_PCT/ALERT_MEM_PCT 同为死配置。
+// 现在与 getRetentionDays 同款三级优先级：UI 显式存储值 > 环境变量 > 硬编码默认。
+function resolveAlertThresholds() {
+  let storedAlert = {};
+  try {
+    const raw = getConfig(SETTINGS_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o.alert === 'object' && o.alert) storedAlert = o.alert;
+    }
+  } catch (e) {}
+  const pick = (key, envName, def, min, max) => {
+    const v = storedAlert[key];
+    if (v !== undefined && v !== null && v !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n)) return Math.min(max, Math.max(min, Math.floor(n)));
+    }
+    const env = Number(process.env[envName]);
+    if (Number.isFinite(env) && env > 0) return Math.min(max, Math.max(min, Math.floor(env)));
+    return def;
+  };
+  return {
+    offline_sec: pick('offline_sec', 'OFFLINE_THRESHOLD_SEC', 60, 10, 86400),
+    cpu_pct: pick('cpu_pct', 'ALERT_CPU_PCT', 90, 1, 100),
+    mem_pct: pick('mem_pct', 'ALERT_MEM_PCT', 90, 1, 100),
+    // 审查 E6：补磁盘/温度阈值（此前只有 cpu/mem，disk_pct/temp 采了却不告警）
+    disk_pct: pick('disk_pct', 'DISK_ALERT_PCT', 90, 1, 100),
+    temp_c: pick('temp_c', 'TEMP_ALERT_C', 80, 1, 200)
+  };
+}
+
+// 审查 E2/E3：观测某 agent 的实际上报间隔（相邻 ts 差的中位数，秒）。
+// 背景：服务端拿不到 agent 侧 SLOW_INTERVAL（agent 侧 env，全仓 0 引用），
+// 自适应 agent 实际间隔在 10–60s 间变化；按 AGENT_INTERVAL 固定值（默认 20s）
+// 估算"超阈值分钟数"最多偏差 3 倍（E3），也无法校验离线阈值是否小于
+// 2× 实际上报间隔（E2 误报的根因）。这里用最近 windowMs 的原始行直接测量
+// （中位数对偶发断连造成的间隔突增鲁棒）。样本不足返回 null，由调用方回退。
+function observedIntervalSec(agentId, windowMs) {
+  const since = Date.now() - (windowMs || 2 * 3600000);
+  const rows = db.prepare('SELECT ts FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC').all(agentId, since);
+  if (rows.length < 3) {
+    // 样本不足（新 agent / 刚清库）：回退到受控端上报的 interval 字段（审查 C-1 方案①）
+    try {
+      const row = db.prepare('SELECT interval FROM metrics WHERE agent_id=? AND interval>0 ORDER BY ts DESC LIMIT 1').get(agentId);
+      if (row && row.interval > 0) return row.interval;
+    } catch (e) {}
+    return null;
+  }
+  const diffs = [];
+  for (let i = 1; i < rows.length; i++) {
+    const d = (rows[i].ts - rows[i - 1].ts) / 1000;
+    if (d > 0) diffs.push(d);
+  }
+  if (!diffs.length) return null;
+  diffs.sort((a, b) => a - b);
+  const mid = diffs.length >> 1;
+  const median = diffs.length % 2 ? diffs[mid] : (diffs[mid - 1] + diffs[mid]) / 2;
+  return Math.max(1, Math.round(median));
 }
 
 // ---- AI 运维分析（配置持久化到 admin_config，报告持久化到 ai_reports）----
@@ -811,13 +897,17 @@ function getDbFileSize() {
 
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
-  createAgent, getAgent, getAgents, updateAgent, deleteAgent, resetAgentToken,
+  createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
+  getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
+  getRecentMetrics, trafficEstimateBucketed,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
+  heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
+  resolveAlertThresholds, observedIntervalSec,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,

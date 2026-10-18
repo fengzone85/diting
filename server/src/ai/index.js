@@ -119,6 +119,9 @@ function nodeCacheTtlMs(config) {
   const minutes = Number.isFinite(raw) && raw > 0 ? Math.max(NODE_TTL_MIN_MINUTES, Math.round(raw)) : NODE_TTL_MIN_MINUTES;
   return minutes * 60 * 1000;
 }
+// 审查 C2：缓存容量上限。键空间（agent 数 × 697 窗口）有界但只增不减，且单条
+// payload（analysis + usage）可达数 KB——长期运行缓慢涨内存。超限淘汰最早条目。
+const NODE_CACHE_MAX = 200;
 const nodeCache = new Map();      // nodeCacheKey() -> { ts, payload }
 const nodeInflight = new Map();   // nodeCacheKey() -> Promise
 
@@ -134,8 +137,11 @@ async function analyzeNode(agentId, opts) {
 
   const cacheKey = nodeCacheKey(agentId, periodHours);
   const cached = nodeCache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < nodeCacheTtlMs(config)) {
-    return Object.assign({ cached: true }, cached.payload);
+  if (cached) {
+    if (Date.now() - cached.ts < nodeCacheTtlMs(config)) {
+      return Object.assign({ cached: true }, cached.payload);
+    }
+    nodeCache.delete(cacheKey); // 过期即删（审查 C2：不只当不存在，避免只增不减）
   }
   if (nodeInflight.has(cacheKey)) return nodeInflight.get(cacheKey);
 
@@ -161,6 +167,11 @@ async function analyzeNode(agentId, opts) {
         prompt_version: NODE_PROMPT_VERSION
       };
       nodeCache.set(cacheKey, { ts: Date.now(), payload });
+      // 审查 C2：超限淘汰最早（Map 保序，首个 key 即最早插入；永不淘汰刚写入的当前键）
+      if (nodeCache.size > NODE_CACHE_MAX) {
+        const oldest = nodeCache.keys().next().value;
+        if (oldest !== undefined && oldest !== cacheKey) nodeCache.delete(oldest);
+      }
       // 历史落库（§8 T17）：只落「真实调用模型并成功」这一次；缓存命中不落。
       // 落库失败绝不影响返回——历史是附加价值，不该让分析整体失败。
       try {

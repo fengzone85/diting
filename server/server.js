@@ -10,7 +10,8 @@ const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
-const { safeEqual, ipWhitelist } = require('./src/auth');
+const { safeEqual, ipWhitelist, resolveRole } = require('./src/auth');
+const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
 
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
@@ -100,11 +101,28 @@ if (ADMIN_TOKEN && ADMIN_TOKEN !== 'change-me-admin-token' && ADMIN_TOKEN.length
   console.warn('[warn] .env 中未设置 ADMIN_TOKEN，首次访问将走 Web 初始化向导。');
 }
 
+// 启动期安全校验（审查 G1/G2）：
+//   G2 — ADMIN_ALLOW_HTTP=1 会放行非 HTTPS 管理请求并去掉会话 Cookie 的 Secure 标志
+//        （见 src/auth.js requireProto / setSessionCookie），仅限本地开发临时使用。
+//   G1 — .env 含 ADMIN_TOKEN/SESSION_SECRET 等密钥，权限不应为 group/other 可读。
+// 两处均为显式告警（不阻断启动）：本地开发可无视，生产环境看到应立即处置。
+if (process.env.ADMIN_ALLOW_HTTP === '1') {
+  console.warn('[warn] ADMIN_ALLOW_HTTP=1 已生效：非 HTTPS 管理请求将被放行，会话 Cookie 不带 Secure 标志。请确认这是本地开发环境；生产环境务必删除 .env 中的该行。');
+}
+try {
+  const envPath = path.join(__dirname, '.env');
+  const st = fs.statSync(envPath);
+  if (st.mode & 0o077) {
+    console.warn(`[warn] .env 权限过松（${(st.mode & 0o777).toString(8)}）：含 ADMIN_TOKEN/SESSION_SECRET 等密钥，同机其他用户可读。请执行 chmod 600 .env`);
+  }
+} catch { /* .env 不存在（纯环境变量部署）时跳过 */ }
+
 app.use(express.json({ limit: '16kb' }));
 
 // ---- Prometheus /metrics 导出（P3：可观测性）----
-// 通过 Bearer Token 鉴权（复用 ADMIN_TOKEN，恒定时间比较），不强制 https，便于内网抓取。
-// 例：curl -H "Authorization: Bearer $ADMIN_TOKEN" http://host:8081/metrics
+// 通过 Bearer Token 鉴权（仅 ADMIN_TOKEN，恒定时间比较）。默认强制 HTTPS
+// （M-2：见下方 app.get('/metrics') 的 proto 校验；ADMIN_ALLOW_HTTP=1 可放行明文），
+// 并受 IP 白名单约束。例：curl -H "Authorization: Bearer $ADMIN_TOKEN" https://host:8081/metrics
 function promEscape(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
@@ -184,6 +202,18 @@ app.use('/api', (req, res, next) => {
       req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse') return next();
   ipWhitelist(req, res, next);
 });
+// 版本信息端点。审查 G5：精确版本 + 构建时间可被用于匹配 CVE，匿名请求只回
+// 主版本号（前端页脚降级显示）；携带有效管理员/只读凭据才回完整信息。响应同时
+// 带第三方主题兼容协议的信封字段（status/message/data），与 compat 层形状一致。
+// 注意：必须注册在 compat.router 之前——此前本路由被 compat 的 /version 静默
+// 遮蔽成为死代码（那条只回静态占位符，从不泄露真实版本，但也从未生效）。
+app.get('/api/version', (req, res) => {
+  const role = resolveRole(req);
+  const envelope = { status: 'success', message: '', data: { hash: '-', version: String(APP_VERSION).split('.')[0] } };
+  if (!role) return res.json(envelope);
+  envelope.data.version = APP_VERSION;
+  return res.json(Object.assign(envelope, { version: APP_VERSION, build_time: APP_BUILD_TIME }));
+});
 app.use('/api', api);
 // 标准公开只读 API 层（/api/v1/*）：语义清晰、与皮肤协议解耦，供独立 adapter 翻译
 app.use('/api/v1', v1.router);
@@ -216,6 +246,21 @@ const THEME_MIME = {
 // 需要 nonce 注入才能正常运行的社区主题白名单（CSP 仅对这些主题放宽）
 const THEME_NEEDS_NONCE = new Set(['glassmorphism']);
 
+// 审查 C5：静态资源流统一投放。此前三处裸 `fs.createReadStream(fp).pipe(res)`：
+// 流错误（文件竞态删除 / 权限不足 / 读中途失败）会成为未捕获异常，客户端拿到
+// 无响应（请求挂起到超时）。这里统一挂 error 处理——未发头则 500，已发头则断连。
+function serveFileStream(res, fp) {
+  const stream = fs.createReadStream(fp);
+  stream.on('error', (err) => {
+    console.error(`[static] stream error: ${fp} - ${err.message}`);
+    try {
+      if (res.headersSent) res.destroy();
+      else res.status(500).end();
+    } catch (_) { /* 响应已销毁时忽略 */ }
+  });
+  return stream.pipe(res);
+}
+
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
 // 规避前置 Nginx / Docker 部署时静态目录未被代理 / 未打进镜像导致的 404。
 // 主题目录名与路径均经白名单校验，杜绝路径穿越；按官方文档 /themes/{short}/... 映射主题包根目录。
@@ -233,7 +278,7 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, must-revalidate');
     const ext = path.extname(fp).toLowerCase();
     res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
-    return fs.createReadStream(fp).pipe(res);
+    return serveFileStream(res, fp);
   }
   // 无后缀深链（如 /themes/<id>/instance/<uuid>）：社区主题 SPA history 路由，
   // 回退到主题根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
@@ -263,11 +308,6 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   }
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   return res.sendFile(indexPath);
-});
-
-// 版本信息端点（公开）：供前端页脚显示版本号与构建时间
-app.get('/api/version', (req, res) => {
-  res.json({ version: APP_VERSION, build_time: APP_BUILD_TIME });
 });
 
 // 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
@@ -324,7 +364,7 @@ app.get('*', (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
         const ext = path.extname(fp).toLowerCase();
         res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
-        return fs.createReadStream(fp).pipe(res);
+        return serveFileStream(res, fp);
       }
     }
     return next();
@@ -387,7 +427,7 @@ app.use((req, res, next) => {
   const ext = path.extname(fp).toLowerCase();
   res.setHeader('Content-Type', THEME_MIME[ext] || 'application/octet-stream');
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  return fs.createReadStream(fp).pipe(res);
+  return serveFileStream(res, fp);
 });
 
 // periodic prune of old metrics
@@ -443,10 +483,10 @@ const server = app.listen(PORT, () => {
 // ② 按客户端 IP 限制并发连接数与新建速率，防资源耗尽型攻击。
 const WS_MAX_CONCURRENT = 5;   // 单 IP 最大并发连接
 const WS_MAX_PER_MIN = 20;     // 单 IP 每分钟最大新建连接数
-const WS_MAP_CAP = 10000;      // wsHits Map 最大条目数，防大量不同 IP 撑爆内存
 const wsConns = new Map();     // ip -> Set(ws)
 const wsHits = new Map();      // ip -> { reset, count }
-setInterval(() => wsHits.clear(), 60000).unref?.();
+// 审查 C3/C-3：计数走公共实现（惰性过期 + 淘汰最旧）；原整表 clear 定时器会把
+// 60s 窗口截断到 1s，攻击者跨重置边界可得 2 倍新建配额，已移除。
 
 // ── 公开快照共享缓存（PR-10 / 体检 Section 06）─────────────────────────────
 // 原先 /api/clients（每连接 5s）、/api/clients/sse（每连接 5s）各自调用并序列化
@@ -464,13 +504,7 @@ function wsClientIp(req) {
 }
 // 共用限流函数：/api/clients 与 /api/rpc2 共享同一套并发/速率计数器
 function wsRateLimit(ip) {
-  const now = Date.now();
-  let rec = wsHits.get(ip);
-  if (!rec || now > rec.reset) rec = { reset: now + 60000, count: 0 };
-  rec.count++;
-  if (wsHits.size >= WS_MAP_CAP) wsHits.clear();
-  wsHits.set(ip, rec);
-  if (rec.count > WS_MAX_PER_MIN) return false;
+  if (!rateLimitTouch(wsHits, ip, 60000, WS_MAX_PER_MIN)) return false;
   let set = wsConns.get(ip);
   if (!set) { set = new Set(); wsConns.set(ip, set); }
   if (set.size >= WS_MAX_CONCURRENT) return false;
@@ -559,14 +593,17 @@ try {
         try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
         return;
       }
-      try {
-        const result = handleRpc(msg.method, msg.params);
-        ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id }));
-      } catch (err) {
-        try {
-          ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg ? msg.id : null }));
-        } catch (_) {}
-      }
+      // 审查 C4：handleRpc 异步化（内部重聚合走 worker 线程，不阻塞事件循环）
+      Promise.resolve()
+        .then(() => handleRpc(msg.method, msg.params))
+        .then((result) => {
+          try { ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id })); } catch (_) {}
+        })
+        .catch((err) => {
+          try {
+            ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg ? msg.id : null }));
+          } catch (_) {}
+        });
     });
 
     // 无每连接定时器需清理（状态推送已改由模块级 statusSnapTimer 广播）
@@ -597,10 +634,47 @@ try {
 // SSE 端点 /api/clients/sse：覆盖仅支持 SSE（不支持 WebSocket）的社区主题。
 // 与 WebSocket /api/clients 同构：受 public_enabled 约束，每 5s 推送一次 compat.snapshot()，
 // 事件格式为「data: <json>\n\n」（浏览器 EventSource 原生消费）。
+//
+// 审查 C1/C-2 加固：
+//   C1 — 与 WS 对称地按源 IP 限制并发连接数与新建速率（此前 SSE 完全无限制，
+//        未认证即可开任意条长连接，每条各持一个 5s setInterval）。
+//   C-2 — 背压自保：客户端只建连不读 socket 时 Node 写缓冲持续累积，
+//          write 返回 false 且缓冲超上限即断连清定时器，防单连接 OOM
+//          （per-IP 并发限制对此无效，必须叠加）。
+// 计数器独立于 WS（wsHits/wsConns）：避免 SSE 流量耗尽 WS 限额或相互干扰。
+const SSE_MAX_CONCURRENT = 5;              // 单 IP 最大并发 SSE 连接
+const SSE_MAX_PER_MIN = 20;                // 单 IP 每分钟最大新建连接数
+const SSE_MAP_CAP = 10000;                 // sseHits Map 上限，防大量不同 IP 撑爆内存
+const SSE_MAX_BUFFER_BYTES = 16 * 1024 * 1024; // 单连接写缓冲上限（16MB）
+const sseConns = new Map();                // ip -> Set(res)
+const sseHits = new Map();                 // ip -> { reset, count }
+function sseRateLimit(ip) {
+  const now = Date.now();
+  // 惰性过期：只删过期条目，不清表——整表 clear 会把当前攻击者计数一并清零（审查 C3）
+  if (sseHits.size >= SSE_MAP_CAP) {
+    for (const [k, v] of sseHits) { if (now > v.reset) sseHits.delete(k); }
+    if (sseHits.size >= SSE_MAP_CAP) return false; // 仍满：fail closed
+  }
+  let rec = sseHits.get(ip);
+  if (!rec || now > rec.reset) rec = { reset: now + 60000, count: 0 };
+  rec.count++;
+  sseHits.set(ip, rec);
+  if (rec.count > SSE_MAX_PER_MIN) return false;
+  let set = sseConns.get(ip);
+  if (!set) { set = new Set(); sseConns.set(ip, set); }
+  if (set.size >= SSE_MAX_CONCURRENT) return false;
+  return set;
+}
 try {
   app.get('/api/clients/sse', (req, res) => {
     if (!db.getUiSettings().public_enabled) {
       return res.status(403).json({ status: 'error', message: 'public page disabled' });
+    }
+    // 与 WS 一致：只用 TCP 源地址判定，不读可伪造的 X-Forwarded-For
+    const ip = wsClientIp(req);
+    const set = sseRateLimit(ip);
+    if (!set) {
+      return res.status(429).json({ status: 'error', message: 'too many sse connections' });
     }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -609,15 +683,32 @@ try {
       'X-Accel-Buffering': 'no' // 禁用 Nginx 缓冲，确保实时推送
     });
     // PR-10：复用模块级共享快照，不再每连接独立序列化（N 连接 = N 次构造）
+    let timer = null;
+    let closed = false;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (timer) clearInterval(timer);
+      set.delete(res);
+      if (set.size === 0) sseConns.delete(ip);
+    };
     const send = () => {
-      if (!publicSnapStr) return;
-      try { res.write('data: ' + publicSnapStr + '\n\n'); } catch (_) {}
+      if (closed || res.writableEnded || !publicSnapStr) return;
+      let ok = false;
+      try { ok = res.write('data: ' + publicSnapStr + '\n\n'); } catch (_) { ok = false; }
+      // 背压：write 返回 false 且 socket 缓冲超上限 → 客户端不读，断连自保
+      if (!ok && res.socket && res.socket.writableLength > SSE_MAX_BUFFER_BYTES) {
+        try { res.destroy(); } catch (_) {}
+        cleanup();
+      }
     };
     send();
-    const timer = setInterval(send, 5000);
-    req.on('close', () => clearInterval(timer));
+    timer = setInterval(send, 5000);
+    req.on('close', cleanup);
+    res.on('close', cleanup); // 双保险：req/res 的 close 时序在不同 Node 版本有差异
+    set.add(res);
   });
-  console.log('[monitor] theme-compat SSE /api/clients/sse enabled');
+  console.log('[monitor] theme-compat SSE /api/clients/sse enabled (per-ip limit + backpressure)');
 } catch (e) {
   console.warn('[monitor] theme-compat SSE 未启用：', e.message);
 }

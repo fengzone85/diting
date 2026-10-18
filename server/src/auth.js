@@ -27,6 +27,9 @@ function agentAuth(req, res, next) {
   const agent = db.getAgent(id);
   if (!agent) return res.status(403).json({ error: 'unknown agent' });
   if (!safeEqual(db.hashToken(token), agent.token_hash)) return res.status(403).json({ error: 'bad token' });
+  // 审查 G4：待确认 agent（自助注册后未经管理员批准）禁止上报。
+  // 放在 token 校验之后，避免无 token 者探测"某 id 是否待确认"。
+  if (agent.pending) return res.status(403).json({ error: 'agent pending approval' });
   req.agent = agent;
   next();
 }
@@ -369,6 +372,7 @@ function auditLog(req, action, detail) {
 
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
+  resolveRole,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog,
