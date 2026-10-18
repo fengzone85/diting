@@ -144,7 +144,7 @@ test('computeSignals: 统计离线/沉默/超阈值/临期', () => {
   const s = computeSignals([
     mkAgent({ online: false, stale: true }),
     mkAgent({ online: false }),
-    mkAgent({ cpu: { max: 95 } }),
+    mkAgent({ cpu: { over_threshold_minutes: 5 } }),
     mkAgent({ billing: { days_until_expire: 5 } })
   ], { cpuAlert: 90, memAlert: 90 });
   assert.strictEqual(s.agents, 4);
@@ -155,6 +155,17 @@ test('computeSignals: 统计离线/沉默/超阈值/临期', () => {
   assert.strictEqual(s.expiring_7d, 1);
 });
 
+// 审查 E3：单样本峰值不再计入超阈值——24h 窗口内一次 spike（max 达标但持续
+// 分钟数不足）不再把节点抬为"超阈值节点"，这是风险通胀的主要来源。
+test('computeSignals: 单样本峰值不计超阈值；持续 ≥5 分钟才计（审查 E3）', () => {
+  const s = computeSignals([
+    mkAgent({ cpu: { max: 95, over_threshold_minutes: 0 } }),  // 一次 spike
+    mkAgent({ mem: { max: 99, over_threshold_minutes: 4 } }),  // 持续 4 分钟（差 1 分钟）
+    mkAgent({ cpu: { over_threshold_minutes: 5 } })            // 持续 5 分钟 → 计
+  ], { cpuAlert: 90, memAlert: 90 });
+  assert.strictEqual(s.over_threshold, 1, '只有持续达标的节点计入');
+});
+
 test('baselineRisk: 按离线占比 / 超阈值数 / 临期数分级', () => {
   const risk = (list) => baselineRisk(computeSignals(list, { cpuAlert: 90, memAlert: 90 }));
   assert.strictEqual(risk([]), 'low');
@@ -163,11 +174,11 @@ test('baselineRisk: 按离线占比 / 超阈值数 / 临期数分级', () => {
   // 离线占比 >30% → high（10 台中 4 台离线）
   assert.strictEqual(risk(Array.from({ length: 10 }, (_, i) => mkAgent({ online: i >= 4 }))), 'high');
   assert.strictEqual(risk([mkAgent({ cpu: { over_threshold_minutes: 5 } })]), 'medium');
-  // 超阈值节点 ≥3 → high
+  // 超阈值节点 ≥3 → high（均满足"持续 ≥5 分钟"；单样本峰值不再计数，审查 E3）
   assert.strictEqual(risk([
     mkAgent({ cpu: { over_threshold_minutes: 5 } }),
-    mkAgent({ cpu: { max: 95 } }),
-    mkAgent({ memory: { max: 95 } })
+    mkAgent({ cpu: { over_threshold_minutes: 30 } }),
+    mkAgent({ memory: { over_threshold_minutes: 5 } })
   ]), 'high');
   assert.strictEqual(risk([mkAgent({ billing: { days_until_expire: 3 } })]), 'medium');
 });
