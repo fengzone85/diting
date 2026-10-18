@@ -466,7 +466,7 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 
 To avoid sharing the full-privilege admin token around, configure an optional **read-only** account:
 
-- Set the optional `READONLY_TOKEN` in `.env` (also recommended ≥ 16 chars).
+- Set the optional `READONLY_TOKEN` in `.env` (also recommended ≥ 16 chars; the placeholder or a shorter value logs a startup warning — it stays effective).
 - Holders may **only call read-only `GET` endpoints** (client list, latest metrics, sparklines; **not** `/metrics`, which accepts `ADMIN_TOKEN` only); all write operations (`POST /agents`, `PUT/DELETE /agents/:id`, `reset-token`, `/test-alert`) are blocked by the `adminOnly` guard with `403 admin required`.
 - Ideal for read-only consumers like Grafana / third-party dashboards, so the admin token is not exposed to them.
 - The read-only account is **not subject to 2FA** (2FA only constrains admin writes), keeping programmatic read pulls transparent.

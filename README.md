@@ -215,7 +215,7 @@ diting/
 | `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、不阻止启动，未设时走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写） |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写；建议 ≥16 位，占位符 / 过短会启动告警） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌 |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
