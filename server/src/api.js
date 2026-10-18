@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
+const { rateLimitTouch } = require('./ratelimit');
+const { heavyQuery } = require('./heavy-db');
 const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
@@ -28,27 +30,18 @@ function parseDisks(s) {
   try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
 
-// 应用层限流（兜底，不依赖 Nginx）：每 IP 每 10s 最多 20 次。
+// 应用层限流（兜底，不依赖 Nginx）：每 IP 每 10s 最多 60 次。
 // /report 已由 Nginx 单独限流，此处放行。trust proxy 已在 server.js 启用，req.ip 为真实客户端。
-// MAP_CAP：限流 Map 最大条目数，超出则提前清空，防分布式攻击用大量不同 IP 撑爆内存。
-// 放宽到每 IP 每 10s 60 次：单标签页前端每 5s 约 4 请求(8/10s)，
-// 多标签页/多设备共享同一源 IP 时极易超过 20 次阈值而误伤正常浏览。
-// 应用层限流仅为兜底，真实安全边界仍由 Nginx limit_req 承担。
-const RATE_WINDOW = 10000, RATE_MAX = 60, MAP_CAP = 10000;
+// 放宽到 60 次：单标签页前端每 5s 约 4 请求(8/10s)，多标签页/多设备共享同一源 IP
+// 时极易超过 20 次阈值而误伤正常浏览。应用层限流仅为兜底，真实安全边界仍由 Nginx limit_req。
+// 审查 C3/C-3：计数逻辑统一走 src/ratelimit.js（惰性过期 + 淘汰最旧，无整表清空）。
+const RATE_WINDOW = 10000, RATE_MAX = 60;
 const rateHits = new Map();
-setInterval(() => rateHits.clear(), RATE_WINDOW).unref?.();
 const rateLimit = (req, res, next) => {
   if (req.path === '/report') return next();
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  const rec = rateHits.get(ip);
-  if (!rec || now > rec.reset) {
-    if (rateHits.size >= MAP_CAP) rateHits.clear();
-    rateHits.set(ip, { reset: now + RATE_WINDOW, count: 1 });
-    return next();
+  if (!rateLimitTouch(rateHits, req.ip || req.socket.remoteAddress, RATE_WINDOW, RATE_MAX)) {
+    return res.status(429).json({ error: 'too many requests' });
   }
-  rec.count++;
-  if (rec.count > RATE_MAX) return res.status(429).json({ error: 'too many requests' });
   next();
 };
 
@@ -73,19 +66,8 @@ router.use(rateLimit);
 // Admin Token 为 256 位随机值，理论上不可暴力破解；此限流主要防日志刷屏与资源消耗。
 const LOGIN_WINDOW = 60000, LOGIN_MAX = 5;
 const loginHits = new Map();
-setInterval(() => loginHits.clear(), LOGIN_WINDOW).unref?.();
 const loginRateLimit = (req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  let rec = loginHits.get(ip);
-  if (!rec || now > rec.reset) {
-    if (loginHits.size >= MAP_CAP) loginHits.clear();
-    loginHits.set(ip, { reset: now + LOGIN_WINDOW, count: 1 });
-    return next();
-  }
-  rec.count++;
-  loginHits.set(ip, rec);
-  if (rec.count > LOGIN_MAX) {
+  if (!rateLimitTouch(loginHits, req.ip || req.socket.remoteAddress, LOGIN_WINDOW, LOGIN_MAX)) {
     return res.status(429).json({ error: 'too many login attempts, retry in 60s' });
   }
   next();
@@ -107,26 +89,32 @@ router.get('/setup/status', (req, res) => {
 // 初始化端点限流（纵深防御）：每 IP 每 60s 最多 5 次，防止未授权时暴力/竞态抢占。
 const SETUP_WINDOW = 60000, SETUP_MAX = 5;
 const setupHits = new Map();
-setInterval(() => setupHits.clear(), SETUP_WINDOW).unref?.();
 const setupRateLimit = (req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  let rec = setupHits.get(ip);
-  if (!rec || now > rec.reset) rec = { reset: now + SETUP_WINDOW, count: 0 };
-  rec.count++;
-  if (setupHits.size >= MAP_CAP) setupHits.clear();
-  setupHits.set(ip, rec);
-  if (rec.count > SETUP_MAX) return res.status(429).json({ error: 'too many requests' });
+  if (!rateLimitTouch(setupHits, req.ip || req.socket.remoteAddress, SETUP_WINDOW, SETUP_MAX)) {
+    return res.status(429).json({ error: 'too many requests' });
+  }
   next();
 };
 // 初始化端点：仅在「无任何有效 Token」时可用。一旦生成本端点永久失效（返回 410 Gone），
 // 后续重置 Token 只能通过 SSH 运行 diting.sh --reset-admin-token，彻底杜绝 Web 重置风险。
-router.post('/setup/generate', setupRateLimit, (req, res) => {
+// 审查 C-4：初始化端点同样要求经反代的 HTTPS（此前只挂 setupRateLimit，
+// 纯 HTTP 即可触发生成，管理员若在明文网络下初始化，token 走明文回显）。
+router.post('/setup/generate', setupRateLimit, requireProto, (req, res) => {
   // 任何有效 Token 存在一律拒绝，返回 410 Gone
   if (getAdminToken()) {
     return res.status(410).json({
       error: 'already initialized',
       message: '管理员 Token 已存在，本端点已永久禁用。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
+    });
+  }
+  // 审查 D1：用"仅当 key 不存在才写入"的配置项作初始化锁（setConfigIfAbsent 此前是
+  // 死代码）。单进程下 TOCTOU 不成立（handler 全程同步），但多实例/cluster 部署时
+  // 两个实例可能同时通过上面的空检查各自生成 token；只有抢到锁的实例能继续，
+  // 其余拿到 410。语义上强化了"一旦初始化，Web 通道永久禁用"的承诺。
+  if (!db.setConfigIfAbsent('admin_initialized', '1')) {
+    return res.status(410).json({
+      error: 'already initialized',
+      message: '另一实例已完成初始化（admin_initialized 锁已置位）。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
     });
   }
   // 生成新 Token 并写入 .env（唯一来源）
@@ -141,14 +129,20 @@ router.post('/setup/generate', setupRateLimit, (req, res) => {
     } else {
       content += (content.endsWith('\n') ? '' : '\n') + `ADMIN_TOKEN=${token}\n`;
     }
-    fs.writeFileSync(envPath, content, 'utf-8');
+    // 审查 D1/G1：原子写（tmp + rename），崩溃不会留下半截 .env；显式 600 权限，
+    // 避免沿袭 umask（常为 644，同机其他用户可读密钥）。
+    const tmpPath = envPath + '.tmp';
+    fs.writeFileSync(tmpPath, content, 'utf-8');
+    try { fs.chmodSync(tmpPath, 0o600); } catch { /* 某些文件系统不支持 chmod，忽略 */ }
+    fs.renameSync(tmpPath, envPath);
     // 同步更新进程环境变量，使本次启动后续请求即可用
     process.env.ADMIN_TOKEN = token;
     console.log('[setup] 管理员 Token 已生成并写入 .env，此后 /api/setup/generate 永久禁用');
     res.json({ token });
   } catch (e) {
     console.error('[setup] 写入 .env 失败:', e.message);
-    res.status(500).json({ error: 'write_failed', message: '写入 .env 失败：' + e.message });
+    // 审查 G6：不回显底层错误（可能含路径/权限细节），只给可操作提示
+    res.status(500).json({ error: 'write_failed', message: '写入 .env 失败，请检查文件系统权限与磁盘空间' });
   }
 });
 
@@ -217,8 +211,8 @@ sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUr
   // 需以管理员身份运行。GO_RELEASE = agent-go Release 下载基址（latest）。
   const GO_RELEASE = 'https://github.com/fengzone85/diting/releases/latest/download';
   const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'diting-go-install.ps1'; iwr '${REPO_BASE}/agent-go/install-go.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RepoBase '${GO_RELEASE}' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv}${ptWin}"`;
-  // Docker 版暂仍为 Python 镜像：Go 容器形态需挂载宿主 /proc 并在 Go collector
-  // 内支持 hostproc 视图（后续 PR）；systemd/Windows 已切 Go。
+  // Docker 版（M3 起同为 Go）：多阶段构建出 scratch 镜像（USER 1000 + cap-drop ALL），
+  // 多盘识别在 Go collector 内优先读 /hostproc/mounts、回退 /proc/mounts，无需额外挂 /proc。
   return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '' };
 }
 
@@ -274,36 +268,66 @@ router.post('/report', agentAuth, (req, res) => {
 // 防暴力枚举 agent 名称 / 资源耗尽。全局 rateLimit 已做兜底，此处更严格。
 const REGISTER_WINDOW = 60000, REGISTER_MAX = 10;
 const registerHits = new Map();
-setInterval(() => registerHits.clear(), REGISTER_WINDOW).unref?.();
 const registerRateLimit = (req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  let rec = registerHits.get(ip);
-  if (!rec || now > rec.reset) rec = { reset: now + REGISTER_WINDOW, count: 0 };
-  rec.count++;
-  if (registerHits.size >= MAP_CAP) registerHits.clear();
-  registerHits.set(ip, rec);
-  if (rec.count > REGISTER_MAX) return res.status(429).json({ error: 'too many requests' });
+  if (!rateLimitTouch(registerHits, req.ip || req.socket.remoteAddress, REGISTER_WINDOW, REGISTER_MAX)) {
+    return res.status(429).json({ error: 'too many requests' });
+  }
   next();
 };
+// SETUP_TOKEN 弱模式拒绝（审查 G4）：长度之外再查熵——纯数字、字符种类过少、
+// 含连续序列（1234/abcd/qwer）的"够长但可猜"令牌一律停用注册。
+function isWeakSetupToken(t) {
+  const s = String(t || '').trim();
+  if (s.length < 16) return true;
+  if (/^\d+$/.test(s)) return true;                              // 纯数字
+  if (new Set(s).size <= 4) return true;                         // 字符种类过少
+  if (/(?:0123|1234|2345|3456|4567|5678|6789|abcd|bcde|qwer|asdf)/i.test(s)) return true; // 连续序列
+  return false;
+}
 router.post('/setup/register', registerRateLimit, (req, res) => {
   const setupToken = process.env.SETUP_TOKEN;
   if (!setupToken) {
     return res.status(403).json({ error: '服务端未启用一键注册（未配置 SETUP_TOKEN）' });
   }
-  if (setupToken.trim().length < 16) {
-    return res.status(403).json({ error: 'SETUP_TOKEN 过弱（至少 16 字符，建议 openssl rand -hex 16），一键注册已停用' });
+  if (isWeakSetupToken(setupToken)) {
+    return res.status(403).json({ error: 'SETUP_TOKEN 过弱（至少 16 字符且需含足够熵：禁用纯数字/极少字符种类/连续序列，建议 openssl rand -hex 16），一键注册已停用' });
+  }
+  // 单 SETUP_TOKEN 累计注册上限（审查 G4）：令牌泄露时限制 rogue agent 数量。
+  const maxAgents = Math.max(1, Number(process.env.SETUP_MAX_AGENTS || 50));
+  if (db.getSelfRegisteredCount() >= maxAgents) {
+    return res.status(403).json({ error: `self-registration quota exhausted (max ${maxAgents} agents per setup token)` });
   }
   const provided = (req.body && req.body.setup_token) || (req.headers['x-setup-token'] || '').trim();
   if (!provided || !safeEqual(provided, setupToken)) {
     return res.status(401).json({ error: 'invalid setup token' });
   }
+  // 审查 G4：自助注册的 agent 默认待管理员确认（SETUP_REQUIRE_APPROVAL=0 可退回旧行为）。
+  // 待确认期间 agentAuth 拒绝其上报，且不进入看板/告警/公开页统计。
+  const requireApproval = process.env.SETUP_REQUIRE_APPROVAL !== '0';
   const { id, token } = db.createAgent({
     name: str(req.body.name, 100) || undefined,
-    note: str(req.body.note, 500)
+    note: str(req.body.note, 500),
+    pending: requireApproval
   });
-  res.json({ agent_id: id, agent_token: token });
+  db.bumpSelfRegisteredCount();
+  res.json({
+    agent_id: id,
+    agent_token: token,
+    pending: requireApproval,
+    message: requireApproval ? 'registered, pending admin approval' : 'registered'
+  });
 });
+
+// ---- Admin: 批准自助注册的待确认 agent（审查 G4）----
+// 待确认 agent 无法上报也不进看板；管理员在后台批准后放行。
+router.post('/agents/:id/approve', adminOnly, asyncHandler(async (req, res) => {
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!a.pending) return res.json({ ok: true, id: a.id, pending: false, message: 'already approved' });
+  if (!db.approveAgent(a.id)) return res.status(500).json({ error: 'approve failed' });
+  auditLog(req, 'agent_approve', `id=${a.id}`);
+  res.json({ ok: true, id: a.id, pending: false });
+}));
 
 // ---- Admin: list agents + latest metric + online status ----
 router.get('/agents', adminOrReadonly, (req, res) => {
@@ -319,31 +343,34 @@ router.get('/agents', adminOrReadonly, (req, res) => {
 });
 
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----
-router.get('/agents/sparklines', adminOrReadonly, (req, res) => {
+router.get('/agents/sparklines', adminOrReadonly, asyncHandler(async (req, res) => {
   const range = req.query.range;
   const sec = RANGES[range] || 21600;
   // 管理端 sparklines：用轻量列查询（不含 probes 大字段）+ SQL 层采样，避免 SELECT * 物化全行。
   const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
-  const rows = db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+  // 审查 C4：重聚合移 worker 线程执行——同步执行会阻塞事件循环数秒，
+  // 期间 /report、告警、全部请求一并挂起。
+  const rows = await heavyQuery('sparklinesAllSampled', Date.now() - sec * 1000, mp);
   res.json(downsampleSparklines(rows, mp));
-});
+}));
 
 // ---- Admin: 集群平均 CPU/内存趋势（仪表盘专用）----
 // 与 /agents/sparklines 不同：不做「每 agent 原始点」，而是由 SQL 引擎跨所有 agent 按时间桶
 // 直接聚合出集群平均曲线，只返回 ≤maxPoints 行（几十~几百个点）。彻底消除前端拉 62 台全量
 // 再逐点聚合的主线程卡顿。max_points 缺省用 sparkMaxPoints，与右侧趋势图桶粒度一致。
-router.get('/agents/sparklines/overview', adminOrReadonly, (req, res) => {
+router.get('/agents/sparklines/overview', adminOrReadonly, asyncHandler(async (req, res) => {
   const range = req.query.range;
   const sec = RANGES[range] || 21600;
   const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
-  const rows = db.metricsClusterAvg(Date.now() - sec * 1000, sec * 1000, mp);
+  // 审查 C4：重聚合移 worker 线程执行，避免阻塞事件循环
+  const rows = await heavyQuery('clusterAvg', Date.now() - sec * 1000, sec * 1000, mp);
   // rows: [{ts, cpu, mem_pct}]，桶内已有集群平均，直接返回
   res.json(rows.map(r => ({
     ts: r.ts,
     cpu: r.cpu == null ? null : +r.cpu.toFixed(2),
     mem_pct: r.mem_pct == null ? null : +r.mem_pct.toFixed(2)
   })));
-});
+}));
 
 // ---- Admin: single agent info ----
 router.get('/agents/:id', adminOrReadonly, (req, res) => {
@@ -379,7 +406,7 @@ router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
 router.get('/overview', adminOrReadonly, (req, res) => {
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   let online = 0, cpuSum = 0, memSum = 0, cnt = 0;
   let trafficUsedBytes = 0; // 本月累计流量（在线节点 latest 的收+发）
   let totalQuotaGB = 0;
@@ -413,7 +440,7 @@ router.get('/overview', adminOrReadonly, (req, res) => {
 
 // ---- Admin: billing overview（月度费用 + 分组费用 + 7 天内到期列表）----
 router.get('/billing', adminOrReadonly, (req, res) => {
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   let monthlyTotal = 0;
   const perGroup = {};
   const expiringSoon = [];
@@ -446,7 +473,7 @@ router.get('/public/overview', (req, res) => {
   if (ui.public_enabled === false) return publicDisabled(res);
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   let online = 0;
   let cpuSum = 0, memSum = 0, cpuCount = 0, memCount = 0;
   const groups = {};
@@ -483,7 +510,7 @@ router.get('/public/agents', (req, res) => {
   const showBiz = ui.public_show_business !== false;
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
-  const list = db.getAgents().map((a) => {
+  const list = db.getMonitoredAgents().map((a) => {
     const latest = db.getLatestMetric(a.id);
     const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
     const m = online && latest ? latest : null;
@@ -542,7 +569,7 @@ const sparkCache = new Map(); // key: `${range}|${onlyId}` -> { ts, data }
 const SPARK_CACHE_TTL = 30000;
 // 无 id 全量请求（首页卡片迷你图）每 agent 点数上限：100 台规模下控制传输量
 const SPARK_ALL_MAX_POINTS = 120;
-router.get('/public/agents/sparklines', (req, res) => {
+router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const range = RANGES[req.query.range] ? req.query.range : '7d'; // 无效 range 兜底 7d
@@ -562,9 +589,11 @@ router.get('/public/agents/sparklines', (req, res) => {
   const mp = clampInt(req.query.max_points, 60, 20000)
     || (onlyId ? sparkMaxPoints(range) : SPARK_ALL_MAX_POINTS);
   const t0 = Date.now();
+  // 审查 C4：全量分支（首页卡片迷你图，100 台规模最重）移 worker 线程；
+  // 单节点分支（详情页）行数有界，保留主线程同步路径。
   const rows = onlyId
     ? db.getMetricsSparklinesOne(onlyId, Date.now() - sec * 1000, mp)
-    : db.metricsSparklinesAllSampled(Date.now() - sec * 1000, mp);
+    : await heavyQuery('sparklinesAllSampled', Date.now() - sec * 1000, mp);
   // 后端降采样（对齐 Komari max_points 契约）。
   // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
   // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
@@ -585,7 +614,7 @@ router.get('/public/agents/sparklines', (req, res) => {
   }
   sparkCache.set(cacheKey, { ts: Date.now(), data: byAgent });
   res.json(byAgent);
-});
+}));
 
 // 后端降采样开关（对齐 Komari downsample/max_points 契约）：
 //   PROBES_DOWNSAMPLE=1（默认）启用后端时间桶聚合 + 每 label 点数上限；
@@ -1052,7 +1081,9 @@ router.post('/test-alert', adminOnly, asyncHandler(async (req, res) => {
     await alerts.sendAlert('[监控] 测试告警', '这是一条测试消息，用于验证通知通道（邮件 / Telegram）是否配置正确。若你收到了，说明配置生效。');
     res.json({ ok: true, message: '测试告警已发送，请检查邮件 / Telegram。', status: st });
   } catch (e) {
-    res.status(500).json({ error: e.message, status: st });
+    // 审查 G6：细节（SMTP 错误串，可能含主机名/凭据片段）只落日志，不回显客户端
+    console.error('[test-alert] 发送失败:', e.message);
+    res.status(500).json({ error: 'send_failed', message: '测试告警发送失败，请检查服务端日志与通知配置', status: st });
   }
 }));
 
@@ -1136,7 +1167,12 @@ router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => 
   auditLog(req, 'ai_analyze_node', `agent=${req.params.id} status=${r.status} hours=${periodHours}`);
   if (r.status === 'not_found') return res.status(404).json(r);
   if (r.status === 'disabled') return res.status(400).json(r);
-  if (r.status === 'error') return res.status(502).json(r);
+  // 审查 G6：AI 分析失败的底层错误（可能含服务商 URL/密钥片段）只落日志，
+  // 不回显客户端；r.message 由 ai/index.js 的 catch 分支产生。
+  if (r.status === 'error') {
+    console.error('[ai/analyze-node] 分析失败:', r.message);
+    return res.status(502).json({ status: 'error', error: 'analysis_failed', message: '分析失败，请检查服务端日志与 AI 配置' });
+  }
   return res.json(r);
 }));
 

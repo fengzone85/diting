@@ -134,7 +134,7 @@ router.get('/sites', (req, res) => {
 // GET /api/v1/nodes —— 节点列表（不含实时负载）
 router.get('/nodes', (req, res) => {
   const show = businessVisible();
-  ok(res, db.getAgents().map((a) => toNode(a, show)));
+  ok(res, db.getMonitoredAgents().map((a) => toNode(a, show)));
 });
 
 // GET /api/v1/nodes/:uuid —— 单节点详情（基础信息 + 实时 + 能力声明）

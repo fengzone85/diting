@@ -6,6 +6,9 @@
 const express = require('express');
 const router = express.Router();
 const db = require('./db');
+const { asyncHandler } = require('./util');
+// 审查 C4：公开兼容层的重聚合（720h 全窗、未认证即可触发）移 worker 线程
+const { heavyQuery } = require('./heavy-db');
 
 const OFFLINE_SEC = () => Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
 const offlineMs = () => OFFLINE_SEC() * 1000;
@@ -41,6 +44,16 @@ function cachedRecords(key, build) {
   const hit = recordsCache.get(key);
   if (hit && Date.now() - hit.ts < RECORDS_CACHE_TTL) return hit.data;
   const data = build();
+  if (recordsCache.size >= RECORDS_CACHE_MAX) recordsCache.clear();
+  recordsCache.set(key, { ts: Date.now(), data });
+  return data;
+}
+// 审查 C4：异步版——build 内部的重聚合走 worker 线程（公开端点最坏 720h 全库
+// 扫描，同步执行会阻塞事件循环数秒，期间 /report 与告警一并挂起）。
+async function cachedRecordsAsync(key, build) {
+  const hit = recordsCache.get(key);
+  if (hit && Date.now() - hit.ts < RECORDS_CACHE_TTL) return hit.data;
+  const data = await build();
   if (recordsCache.size >= RECORDS_CACHE_MAX) recordsCache.clear();
   recordsCache.set(key, { ts: Date.now(), data });
   return data;
@@ -139,7 +152,7 @@ function publicOpen() {
 // L(node, status) => { online, time, cpu, ram, ram_total, swap, ... }
 function getNodesLatestStatus() {
   if (!publicOpen()) return {};
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   const data = {};
   for (const a of agents) {
     const m = db.getLatestMetric(a.id);
@@ -179,7 +192,7 @@ function getNodesLatestStatus() {
 // 社区主题既可用 online 数组也可逐节点判断，兼容官方两种取数方式。
 function snapshot() {
   if (!publicOpen()) return { data: { online: [], data: {} }, status: 'success' };
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   const online = [];
   const data = {};
   for (const a of agents) {
@@ -245,14 +258,13 @@ router.get('/public', guard, (req, res) => {
   });
 });
 
-// GET /api/version
-router.get('/version', (req, res) => {
-  res.json({ status: 'success', message: '', data: { hash: '-', version: 'diting-compat' } });
-});
+// GET /api/version 已移至 server.js（注册于本 router 之前）。此前这里有一条
+// 同名静态占位路由，会把 server.js 的真实版本端点静默遮蔽成死代码；现在由
+// server.js 单点提供「主题兼容信封 + G5 版本披露收敛」，本文件不再重复注册。
 
 // GET /api/nodes —— 节点基础信息列表（不含实时负载）
 router.get('/nodes', guard, (req, res) => {
-  const agents = db.getAgents();
+  const agents = db.getMonitoredAgents();
   // 注意：不能用 agents.map(toNode)——map 会把数组下标当作第二个参数 showBusiness 传入，
   // 下标 0 会被当成 false，导致第一个节点的业务字段被静默隐藏。
   const show = businessVisible();
@@ -295,41 +307,43 @@ function toLoadRecord(m) {
     connections: 0
   };
 }
-router.get('/records/load', guard, (req, res) => {
+router.get('/records/load', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
   // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
-  const payload = cachedRecords(`load|${uuid || '*'}|${hours}|${maxCount}`, () => {
+  // 审查 C4：缓存未命中时的重聚合移 worker 线程（否则数秒阻塞事件循环）
+  const payload = await cachedRecordsAsync(`load|${uuid || '*'}|${hours}|${maxCount}`, async () => {
     const since = Date.now() - hours * 3600 * 1000;
     // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
     // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
     // 每节点各取 1000 点纯属浪费——61 台 ⇒ 6 万行 324KB，降到 ~750 行后 720h 从 21s 到 2.2s）。
     const sampled = uuid
-      ? db.getMetricsLoadOne(uuid, since, maxCount)
-      : db.getMetricsLoadAll(since, perAgentPoints(maxCount, since));
+      ? await heavyQuery('loadOne', uuid, since, maxCount)
+      : await heavyQuery('loadAll', since, perAgentPoints(maxCount, since));
     const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
     const records = rows.map(toLoadRecord);
     return { status: 'success', message: '', count: records.length, records };
   });
   res.json(payload);
-});
+}));
 
 // GET /api/records/ping —— 延迟历史（官方主题延迟图依赖）。
 // diting 无独立 ping task 表，网络质量自测结果存于 metrics.probes(JSON)。
 // 转译为官方结构：每个被探测目标为一个 task，value=该时刻延迟(ms)，loss=丢包率。
-router.get('/records/ping', guard, (req, res) => {
+router.get('/records/ping', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
   const hours = Math.min(Number(req.query.hours) || 24, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
   // 与 /records/load 同理：游客可直连，720h 全量最坏要扫百万行，30s 缓存兜底
-  const payload = cachedRecords(`ping|${uuid || '*'}|${hours}|${maxCount}`, () => {
+  // 审查 C4：重聚合移 worker 线程
+  const payload = await cachedRecordsAsync(`ping|${uuid || '*'}|${hours}|${maxCount}`, async () => {
     const since = Date.now() - hours * 3600 * 1000;
     // M-02：只取 ts+probes 两列并在 SQL 层采样。指定节点用单节点版，
-    // 否则一次 SQL 跨节点采样（metricsProbesAll），避免 per-agent 循环 N 次扫索引。
+    // 否则一次 SQL 跨节点采样（probesAll），避免 per-agent 循环 N 次扫索引。
     const probeRows = uuid
       ? db.getMetricsProbesOne(uuid, since, maxCount)
-      : db.metricsProbesAll(since, Math.max(200, perAgentPoints(maxCount, since)));
+      : await heavyQuery('probesAll', since, Math.max(200, perAgentPoints(maxCount, since)));
     const tasks = new Map();      // task_id -> {id,name,interval,loss}
     const records = [];           // {task_id,time,value}
     let tid = 0;
@@ -367,7 +381,7 @@ router.get('/records/ping', guard, (req, res) => {
     };
   });
   res.json(payload);
-});
+}));
 
 // GET /api/node/:uuid —— 社区主题 node detail 取数（参考 Komari getNode 形状）
 // 返回 node 基础信息 + 实时 realtime + 历史 history（最近一段时间序列），供社区皮肤详情页渲染。
