@@ -111,14 +111,16 @@ sudo REPO_BRANCH=v1.2.0 bash diting.sh --install-server
 # 2) 校验脚本自身（可在 Release notes 里核对）
 sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-script
 
-# 3) 校验受控端载荷（逗号分隔，顺序须与下载清单一致：
-#    install.sh uninstall.sh agent.py collector.py diting-agent.service）
-sudo SP_AGENT_SHA256S=<s1>,<s2>,<s3>,<s4>,<s5> bash diting.sh --install-agent --server ...
+# 3) 受控端载荷校验：diting.sh --install-agent 现在只走 Go 版，二进制由 install.sh
+#    强制比对 Release 随附的 .sha256（不提供即失败），无需再传哈希。
+#    仅当直接执行旧 Python 安装器 agent/install.sh 时，才需按下载清单顺序传入：
+# sudo SP_AGENT_SHA256S=<s1>,<s2>,<s3> bash agent/install.sh ...
 ```
 
-> 未提供 SHA256 时不校验（但 `--update-script` 仍会把本次下载文件的 SHA256
-> 打印到终端，便于事后留档与下次强校验）。发布流程：打 tag → 编译/打包 →
-> `sha256sum` 各产物 → 写入 Release notes。
+> 两种校验口径：`SP_INSTALL_SHA256`（脚本自身）未提供时 `--update-script` 不校验，
+> 但会把本次下载文件的 SHA256 打印到终端，便于留档与下次强校验；受控端安装器
+> （Go 的 `.sha256` 与 Python 的 `SP_AGENT_SHA256S`）则是**未提供即拒绝安装**。
+> 发布流程：打 tag → 编译/打包 → `sha256sum` 各产物 → 写入 Release notes。
 
 ---
 
@@ -210,13 +212,13 @@ diting/
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
-| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位，弱口令启动即拦截） |
+| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、不阻止启动，未设时走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
 | `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌 |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
-| `AGENT_INTERVAL` | 否 | `15` | 期望上报间隔（用于离线判定） |
+| `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7-3650） |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭，交前端处理） |
@@ -259,9 +261,9 @@ diting/
 | `SERVER_URL` | ✅ | — | 服务端 URL（非 localhost 必须为 HTTPS） |
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
-| `INTERVAL` | 否 | `15` | 上报间隔（秒） |
+| `INTERVAL` | 否 | `20`（Docker 镜像 / Windows 为 `15`） | 上报间隔（秒） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
-| `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
+| `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」 |
 | `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `GZIP` | 否 | off | 启用 Gzip 压缩上报（需服务端支持解压） |
@@ -375,8 +377,8 @@ cd server/web && npm install && npm run build
 为降低「全权限 Admin Token 被到处共享」的风险，可配置一个**仅只读**的账号：
 
 - 在 `.env` 设置可选的 `READONLY_TOKEN`（长度建议 ≥ 16）
-- 持有者**仅能调用只读 GET 接口**（查看客户端列表、最新指标、sparkline、`/metrics`）
-- 所有写操作（增删改客户端、重置 Token、测试告警）被 `adminOnly` 守卫拦截，返回 401
+- 持有者**仅能调用只读 GET 接口**（查看客户端列表、最新指标、sparkline 等；**不含** `/metrics`，该端点只认 `ADMIN_TOKEN`）
+- 所有写操作（增删改客户端、重置 Token、测试告警）被 `adminOnly` 守卫拦截，返回 **403** `admin required`
 - 适用于 Grafana / 第三方看板等只读消费场景
 
 ---
@@ -384,9 +386,10 @@ cd server/web && npm install && npm run build
 ## 📈 Prometheus 指标导出（`/metrics`）
 
 - `GET /metrics` 返回 Prometheus 文本格式
-- 鉴权：`Authorization: Bearer <ADMIN_TOKEN | READONLY_TOKEN>`
+- 鉴权：`Authorization: Bearer <ADMIN_TOKEN>`（**仅** `ADMIN_TOKEN`，恒定时间比较，且受管理端 IP 白名单约束）
+- **默认强制 HTTPS**（`X-Forwarded-Proto: https` 或直连 TLS）；仅内网调试可设 `ADMIN_ALLOW_HTTP=1`
 - 指标：`monitor_agent_cpu_percent`、`monitor_agent_mem_percent`、`monitor_agent_disk_percent`、`monitor_agent_net_rx_rate_bytes` 等
-- 示例：`curl -H 'Authorization: Bearer TOKEN' http://localhost:8081/metrics`
+- 示例：`curl -H 'Authorization: Bearer TOKEN' https://your-server/metrics`
 
 ---
 
@@ -409,7 +412,7 @@ cd server/web && npm install && npm run build
 - **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / supervisord）
 - **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 10s ↔ 60s 自动调整（需服务端 `OFFLINE_THRESHOLD_SEC ≥ 120`）
 - **压缩上报**：可选 `GZIP=1`；**月流量**：`STATE_FILE` 与 Python 同格式可平滑切换
-- **资源占用**：常驻内存约 10MB（Python 约 80MB），不依赖 Python / Docker
+- **资源占用**：常驻内存约 10MB（Python 版约 12-25MB，视采集项与系统而定），不依赖 Python / Docker
 
 ---
 
@@ -617,7 +620,7 @@ Token 在数据库中以 **SHA-256 哈希**（`token_hash`）存储，从不明�
 ### 1. 集中式主动探测（对任意目标的 ICMP/TCP/HTTP ping，可指派到特定节点）
 要让 Agent ping/探测某目标，服务端必须向它下推任务——这需要指令通道。一旦指令通道存在，信任边界即破：失陷的服务端可让每个 Agent 探测任意公网目标，把机群变成分布式探测跳板。我们严格保持 Agent→Server 单向，因此不提供「服务端编排探测」。
 
-> **补注（2026-07-09）：我们加了一个安全的等价物——「Agent 侧网络质量自测」。** 思路是用「Agent 自 ping / TCP 探测几个*写死在本地配置里的固定公共基础设施*（默认三家运营商 DNS + 8.8.8.8）」替代「服务端下推任意探测目标」。因为探测目标来自 Agent 本地配置、服务端**从不**下推任何目标，指令通道不存在，信任边界完好。见下方「网络质量自测（固定公共目标）」。它遵守「不做」原则：无指纹、无新指令通道、Agent 零耦合。
+> **补注（2026-07-09）：我们加了一个安全的等价物——「Agent 侧网络质量自测」。** 思路是用「Agent 自 ping / TCP 探测几个*写死在本地配置里的固定公共基础设施*（默认移动门户 `www.10086.cn:443` + 电信/联通 DNS + 8.8.8.8）」替代「服务端下推任意探测目标」。因为探测目标写在 Agent 本地配置、服务端**运行期从不**下推任何目标，指令通道不存在，信任边界完好。见下方「网络质量自测（固定公共目标）」。它遵守「不做」原则：无指纹、无新指令通道、Agent 零耦合。
 
 ### 2. 主机指纹（内核版本 / GPU 型号 / 公网IP / TCP 连接数等）
 此类指纹一旦服务端被拖库（尤其外泄），直接暴露每台机器的攻击面——老内核版本可被定向 CVE 匹配、公网IP 给直接目标、GPU 可用于挖矿权衡。我们只采基础状态（含温度/Swap/开机等非指纹指标），因此即便泄露也无定向攻击价值。
@@ -663,12 +666,12 @@ Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的�
 
 我们的做法是**本地固定、单向上报**：
 - 采样逻辑在 Agent 本地写死，服务端既不推送也不感知；
-- 网络质量探测目标写死在本地 `PROBE_TARGETS`（`label:host[:port]`，默认三家运营商 DNS + 8.8.8.8），**服务端永远不下发任何探测目标**；
+- 网络质量探测目标写死在本地 `PROBE_TARGETS`（`label:host[:port]`，默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」）；安装时由一键命令写入本地一次，**运行期服务端无任何下发通道**；
 - 更新受控端必须**由运维在受控机本地执行**（`sudo bash diting.sh --update-agent`，保留已注册身份），而非 Agent 自己从远端拉脚本。
 
 > 一句话：本项目用「功能减法」（无指令通道、无指纹、Agent 互不感知）换取「安全加法」。攻击者无法利用根本不存在的东西。需要更新时，请走本地运维通道，而非远端自更新。
 >
-> **供应链完整性（L-6）**：部署受控端时通过 `SP_AGENT_SHA256S` 环境变量钉死已知良好版本的 SHA-256 哈希，防止 GitHub CDN / 中间人投毒。不设则跳过校验。详见 [Agent 安全原则](agent/README.md#安全原则)。
+> **供应链完整性（L-6）**：Go 受控端从 Release 下载二进制后强制比对随附 `.sha256`；旧 Python 受控端则通过 `SP_AGENT_SHA256S` 钉死已知良好版本的 SHA-256 哈希。两者**缺少校验和时都拒绝安装（fail closed）**，不会静默信任下载内容。详见 [Agent 安全原则](agent/README.md#安全原则)。
 
 > 补充：GPU 型号（`nvidia-smi` / `lspci` 取得的硬件标识）属于**主机指纹**，与本项目「不采内核/GPU/公网IP」原则冲突，因此**不做 GPU 监控**。
 

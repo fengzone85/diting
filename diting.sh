@@ -1228,7 +1228,7 @@ do_restore() {
 # 安装/卸载每日自动备份（cron）。
 # 用法：do_backup_schedule install|uninstall [保留天数] [小时]
 # 设计要点：
-#  - 只在 crontab 里写一行，带 # diting-backup 标记，卸载时按标记精准移除，不动其它条目；
+#  - 写入两行（# diting-backup 每日备份 / # diting-backup-restore 恢复轮询），卸载时按标记精准移除，不动其它条目；
 #  - 备份输出到 $DB_BACKUP_DIR 并按保留天数轮转，避免占满磁盘；
 #  - 无 crontab 命令时给出清晰指引（最小化容器需 apt-get install -y cron）。
 do_backup_schedule() {

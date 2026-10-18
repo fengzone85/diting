@@ -16,8 +16,13 @@ description: 5 分钟部署 DiTing
 ```bash
 git clone https://github.com/fengzone85/diting.git
 cd diting
+cp server/.env.example server/.env
 docker compose up -d
 ```
+
+> `server/.env` 被 `.gitignore` 忽略、不会随仓库分发，必须先从 `.env.example` 复制一份
+> （`docker-compose.yml` 通过 `env_file` 引用它，缺文件会直接启动失败）。复制后请把
+> `ADMIN_TOKEN` / `SESSION_SECRET` 改成随机强值。
 
 访问 `http://<你的IP>:8081` 即可看到仪表盘。
 
@@ -54,20 +59,32 @@ docker run -d \
 ### Linux（原生 systemd）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
+# 下载统一安装脚本后执行（推荐，参数与后台生成的一致）
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/diting.sh -o diting.sh
+chmod +x diting.sh
+sudo ./diting.sh --install-agent --server https://<你的域名> --id <ID> --token <Token>
 ```
 
-按提示输入 Server URL 和 Token 即可。
+安装的是 **Go 单二进制**受控端（零依赖，约 5MB）。也可直接用 `agent-go/install.sh`：
+
+```bash
+sudo bash agent-go/install.sh --server https://<你的域名> --id <ID> --token <Token>
+```
 
 ### Windows
 
-下载 `agent/windows/` 下的脚本，以管理员身份运行 `install.ps1`。
+以**管理员**身份运行 PowerShell，执行后台「添加 Agent」生成的 Windows 一键命令
+（内部为 `agent-go/install-go.ps1`：下载 `diting-agent.exe` + SHA256 校验 + 注册计划任务）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "`$p=Join-Path `$env:TEMP 'diting-go-install.ps1'; iwr 'https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/install-go.ps1' -OutFile `$p -UseBasicParsing; & `$p -RepoBase 'https://github.com/fengzone85/diting/releases/latest/download' -ServerUrl 'https://<你的域名>' -AgentId '<ID>' -AgentToken '<Token>' -Interval 20"
+```
 
 ## 数据管理
 
 ### 数据保留
 
-服务端每小时自动清理过期指标。默认保留 30 天，可在「设置 → 告警规则」调整（7-3650 天），也可通过环境变量 `RETENTION_DAYS` 设置。
+服务端每小时自动清理过期指标。默认保留 30 天，可在「设置 → 站点与界面」调整（7-3650 天），也可通过环境变量 `RETENTION_DAYS` 设置。
 
 ### 数据备份
 

@@ -52,11 +52,12 @@ Agent 之间互不通信，互不知道彼此存在。
 
 | 措施 | 说明 |
 |---|---|
-| TOTP 2FA (RFC 6238) | 管理员登录需动态验证码 |
+| TOTP 2FA (RFC 6238) | 管理员登录需动态验证码（可选启用，非强制） |
 | 恒定时间比较 | Token 比较 `SHA-256 + timingSafeEqual`，消除长度侧信道 |
 | HttpOnly Cookie | Session Cookie 不可被 JS 读取 |
 | 登录限速 | 防暴力破解 |
-| 2FA 重置 Token | 一次性使用，有效期可配 |
+
+> 目前**没有** 2FA 一键重置 / 恢复令牌，丢失设备需改库处理，见文末「TOTP 2FA → 2FA 重置」。
 
 ### 受控端加固
 
@@ -64,10 +65,10 @@ Agent 之间互不通信，互不知道彼此存在。
 |---|---|
 | HTTPS 强制 | 非 localhost 请求 `exit(1)` |
 | 401/403 长退避 | 认证失败退避 600 秒，防爆破 |
-| 非运行 | Docker: `--user 65534` + 只读挂载 |
-| systemd 14 项加固 | NoNewPrivileges、ProtectSystem、ProtectHome 等 |
+| 非 root 运行 | Docker 内 uid 1000（用户 `diting`）+ 只读挂载 `/:/host:ro` |
+| systemd 加固 | `NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome`、`ReadWritePaths=/var/lib/diting`、`PrivateTmp`（Go 版共 5 项；Python 版另有内核 / cgroup 隔离与 `AmbientCapabilities=CAP_NET_RAW`，见《受控端部署》） |
 | 无 shell 调用 | `probe_one()` 使用 list 形式命令，不经过 shell |
-| 本地固定探测目标 | 网络质量测试目标来自本地环境变量，服务端不可下发 |
+| 本地固定探测目标 | 探测目标写在 agent 本地环境变量；**运行期**服务端无任何下发通道（安装期由一键命令注入一次） |
 
 ### 传输安全
 
@@ -87,7 +88,7 @@ Agent 之间互不通信，互不知道彼此存在。
 
 ## 数据保留
 
-服务端每小时自动清理过期指标，防止数据库无限膨胀。保留天数可在「设置 → 告警规则」配置（7-3650 天），也可通过环境变量 `RETENTION_DAYS` 设置（默认 30 天）。后台设置优先级高于环境变量，保存后 1 小时内自动生效，无需重启。
+服务端每小时自动清理过期指标，防止数据库无限膨胀。保留天数可在「设置 → 站点与界面」配置（7-3650 天），也可通过环境变量 `RETENTION_DAYS` 设置（默认 30 天）。后台设置优先级高于环境变量，保存后 1 小时内自动生效，无需重启。
 
 ## 数据备份
 
@@ -101,7 +102,7 @@ sudo bash diting.sh --backup
 sudo bash diting.sh --backup-schedule install
 ```
 
-备份文件默认存到 `/var/backups/diting/`（gzip 压缩，体积约 20%），包含完整
+备份文件默认存到 `/var/backups/diting/`（压缩优先 `pigz`，无则回退 `gzip`，体积约为库的 20%），包含完整
 数据库快照。恢复前会自动备份当前状态，确保可回滚。新增的备份状态与操作都会
 写入 audit_logs（下载 / 删除 / 请求恢复均可审计）。
 
@@ -118,7 +119,16 @@ DiTing 支持 TOTP（基于时间的一次性密码），兼容 Google Authentic
 
 ### 2FA 重置
 
-如果丢失 2FA 设备，可通过一次性重置 Token 恢复。重置 Token 在启用 2FA 时生成，请妥善保管。
+目前**没有**一键重置 2FA 的开关，也没有「启用时生成的一次性重置 Token」——`diting.sh --reset-admin-token`
+只重置 `ADMIN_TOKEN`，**不影响** 2FA 状态。丢失设备时需 SSH 登录服务器改库关闭：
+
+```sql
+-- 库位置：Docker 部署为 diting-server 容器内 /data/monitor.db（DB_PATH 可改）；
+-- 原生部署为 server/ 实际使用的库。可用 sqlite3 <库文件> 执行：
+DELETE FROM admin_config WHERE key IN ('admin_2fa_secret', 'admin_2fa_enabled');
+```
+
+执行后重启服务（容器重建 / `systemctl restart`），即可用管理员 Token 登录，并在「设置 → 安全」重新绑定 2FA。
 
 ## 信任边界
 
