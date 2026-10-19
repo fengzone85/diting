@@ -234,6 +234,61 @@ test('P1：POST /api/report 用服务端累加器覆盖 metrics 月流量', asyn
   assert.strictEqual(st.cycle_key, 'cumulative');
 });
 
+test('P3：agents API 透出 month_rotate/has_counter，PUT 支持三态更新', async () => {
+  const a = db.createAgent({ name: 'itest-p3-agent' });
+  const auth = { 'X-Agent-ID': a.id, Authorization: `Bearer ${a.token}` };
+
+  let res = await request(app).get('/api/agents').set(READONLY);
+  let row = res.body.find((x) => x.id === a.id);
+  assert.ok(row, 'GET /api/agents 应包含新 agent');
+  assert.strictEqual(row.month_rotate, null);
+  assert.strictEqual(row.has_counter, false);
+
+  const report = await request(app).post('/api/report').set(auth).set('X-Forwarded-Proto', 'https')
+    .send({ cpu: 1, mem_total: 1, net_rx_rate: 0, net_tx_rate: 0, net_rx_month: 0, net_tx_month: 0, net_rx: 100, net_tx: 50, month_rotate: 0 });
+  assert.strictEqual(report.status, 200);
+
+  res = await request(app).get('/api/agents').set(READONLY);
+  row = res.body.find((x) => x.id === a.id);
+  assert.strictEqual(row.has_counter, true, '上报绝对计数器后 has_counter 应为 true');
+
+  res = await request(app).get('/api/public/agents');
+  row = res.body.find((x) => x.id === a.id);
+  assert.ok(row, '公开 agents 应包含该节点');
+  assert.strictEqual(row.has_counter, true);
+  assert.strictEqual(row.month_rotate, null);
+
+  res = await request(app).put(`/api/agents/${a.id}`).set(ADMIN).send({ name: 'itest-p3-agent', month_rotate: 15 });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(db.getAgent(a.id).month_rotate, 15);
+
+  res = await request(app).put(`/api/agents/${a.id}`).set(ADMIN).send({ name: 'itest-p3-agent' });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(db.getAgent(a.id).month_rotate, 15, '未携带 month_rotate 不得改写原值');
+
+  res = await request(app).put(`/api/agents/${a.id}`).set(ADMIN).send({ name: 'itest-p3-agent', month_rotate: null });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(db.getAgent(a.id).month_rotate, null, '显式 null 应清除 UI 覆盖');
+
+  res = await request(app).put(`/api/agents/${a.id}`).set(ADMIN).send({ name: 'itest-p3-agent', month_rotate: 32 });
+  assert.strictEqual(res.status, 400);
+});
+
+test('P3：compat/v1 traffic_limit 使用 GiB 换算', async () => {
+  const a = db.createAgent({ name: 'itest-gib' });
+  db.updateAgent(a.id, { name: 'itest-gib', monthly_quota_gb: 2 });
+
+  let res = await request(app).get('/api/nodes');
+  let node = res.body.data.find((n) => n.uuid === a.id);
+  assert.ok(node, '/api/nodes 应包含该节点');
+  assert.strictEqual(node.traffic_limit, 2 * 1024 * 1024 * 1024);
+
+  res = await request(app).get('/api/v1/nodes');
+  node = res.body.data.find((n) => n.uuid === a.id);
+  assert.ok(node, '/api/v1/nodes 应包含该节点');
+  assert.strictEqual(node.traffic_limit, 2 * 1024 * 1024 * 1024);
+});
+
 test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);

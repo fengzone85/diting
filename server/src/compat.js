@@ -107,7 +107,8 @@ function toNode(a, showBusiness) {
     tags: '',
     hidden: false,
     public_remark: a.note || '',
-    traffic_limit: Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1e9) : 0,
+    // monthly_quota_gb 为 GiB 口径（与 alerts/前端/AI 一致），对主题边界换算成字节。
+    traffic_limit: Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1024 * 1024 * 1024) : 0,
     traffic_limit_type: 'max',
     created_at: new Date(a.created_at).toISOString(),
     updated_at: new Date(a.last_seen || a.created_at).toISOString(),

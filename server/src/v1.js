@@ -60,7 +60,8 @@ function toNode(a, showBusiness) {
     group: a.grp || null,
     remark: show ? (a.note || null) : null,              // 公开备注（受 public_show_business 控制）
     expired_at: show ? (a.expire_at || null) : null,     // 到期时间（同上）
-    traffic_limit: show && Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1e9) : 0,
+    // monthly_quota_gb 为 GiB 口径（与 alerts/compat/前端/AI 一致），标准 API 边界换算成字节。
+    traffic_limit: show && Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1024 * 1024 * 1024) : 0,
     traffic_limit_type: 'max',
     created_at: new Date(a.created_at).toISOString(),
     updated_at: new Date(a.last_seen || a.created_at).toISOString()

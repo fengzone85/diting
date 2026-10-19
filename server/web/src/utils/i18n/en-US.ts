@@ -555,6 +555,8 @@ export const enUS: Record<string, string> = {
   'agent.billingCycle': 'Billing cycle',
   'agent.expireDate': 'Expiry date',
   'agent.monthlyQuota': 'Monthly quota (GB)',
+  'agent.monthRotate': 'Traffic reset day',
+  'agent.monthRotateHint': '0 = unlimited (cumulative), 1–31 = monthly reset day. Go agents only; takes effect on the next report. Leave empty to use the agent-reported value.',
   'agent.autoRenew': 'Auto renew',
   'agent.renewCycle': 'Renew one cycle manually',
   'agent.probeTargets': 'Probe Targets',
