@@ -5,6 +5,7 @@ const Database = require('better-sqlite3');
 // 审查 C4：重聚合 SQL 与 db 句柄解耦后放这里——主线程（db.js 委派）与
 // worker 线程（dbworker.js 只读连接）共用同一份实现，避免两条路径语义分叉。
 const heavyQueries = require('./heavy-queries');
+const traffic = require('./traffic');
 
 // 数据库默认落盘位置：容器内若挂载了持久卷 /data（docker-compose 的 server-data），
 // 则写入 /data/monitor.db，确保重建容器后数据仍在；否则回退到本地 server/data（开发/裸跑）。
@@ -73,6 +74,19 @@ CREATE TABLE IF NOT EXISTS alert_state (
   type       TEXT NOT NULL,
   last_sent  INTEGER NOT NULL,
   PRIMARY KEY(agent_id, type)
+);
+
+-- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
+CREATE TABLE IF NOT EXISTS traffic_state (
+  agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+  cycle_key   TEXT,
+  cycle_start INTEGER,
+  used_rx     INTEGER CHECK (used_rx BETWEEN 0 AND 9007199254740991),
+  used_tx     INTEGER CHECK (used_tx BETWEEN 0 AND 9007199254740991),
+  last_rx     INTEGER CHECK (last_rx BETWEEN 0 AND 9007199254740991),
+  last_tx     INTEGER CHECK (last_tx BETWEEN 0 AND 9007199254740991),
+  last_ts     INTEGER,
+  updated_at  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS admin_config (
@@ -189,6 +203,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('pending')) db.exec('ALTER TABLE agents ADD COLUMN pending INTEGER DEFAULT 0');
 }
+// P1: agents 增加流量重置日列。三态 NULL=未设置（采纳 agent 上报）/0=累计/1–31=重置日；不给默认值。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('month_rotate')) db.exec('ALTER TABLE agents ADD COLUMN month_rotate INTEGER');
+}
 
 // schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
 {
@@ -217,9 +236,14 @@ const stmts = {
     VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @pending, @created_at, 0)`),
   updateAgent: db.prepare(`UPDATE agents SET
     name=@name, merchant=@merchant, note=@note, expire_at=@expire_at, monthly_quota_gb=@monthly_quota_gb,
+    month_rotate=@month_rotate,
     price=@price, billing_cycle=@billing_cycle, currency=@currency, auto_renewal=@auto_renewal,
     grp=@grp, country=@country, probe_targets=@probe_targets
     WHERE id=@id`),
+  upsertTrafficState: db.prepare(`INSERT OR REPLACE INTO traffic_state
+    (agent_id, cycle_key, cycle_start, used_rx, used_tx, last_rx, last_tx, last_ts, updated_at)
+    VALUES (@agent_id, @cycle_key, @cycle_start, @used_rx, @used_tx, @last_rx, @last_tx, @last_ts, @updated_at)`),
+  allTrafficState: db.prepare('SELECT * FROM traffic_state'),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
   // 审查 G4：批准自助注册的待确认 agent（pending 1→0）
   approveAgent: db.prepare('UPDATE agents SET pending=0 WHERE id=?'),
@@ -491,21 +515,29 @@ const heavyQuerySync = (fn, args) => {
 // sparkline 专用：只取指标列（不含 probes 大字段），规避 SELECT * 全行物化。
 const getMetricsSparklines = (agentId, sinceTs) => stmts.metricsSparklines.all(agentId, sinceTs);
 
-const updateAgent = (id, f) => stmts.updateAgent.run({
-  id,
-  name: f.name,
-  merchant: f.merchant || '',
-  note: f.note || '',
-  expire_at: f.expire_at || '',
-  monthly_quota_gb: Number(f.monthly_quota_gb) || 0,
-  price: Number(f.price) || 0,
-  billing_cycle: (f.billing_cycle === undefined || f.billing_cycle === null || f.billing_cycle === '' || isNaN(Number(f.billing_cycle))) ? 30 : Number(f.billing_cycle),
-  currency: f.currency || '¥',
-  auto_renewal: f.auto_renewal !== false ? 1 : 0,
-  grp: f.grp || '',
-  country: (f.country || '').toUpperCase().slice(0, 2),
-  probe_targets: f.probe_targets || ''
-});
+const updateAgent = (id, f) => {
+  // P1 三态：仅当调用方显式携带 month_rotate 才更新；否则保留库中原值（可能是 NULL）。
+  const current = stmts.getAgent.get(id);
+  const monthRotate = Object.prototype.hasOwnProperty.call(f, 'month_rotate')
+    ? traffic.normalizeRotate(f.month_rotate)
+    : (current ? current.month_rotate : null);
+  return stmts.updateAgent.run({
+    id,
+    name: f.name,
+    merchant: f.merchant || '',
+    note: f.note || '',
+    expire_at: f.expire_at || '',
+    monthly_quota_gb: Number(f.monthly_quota_gb) || 0,
+    month_rotate: monthRotate,
+    price: Number(f.price) || 0,
+    billing_cycle: (f.billing_cycle === undefined || f.billing_cycle === null || f.billing_cycle === '' || isNaN(Number(f.billing_cycle))) ? 30 : Number(f.billing_cycle),
+    currency: f.currency || '¥',
+    auto_renewal: f.auto_renewal !== false ? 1 : 0,
+    grp: f.grp || '',
+    country: (f.country || '').toUpperCase().slice(0, 2),
+    probe_targets: f.probe_targets || ''
+  });
+};
 
 const deleteAgent = (id) => {
   stmts.clearAllAlertState.run(id);
@@ -538,6 +570,47 @@ const METRIC_DEFAULTS = {
   process_count: 0, interval: 0
 };
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({}, METRIC_DEFAULTS, m, { agent_id }));
+
+// ---- P1 服务端流量累加器：内存 Map + 节流落盘，/report 热路径不打 SQLite ----
+const trafficCache = new Map(stmts.allTrafficState.all().map((r) => [r.agent_id, r]));
+const trafficDirty = new Set();
+
+const accumulateTraffic = (agentId, report, nowMs = Date.now()) => {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return null;
+  let state = trafficCache.get(agentId);
+  if (!state) {
+    state = traffic.emptyState(agentId);
+    trafficCache.set(agentId, state);
+  }
+  const tzOffsetHours = Number(getAiConfig().tz_offset_hours) || 0;
+  const out = traffic.accumulate(state, agent, report, nowMs, tzOffsetHours);
+  report.net_rx_month = out.used_rx;
+  report.net_tx_month = out.used_tx;
+  trafficDirty.add(agentId);
+  return out;
+};
+
+const flushTraffic = () => {
+  if (!trafficDirty.size) return;
+  const rows = [];
+  for (const id of trafficDirty) {
+    const s = trafficCache.get(id);
+    if (s) rows.push(s);
+  }
+  if (!rows.length) { trafficDirty.clear(); return; }
+  const tx = db.transaction((list) => {
+    for (const s of list) stmts.upsertTrafficState.run(s);
+  });
+  tx(rows);
+  trafficDirty.clear();
+};
+
+const trafficFlushTimer = setInterval(flushTraffic, 60000);
+trafficFlushTimer.unref();
+process.once('exit', () => {
+  try { if (fs.existsSync(DB_PATH)) flushTraffic(); } catch { /* 退出兜底失败不阻断 */ }
+});
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
 
@@ -900,7 +973,7 @@ module.exports = {
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
-  getRecentMetrics, trafficEstimateBucketed,
+  getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,

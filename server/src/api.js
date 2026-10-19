@@ -249,6 +249,8 @@ router.post('/report', agentAuth, (req, res) => {
     return res.status(400).json({ error: 'invalid payload' });
   }
   const ts = Date.now();
+  // P1：先用服务端累加器按 month_rotate 口径覆盖 m.net_*_month，再落 metrics。
+  db.accumulateTraffic(req.agent.id, m, ts);
   db.insertMetric(req.agent.id, Object.assign({ ts }, m));
   db.touchAgent(req.agent.id, m.os, m.hostname);
   // CPU 核数（§9 T18）：老 agent 不带该字段 → m.cores = 0 → 不写，库中保持 0 = 未知

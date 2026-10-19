@@ -207,6 +207,33 @@ const withUi = async (patch, fn) => {
   try { return await fn(); } finally { db.setUiSettings(ui); }
 };
 
+test('P1：POST /api/report 用服务端累加器覆盖 metrics 月流量', async () => {
+  const a = db.createAgent({ name: 'itest-traffic-report' });
+  const auth = { 'X-Agent-ID': a.id, Authorization: `Bearer ${a.token}` };
+  const base = {
+    cpu: 1, mem_used: 1, mem_total: 2, mem_pct: 50,
+    net_rx_rate: 0, net_tx_rate: 0, net_rx_month: 0, net_tx_month: 0,
+    os: 'Linux', hostname: 'itest-traffic-report'
+  };
+  const first = await request(app).post('/api/report').set(auth).set('X-Forwarded-Proto', 'https')
+    .send(Object.assign({}, base, { net_rx: 1000, net_tx: 500, month_rotate: 0 }));
+  assert.strictEqual(first.status, 200);
+  let m = db.getLatestMetric(a.id);
+  assert.strictEqual(m.net_rx_month, 1000);
+  assert.strictEqual(m.net_tx_month, 500);
+
+  const second = await request(app).post('/api/report').set(auth).set('X-Forwarded-Proto', 'https')
+    .send(Object.assign({}, base, { net_rx: 1600, net_tx: 800, month_rotate: 0 }));
+  assert.strictEqual(second.status, 200);
+  m = db.getLatestMetric(a.id);
+  assert.strictEqual(m.net_rx_month, 1600, 'cumulative 应等于最新绝对计数器');
+  assert.strictEqual(m.net_tx_month, 800);
+  db.flushTraffic();
+  const st = db.db.prepare('SELECT * FROM traffic_state WHERE agent_id=?').get(a.id);
+  assert.strictEqual(st.used_rx, 1600);
+  assert.strictEqual(st.cycle_key, 'cumulative');
+});
+
 test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);
