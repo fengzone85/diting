@@ -289,6 +289,21 @@ test('P3：compat/v1 traffic_limit 使用 GiB 换算', async () => {
   assert.strictEqual(node.traffic_limit, 2 * 1024 * 1024 * 1024);
 });
 
+test('P4：一键安装命令贯通 MONTH_ROTATE', async () => {
+  const a = db.createAgent({ name: 'itest-p4-install' });
+  db.updateAgent(a.id, { name: 'itest-p4-install', month_rotate: 7 });
+
+  await withUi({ agent_server_url: 'https://agent.example.com' }, async () => {
+    const res = await request(app).get(`/api/agents/${a.id}/commands`).set(ADMIN);
+    assert.strictEqual(res.status, 200);
+    const install = res.body.install;
+    assert.strictEqual(install.month_rotate, 7);
+    assert.ok(install.native_cmd.includes('--month-rotate 7'), 'native_cmd 应带 --month-rotate');
+    assert.ok(install.docker_cmd.includes('-e MONTH_ROTATE=7'), 'docker_cmd 应带 MONTH_ROTATE env');
+    assert.ok(install.windows_cmd.includes('-MonthRotate 7'), 'windows_cmd 应带 -MonthRotate');
+  });
+});
+
 test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);

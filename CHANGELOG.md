@@ -2,6 +2,34 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-19 流量周期口径：month_rotate / net_rx / net_tx（P1–P4 安装链路）
+
+### ⚠️ 行为变更
+
+- **Go 受控端新增上报绝对网络计数器** `net_rx/net_tx`（接口累计字节）与 `month_rotate`
+  （环境变量 `MONTH_ROTATE`，兼容别名 `AGENT_MONTH_ROTATE`）。服务端新增 `traffic_state`
+  小表做周期累加，并按
+  `agents.month_rotate` / agent 上报值决定口径：`0`=自网卡建立累计，`1–31`=每月重置日
+  （短月顺延规则对齐 Komari），未上报计数器的 Python/legacy 节点继续透传其本地自然月累计。
+- 管理端 Agent 详情新增「流量重置日」：仅对已有 `has_counter=true` 的 Go 节点显示；留空表示
+  采纳受控端上报值，显式 `0` 表示累计口径，保存后下一条上报生效。
+- **配额单位统一为 GiB**：`alerts` / 前端 / AI 原本按 GiB，`compat` 与 `v1` 的
+  `traffic_limit` 由十进制 GB 改为 `monthly_quota_gb * 1024³`；使用社区主题按字节展示配额的
+  界面数值会相应变大（约 7.37%），属修正而非超量。
+- 一键安装/更新链路新增 `--month-rotate` / `-MonthRotate` / `-e MONTH_ROTATE`：
+  `diting.sh`、`agent-go/install.sh`、`api.js` 生成的 native/Docker/Windows 命令、
+  `install-go.ps1` 的 `run_scheduled.bat` 均已贯通；`diting.sh --update-agent` 会保留
+  `/etc/diting/agent.env` 里的 `MONTH_ROTATE`。
+
+### 说明
+
+- 服务端月流量字段仍是 `metrics.net_rx_month/net_tx_month`，但 Go 节点的值已由服务端累加器
+  回写；升级切档日历史曲线可能出现台阶（legacy Python 节点不变）。
+- Go agent 仍保留本地 `state.json` 月累计作为回滚/观测期冗余；删除本地月累计需线上观测稳定后
+  再执行（见 `dev-docs/TRAFFIC_PLAN_2026-10-13.md` P4）。
+- 整数口径按 JS 安全整数收敛：超过 `Number.MAX_SAFE_INTEGER` 的计数器字段按 legacy 透传处理，
+  不承诺 uint64 满量程。
+
 ## 2026-10-18 Token 强度判定收敛：弱 ADMIN_TOKEN 全入口失效 + READONLY_TOKEN 告警
 
 ### ⚠️ 行为变更

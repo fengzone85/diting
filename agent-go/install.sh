@@ -34,11 +34,13 @@ Usage: sudo bash install.sh [OPTIONS]
   --setup-name NAME      Node display name
   --interval SECONDS     Report interval (default 20)
   --probe-targets LIST   label:host[:port] comma-separated
+  --month-rotate N       traffic reset day (0=cumulative, 1-31; default 0)
   --repo URL             Release download base (default .../releases/latest/download)
 EOF
     exit 0
 }
 INTERVAL=20
+MONTH_ROTATE="${MONTH_ROTATE:-0}"
 RELEASE_BASE="https://github.com/fengzone85/diting/releases/latest/download"
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,6 +53,7 @@ while [[ $# -gt 0 ]]; do
         --setup-name) SETUP_NAME="$2"; shift 2 ;;
         --interval) INTERVAL="$2"; shift 2 ;;
         --probe-targets) PROBE_TARGETS="$2"; shift 2 ;;
+        --month-rotate) MONTH_ROTATE="$2"; shift 2 ;;
         --repo) RELEASE_BASE="$2"; shift 2 ;;
         --install-agent) shift ;;
         --help|-h) usage ;;
@@ -110,6 +113,7 @@ fi
 [[ -z "${AGENT_ID:-}" ]] && { read -rp "AGENT_ID: " AGENT_ID; }
 [[ -z "${AGENT_TOKEN:-}" ]] && { read -rs AGENT_TOKEN; echo ""; }
 [[ -n "$SERVER_URL" && -n "$AGENT_ID" && -n "$AGENT_TOKEN" ]] || { echo -e "${RED}[error] empty required fields${NC}" >&2; exit 1; }
+[[ "$MONTH_ROTATE" =~ ^[0-9]+$ ]] && (( MONTH_ROTATE >= 0 && MONTH_ROTATE <= 31 )) || { echo -e "${RED}[error] month-rotate must be 0-31${NC}" >&2; exit 1; }
 validate_server_url "$SERVER_URL" || exit 1
 id diting >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin -d /nonexistent -c "Diting Agent" diting
 mkdir -p /opt/diting /var/lib/diting /etc/diting
@@ -120,6 +124,7 @@ ENV_CONTENT="SERVER_URL=${SERVER_URL}
 AGENT_ID=${AGENT_ID}
 AGENT_TOKEN=${AGENT_TOKEN}
 INTERVAL=${INTERVAL}
+MONTH_ROTATE=${MONTH_ROTATE}
 DISK_PATH=/
 STATE_FILE=/var/lib/diting/state.json
 "

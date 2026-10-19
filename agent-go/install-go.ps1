@@ -11,6 +11,7 @@
 .PARAMETER ServerUrl / AgentId / AgentToken  (required)
 .PARAMETER Interval       Report interval seconds (default 20)
 .PARAMETER ProbeTargets   label:host[:port] comma-separated (optional)
+.PARAMETER MonthRotate    Traffic reset day (0=cumulative, 1-31; default 0)
 .PARAMETER InstallDir     Default %ProgramData%\diting-agent (same as the Python agent,
                           so upgrades reuse the same directory)
 .PARAMETER RepoBase       Release download base (default latest/download)
@@ -26,6 +27,7 @@ param(
     [string]$AgentToken,
     [int]$Interval = 20,
     [string]$ProbeTargets = '',
+    [int]$MonthRotate = 0,
     [string]$InstallDir = (Join-Path $env:ProgramData 'diting-agent'),
     [string]$RepoBase = 'https://github.com/fengzone85/diting/releases/latest/download'
 )
@@ -39,6 +41,11 @@ if ($ServerUrl -notmatch '^https://') {
         Write-Error 'SERVER_URL must use https (agent refuses plain http for non-localhost)'
         exit 1
     }
+}
+
+if ($MonthRotate -lt 0 -or $MonthRotate -gt 31) {
+    Write-Warning "Invalid -MonthRotate $MonthRotate; falling back to 0 (cumulative)."
+    $MonthRotate = 0
 }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -117,6 +124,7 @@ set SERVER_URL=$ServerUrl
 set AGENT_ID=$AgentId
 set AGENT_TOKEN=$AgentToken
 set INTERVAL=$Interval
+set MONTH_ROTATE=$MonthRotate
 set STATE_FILE=$InstallDir\state.json
 $ptLine
 "$exe"
