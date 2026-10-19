@@ -23,6 +23,8 @@ type Config struct {
 	DiskPath     string
 	StateFile    string
 	ProbeTargets string
+	// MonthRotate：Komari 兼容流量重置日（0=绝对累计，1–31=周期重置日；越界回落 0）。
+	MonthRotate  int
 	Debug        bool
 	Gzip         bool
 	Adaptive     bool          // 纯本地自适应（不解析响应）：变化大→快档，平稳→慢档
@@ -35,11 +37,11 @@ type Config struct {
 // 零依赖：使用标准库 os.Getenv，不用 caarlos0/env（减少攻击面、加速交叉编译）。
 func Load() (*Config, error) {
 	cfg := &Config{
-		ServerURL:    os.Getenv("SERVER_URL"),
-		AgentID:      os.Getenv("AGENT_ID"),
-		AgentToken:   os.Getenv("AGENT_TOKEN"),
-		DiskPath:     getEnvDefault("DISK_PATH", "/"),
-		StateFile:    getEnvDefault("STATE_FILE", "/data/state.json"),
+		ServerURL:  os.Getenv("SERVER_URL"),
+		AgentID:    os.Getenv("AGENT_ID"),
+		AgentToken: os.Getenv("AGENT_TOKEN"),
+		DiskPath:   getEnvDefault("DISK_PATH", "/"),
+		StateFile:  getEnvDefault("STATE_FILE", "/data/state.json"),
 	}
 
 	// ProbeTargets：未设用默认目标（两字母标签适配状态卡片；目标为移动门户 + 电信/联通
@@ -53,6 +55,9 @@ func Load() (*Config, error) {
 	} else {
 		cfg.ProbeTargets = "CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 	}
+
+	// MonthRotate：优先 MONTH_ROTATE，兼容 Komari 别名 AGENT_MONTH_ROTATE；取第一个非空值，非法/越界回落 0。
+	cfg.MonthRotate = getEnvRotate("MONTH_ROTATE", "AGENT_MONTH_ROTATE")
 
 	// 解析 interval（默认 20s，最小 5s；ADAPTIVE=false 时的固定间隔）
 	intervalStr := getEnvDefault("INTERVAL", "20")
@@ -122,6 +127,19 @@ func getEnvInt(key string, def int) int {
 		}
 	}
 	return def
+}
+
+// getEnvRotate 取第一个非空环境变量为 month_rotate；空/非法/越界一律回落 0。
+func getEnvRotate(keys ...string) int {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 31 {
+				return n
+			}
+			return 0
+		}
+	}
+	return 0
 }
 
 // Validate 强制 HTTPS：仅 localhost/127.0.0.1/::1 允许 http://。
