@@ -83,13 +83,16 @@ type Metrics struct {
 	NetRxRate float64 `json:"net_rx_rate"`
 	NetTxRate float64 `json:"net_tx_rate"`
 
-	// 网络月累计（持久化，跨重启）
+	// 网络月累计（P4 前仍本地持久化并上报；服务端 P1 起优先用绝对计数器口径回写同名字段）
 	NetRxMonth uint64 `json:"net_rx_month"`
 	NetTxMonth uint64 `json:"net_tx_month"`
 
-	// 网络累计字节（不上报，用于月累计计算，json:"-" 跳过序列化）
-	NetRx uint64 `json:"-"`
-	NetTx uint64 `json:"-"`
+	// 网络累计字节（P2 起上报；服务端 traffic_state 累加器以此为周期基线）
+	NetRx uint64 `json:"net_rx"`
+	NetTx uint64 `json:"net_tx"`
+
+	// 流量重置日（Komari month_rotate；0=绝对累计，1–31=周期重置日；服务端 agents.month_rotate 未设置时采用）
+	MonthRotate int `json:"month_rotate,omitempty"`
 
 	// 磁盘 IO 速率（B/s，需要前次样本）
 	DiskRRate float64 `json:"disk_r_rate"`
@@ -108,6 +111,7 @@ type ProbeTarget struct {
 	Host  string
 	Port  int
 }
+
 // round2 四舍五入到 2 位小数（平台共用：linux disk.go 与 windows disk 使用）。
 // round2 四舍五入到 2 位小数（对齐 Python round(pct, 2)）。
 func round2(v float64) float64 {

@@ -128,6 +128,7 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, s
 	tA := time.Now()
 	st.Accumulate(m.NetRx, m.NetTx)
 	m.Probes = probes.Snapshot()
+	m.MonthRotate = cfg.MonthRotate
 	m.NetRxMonth = st.MonthRx
 	m.NetTxMonth = st.MonthTx
 	payload, err := json.Marshal(m)
