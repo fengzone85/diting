@@ -16,7 +16,6 @@ import (
 	"github.com/fengzone85/diting/agent-go/collector"
 	"github.com/fengzone85/diting/agent-go/config"
 	"github.com/fengzone85/diting/agent-go/reporter"
-	"github.com/fengzone85/diting/agent-go/state"
 )
 
 // memLimit 是 Agent 的软内存上限（32 MB）。
@@ -51,7 +50,6 @@ func main() {
 
 	c := collector.NewCollector(cfg.DiskPath)
 	r := reporter.NewReporter(cfg.ServerURL, cfg.AgentID, cfg.AgentToken, cfg.Interval, version)
-	st := state.Load(cfg.StateFile)
 	targets := collector.ParseProbeTargets(cfg.ProbeTargets)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -62,7 +60,7 @@ func main() {
 	probes.Start(ctx)
 
 	// 首次立即上报
-	prevM := runOnce(ctx, c, r, st, probes, cfg)
+	prevM := runOnce(ctx, c, r, probes, cfg)
 
 	// 自适应状态：首报后强制 3 轮快档建基线
 	var fastStreak int
@@ -88,7 +86,7 @@ func main() {
 			return
 		case <-time.After(wait):
 			t0 := time.Now()
-			m := runOnce(ctx, c, r, st, probes, cfg)
+			m := runOnce(ctx, c, r, probes, cfg)
 			d := time.Since(t0)
 			if cfg.Adaptive {
 				decided := adaptiveInterval(prevM, m, cfg.FastInterval, cfg.SlowInterval, &fastStreak)
@@ -106,7 +104,7 @@ func main() {
 var lastReportAt time.Time
 
 // runOnce 执行一次采集 + 上报，返回本轮指标（用于自适应判断；采集失败返回 nil）。
-func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, st *state.State, probes *collector.ProbeRunner, cfg *config.Config) *collector.Metrics {
+func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, probes *collector.ProbeRunner, cfg *config.Config) *collector.Metrics {
 	t0 := time.Now()
 	m, err := c.Collect()
 	if err != nil {
@@ -124,13 +122,11 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, s
 	lastReportAt = time.Now()
 	tCollect := time.Since(t0)
 
-	// 流量累计 + 探测快照 + 序列化
+	// 探测快照 + 序列化。月累计不再本地累加（P4 cleanup）：服务端 traffic_state
+	// 累加器以 net_rx/net_tx 绝对计数器为准，回写 net_rx_month/net_tx_month。
 	tA := time.Now()
-	st.Accumulate(m.NetRx, m.NetTx)
 	m.Probes = probes.Snapshot()
 	m.MonthRotate = cfg.MonthRotate
-	m.NetRxMonth = st.MonthRx
-	m.NetTxMonth = st.MonthTx
 	payload, err := json.Marshal(m)
 	if err != nil {
 		log.Printf("[error] marshal: %v", err)
@@ -145,15 +141,8 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, s
 	}
 	tReport := time.Since(t1)
 
-	// 持久化状态
-	t2 := time.Now()
-	if err := st.Save(cfg.StateFile); err != nil {
-		log.Printf("[warn] save state: %v", err)
-	}
-	tSave := time.Since(t2)
-
 	if cfg.Debug {
-		log.Printf("[debug] runOnce: collect=%s mid=%s report=%s save=%s", tCollect, tMid, tReport, tSave)
+		log.Printf("[debug] runOnce: collect=%s mid=%s report=%s", tCollect, tMid, tReport)
 	}
 
 	return m

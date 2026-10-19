@@ -86,7 +86,6 @@ description: 服务端与受控端环境变量参考
 | `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。**仅 Go 受控端生效**，Python legacy 节点由服务端透传其本地自然月累计 |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
-| `STATE_FILE` | Go | 代码兜底 `/data/state.json`；systemd 安装写入 `/var/lib/diting/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 

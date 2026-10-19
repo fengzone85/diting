@@ -128,7 +128,6 @@ set AGENT_ID=$AgentId
 set AGENT_TOKEN=$AgentToken
 set INTERVAL=$Interval
 set MONTH_ROTATE=$MonthRotate
-set STATE_FILE=$InstallDir\state.json
 $ptLine
 "$exe"
 "@

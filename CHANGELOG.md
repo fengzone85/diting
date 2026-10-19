@@ -25,8 +25,10 @@
 
 - 服务端月流量字段仍是 `metrics.net_rx_month/net_tx_month`，但 Go 节点的值已由服务端累加器
   回写；升级切档日历史曲线可能出现台阶（legacy Python 节点不变）。
-- Go agent 仍保留本地 `state.json` 月累计作为回滚/观测期冗余；删除本地月累计需线上观测稳定后
-  再执行（见 `dev-docs/TRAFFIC_PLAN_2026-10-13.md` P4）。
+- **Go agent 本地 `state.json` 月累计已删除（P4 cleanup）**：`agent-go/state` 包移除，
+  `STATE_FILE` 环境变量与 `diting-state` Docker 卷不再使用（存量环境变量/卷被忽略，无影响）。
+  周期口径完全由服务端 `traffic_state` 按 `month_rotate` 决定（见
+  `dev-docs/TRAFFIC_PLAN_2026-10-13.md` P4）。
 - 整数口径按 JS 安全整数收敛：超过 `Number.MAX_SAFE_INTEGER` 的计数器字段按 legacy 透传处理，
   不承诺 uint64 满量程。
 

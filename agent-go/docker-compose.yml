@@ -44,8 +44,3 @@ services:
     #     读到的是容器自己的 init，拿不到宿主挂载表）
     volumes:
       - /:/host:ro
-      # 月流量状态持久化（state.json；与 Python 版卷通用，格式一致）
-      - diting-state:/data
-
-volumes:
-  diting-state:

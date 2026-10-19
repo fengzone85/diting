@@ -21,7 +21,6 @@ type Config struct {
 	AgentToken   string
 	Interval     time.Duration // 固定模式间隔（ADAPTIVE=false 时生效）
 	DiskPath     string
-	StateFile    string
 	ProbeTargets string
 	// MonthRotate：Komari 兼容流量重置日（0=绝对累计，1–31=周期重置日；越界回落 0）。
 	MonthRotate  int
@@ -40,7 +39,6 @@ func Load() (*Config, error) {
 		AgentID:    os.Getenv("AGENT_ID"),
 		AgentToken: os.Getenv("AGENT_TOKEN"),
 		DiskPath:   getEnvDefault("DISK_PATH", "/"),
-		StateFile:  getEnvDefault("STATE_FILE", "/data/state.json"),
 	}
 
 	// ProbeTargets：未设用默认目标（两字母标签适配状态卡片；目标为移动门户 + 电信/联通

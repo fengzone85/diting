@@ -80,7 +80,7 @@ Get-ScheduledTaskInfo -TaskName "HostMonitorAgent-<AgentId>"
 > （计划任务本身在 session 0 运行，无窗口）。
 
 配置位于 `%ProgramData%\diting-agent\run_scheduled.bat`（环境变量 `SERVER_URL` / `AGENT_ID` /
-`AGENT_TOKEN` / `INTERVAL` / `MONTH_ROTATE` / `STATE_FILE` / `PROBE_TARGETS`）。服务端「修改探测目标」命令
+`AGENT_TOKEN` / `INTERVAL` / `MONTH_ROTATE` / `PROBE_TARGETS`）。服务端「修改探测目标」命令
 改的就是该文件里的 `PROBE_TARGETS` 行并重启任务，无需重装、无需 Token。
 
 ## 卸载

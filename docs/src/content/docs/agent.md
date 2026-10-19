@@ -110,7 +110,6 @@ SERVER_URL=https://agent.example.com:4443 \
 AGENT_ID=agt_xxxxxxxxxxxx \
 AGENT_TOKEN=xxxxxxxxxxxx \
 DISK_PATH=/ \
-STATE_FILE=/var/lib/diting-agent-go/state.json \
 ./diting-agent-go
 ```
 
@@ -132,7 +131,6 @@ STATE_FILE=/var/lib/diting-agent-go/state.json \
 | `AGENT_ID` | 必填 | 独立 agent 标识 |
 | `AGENT_TOKEN` | 必填 | 上报 token（随 `agent.env` 落盘，权限 600；传输仅经 HTTPS 头） |
 | `DISK_PATH` | `/` | 顶层磁盘聚合根 |
-| `STATE_FILE` | 代码兜底 `/data/state.json`；systemd 安装写入 `/var/lib/diting/state.json` | 月累计状态文件路径（建议权限 600） |
 | `INTERVAL` | `20` | 固定模式间隔秒（`ADAPTIVE=false` 时生效，最小 5） |
 | `MONTH_ROTATE` | `0` | 流量重置日：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`，仅 Go 受控端生效 |
 | `DEBUG` | `0` | `1`/`true` 打印调试日志（不打印 token） |
@@ -224,16 +222,11 @@ SERVER_URL=https://1.2.3.4:4443
 
 ### 月流量清零口径
 
-月流量（`net_rx_month` / `net_tx_month`）按 **agent 本地时区**的月初清零，
-累计值持久化在 `STATE_FILE`（默认 `/var/lib/diting/state.json`），跨重启不丢。
-
-Docker 容器内默认为 **UTC**：若希望「北京时间月初」清零，需显式注入时区——
-
-```bash
-docker run -e TZ=Asia/Shanghai ...
-```
-
-否则清零时刻会比北京时间早 8 小时（即在月末最后一天 16:00 就归零）。
+Go 受控端只上报绝对计数器 `net_rx` / `net_tx` 与重置日 `month_rotate`，
+月累计（`net_rx_month` / `net_tx_month`）由**服务端** `traffic_state` 累加器
+统一计算并回写（见 `TRAFFIC_PLAN` P1/P4）：周期口径（`month_rotate`，含短月顺延、
+闰年边界）由服务端按管理员设置或 agent 上报值决定，agent 本地不再持久化任何
+流量状态。时区口径统一在服务端配置，与 agent 容器时区无关。
 
 ### Windows 上报间隔差异
 

@@ -83,11 +83,8 @@ type Metrics struct {
 	NetRxRate float64 `json:"net_rx_rate"`
 	NetTxRate float64 `json:"net_tx_rate"`
 
-	// 网络月累计（P4 前仍本地持久化并上报；服务端 P1 起优先用绝对计数器口径回写同名字段）
-	NetRxMonth uint64 `json:"net_rx_month"`
-	NetTxMonth uint64 `json:"net_tx_month"`
-
-	// 网络累计字节（P2 起上报；服务端 traffic_state 累加器以此为周期基线）
+	// 网络累计字节（P2 起上报；服务端 traffic_state 累加器以此为周期基线，
+	// 并回写 net_rx_month/net_tx_month——Go 端不再本地累加，P4 cleanup 已删 state 包）
 	NetRx uint64 `json:"net_rx"`
 	NetTx uint64 `json:"net_tx"`
 

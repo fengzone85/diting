@@ -193,7 +193,6 @@ diting/
 │   ├── main.go              # 主循环 + 自适应采样
 │   ├── collector/           # 采集子模块（cpu/mem/disk/diskio/network/probe/…）
 │   ├── reporter/            # 上报 + 压缩 + 重试
-│   ├── state/               # 月流量 STATE_FILE 持久化
 │   └── config/              # 环境变量解析
 ├── docs/                    # 用户技术文档（13 篇）
 └── nginx/monitor.conf.example   # TLS 反代 + 限流示例
@@ -264,7 +263,6 @@ diting/
 | `INTERVAL` | 否 | `20`（Docker 镜像 / Windows 为 `15`） | 上报间隔（秒） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」 |
-| `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
@@ -400,7 +398,7 @@ cd server/web && npm install && npm run build
 - 采集：`/proc/stat`（CPU）、`/proc/meminfo`（内存）、`/proc/mounts`+`statvfs`（按 st_dev 去重真实盘，过滤 tmpfs/伪盘）
 - 网络流量：`/proc/net/dev`（容器内需 `--network host` 才能拿到真实流量）
 - 温度：`/sys/class/thermal`（可选）；网络质量：ICMP ping 优先、TCP 兜底、多目标并行
-- 月流量累计：`STATE_FILE=/data/state.json` 跨重启持久化、跨月清零
+- 月流量累计：服务端 `traffic_state` 累加器基于绝对计数器 `net_rx/net_tx` 计算，agent 无本地状态
 - 401/403 → 10 分钟长退避（静态 Token 无法自愈）；瞬时错误指数退避（最多 3 次）
 
 ---

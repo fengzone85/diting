@@ -201,7 +201,7 @@ sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUr
   // Docker 版（M3 起 Go scratch 镜像，~7.5MB）：--network host 取真实流量；
   // /:/host:ro 是宿主磁盘监控的结构性依赖（见 agent-go/docker-compose.yml 注释）；
   // cap_drop ALL + no-new-privileges（纯 TCP 探测无需 NET_RAW）。
-  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     --network host --cap-drop ALL --security-opt no-new-privileges:true \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv} -e MONTH_ROTATE=${mr} -e DISK_PATH=/host${ptEnv} \\\n     -v /:/host:ro -v diting-state:/data \\\n     diting-agent`;
+  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     --network host --cap-drop ALL --security-opt no-new-privileges:true \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv} -e MONTH_ROTATE=${mr} -e DISK_PATH=/host${ptEnv} \\\n     -v /:/host:ro \\\n     diting-agent`;
   // Windows 版（M3 起 Go 单二进制）：一条 PowerShell 命令。外层用双引号、内部一律
   // 单引号，避免引号嵌套。install-go.ps1 从 GitHub Release 下载 diting-agent.exe
   // （SHA256 校验）并注册计划任务（AtStartup/LocalService/自动重启/单实例互斥）。
