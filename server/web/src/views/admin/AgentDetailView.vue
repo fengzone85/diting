@@ -65,6 +65,7 @@ function resetForm(src?: Agent) {
         note: src.note,
         expire_at: src.expire_at,
         monthly_quota_gb: src.monthly_quota_gb,
+        month_rotate: src.month_rotate ?? null,
         price: src.price,
         billing_cycle: src.billing_cycle ?? 30,
         currency: src.currency || '¥',
@@ -78,6 +79,14 @@ function resetForm(src?: Agent) {
     formDirty.value = false; // 回填后视为"未编辑"
   } finally {
     backfilling = false;
+  }
+}
+
+function setMonthRotate(v: string | number | boolean | undefined) {
+  if (v === '' || v === undefined || v === null) {
+    form.value.month_rotate = null;
+  } else {
+    form.value.month_rotate = Number(v);
   }
 }
 
@@ -275,6 +284,14 @@ function formatDate(ts?: number) {
             </div>
             <FormInput v-model="form.expire_at" :label="t('agent.expireDate')" placeholder="YYYY-MM-DD" />
             <FormInput v-model="form.monthly_quota_gb" :label="t('agent.monthlyQuota')" type="number" />
+            <FormInput
+              v-if="agent?.has_counter"
+              :model-value="form.month_rotate ?? ''"
+              :label="t('agent.monthRotate')"
+              type="number"
+              :hint="t('agent.monthRotateHint')"
+              @update:model-value="setMonthRotate"
+            />
             <div class="flex items-end">
               <label class="flex items-center gap-2 text-sm text-slate-300">
                 <input v-model="form.auto_renewal" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900/50 text-sky-500" />

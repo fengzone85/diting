@@ -69,7 +69,7 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
   agent/        # Monitored side (Docker, Linux)
     collector.py   collects CPU/memory/disk/load/traffic (incl. monthly totals)
     agent.py       periodic reporting + backoff retry
-    Dockerfile     python:3.12-slim, stdlib only, runs as non-root
+    Dockerfile     python:3.11-slim, stdlib only, runs as non-root
     docker-compose.yml
   agent/windows/ # Monitored side (native Windows, psutil; see its README)
     win_collector.py  Windows metric collection (same protocol as Linux)
@@ -247,7 +247,7 @@ The core idea of this project is "security through omission." Below are common f
 ### 1. Centralized active probing (ICMP / TCP / HTTP ping of arbitrary targets, assignable to specific nodes)
 For an agent to ping or probe a target, the server must push a task to it — which requires a command channel. Once a command channel exists, the trust boundary breaks: a compromised server could make every agent probe arbitrary public targets, turning the fleet into a distributed probe jump host. We keep the Agent → Server flow strictly one-way, so we do not offer "server-orchestrated probing."
 
-> **Addendum (2026-07-09): we added a safe equivalent — "agent-side network-quality self-test."** The idea is to replace "server pushes arbitrary probe targets" with "each agent pings / TCP-probes a few *fixed public infrastructures* hardcoded in its local config (default: three carrier DNS + 8.8.8.8) from its own host. Because the probe targets come from the agent's local config and the server **never** pushes any, the command channel does not exist and the trust boundary stays intact. See "Network-quality self-test (fixed public targets)" below. It honors the "don't do" principles: no fingerprint, no new command channel, zero agent coupling.
+> **Addendum (2026-07-09): we added a safe equivalent — "agent-side network-quality self-test."** The idea is to replace "server pushes arbitrary probe targets" with "each agent pings / TCP-probes a few *fixed public infrastructures* hardcoded in its local config (default: China Mobile portal `www.10086.cn:443` + CT/CU carrier DNS + 8.8.8.8) from its own host. Because the probe targets come from the agent's local config and the server **never** pushes any at runtime, the command channel does not exist and the trust boundary stays intact. See "Network-quality self-test (fixed public targets)" below. It honors the "don't do" principles: no fingerprint, no new command channel, zero agent coupling.
 
 ### 2. Host fingerprinting (kernel version / GPU model / public IP / TCP connection count, etc.)
 Such fingerprints, if the server is breached (especially exfiltrated), directly expose each machine's attack surface — an old kernel version enables targeted CVE matching, a public IP gives a direct target, a GPU enables mining trade-offs. We collect only basic state (incl. non-fingerprint metrics such as temperature / Swap / uptime), so even a leak yields nothing actionable for targeted attack.
@@ -262,7 +262,7 @@ A natural consequence of the above. With no command channel and no externally co
 
 ## Network-quality self-test (fixed public targets)
 
-The agent actively pings / TCP-probes **public infrastructures hardcoded in its local config** (default: China Unicom / Telecom / Mobile DNS + 8.8.8.8) from its own host, reporting each target's round-trip latency and reachability to the server. It is the safe equivalent of the "centralized active probing" feature we refuse to implement:
+The agent actively pings / TCP-probes **public infrastructures hardcoded in its local config** (default: `CM` = China Mobile portal `www.10086.cn:443`, `CT`/`CU` = carrier DNS, `GG` = 8.8.8.8) from its own host, reporting each target's round-trip latency and reachability to the server. It is the safe equivalent of the "centralized active probing" feature we refuse to implement:
 
 - **Targets are hardcoded locally**: configured via the `PROBE_TARGETS` env var, format `label:host[:port]`, comma-separated; usable by default, empty to disable. The server **never** pushes any probe target to the agent — the fundamental divide from command-channel monitors.
 - **No command channel**: the server cannot order any agent to probe an arbitrary host, so the fleet can never become a distributed probe jump host. The core pillars (no command channel / zero agent coupling / data minimization) are fully preserved.
@@ -282,7 +282,7 @@ Some monitors let the server push config to agents — e.g. an `X-Agent-Config-M
 - **Code-execution surface**: auto-update `bash -s install` hands root execution to "remote script + script source". If the worker URL / CDN is MITM'd or supply-chain poisoned, agents run arbitrary scripts as root (RCE / supply-chain attack).
 - **Consistent with no-fingerprint**: server-pushed sampling policy or probe targets are just another variant of "server influences agent behavior" — rejected wholesale.
 
-Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in the agent; network-quality probe targets are hardcoded locally in `PROBE_TARGETS` (default: three carrier DNS + 8.8.8.8) and the server *never* pushes any; updating an agent is a local ops action (`sudo bash diting.sh --update-agent`, preserving the registered identity), never a remote self-pull.
+Our approach is **local-fixed, one-way report**: sampling logic is hardcoded in the agent; network-quality probe targets are hardcoded locally in `PROBE_TARGETS` (default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`; `CM` is the China Mobile portal because carrier DNS rejects TCP outright) and the server *never* pushes any at runtime; updating an agent is a local ops action (`sudo bash diting.sh --update-agent`, preserving the registered identity), never a remote self-pull.
 
 > Note: GPU model (from `nvidia-smi` / `lspci`) is a host fingerprint and conflicts with our "no kernel/GPU/public-IP" rule, so we do not implement GPU monitoring either.
 
@@ -322,7 +322,7 @@ certbot --nginx -d monitor.yourdomain.com
 
 Even without Cloudflare's CDN/WAF ("CF shield"), the setup above (8081 bound to loopback + Nginx TLS + strong token + CSP) is already secure; however, the VPS public IP is still directly exposed and will be scanned / brute-forced, with no managed WAF.
 
-To **expose no inbound ports at all** and keep the origin IP invisible, see [`TUNNEL-GUIDE.md`](TUNNEL-GUIDE.md): it covers both Cloudflare Tunnel and Tailscale, with full commands and certificate / firewall notes.
+To **expose no inbound ports at all** and keep the origin IP invisible, see the [tunnel guide](docs/src/content/docs/tunnel-guide.md): it covers both Cloudflare Tunnel and Tailscale, with full commands and certificate / firewall notes.
 
 ### B. Monitored side (each monitored VPS)
 
@@ -443,7 +443,7 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 
 **Public data boundary (`public_show_business`)**: `/api/public/agents` and `/api/v1/nodes` expose business fields (provider, expiry, note, monthly quota, plan) by default, because the public home page ("providers / expiring soon") and the node detail page ("note / plan") render them. Turn the switch off in Dashboard → Settings → "Expose business fields on public API" when your public page faces outside visitors; the fields then disappear from the response entirely. This is independent of "Enable public page" (`public_enabled`): when the public page is disabled, both API families return 403.
 
-**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds, default 15 for the Python agent, 20 for the Go binary), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `STATE_FILE` (monthly-traffic state; default `/data/state.json`), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
+**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds; native systemd installs default 20 for both the Python and Go agents, while Docker images and Windows default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `STATE_FILE` (monthly-traffic state; default `/data/state.json`), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
 
 ## Dashboard features
 
@@ -460,14 +460,14 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 - **Prune-failure alert**: if `prune` fails 3 times in a row (e.g. DB permission / disk issues), an email alert is sent so the metrics table does not silently grow without bound.
 - **Telegram alerts (optional)**: once `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set in `.env`, the alerts above are **also** delivered to Telegram in parallel with email (each channel fails independently). See `.env.example` for how to obtain them.
 - Provide `SMTP_PASS` in `.env` for mail (QQ Mail: Settings → Account → generate authorization code; not the login password). Telegram and email can be enabled independently.
-- **Send a test alert**: after configuring, verify with `curl -X POST -H 'X-Admin-Token: YOUR_TOKEN' http://localhost:8081/api/test-alert` (add `-H 'X-Forwarded-Proto: https'` when behind an Nginx proxy), click the **📨 Test Alert** button on the dashboard top-right (fill in the admin token first), or run `node scripts/test-notify.js` from the `server/` directory.
+- **Send a test alert**: after configuring, verify with `curl -X POST -H 'X-Admin-Token: YOUR_TOKEN' http://localhost:8081/api/test-alert` (add `-H 'X-Forwarded-Proto: https'` when behind an Nginx proxy), or click the **📨 Test Alert** button on the dashboard top-right (fill in the admin token first).
 
 ## Read-only account (READONLY_TOKEN)
 
 To avoid sharing the full-privilege admin token around, configure an optional **read-only** account:
 
-- Set the optional `READONLY_TOKEN` in `.env` (also recommended ≥ 16 chars).
-- Holders may **only call read-only `GET` endpoints** (client list, latest metrics, sparklines, `/metrics`); all write operations (`POST /agents`, `PUT/DELETE /agents/:id`, `reset-token`, `/test-alert`) are blocked by the `adminOnly` guard with `401`.
+- Set the optional `READONLY_TOKEN` in `.env` (also recommended ≥ 16 chars; the placeholder or a shorter value logs a startup warning — it stays effective).
+- Holders may **only call read-only `GET` endpoints** (client list, latest metrics, sparklines; **not** `/metrics`, which accepts `ADMIN_TOKEN` only); all write operations (`POST /agents`, `PUT/DELETE /agents/:id`, `reset-token`, `/test-alert`) are blocked by the `adminOnly` guard with `403 admin required`.
 - Ideal for read-only consumers like Grafana / third-party dashboards, so the admin token is not exposed to them.
 - The read-only account is **not subject to 2FA** (2FA only constrains admin writes), keeping programmatic read pulls transparent.
 
@@ -477,7 +477,7 @@ The server automatically cleans up expired metric data (the `metrics` table) eve
 
 | Method | Description | Priority |
 |---|---|---|
-| Admin panel (recommended) | "Settings → Alert Rules → Metric retention days", range 7-3650 days | High |
+| Admin panel (recommended) | "Settings → Site & UI → Metric retention days", range 7-3650 days | High |
 | Environment variable | `RETENTION_DAYS` (docker-compose / .env) | Medium |
 | Hardcoded default | 30 days | Low |
 
@@ -487,13 +487,13 @@ Changes from the admin panel take effect **within 1 hour** — no restart requir
 
 To integrate with Prometheus / Grafana and other observability stacks, the server exposes metrics in standard exposition format:
 
-- `GET /metrics` returns Prometheus text format with unit-suffixed metric names and escaped labels, e.g. `probe_cpu_percent{agent="...",host="..."}`, `probe_mem_percent`, `probe_disk_percent`, `probe_net_rx_bytes_per_sec`, etc.
-- **Auth**: supports `Authorization: Bearer <ADMIN_TOKEN | READONLY_TOKEN>`; requests without a token get `401`.
-- **Trade-off**: this endpoint does **not** enforce HTTPS, to ease in-network Prometheus scraping, protected by the Bearer token; if exposed publicly, always place it behind Nginx + TLS.
+- `GET /metrics` returns Prometheus text format with unit-suffixed metric names and escaped labels, e.g. `monitor_agent_cpu_percent{agent="...",host="..."}`, `monitor_agent_mem_percent`, `monitor_agent_disk_percent`, `monitor_agent_net_rx_rate_bytes`, etc.
+- **Auth**: `Authorization: Bearer <ADMIN_TOKEN>` only — `READONLY_TOKEN` is **not** accepted; requests without a valid token get `401`. Also subject to the admin IP whitelist.
+- **HTTPS is enforced by default** (`X-Forwarded-Proto: https` or direct TLS); set `ADMIN_ALLOW_HTTP=1` for local plaintext debugging only. If exposed publicly, always place it behind Nginx + TLS.
 - Example:
 
 ```bash
-curl -H 'Authorization: Bearer <your READONLY_TOKEN>' http://localhost:8081/metrics
+curl -H 'Authorization: Bearer <your ADMIN_TOKEN>' https://your-server/metrics
 ```
 
 ## Windows monitored side

@@ -1,6 +1,79 @@
 # Changelog
 
-> **注意**：本文件记录截至 **2026-08-03**，此后未再维护（本条为 Breaking 变更提醒，破例保留）。完整变更请以 `git log` 为准。
+> **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
+
+## 2026-10-19 流量周期口径：month_rotate / net_rx / net_tx（P1–P4 安装链路）
+
+### ⚠️ 行为变更
+
+- **Go 受控端新增上报绝对网络计数器** `net_rx/net_tx`（接口累计字节）与 `month_rotate`
+  （环境变量 `MONTH_ROTATE`，兼容别名 `AGENT_MONTH_ROTATE`）。服务端新增 `traffic_state`
+  小表做周期累加，并按
+  `agents.month_rotate` / agent 上报值决定口径：`0`=自网卡建立累计，`1–31`=每月重置日
+  （短月顺延规则对齐 Komari），未上报计数器的 Python/legacy 节点继续透传其本地自然月累计。
+- 管理端 Agent 详情新增「流量重置日」：仅对已有 `has_counter=true` 的 Go 节点显示；留空表示
+  采纳受控端上报值，显式 `0` 表示累计口径，保存后下一条上报生效。
+- **配额单位统一为 GiB**：`alerts` / 前端 / AI 原本按 GiB，`compat` 与 `v1` 的
+  `traffic_limit` 由十进制 GB 改为 `monthly_quota_gb * 1024³`；使用社区主题按字节展示配额的
+  界面数值会相应变大（约 7.37%），属修正而非超量。
+- 一键安装/更新链路新增 `--month-rotate` / `-MonthRotate` / `-e MONTH_ROTATE`：
+  `diting.sh`、`agent-go/install.sh`、`api.js` 生成的 native/Docker/Windows 命令、
+  `install-go.ps1` 的 `run_scheduled.bat` 均已贯通；`diting.sh --update-agent` 会保留
+  `/etc/diting/agent.env` 里的 `MONTH_ROTATE`。
+
+### 说明
+
+- 服务端月流量字段仍是 `metrics.net_rx_month/net_tx_month`，但 Go 节点的值已由服务端累加器
+  回写；升级切档日历史曲线可能出现台阶（legacy Python 节点不变）。
+- Go agent 仍保留本地 `state.json` 月累计作为回滚/观测期冗余；删除本地月累计需线上观测稳定后
+  再执行（见 `dev-docs/TRAFFIC_PLAN_2026-10-13.md` P4）。
+- 整数口径按 JS 安全整数收敛：超过 `Number.MAX_SAFE_INTEGER` 的计数器字段按 legacy 透传处理，
+  不承诺 uint64 满量程。
+
+## 2026-10-18 Token 强度判定收敛：弱 ADMIN_TOKEN 全入口失效 + READONLY_TOKEN 告警
+
+### ⚠️ 行为变更
+
+- **弱 `ADMIN_TOKEN` 现在在所有入口都失效**：示例占位符 `change-me-admin-token` 与短于 16 位的值，
+  统一由新增的 `server/src/token-policy.js` 判定为「未设置」。此前管理接口已拒绝，但
+  `GET /metrics` 直接比对原始 `process.env.ADMIN_TOKEN`，弱值仍可拉取指标；现两者一致返回 `401`。
+  若线上确在使用 <16 位 Token，升级后 `/metrics` 需改用强值：
+  `sudo bash diting.sh --reset-admin-token`（生成 `adm_` + 48 位 hex，并重启服务）。
+- **启动日志分档**：不再把「占位符 / 过短」误报成「未设置」，明确提示已被忽略、将走 Web
+  初始化向导，并给出 `openssl rand -hex 32`。日志只打印长度，不打印 Token 内容。
+
+### 改进
+
+- `READONLY_TOKEN` 增加启动期强度告警（占位符 / <16 位），仍保持「生效但不阻断」，
+  避免存量部署升级后突然失去只读访问；该 Token 可读全部节点指标、备份列表与客户端 IP
+  诊断，弱值应尽快轮换。
+- Token 判定由 `server.js` / `auth.js` / `api.js` 三份副本收敛为 `src/token-policy.js`；
+  新增 `test/token-policy.test.js`（判定四态、阈值、断言复用同一函数引用）与
+  `test/metrics-token.test.js`（`/metrics` 拒绝弱值与占位符）。
+
+## 2026-10-16 Windows 受控端安装器：最小权限运行（LocalService）+ 状态文件路径修正
+
+### ⚠️ 行为变更
+
+- **Go Windows 安装器的计划任务运行账户由 `SYSTEM` 改为 `LocalService`（最小权限）**。
+  原因：以完整 SYSTEM 常驻违背「提权只用于安装、agent 只在自身权限内运行」的原则。
+  做法对齐 Linux 版（安装期以 root 建目录/授权 → 运行时以非 root `diting` 跑）：
+  安装期由管理员 `icacls` 显式授予 LocalService 对 `%ProgramData%\diting-agent` 的
+  Modify 权限（`(OI)(CI)(M)`），并加入系统内置「Performance Monitor Users」组，
+  以保证 PDH 计数器（`\PhysicalDisk`、`\System\Processes`、`\Thermal Zone Information`）可读。
+  **不新建专用本地账户**：专用账户需口令管理、「作为批处理作业登录」权、卸载残留清理，
+  反而增加用户排障成本（对照：Komari 的 Windows 受控端直接以 SYSTEM 运行，无专用账户先例）。
+- **修复状态文件路径**：安装器此前未设 `STATE_FILE`，Go 端默认 `/data/state.json`
+  在 Windows 被解析为 `C:\data\state.json`（不在授权目录内、非管理员亦无权写入）。
+  现显式设 `STATE_FILE=%ProgramData%\diting-agent\state.json`，与 Python 版同路径、可复用。
+  **升级既有 Go Windows 节点会有一次月流量归零**（状态文件路径迁移，属预期一次性）。
+- **新增隐藏启动器 `run_hidden.vbs`**：解决"手动启动弹窗、关窗即停"。计划任务已在
+  session 0 运行（无窗口）；但直接双击 `run_scheduled.bat` 会留下 cmd 窗口，关窗即杀
+  agent。现安装器额外生成 `run_hidden.vbs`（`WScript.Shell.Run "cmd /c …", 0` 隐藏窗口），
+  手动启动请用它或 `Start-ScheduledTask`，**勿直接双击 bat**。
+
+> 待 Windows 真机验证：任务以 LocalService 注册并启动成功、agent 能写 state.json、
+> 磁盘IO/进程数/温度三个 PDH 字段有值、OS 名称正常。
 
 ## 2026-10-12 移除从未可用的「GZIP 上报」选项
 
@@ -54,7 +127,7 @@
    Python 三件套。存量 Python 节点执行 `--update-agent` 会迁移到 Go 版
    （agent.env 身份与月流量 state 保留）。
 2. **Windows 一键命令切换为 `agent-go/install-go.ps1`**：计划任务形态升级——
-   AtStartup（开机即启，无需登录）、SYSTEM 运行、自动重启 10×1min、
+   AtStartup（开机即启，无需登录）、LocalService 最小权限运行（2026-10-16 起修正，原为 SYSTEM）、自动重启 10×1min、
    **单实例互斥**（MultipleInstances=IgnoreNew + bat 内 tasklist 守卫），
    修复 Python 版「重复安装叠加实例 / 连崩躺平 / 重启需登录」三缺口。
 3. **Docker 形态切换为 Go scratch 镜像**（~7.5MB，多阶段构建；`USER 1000` +
@@ -369,15 +442,18 @@
 ## P3：Prometheus /metrics 导出（2026-07-09）
 
 - **`GET /metrics`（Prometheus 文本格式）**（`server/server.js`）：导出每个 Agent 的最新 CPU / 内存 / 磁盘 / 负载 / 网络速率与累计量 / 运行时长，以及 `monitor_up`（复用 `OFFLINE_THRESHOLD_SEC` 判定在线）。便于直接喂给 Grafana + Prometheus 做仪表盘与告警，无需轮询 JSON API。
-- **鉴权**：`/metrics` 与后台一致使用 `Authorization: Bearer <ADMIN_TOKEN>`（恒定时间比较），不强制 https，方便内网抓取；未携带有效 Token 返回 401。
+- **鉴权**：`/metrics` 与后台一致使用 `Authorization: Bearer <ADMIN_TOKEN>`（恒定时间比较），未携带有效 Token 返回 401。
+  > **后续修订**：该端点现已**默认强制 HTTPS**（M-2 修复，`server/server.js:151-157`，仅 `ADMIN_ALLOW_HTTP=1` 放行明文），并受管理端 IP 白名单约束（M-4）；本条「不强制 https，方便内网抓取」的描述已过时。另 `/metrics` **不认** `READONLY_TOKEN`。
 - 指标名带单位后缀（`_bytes` / `_percent` / `_seconds`），label 为 `agent` 与 `name`（已转义），符合 Prometheus exposition 规范。
 
 ## P2 改进：Express 5 / 镜像固定 / 变量化邮箱 / 应用层限流（2026-07-09）
 
 - **升级 Express 5**（`server/package.json`）：`express` 由 `^4.19.2` 升到 `^5.0.0`（Express 4 已 EOL）。本项目仅使用稳定 API（简单 `:id` 路由、`express.json`、静态托管），迁移无破坏性改动；需 `npm install` 重新安装依赖并重建镜像。
+  > **勘误（2026-10-16 核对）**：该升级**实际未落地**——`server/package.json` 仍为 `"express": "^4.21.0"`。如需升级请作为独立变更重新评估。
 - **Dockerfile 固定基础镜像版本**（`server/Dockerfile`）：`FROM node:22-slim` → `node:22.21.1-slim`，避免不同时间构建的镜像 Node 小版本漂移。
 - **compose 邮箱占位符变量化**（`server/docker-compose.yml`）：`SMTP_USER/ALERT_FROM/ALERT_TO` 改为 `${...}`（与现有 `ADMIN_TOKEN` 一致），由运行环境 / `.env` 注入，消除硬编码占位。`cp .env.example .env` 后 compose 会自动插值，行为不变。
 - **应用层 Admin 限流（兜底）**（`server/src/api.js` + `server.js`）：新增每 IP 每 10s 20 次的固定窗口限流，作用于除 `/report` 外的全部 `/api` 路由；并设 `app.set('trust proxy', true)` 使 `req.ip` 在 Nginx 后取真实客户端 IP，不再完全依赖 Nginx 限流（S7）。
+  > **后续修订（H-02，2026-09-10）**：`trust proxy` 已由 `true` 收紧为**默认只信任 loopback**（含 `::ffff:` 映射形态的自研判定），反代在其它主机 / 容器时须显式设 `TRUST_PROXY`。原因是 `8081` 可被直连时，客户端可自造 `X-Forwarded-For` 绕过 IP 白名单与限流、自造 `X-Forwarded-Proto: https` 让管理接口走明文 HTTP。详见 `server/server.js:44-76` 与文档《环境变量》。
 
 ## P1 改进：Token 重置 / 告警态清理 / sparkline 批量（2026-07-09）
 

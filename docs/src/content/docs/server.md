@@ -10,7 +10,7 @@ description: 服务端配置与管理
 | 变量 | 必填 | 说明 | 默认值 |
 |---|---|---|---|
 | `PORT` | 否 | 监听端口 | `8081` |
-| `ADMIN_TOKEN` | 首次 | 管理员 Token（≥16 位，弱口令启动即拦截） | — |
+| `ADMIN_TOKEN` | 首次 | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**，未设时走 Web 初始化向导生成） | — |
 | `SETUP_TOKEN` | 否 | 受控端自助注册令牌 | — |
 | `DB_PATH` | 否 | SQLite 数据库路径 | `/data/monitor.db` |
 | `SESSION_SECRET` | 推荐 | Session 签名密钥（固定则重启不失效） | 随机生成 |
@@ -64,7 +64,7 @@ sudo bash diting.sh --db-stats
 
 服务端每小时自动清理过期的指标数据，控制数据库体积。保留天数可配置：
 
-- **后台设置**（推荐）：「设置 → 告警规则 → 指标保留天数」，范围 7-3650 天，保存后 1 小时内自动生效
+- **后台设置**（推荐）：「设置 → 站点与界面 → 指标保留天数」，范围 7-3650 天，保存后 1 小时内自动生效
 - **环境变量**：`RETENTION_DAYS`（默认 30 天），后台未设置时生效
 - **优先级**：后台设置 > 环境变量 > 默认 30 天
 
@@ -94,8 +94,11 @@ sudo bash diting.sh --backup-schedule status
 sudo bash diting.sh --backup-schedule uninstall
 ```
 
-备份默认压缩（gzip，体积约 20%）并按保留天数轮转，可在后台
-「设置 → 数据库备份」调整周期、执行小时、保留天数与是否压缩。
+备份默认压缩（优先 `pigz`，无则回退 `gzip`；体积约为库的 20%）并按保留天数轮转。
+后台「设置 → 数据库备份」可调整**周期（off/daily/weekly）、保留天数、是否压缩**——这三项由 cron 里的
+`BACKUP_AUTO=1 diting.sh --backup` 实时读取，改完即时生效、无需重建定时任务；
+但**执行小时**在 `--backup-schedule install` 时写死进 cron（默认凌晨 3 点，`diting.sh:1234-1260`），
+后台改「执行小时」不会改变实际备份时刻，需手动 `crontab -e` 改那一行或重跑 install。
 
 ## 进程守护
 
@@ -108,7 +111,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/diting/server
+WorkingDirectory=/opt/diting-src/server
 ExecStart=/usr/bin/node server.js
 Environment=NODE_ENV=production
 Restart=always
@@ -132,7 +135,7 @@ monitor.example.com {
 
 ## 安全加固清单
 
-- [ ] 设置强随机 `ADMIN_TOKEN`（弱口令启动即拦截）
+- [ ] 设置强随机 `ADMIN_TOKEN`（弱口令只在启动时告警，不会拦截启动；未设时走 Web 初始化向导）
 - [ ] 启用 TOTP 2FA
 - [ ] 配置 HTTPS（受控端强制 HTTPS）
 - [ ] 设置 CSP 头

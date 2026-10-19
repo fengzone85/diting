@@ -13,7 +13,7 @@ DiTing 支持多种部署方式，按需选择。
 |---|---|---|---|
 | Docker Compose | 有 Docker 环境 | 65-150MB | 5 分钟 |
 | 原生 Node + systemd | 无 Docker / 精简 | 30-60MB | 10 分钟 |
-| 原生受控端 | 小内存机器 | 12-25MB | 3 分钟 |
+| 原生受控端 | 小内存机器 | Go <10MB（Python 12-25MB） | 3 分钟 |
 
 ## 服务端安装
 
@@ -119,8 +119,8 @@ sudo bash diting.sh --backup --no-compress
 且不碰 `pre_restore_*`），最后仍不够才报错退出 —— 避免「磁盘写满后
 备份失败、清理又在成功后才跑」导致的死锁。
 
-**定时备份说明**：`--backup-schedule install` 会写入**两行** cron，都带 `# diting-backup`
-标记（卸载时按标记精准移除，不会动你已有的其它定时任务）：
+**定时备份说明**：`--backup-schedule install` 会写入**两行** cron，分别带
+`# diting-backup` 与 `# diting-backup-restore` 标记（卸载时按标记精准移除，不会动你已有的其它定时任务）：
 
 | 频率 | 任务 | 日志 |
 |---|---|---|
@@ -132,8 +132,10 @@ sudo bash diting.sh --backup --no-compress
 若提示未检测到 `crontab`，先安装 cron（Debian/Ubuntu: `apt-get install -y cron`）。
 
 **周期可在后台调整**：cron 固定每日触发一次，是否真正执行由后台
-「设置 → 数据库备份」的周期决定（`off` / `daily` / `weekly`，以及执行小时、
-保留天数、是否压缩）。因此改周期**无需重建定时任务**，即时生效。
+「设置 → 数据库备份」的周期（`off` / `daily` / `weekly`）决定；保留天数与是否压缩
+也由脚本实时读取。因此改这三项**无需重建定时任务**，即时生效。
+但**执行小时**在 install 时写死进 cron（默认凌晨 3 点，见 `diting.sh:1234-1260`），
+后台改「执行小时」不改变实际备份时刻——需改时刻请 `crontab -e` 手动改那一行。
 
 **备份监控**：每次备份完成后，脚本会把结果回写数据库（最近时间、状态、文件名、
 体积、耗时、占用、错误），后台「设置 → 数据库备份 → 备份监控」可直接查看；

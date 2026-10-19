@@ -6,6 +6,11 @@ const num = (v, min, max) => {
   if (n < min || n > max) return null;
   return n;
 };
+const optNum = (v, min, max) => (v === null || v === undefined) ? null : num(v, min, max);
+const optInt = (v, min, max) => {
+  const n = optNum(v, min, max);
+  return n === null ? null : Math.floor(n);
+};
 const str = (v, max) => (typeof v === 'string' && v.length <= max ? v : '');
 
 // 管理员自定义 CSS 清洗：仅放行样式能力，杜绝外联资源加载与脚本注入。
@@ -73,6 +78,10 @@ const validateReport = (b) => {
     net_tx_rate: num(b.net_tx_rate, 0, 1e15),
     net_rx_month: num(b.net_rx_month, 0, 1e18),
     net_tx_month: num(b.net_tx_month, 0, 1e18),
+    // P1 流量口径：绝对计数器与重置日仅 Go 端上报；缺字段=null（legacy），超限=null（退回 legacy 透传）。
+    net_rx: optNum(b.net_rx, 0, Number.MAX_SAFE_INTEGER),
+    net_tx: optNum(b.net_tx, 0, Number.MAX_SAFE_INTEGER),
+    month_rotate: optInt(b.month_rotate, 0, 31),
     disk_r_rate: num(b.disk_r_rate, 0, 1e15),
     disk_w_rate: num(b.disk_w_rate, 0, 1e15),
     uptime: num(b.uptime, 0, 1e12),
@@ -80,6 +89,9 @@ const validateReport = (b) => {
     temp: (b.temp === null || b.temp === undefined) ? null : num(b.temp, -50, 200),
     // 进程总数（仅计数，无进程明细；0 = 未采集/不可用；上限 10 万防异常负载）
     process_count: Math.floor(num(b.process_count, 0, 100000) || 0),
+    // 审查 C-1/E2：受控端上报的实际上报间隔（秒）。0 = 未上报（老 agent）。
+    // 服务端另有相邻 ts 中位数观测（db.observedIntervalSec）作交叉/回退源。
+    interval: Math.floor(num(b.interval, 0, 86400) || 0),
     swap_used: num(b.swap_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_total: num(b.swap_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
     swap_pct: num(b.swap_pct, 0, 100),

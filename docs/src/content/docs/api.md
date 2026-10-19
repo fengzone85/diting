@@ -11,7 +11,9 @@ DiTing 服务端提供 REST API。受控端（Agent）与管理端（浏览器 /
 
 **受控端上报**：请求头携带 `X-Agent-ID: <id>` 与 `Authorization: Bearer <agent_token>`。
 
-**管理接口**：`Authorization: Bearer <admin_token | readonly_token>`，或使用 Web 登录后的签名 Session Cookie（自动携带）。
+**管理接口**：自定义头 `X-Admin-Token: <admin_token>` 或 `X-Readonly-Token: <readonly_token>`，或使用 Web 登录后的签名 Session Cookie（浏览器自动携带）。注意管理端**不解析** `Authorization: Bearer`——该头只用于受控端上报与 `/metrics`。
+
+> 反代后须带 `X-Forwarded-Proto: https`（或本机调试设 `ADMIN_ALLOW_HTTP=1`），否则管理请求返回 `403 https required`。只读 Token 调用写接口返回 `403 admin required`。
 
 ## Agent 上报
 
@@ -36,7 +38,7 @@ Content-Type: application/json
   "disk_r_rate": 0, "disk_w_rate": 0,
   "temp": 52.0,
   "uptime": 86400,
-  "probes": { "移动": { "ms": 12.3, "ok": true, "loss": 0 } },
+  "probes": { "CM": { "ms": 12.3, "ok": true, "loss": 0 } },
   "disks": [ { "mount": "/", "used": 71.0, "total": 100 } ],
   "os": "Debian GNU/Linux 13", "hostname": "srv1"
 }
@@ -65,6 +67,25 @@ Content-Type: application/json
 | GET / PUT | `/api/ai/config` | AI 日报配置 |
 | POST | `/api/ai/run` | 手动触发 AI 日报（异步任务：`202` 已受理 / `400` 未启用 / `409` 执行中 / `429` 冷却带 `Retry-After`；`?force=1` 跳过冷却） |
 | GET | `/api/ai/reports` | AI 日报列表 |
+| GET | `/api/ai/reports/:id` | AI 日报详情 |
+| GET | `/api/ai/usage` | AI 用量统计 |
+| GET | `/api/ai/status` | AI 任务运行状态 |
+| POST | `/api/ai/analyze-node/:id` | 单节点 AI 分析 |
+| GET | `/api/ai/node-reports` | 节点报告列表 |
+| GET | `/api/agents/:id/commands` | 生成该节点的一键安装 / 「修改探测目标」命令（免 Token，凭管理员身份） |
+| GET | `/api/client-ip` | 当前请求所见 IP 与反代信任判定（排查白名单 / 限流归属） |
+| POST | `/api/login` · POST `/api/logout` | Web 登录 / 登出（签发表态 Cookie） |
+| GET | `/api/setup/status` | 初始化向导状态 |
+| POST | `/api/setup/generate` | 首次访问生成管理员 Token（独立限流） |
+| POST | `/api/setup/register` | 受控端自助注册（需 `SETUP_TOKEN`，独立限流） |
+| GET | `/api/admin/backups` | 备份文件列表 |
+| GET | `/api/admin/backups/:name/download` | 下载指定备份 |
+| DELETE | `/api/admin/backups/:name` | 删除指定备份 |
+| POST | `/api/admin/backups/:name/restore` | 请求宿主侧恢复（由 cron 每 5 分钟消费） |
+| GET | `/api/admin/backup-status` | 备份配置与备份监控状态 |
+| GET | `/api/admin/audit-logs` | 管理员操作审计日志 |
+| GET | `/api/admin/2fa/status` | 2FA 状态 |
+| POST | `/api/admin/2fa/setup` `/enable` `/disable` | 绑定 / 启用 / 关闭 2FA |
 
 ## 公开只读接口（脱敏）
 
@@ -78,21 +99,23 @@ Content-Type: application/json
 | GET | `/api/public/agents/:id/probes` | 公开延迟历史 |
 | GET | `/api/public/meta` | 站点元信息（logo / 标题） |
 | GET | `/api/public/themes` | 可用主题列表 |
+| GET | `/api/public/visitor` | 访客 IP / UA（公开页访客计数） |
+| POST | `/api/public/order` | 公开页卡片排序保存（需 admin） |
 
 ## Komari 主题兼容层
 
 第三方 Komari 皮肤通过 `server/src/compat.js` 接入，端点对齐 Komari 协议：
 
-- REST：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
-- 实时：`/api/clients`（WebSocket，发 `get` 取 snapshot）、`/api/clients/sse`（SSE）
+- REST：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/node/:uuid`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
+- 实时：`/api/clients`（WebSocket，任意消息即回推最新 snapshot）、`/api/clients/sse`（SSE）
 - RPC2：`/api/rpc2`（POST / WS）
-- 标准层：`/api/v1/*`（与 Komari 同形，供自研 SPA 复用）
+- 标准层：`/api/v1/*`（自研 RESTful 层，响应信封为 `{ code, message, data }`，与皮肤 / 主题协议解耦；适配由独立 adapter 负责）
 
 ## Prometheus
 
 ### GET /metrics
 
-Prometheus 文本格式，可用于 Grafana。鉴权 `Authorization: Bearer <admin_token | readonly_token>`，默认强制 HTTPS。
+Prometheus 文本格式，可用于 Grafana。鉴权 `Authorization: Bearer <ADMIN_TOKEN>`（**仅** `ADMIN_TOKEN`，不认 `READONLY_TOKEN`），默认强制 HTTPS（内网直连抓取可设 `ADMIN_ALLOW_HTTP=1`），并受管理端 IP 白名单约束。
 
 ```
 # HELP monitor_up Agent 是否在线（最近上报在阈值内为 1）
@@ -111,5 +134,5 @@ monitor_agent_net_rx_rate_bytes{agent="agt_xxx",name="web-01"} 1024
 
 ## 限流
 
-- 真实边界在 Nginx `limit_req`（基于 TCP 对端 IP）；应用层限流仅作兜底，`req.ip` 取自可伪造的 `X-Forwarded-For`，**不作为安全边界**
+- 真实边界在 Nginx `limit_req`（基于 TCP 对端 IP）；应用层限流仅作兜底。`req.ip` 的转发头采信范围由 `TRUST_PROXY` 决定，**默认只信任 loopback**（H-02 收紧）：反代在其它主机 / 容器时必须显式配置 `TRUST_PROXY`，否则 `req.ip` 会算到反代头上；直连场景伪造 `X-Forwarded-For` 不影响 `req.ip`
 - 自助注册 `/api/setup/register` 与初始化 `/api/setup/generate` 有独立限流

@@ -12,10 +12,10 @@ description: 服务端与受控端环境变量参考
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
-| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位，弱口令启动即拦截） |
+| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**——未设或过弱时首次访问走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥。⚠️ 生产务必设为随机长字符串（`openssl rand -hex 32`），留空则每次重启随机、所有已登录会话失效 |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口） |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口）。建议 ≥16 位随机值；占位符 / 过短时启动告警（仍生效），因其可读全部节点指标与备份列表 |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌（`--setup-token` 用） |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 数据库路径 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
@@ -36,8 +36,12 @@ description: 服务端与受控端环境变量参考
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram 告警（与邮件并行） |
 | `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
 | `TRUST_PROXY` | 否 | `loopback` | 可信反向代理（决定 `req.ip` 取转发头还是 TCP 源地址） |
+| `PUBLIC_URL` | 推荐 | — | 服务端公网地址，用于生成受控端一键安装命令（也可在后台「设置 → Agent 连接地址」配置） |
+| `AGENT_RAW_REPO` | 否 | `https://raw.githubusercontent.com/fengzone85/diting/master` | 一键命令中 `diting.sh` / 安装脚本的 raw 基址（可钉 tag） |
+| `AGENT_GIT_REPO` | 否 | `https://github.com/fengzone85/diting.git#master:agent-go` | Docker 受控端一键命令的构建源（M3 起为 Go） |
+| `ALERT_CONCURRENCY` | 否 | `8` | 告警并发发送上限 |
 | `BACKUP_DIR` | 否 | `/data/backups` | 备份目录（**容器内路径**）。后台「备份文件」列表/下载/删除读它；默认需 compose 把宿主目录挂到此路径，且用 `HOST_BACKUP_DIR` 指定宿主侧来源 |
-| `RESTORE_TRIGGER` | 否 | `<BACKUP_DIR>/restore.request` | 后台点「恢复」时投递的请求文件。必须落在宿主可读的备份目录内，宿主侧 `diting.sh --process-restore` 读取并执行 |
+| `RESTORE_TRIGGER` | 否 | `/data/restore.request` | 后台点「恢复」时投递的请求文件。代码兜底默认在 `/data/` 下；compose 示例传 `/data/backups/restore.request`（与 `BACKUP_DIR` 同卷）。宿主侧 `diting.sh --process-restore` 读取并执行 |
 
 > AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
 
@@ -78,18 +82,19 @@ description: 服务端与受控端环境变量参考
 | `SERVER_URL` | ✅ | — | 服务端 URL（非 localhost 必须为 HTTPS，否则 `exit(1)`） |
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
-| `INTERVAL` | 否 | `15` | 上报间隔（秒） |
+| `INTERVAL` | 否 | `20`（Docker 镜像与 Windows 为 `15`） | 上报间隔（秒），最小 5 |
+| `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。**仅 Go 受控端生效**，Python legacy 节点由服务端透传其本地自然月累计 |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
-| `PROBE_TARGETS` | 否 | 移动/电信/联通 DNS + 8.8.8.8 | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭） |
-| `STATE_FILE` | Go | `/data/state.json` | 月流量状态持久化文件（Go Agent） |
+| `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
+| `STATE_FILE` | Go | 代码兜底 `/data/state.json`；systemd 安装写入 `/var/lib/diting/state.json` | 月流量状态持久化文件（Go Agent） |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 
 ### PROBE_TARGETS 说明
 
 - 多个目标用逗号分隔，格式 `label:host[:port]`（如 `CM:www.10086.cn:443`）
-- ICMP 优先，失败自动 TCP 回退（默认探测 53 端口）
-- **本地固定，服务端不可下发** — 这是核心安全设计
+- Go 受控端为**纯 TCP** 握手探测（端口序：目标端口 → 443 → 80），`loss` 仅 `0` / `100` 二值、不伪造中间值；Linux Python 版为 ICMP 优先、失败自动回退 TCP
+- **运行期无下发通道**：目标只在安装时由一键命令写入本地一次，之后只能在本机改——服务端没有任何 API 能在运行期推送探测目标
 - `label` 建议用 ≤2 字符缩写（`CM`=移动门户 / `CT`=电信 / `CU`=联通 / `GG`=公共谷歌 DNS），状态卡片空间有限；默认 `PROBE_TARGETS=CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`（运营商 DNS 对 TCP 全拒，CM 用移动自家门户测"移动入口可达性"）
 
 ### 网络质量探测示例
@@ -127,6 +132,7 @@ services:
       - AGENT_ID=your-agent-id
       - AGENT_TOKEN=your-agent-token
       - INTERVAL=15
+      - MONTH_ROTATE=0
       - DISK_PATH=/host
     volumes:
       - /:/host:ro

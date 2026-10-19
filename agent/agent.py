@@ -92,6 +92,7 @@ def send(payload, attempt=0):
 
 def main():
     print(f'[agent] starting: id={AGENT_ID} server={SERVER_URL} interval={INTERVAL}s')
+    last_report_at = None
     while True:
         try:
             payload = collector.collect()
@@ -99,6 +100,14 @@ def main():
             print(f'[error] collect failed: {e}', file=sys.stderr)
             payload = None
         if payload:
+            # 审查 C-1/E2：上报本机实际上报间隔（距上次采集的秒数；首轮无上次
+            # 时刻不报）。服务端据此（并结合相邻 ts 观测）校正离线阈值与 AI
+            # 超阈值时长估算，替代按 INTERVAL 固定值估算。
+            if last_report_at is not None:
+                sec = int(time.time() - last_report_at)
+                if sec > 0:
+                    payload['interval'] = sec
+            last_report_at = time.time()
             ok = send(payload)
             if not ok:
                 print('[error] failed to report after retries; metrics for this cycle dropped', file=sys.stderr)

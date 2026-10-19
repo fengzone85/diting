@@ -4,11 +4,8 @@ const db = require('./db');
 const totp = require('./totp');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
-function getAdminToken() {
-  const t = process.env.ADMIN_TOKEN;
-  if (t && t !== 'change-me-admin-token' && t.length >= 16) return t;
-  return '';
-}
+// 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
+const { getAdminToken } = require('./token-policy');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
@@ -27,6 +24,9 @@ function agentAuth(req, res, next) {
   const agent = db.getAgent(id);
   if (!agent) return res.status(403).json({ error: 'unknown agent' });
   if (!safeEqual(db.hashToken(token), agent.token_hash)) return res.status(403).json({ error: 'bad token' });
+  // 审查 G4：待确认 agent（自助注册后未经管理员批准）禁止上报。
+  // 放在 token 校验之后，避免无 token 者探测"某 id 是否待确认"。
+  if (agent.pending) return res.status(403).json({ error: 'agent pending approval' });
   req.agent = agent;
   next();
 }
@@ -369,6 +369,7 @@ function auditLog(req, action, detail) {
 
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
+  resolveRole,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog,
