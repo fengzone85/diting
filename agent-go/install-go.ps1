@@ -98,7 +98,10 @@ try {
 $exe = Join-Path $InstallDir 'diting-agent.exe'
 Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
 Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe" -OutFile $exe -UseBasicParsing
-$expected = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing).Content.Trim()
+# PS 5.1 在部分响应下 Content 为 Byte[]，无 .Trim()；统一按 ASCII 解码后去空白
+$sumResp = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing).Content
+if ($sumResp -is [byte[]]) { $sumResp = [System.Text.Encoding]::ASCII.GetString($sumResp) }
+$expected = ($sumResp -split '\s+')[0].Trim().ToLower()
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) {
     Write-Error "SHA256 mismatch: want $expected got $actual"
