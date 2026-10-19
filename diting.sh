@@ -82,9 +82,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.7"
-SCRIPT_DATE="2026-09-15"
-SCRIPT_NOTES="界面语言可持久化：首次交互运行选择 中文/English，菜单新增「11 切换语言」随时切换（/etc/diting/ui.lang，优先级高于 LANG/LC_ALL 自动判定）"
+SCRIPT_VERSION="1.1.8"
+SCRIPT_DATE="2026-10-19"
+SCRIPT_NOTES="受控端安装/更新链路支持 --month-rotate（MONTH_ROTATE，0=累计，1–31=流量重置日），update_agent 会保留已存值"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -130,7 +130,7 @@ need_val_guard() {
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
-A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""
+A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""; A_MONTH_ROTATE=""
 A_BACKUP_PATH=""; A_BACKUP_KEEP=""; A_BACKUP_SCHEDULE=""
 
 show_usage() {
@@ -206,6 +206,7 @@ show_usage() {
   --setup-name NAME       自助注册的节点显示名（可选）
   --interval SEC          上报间隔（秒，默认 15）
   --probe-targets LIST    网络质量自测目标（label:host[:port] 逗号分隔；覆盖默认）
+  --month-rotate N        流量重置日（0=累计口径，1–31；仅 Go 受控端，默认 0）
   --repo URL              自定义 raw 仓库地址（默认本项目 master 分支）
 EOF
 }
@@ -298,6 +299,7 @@ install_agent() {
     [[ -n "$A_SETUP_NAME" ]] && args+=(--setup-name "$A_SETUP_NAME")
     [[ -n "$A_INTERVAL" ]]   && args+=(--interval "$A_INTERVAL")
     [[ -n "$A_PROBE_TARGETS" ]] && args+=(--probe-targets "$A_PROBE_TARGETS")
+    [[ -n "$A_MONTH_ROTATE" ]] && args+=(--month-rotate "$A_MONTH_ROTATE")
 
     # 仓库内运行：直接复用本地 agent-go/install.sh（M3 起为 Go 版）
     if [[ -f "$SCRIPT_DIR/agent-go/install.sh" ]]; then
@@ -651,7 +653,7 @@ update_agent() {
         return 1
     fi
     # 从已存 env 读取注册身份，用户无需重新输入令牌
-    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 PROBE_TARGETS="" k v
+    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 PROBE_TARGETS="" MONTH_ROTATE=0 k v
     while IFS='=' read -r k v; do
         case "$k" in
             SERVER_URL)     SERVER_URL="$v" ;;
@@ -659,6 +661,7 @@ update_agent() {
             AGENT_TOKEN)    AGENT_TOKEN="$v" ;;
             INTERVAL)       INTERVAL="$v" ;;
             PROBE_TARGETS)  PROBE_TARGETS="$v" ;;
+            MONTH_ROTATE)   MONTH_ROTATE="$v" ;;
         esac
     done < "$envfile"
     if [[ -z "$SERVER_URL" || -z "$AGENT_ID" || -z "$AGENT_TOKEN" ]]; then
@@ -677,9 +680,9 @@ update_agent() {
     fi
     chmod +x "$tmp/install.sh"
     # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务。
-    # 必须回传 PROBE_TARGETS：install.sh 仅在显式传参时才写该键，否则更新后
-    # 用户自定义的探测目标会被覆盖丢失。
-    local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL")
+    # 必须回传 PROBE_TARGETS 与 MONTH_ROTATE：install.sh 仅在显式传参时才写这些键，
+    # 否则更新后用户自定义的探测目标 / 流量重置日会被覆盖丢失。
+    local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL" --month-rotate "${MONTH_ROTATE:-0}")
     [[ -n "$PROBE_TARGETS" ]] && re_args+=(--probe-targets "$PROBE_TARGETS")
     bash "$tmp/install.sh" "${re_args[@]}"
     rm -rf "$tmp"
@@ -879,6 +882,10 @@ do_backup() {
         echo -e "       $(msg "bk.space_hint")" >&2
         return 1
     fi
+    # 审查 G3：备份含 2FA secret / SMTP 密码 / Telegram token / AI key 等全部凭据
+    # （monitor.db 不加密），cp/docker cp 产物默认跟随 umask（常为 644，同机其他
+    # 用户可读）。落盘即收紧为仅属主可读写。
+    chmod 600 "$out_path" 2>/dev/null || true
 
     # ── 压缩（A）：SQLite 含大量空闲页且内容为高重复数值，实测压到约 20% ────
     # 压缩器选择（实测 200MB 采样 / 4 核）：pigz -6 = 2.0s/41M，gzip -6 = 7.2s/41M，
@@ -906,6 +913,8 @@ do_backup() {
     fi
 
     local sz; sz="$(du -h "$final_path" | cut -f1)"
+    # 压缩产物（gzip -c > 重定向创建）同样收紧为 600
+    chmod 600 "$final_path" 2>/dev/null || true
     echo -e "${GREEN}[OK]   备份完成: ${final_path} (${sz})${NC}"
     echo -e "${YELLOW}[提示] 备份包含全部监控数据、Agent 记录、设置；请妥善保管${NC}"
     # 同步一份到后台可见目录（供网页列表/下载），未配置则跳过
@@ -1088,6 +1097,8 @@ sync_to_visible_dir() {
     # 且它只服务于「宿主侧手动回滚」这一场景，无需在网页里下载。
     [[ "$(basename "$src")" == pre_restore_* ]] && return 0
     cp -f "$src" "$dst/" 2>/dev/null || true
+    # 审查 G3：可见目录副本同样含全部凭据，权限与源一致收紧为 600
+    chmod 600 "$dst/$(basename "$src")" 2>/dev/null || true
 }
 
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
@@ -1220,7 +1231,7 @@ do_restore() {
 # 安装/卸载每日自动备份（cron）。
 # 用法：do_backup_schedule install|uninstall [保留天数] [小时]
 # 设计要点：
-#  - 只在 crontab 里写一行，带 # diting-backup 标记，卸载时按标记精准移除，不动其它条目；
+#  - 写入两行（# diting-backup 每日备份 / # diting-backup-restore 恢复轮询），卸载时按标记精准移除，不动其它条目；
 #  - 备份输出到 $DB_BACKUP_DIR 并按保留天数轮转，避免占满磁盘；
 #  - 无 crontab 命令时给出清晰指引（最小化容器需 apt-get install -y cron）。
 do_backup_schedule() {
@@ -2116,6 +2127,7 @@ while [[ $# -gt 0 ]]; do
         --setup-name)  need_val_guard "$1" "${2:-}"; A_SETUP_NAME="${2:-}"; shift 2 ;;
         --interval)    need_val_guard "$1" "${2:-}"; A_INTERVAL="${2:-}"; shift 2 ;;
         --probe-targets) need_val_guard "$1" "${2:-}"; A_PROBE_TARGETS="${2:-}"; shift 2 ;;
+        --month-rotate) need_val_guard "$1" "${2:-}"; A_MONTH_ROTATE="${2:-}"; shift 2 ;;
         --repo)        need_val_guard "$1" "${2:-}"; REPO_RAW="${2:-}"; shift 2 ;;
         -h|--help)     show_usage; exit 0 ;;
         *) echo -e "${RED}[错误] 未知参数: $1${NC}" >&2; show_usage; exit 1 ;;

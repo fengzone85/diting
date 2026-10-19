@@ -19,10 +19,10 @@ DiTing 是一个纯状态监控方案，专注于「在线/负载/CPU/内存/硬
     受控端仅出站上报，服务端无法向 Agent 下发任何指令。从架构层面杜绝 RCE。
   </Card>
   <Card title="🪶 轻量低耗" icon="seti:rocket">
-    原生 Linux 部署内存占用 12-25MB；受控端纯标准库、零外部依赖。
+    原生部署的服务端约 30-60MB、Go 受控端 <10MB（Python 受控端 12-25MB）；Go 版零外部依赖。
   </Card>
   <Card title="🛡️ 安全优先" icon="seti:shield">
-    TOTP 2FA、CSP、HTTPS 白名单、恒定时间比较、RBAC 只读账号、Prometheus /metrics。
+    TOTP 2FA、CSP、HTTPS 白名单、恒定时间比较、可选只读 Token（`READONLY_TOKEN`）、Prometheus `/metrics`。
   </Card>
   <Card title="📊 实用仪表盘" icon="seti:graph">
     CPU/内存/磁盘/温度/Swap/网络质量/Ping 折线图，3 秒实时流量，Sparkline 趋势缩略。

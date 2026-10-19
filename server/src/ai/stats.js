@@ -190,14 +190,23 @@ function diskTrend(series, opts) {
 // 模型对「整体风险等级」的自由裁量很容易被少数扎眼节点带偏（实测某站点曾连续多日恒为 high）。
 // 这里先用本地规则算一个确定性的 baseline，模型只能在此基础上上下浮动一级（见 report.clampRisk）。
 
-// 是否属于「指标超阈值节点」：超阈值分钟数 > 0，或峰值达到告警阈值。
+// 审查 E3：持续超阈值才算"超阈值节点"的门槛（分钟）。24h 窗口内一次 spike
+// （单个采样）不再把节点计为超阈——这是 v1 风险通胀的主要来源。
+const OVER_THRESHOLD_MIN_MINUTES = 5;
+
+// 是否属于「指标超阈值节点」。审查 E3：原规则"超阈值分钟数 > 0 或峰值达到
+// 阈值"——24h 窗口内一次 spike 即把节点计为超阈，足以把站点风险抬到
+// medium/high（假阳性，且 AI 日报据此展开）。改为持续时长门槛：超阈值分钟数
+// ≥ OVER_THRESHOLD_MIN_MINUTES 才算（分钟数由 observedIntervalSec 实测间隔
+// 估算，见 summarizer.js，不再按 AGENT_INTERVAL 固定值）。峰值参数保留仅为
+// 兼容调用方透传，不再参与判定。
+// eslint-disable-next-line no-unused-vars
 function isOverThreshold(a, cpuAlert, memAlert) {
   const c = a.cpu || {};
   const m = a.memory || {};
-  if ((c.over_threshold_minutes || 0) > 0 || (m.over_threshold_minutes || 0) > 0) return true;
-  if (c.max != null && c.max >= cpuAlert) return true;
-  if (m.max != null && m.max >= memAlert) return true;
-  return false;
+  const cpuMin = c.over_threshold_minutes || 0;
+  const memMin = m.over_threshold_minutes || 0;
+  return cpuMin >= OVER_THRESHOLD_MIN_MINUTES || memMin >= OVER_THRESHOLD_MIN_MINUTES;
 }
 
 // 汇总用于分级与展示的信号量。

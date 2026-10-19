@@ -4,6 +4,8 @@
 const db = require('./db');
 const { toNode, toRealtime, publicOpen, getNodesLatestStatus } = require('./compat');
 const { METRIC_DEFINITIONS, queryMetrics } = require('./compat-metrics');
+// 审查 C4：RPC 里的重聚合（getPingRecords 720h 全窗）移 worker 线程
+const { heavyQuery } = require('./heavy-db');
 
 const METHODS = new Map();
 
@@ -41,16 +43,18 @@ function getMetricsRange(agentId, { hours = 1, maxPoints = 100 } = {}) {
   maxPoints = clamp(Math.floor(Number(maxPoints) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
   // M-02：SQL 层均匀采样（保留首尾点），且只取负载列，不再「全量拉取 720h 后 JS filter」
-  return db.getMetricsLoadOne(agentId, since, Math.max(1, maxPoints));
+  // 审查 C4：单节点 720h 仍要扫十余万行，移 worker 线程避免阻塞事件循环
+  return heavyQuery('loadOne', agentId, since, Math.max(1, maxPoints));
 }
 
-function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
+async function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxCount = clamp(Math.floor(Number(maxCount) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
   // 只取 ts+agent_id+probes 三列并按 agent 时间桶降采样（每 agent 最多 maxCount 点），
   // 规避 SELECT * 全表物化 + 330 万行读进内存触发 OOM。probes 周期采样不丢"出现过哪些 task"语义。
-  const rows = (db.metricsProbesAll(since, Math.max(200, maxCount)) || [])
+  // 审查 C4：跨节点全窗聚合（未认证 RPC 即可触发）移 worker 线程。
+  const rows = (await heavyQuery('probesAll', since, Math.max(200, maxCount)) || [])
     .filter(r => r.probes != null)
     .slice(0, maxCount * 10);
 
@@ -95,7 +99,8 @@ const RECORD_FIELD_MAP = {
   'temperature': 'temp'
 };
 
-function getRecords(params = {}) {
+// 审查 C4：异步化——内部 getProbeRecords/getMetricsRange 的重聚合走 worker 线程
+async function getRecords(params = {}) {
   // 兼容前端 LoadChart 实际传参：entity_id + metric_keys + hours + max_points
   // 也兼容旧调用：uuid + type + hours + maxPoints
   const entityId = params.entity_id || params.uuid || (Array.isArray(params.entity_ids) ? params.entity_ids[0] : undefined);
@@ -107,7 +112,7 @@ function getRecords(params = {}) {
 
   // ping 类型：从 probes 抽延迟
   if (params.type === 'ping' || (metricKeys && metricKeys.some(k => k.startsWith('ping')))) {
-    const records = getProbeRecords({ hours, maxCount: maxPoints });
+    const records = await getProbeRecords({ hours, maxCount: maxPoints });
     const byClient = {};
     records.forEach(r => {
       (byClient[r.client] = byClient[r.client] || []).push(r);
@@ -160,7 +165,7 @@ function getRecords(params = {}) {
   }
 
   if (!entityId) return { count: 0, recordsByClient: {}, from: fromIso, to: nowIso };
-  const rows = getMetricsRange(entityId, { hours, maxPoints });
+  const rows = await getMetricsRange(entityId, { hours, maxPoints });
 
   // 若指定了 metric_keys，只返回这些字段（点分命名）；否则返回全部已映射字段
   const wantKeys = metricKeys && metricKeys.length ? metricKeys : Object.keys(RECORD_FIELD_MAP);
@@ -216,7 +221,7 @@ function getPingMetricStats(params = {}) {
   // 结构与 metrics:ping 里的 stats 一致：按 (client,task_id) 聚合延迟统计。
   const entityId = params.entity_id || params.uuid;
   const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
-  const records = getProbeRecords({ hours, maxCount: clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000 });
+  return getProbeRecords({ hours, maxCount: clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000 }).then((records) => {
   const agg = {};
   records.forEach(r => {
     if (entityId && r.client !== entityId) return;
@@ -252,6 +257,7 @@ function getPingMetricStats(params = {}) {
     };
   });
   return { count: stats.length, stats, tasks: [], basic_info: [] };
+  });
 }
 
 // ===== 方法表注册 =====
@@ -259,7 +265,7 @@ registerMethod('rpc.ping', () => 'pong');
 registerMethod('rpc.getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 registerMethod('rpc.getMethods', () => Array.from(METHODS.keys()));
 
-registerMethod('common:getNodes', () => Object.fromEntries(db.getAgents().map(a => [a.id, toNode(a)])));
+registerMethod('common:getNodes', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
 registerMethod('common:getNodesLatestStatus', getNodesLatestStatus);
 registerMethod('common:getNodeRecentStatus', (params = {}) => {
   const a = db.getAgent(params.uuid);
@@ -272,7 +278,7 @@ registerMethod('common:getRecords', getRecords);
 registerMethod('public:getMe', () => ({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('public:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 registerMethod('public:getPublicSettings', getPublicInfo);
-registerMethod('public:getNodesInformation', () => Object.fromEntries(db.getAgents().map(a => [a.id, toNode(a)])));
+registerMethod('public:getNodesInformation', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
 registerMethod('public:getClientRecentRecords', (params = {}) => {
   const a = db.getAgent(params.uuid);
   if (!a) return [];
@@ -317,10 +323,12 @@ registerMethod('metrics:ping', (params = {}) => {
   }
 })();
 
-function handleRpc(method, params) {
+// 审查 C4：handler 可能异步（内部重聚合走 worker 线程），故 handleRpc 返回
+// Promise——调用方（rpcMiddleware / WS 消息处理）必须 await。
+async function handleRpc(method, params) {
   if (method.startsWith('admin:')) throw { code: -32000, message: 'admin not supported' };
   if (!METHODS.has(method)) throw { code: -32601, message: 'method not found' };
-  return METHODS.get(method)(params);
+  return await METHODS.get(method)(params);
 }
 
 function rpcMiddleware(req, res) {
@@ -334,16 +342,16 @@ function rpcMiddleware(req, res) {
   if (!msg || typeof msg !== 'object' || !msg.method) {
     return res.status(200).json({ jsonrpc: '2.0', error: { code: -32600, message: 'invalid request' }, id: msg?.id ?? null });
   }
-  try {
-    const result = handleRpc(msg.method, msg.params);
+  // 审查 C4：handleRpc 异步化（重聚合走 worker），错误仍以 JSON-RPC error 返回
+  handleRpc(msg.method, msg.params).then((result) => {
     res.json({ jsonrpc: '2.0', result, id: msg.id });
-  } catch (err) {
+  }).catch((err) => {
     res.status(200).json({
       jsonrpc: '2.0',
       error: { code: err.code || -32603, message: err.message || 'internal error' },
       id: msg?.id ?? null
     });
-  }
+  });
 }
 
 module.exports = { handleRpc, registerMethod, rpcMiddleware, METHODS };

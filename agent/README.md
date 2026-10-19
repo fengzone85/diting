@@ -11,9 +11,9 @@
 受控端（Agent），负责在被控机器上采集系统指标并**只出站**上报给服务端。
 与 Windows Agent **完全相同的上报协议**，服务端无需任何改动。
 
-> **推荐部署方式**：直接用仓库根目录的[统一一键脚本](https://github.com/fengzone85/diting/blob/master/install.sh)安装受控端与服务端——
-> `curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/install.sh -o install.sh && sudo bash install.sh`。
-> 本文档描述的是原生 systemd 受控端的细节与手动 `agent/install.sh` 用法。
+> **推荐部署方式**：用仓库根目录的统一脚本 `diting.sh`（自 M3 起默认安装 **Go 版**受控端）——
+> `curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/diting.sh -o diting.sh && sudo bash diting.sh --install-agent --server <url> --id <id> --token <token>`。
+> 本文档描述的是原生 systemd 受控端（**Python 版，已冻结**）的细节与手动 `agent/install.sh` 用法；Go 版见 `agent-go/` 与文档站《受控端部署》。
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 原生 systemd 部署（推荐，零依赖）
 
-> 目标机只需 Python 3.8+（绝大多数 Linux 内置），无需 Docker。安装脚本会自动探测并校验版本。
+> 目标机只需 Python 3.8+（绝大多数 Linux 内置），无需 Docker。安装脚本会自动探测并校验版本。（Windows 受控端需 3.9+，见 `agent/windows/README.md`。）
 
 ### 一键安装
 
@@ -114,7 +114,7 @@ docker compose up -d
 | `AGENT_TOKEN` | 后台分配的认证令牌 | 必填 |
 | `INTERVAL` | 上报间隔（秒，最小 5） | `15` |
 | `DISK_PATH` | 统计的磁盘路径 | `/host`（容器内宿主机根） |
-| `PROBE_TARGETS` | 网络质量自测目标，格式 `label:host[:port]`，逗号分隔；不填用默认三家运营商 DNS + 8.8.8.8，置空关闭 | 默认开启 |
+| `PROBE_TARGETS` | 网络质量自测目标，格式 `label:host[:port]`，逗号分隔；不填用默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`（运营商 DNS 对 TCP 全拒，`CM` 为移动门户），置空关闭 | 默认开启 |
 | `STATE_FILE` | 月度流量累计状态文件 | `/data/state.json` |
 
 ---
@@ -132,10 +132,10 @@ docker compose up -d
 | `SERVER_URL` | 服务端地址（`https://`） | 必填 | 非 localhost 必须 https |
 | `AGENT_ID` | 节点 ID | 必填 | 后台「添加 Agent」获得 |
 | `AGENT_TOKEN` | 认证令牌 | 必填 | 后台「添加 Agent」获得 |
-| `INTERVAL` | 上报间隔（秒） | `15` | 最小 5 |
+| `INTERVAL` | 上报间隔（秒） | `20`（Docker 镜像 `15`） | 最小 5 |
 | `DISK_PATH` | 磁盘统计路径 | `/`（原生）`/host`（Docker） | 只读，不写入 |
 | `STATE_FILE` | 月度流量状态文件 | `/var/lib/diting/state.json` | 程序自读写 |
-| `PROBE_TARGETS` | 网络质量探测目标 | 默认三家运营商 DNS + 8.8.8.8 | 本地固定，服务端不可下发 |
+| `PROBE_TARGETS` | 网络质量探测目标 | 默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 本地固定，运行期服务端无下发通道 |
 
 ## 指标说明
 
@@ -153,13 +153,14 @@ docker compose up -d
 - **最小 Token**：静态 Bearer Token 出站 HTTPS 推送，泄露风险仅限本机物理访问
 - **非 root 运行**：Docker 用 `diting` 用户（UID 1000），原生用 `diting` 系统用户
 - **服务端不可下发配置**：网络探测目标固定在本地环境变量，服务端无命令注入面
-- **供应链完整性**：部署受控端时强烈建议设置 `SP_AGENT_SHA256S` 环境变量，钉死已知良好版本的 SHA-256 哈希，防止 GitHub CDN / 中间人投毒。不设则跳过校验（等于信任每次拉取的最新内容）。计算方式：
+- **供应链完整性**（仅 Python 路径）：部署受控端时须用 `SP_AGENT_SHA256S` 钉死已知良好版本的哈希，防 CDN / 中间人投毒。**未提供时安装器直接拒绝下载（fail closed）**。文件与顺序必须与 `agent/install.sh` 的下载清单一致：
   ```bash
   # 在可信任环境中计算（一次操作，所有机器复用）
-  SP_AGENT_SHA256S=$(sha256sum install.sh agent.py collector.py uninstall.sh | awk '{print $1}' | paste -sd,)
+  SP_AGENT_SHA256S=$(sha256sum agent.py collector.py uninstall.sh | awk '{print $1}' | paste -sd,)
   # 部署时传入
   sudo SP_AGENT_SHA256S="$SP_AGENT_SHA256S" bash install.sh ...
   ```
+  > Go 版（`agent-go/install.sh`）不读该变量：二进制从 GitHub Release 下载并**强制**比对随附 `.sha256`。
 
 ## 网络与防火墙
 

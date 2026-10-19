@@ -87,6 +87,14 @@ function buildDisk(latest, rows, series, trendDays) {
 function summarizeAgent(agent, rows, opts) {
   const o = opts || {};
   const intervalSec = Number(o.intervalSec) || DEFAULT_AGENT_INTERVAL;
+  // 审查 E3：超阈值时长按该 agent 观测到的相邻 ts 中位数估算——
+  // 自适应 agent 实际间隔在 10–60s 间变化，全站统一固定值（默认 20s）估算
+  // 最多偏差 3 倍。观测样本不足时回退传入的 intervalSec。
+  let effIntervalSec = intervalSec;
+  try {
+    const obs = db.observedIntervalSec(agent.id);
+    if (obs) effIntervalSec = obs;
+  } catch (e) { /* 观测失败用回退值 */ }
   const offlineSec = Number(o.offlineSec) || 60;
   const cpuAlert = Number(o.cpuAlert) || 90;
   const memAlert = Number(o.memAlert) || 90;
@@ -118,12 +126,12 @@ function summarizeAgent(agent, rows, opts) {
     cpu: {
       avg: cpuStats.avg, max: cpuStats.max, p95: cpuStats.p95,
       cores: cores > 0 ? cores : null,
-      over_threshold_minutes: overThresholdMinutes(rows.map(r => r.cpu), cpuAlert, intervalSec)
+      over_threshold_minutes: overThresholdMinutes(rows.map(r => r.cpu), cpuAlert, effIntervalSec)
     },
     memory: {
       avg: memStats.avg, max: memStats.max, p95: memStats.p95,
       slope_pct: memSlope(rows),
-      over_threshold_minutes: overThresholdMinutes(rows.map(r => r.mem_pct), memAlert, intervalSec)
+      over_threshold_minutes: overThresholdMinutes(rows.map(r => r.mem_pct), memAlert, effIntervalSec)
     },
     disk: buildDisk(latest, rows, series, Number(o.trendDays) || 0),
     // 负载：有核数时给出每核负载（真正的"忙不忙"）；没有核数时**缺席 + 显式标记**，
@@ -170,14 +178,16 @@ function summarize(options) {
   const periodHours = Number(opts.periodHours) || 24;
   const sinceTs = Date.now() - periodHours * 3600000;
 
-  const ui = db.getUiSettings();
-  const alertCfg = (ui && ui.alert) || {};
+  // 审查 C-1/E2：阈值单一取值（UI 显式值 > env > 默认），与 alerts.js 同源，
+  // 消除此前"看板直读 env、告警/摘要走 UI 默认合并值"的分裂。
+  const _at = db.resolveAlertThresholds();
   const intervalSec = Number(process.env.AGENT_INTERVAL || DEFAULT_AGENT_INTERVAL);
-  const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
-  const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
-  const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
+  const offlineSec = _at.offline_sec;
+  const cpuAlert = _at.cpu_pct;
+  const memAlert = _at.mem_pct;
 
-  const agents = db.getAgents();
+  // 待确认 agent 无数据、不参与 AI 摘要统计（审查 G4）
+  const agents = db.getMonitoredAgents();
   // 一次拉全量再分组，避免逐台查询（同 /agents/sparklines 模式，api.js:258）
   // 注意：62 台 × 30d 下 metrics 表超 330 万行，直接全量 SELECT *（原 getMetricsAll，
   // 该函数已于 2026-09-13 随 PR-5 死代码清理删除）会把整表物化进内存触发 OOM。
@@ -251,12 +261,13 @@ function summarizeOne(agent, options) {
   const periodHours = Number(opts.periodHours) || 24;
   const sinceTs = Date.now() - periodHours * 3600000;
 
-  const ui = db.getUiSettings();
-  const alertCfg = (ui && ui.alert) || {};
+  // 审查 C-1/E2：阈值单一取值（UI 显式值 > env > 默认），与 alerts.js 同源，
+  // 消除此前"看板直读 env、告警/摘要走 UI 默认合并值"的分裂。
+  const _at = db.resolveAlertThresholds();
   const intervalSec = Number(process.env.AGENT_INTERVAL || DEFAULT_AGENT_INTERVAL);
-  const offlineSec = Number(alertCfg.offline_sec || process.env.OFFLINE_THRESHOLD_SEC || 60);
-  const cpuAlert = Number(alertCfg.cpu_pct || process.env.ALERT_CPU_PCT || 90);
-  const memAlert = Number(alertCfg.mem_pct || process.env.ALERT_MEM_PCT || 90);
+  const offlineSec = _at.offline_sec;
+  const cpuAlert = _at.cpu_pct;
+  const memAlert = _at.mem_pct;
   const aiCfg = db.getAiConfig();
   const silentDays = Number(aiCfg.silent_days) || 0;
   const tzOffsetHours = Number.isFinite(Number(aiCfg.tz_offset_hours)) ? Number(aiCfg.tz_offset_hours) : 8;

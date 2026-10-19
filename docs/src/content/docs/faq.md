@@ -19,7 +19,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 ### Q: 支持 ARM / 树莓派吗？
 
-✅ 支持。受控端是纯 Python，无架构限制。服务端是 Node.js，也支持 ARM。
+✅ 支持。受控端有 Go 单二进制（linux/amd64、linux/arm64）与 Python 两种实现，均无架构限制；服务端是 Node.js，同样支持 ARM。
 
 ### Q: 可以不用 Docker 吗？
 
@@ -51,13 +51,21 @@ SQLite 单文件。无需额外安装数据库服务。
 
 ### Q: 忘记 2FA 怎么办？
 
-在服务器上运行 `sudo bash diting.sh --reset-admin-token` 重置管理员 Token，然后重新绑定 2FA。
+目前**没有**一键重置 2FA 的开关：`sudo bash diting.sh --reset-admin-token` 只重置 `ADMIN_TOKEN`，
+**不影响** 2FA 状态。需 SSH 登录服务器改库关闭后重新绑定：
+
+```sql
+-- 库位置：Docker 部署为 diting-server 容器内 /data/monitor.db（DB_PATH 可改）
+DELETE FROM admin_config WHERE key IN ('admin_2fa_secret', 'admin_2fa_enabled');
+```
+
+重启服务后即可用管理员 Token 登录，再到「设置 → 安全」重新绑定。
 
 ### Q: 数据库被偷了怎么办？
 
 - Agent Token 以 SHA-256 哈希存储，非明文
 - 立即在服务端重置所有 Token
-- 数据库中无密码（仅 Token 哈希 + 监控数据）
+- 但通知与 AI 凭据（`smtp_pass`、`telegram_bot_token`、AI `api_key`）在库中为**明文**（SQLite 无加密），库泄露等同于泄露这些凭据，须立即轮换
 
 ## 使用相关
 
@@ -71,7 +79,7 @@ SQLite 单文件。无需额外安装数据库服务。
 
 ### Q: 历史数据保留多久？
 
-默认保留 30 天，可在「设置 → 告警规则」配置（7–3650 天），也可通过 `RETENTION_DAYS` 环境变量设置。
+默认保留 30 天，可在「设置 → 站点与界面」配置（7–3650 天），也可通过 `RETENTION_DAYS` 环境变量设置。
 
 ### Q: 节点离线多久触发告警？
 

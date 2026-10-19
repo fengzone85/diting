@@ -5,88 +5,81 @@ description: 无 Docker 的原生 systemd 部署方式
 
 # 原生 Linux 部署
 
-适用于无 Docker 环境、精简系统、小内存 VPS（256-512MB）。
+适用于无 Docker 环境、精简系统、小内存 VPS（256-512MB）。受控端以 **Go 单二进制**运行（M3 起的默认形态），零外部依赖；服务端为 Node.js 原生进程。
 
 ## 资源对比
 
-| 部署形态 | 内存基线 | 前置依赖 | 镜像大小 |
+| 部署形态 | 内存基线 | 前置依赖 | 体积 |
 |---|---|---|---|
-| Docker 容器 | 65-150MB | Docker Engine (~120MB) | ~80MB |
-| **原生 systemd** | **12-25MB** | **Python 3.8+** | **~50KB** |
-| 差值 | **~125MB** | — | — |
+| Docker 容器（服务端） | 65-150MB | Docker Engine (~120MB) | ~80MB |
+| **原生 systemd** | 服务端 30-60MB + Go 受控端 <10MB | 无（受控端零依赖） | 二进制 ~5MB |
+| 差值 | **省 ~125MB** | — | — |
 
-> 同一套代码（`agent.py` + `collector.py`），零改动，全在部署层。
+> 受控端另有 Python 实现（内存 12-25MB），已冻结、仅存量节点使用，新装一律 Go。
 
-## 一键安装
+## 一键安装（受控端）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/install.sh | bash
+# 后台「添加 Agent」生成的一键命令（含服务端地址与凭据），或手动：
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/diting.sh -o diting.sh
+chmod +x diting.sh
+sudo ./diting.sh --install-agent --server https://your-server --id <id> --token <token>
 ```
 
-支持交互模式和非交互模式：
+`diting.sh --install-agent` 内部调用 `agent-go/install.sh`，支持交互与非交互两种模式：
 
 ```bash
-# 非交互模式
-curl -fsSL ... | bash -s -- --token "YOUR_TOKEN" --url "https://monitor.example.com"
+# 非交互模式（agent-go/install.sh 参数）
+curl -fsSL ... | bash -s -- --server "https://monitor.example.com" --token "YOUR_TOKEN"
+
+# 也可直接用安装脚本本身
+sudo bash agent-go/install.sh --server https://monitor.example.com --id <id> --token <token> --interval 20
 ```
 
 ## 文件布局
 
 ```
-/opt/diting/           (700 root:root)
-├── agent.py
-├── collector.py
-└── agent.env                (600 root:root)
-    ├── AGENT_TOKEN=xxx
-    └── SERVER_URL=https://...
+/opt/diting/                          ← 程序目录（mkdir -p 创建，未额外 chmod）
+├── diting-agent                      ← Go 二进制（755 root:root）
+└── uninstall.sh                      ← 卸载脚本
+/etc/diting/agent.env                 ← 配置（600，含 SERVER_URL / AGENT_ID / AGENT_TOKEN）
+/var/lib/diting/                      ← 状态目录（700 diting:diting，月流量 state.json）
+/etc/systemd/system/diting-agent.service
 ```
+
+> `chmod 700` 只作用于 `/var/lib/diting`（agent-go/install.sh:102）；`/opt/diting` 本身未收窄权限。
 
 ## systemd 服务
 
-以下与仓库内 `agent/diting-agent.service` 一致：
+以下与仓库内 `agent-go/diting-agent.service` 一致：
 
 ```ini
 [Unit]
-Description=Diting Agent
+Description=Diting Agent (Go)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=diting
-Group=diting
 EnvironmentFile=/etc/diting/agent.env
-ExecStart=/usr/bin/python3 /opt/diting/agent.py
-WorkingDirectory=/opt/diting
-SyslogIdentifier=diting-agent
-StandardOutput=journal
-StandardError=journal
-Restart=on-failure
-RestartSec=10s
+ExecStart=/opt/diting/diting-agent
+Restart=always
+RestartSec=5
 
-# ping 需要 CAP_NET_RAW；NoNewPrivileges=true 下文件 capabilities 会被忽略，
-# 必须用 AmbientCapabilities 传递，并用 CapabilityBoundingSet 收窄范围。
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
-
-# ── 隔离加固 ──
+# 加固：只读系统 + 仅状态目录可写（Go agent 无出站依赖外的文件需求）
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/diting
+ProtectHome=true
 PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelLogs=true
-ProtectClock=true
-ProtectHostname=true
-ProtectControlGroups=true
-LockPersonality=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-SystemCallFilter=@system-service
+ReadWritePaths=/var/lib/diting
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+> Python 版 unit（`agent/diting-agent.service`）另有内核 / cgroup 隔离与
+> `AmbientCapabilities=CAP_NET_RAW`（ICMP 探测需要），已随 Python 端冻结、不再演进。
 
 ## 管理命令
 
@@ -103,8 +96,8 @@ systemctl restart diting-agent
 # 停止
 systemctl stop diting-agent
 
-# 卸载（幂等）
-curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/uninstall.sh | bash
+# 卸载（幂等；保留 /etc/diting/agent.env 与 /var/lib/diting/state.json，便于同 ID 重装续上月流量）
+curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/uninstall.sh | bash
 ```
 
 ## 与 Docker 形态共存
@@ -118,4 +111,5 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent/unin
 
 ## 另见
 
-另有 **Go 二进制形态**（~5MB 静态二进制、内存 <10MB、零依赖），数据格式与安全模型与本形态完全一致，见《受控端部署》中的「Go 受控端」章节。
+本页即 **Go 二进制形态**的 systemd 部署说明（安装 / 布局 / unit / 卸载）。Docker 形态、
+环境变量全表与「修改探测目标」见《受控端部署》；旧 Python 受控端（`agent/`）已冻结，仅存量节点参考。
