@@ -15,8 +15,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
-      -o /out/diting-agent . \
-    && mkdir -p /out/data
+      -o /out/diting-agent .
 
 FROM scratch
 # 运行环境变量（由 docker run -e 注入；占位默认值，启动前必须设置前三个）
@@ -25,12 +24,9 @@ ENV SERVER_URL="" \
     AGENT_TOKEN="" \
     INTERVAL=15 \
     DISK_PATH=/host \
-    STATE_FILE=/data/state.json \
     PROBE_TARGETS="CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 
 COPY --from=build /out/diting-agent /diting-agent
-# /data 建在镜像层并置属主：named volume 首挂载时继承内容与属主，diting(1000) 可写
-COPY --from=build --chown=1000:1000 /out/data /data
 
 # 降权运行（scratch 无用户库，直接用数字 uid/gid = 1000）
 USER 1000:1000

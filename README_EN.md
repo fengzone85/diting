@@ -361,7 +361,6 @@ SERVER_URL=https://monitor.yourdomain.com \
 AGENT_ID=<the id you got> \
 AGENT_TOKEN=<the token you got> \
 DISK_PATH=/ \
-STATE_FILE=/var/lib/diting-agent-go/state.json \
 ./diting-agent-go
 ```
 
@@ -443,7 +442,7 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 
 **Public data boundary (`public_show_business`)**: `/api/public/agents` and `/api/v1/nodes` expose business fields (provider, expiry, note, monthly quota, plan) by default, because the public home page ("providers / expiring soon") and the node detail page ("note / plan") render them. Turn the switch off in Dashboard → Settings → "Expose business fields on public API" when your public page faces outside visitors; the fields then disappear from the response entirely. This is independent of "Enable public page" (`public_enabled`): when the public page is disabled, both API families return 403.
 
-**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds; native systemd installs default 20 for both the Python and Go agents, while Docker images and Windows default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `STATE_FILE` (monthly-traffic state; default `/data/state.json`), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
+**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds; native systemd installs default 20 for both the Python and Go agents, while Docker images and Windows default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `MONTH_ROTATE` (traffic reset day; `0`=cumulative, `1–31`=monthly reset day; alias `AGENT_MONTH_ROTATE`; monthly totals are accumulated server-side from the `net_rx`/`net_tx` absolute counters, the agent keeps no local state), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
 
 ## Dashboard features
 
