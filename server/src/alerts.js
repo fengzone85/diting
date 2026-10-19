@@ -259,21 +259,24 @@ async function checkTrafficQuota(now) {
       const m = db.getLatestMetric(a.id);
       if (!m) continue;
       const usedGb = ((Number(m.net_rx_month) || 0) + (Number(m.net_tx_month) || 0)) / GIB;
-      // 审查 E5：服务端速率积分交叉校验受控端上报的月累计。接口计数重置或
-      // agent state.json 丢失时上报差值被钳零 → 配额检查静默漏报；两侧偏差
-      // 超过一半且服务端估算 >1GB 时，告警"计数不可信"提醒人工核对。
+      // P3/E5：Go 节点月值已由服务端累加器回写，继续用“服务端速率积分 vs 月值”会变成自校验；
+      // 双源交叉校验仅保留给 legacy（Python/无计数器）节点。Go 节点直接清除旧 traffic_untrusted 状态。
       try {
-        const est = db.trafficEstimateBucketed(a.id, now - 30 * 86400000);
-        const estGb = (est.rx + est.tx) / GIB;
-        if (estGb > 1 && usedGb < estGb * 0.5) {
-          const st = db.getAlertState(a.id, 'traffic_untrusted');
-          if (!st || now - st.last_sent > 24 * 3600 * 1000) {
-            await sendAlertGuarded(a.id, 'traffic_untrusted',
-              `[监控] ${a.name} 月流量计数不可信`,
-              `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`);
-          }
-        } else {
+        if (db.hasTrafficCounter(a.id)) {
           db.clearAlertState(a.id, 'traffic_untrusted');
+        } else {
+          const est = db.trafficEstimateBucketed(a.id, now - 30 * 86400000);
+          const estGb = (est.rx + est.tx) / GIB;
+          if (estGb > 1 && usedGb < estGb * 0.5) {
+            const st = db.getAlertState(a.id, 'traffic_untrusted');
+            if (!st || now - st.last_sent > 24 * 3600 * 1000) {
+              await sendAlertGuarded(a.id, 'traffic_untrusted',
+                `[监控] ${a.name} 月流量计数不可信`,
+                `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`);
+            }
+          } else {
+            db.clearAlertState(a.id, 'traffic_untrusted');
+          }
         }
       } catch (e) { /* 交叉校验失败不影响配额主流程 */ }
       if (usedGb >= a.monthly_quota_gb) {

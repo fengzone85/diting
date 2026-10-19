@@ -335,7 +335,13 @@ router.get('/agents', adminOrReadonly, (req, res) => {
     const latest = db.getLatestMetric(a.id);
     const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
     const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
-    return Object.assign({}, a, { group: a.grp || '', online: !!online, latest: latestOut, hostname: shortHost(a.hostname) });
+    return Object.assign({}, a, {
+      group: a.grp || '',
+      online: !!online,
+      has_counter: db.hasTrafficCounter(a.id),
+      latest: latestOut,
+      hostname: shortHost(a.hostname)
+    });
   });
   res.json(list);
 });
@@ -538,6 +544,8 @@ router.get('/public/agents', (req, res) => {
       net_tx_rate: m ? m.net_tx_rate : 0,
       net_rx_month: m ? m.net_rx_month : 0,
       net_tx_month: m ? m.net_tx_month : 0,
+      month_rotate: a.month_rotate ?? null,
+      has_counter: db.hasTrafficCounter(a.id),
       uptime: m ? m.uptime : 0,
       os: (m && m.os) ? m.os : (a.os || ''),
       probes: m ? (m.probes || '') : '',
@@ -874,6 +882,18 @@ router.put('/agents/:id', adminOnly, (req, res) => {
     country: str(req.body.country, 2),
     probe_targets: str(req.body.probe_targets, 600)
   };
+  // P3：month_rotate 三态更新。仅当请求体显式携带该字段时才写；null=回到“采纳 agent 上报”。
+  if (Object.prototype.hasOwnProperty.call(req.body, 'month_rotate')) {
+    if (req.body.month_rotate === null) {
+      updates.month_rotate = null;
+    } else {
+      const rotate = num(req.body.month_rotate, 0, 31);
+      if (rotate === null || !Number.isInteger(rotate)) {
+        return res.status(400).json({ error: 'invalid month_rotate' });
+      }
+      updates.month_rotate = rotate;
+    }
+  }
   if (Number.isFinite(priceUp)) updates.price = Math.max(0, Math.min(99999, priceUp));
   if (Number.isFinite(cycleUp) && [0, 30, 60, 90, 180, 365, 730, 1095].includes(cycleUp)) updates.billing_cycle = cycleUp;
   if (['¥', '$', '€', '£'].includes(req.body.currency)) updates.currency = req.body.currency;

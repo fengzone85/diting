@@ -65,6 +65,9 @@ export interface Agent {
   note?: string;
   expire_at?: string;
   monthly_quota_gb?: number;
+  // P3 流量周期：month_rotate 三态（undefined=老数据，null=采纳 agent 上报，0=累计，1–31=重置日）
+  month_rotate?: number | null;
+  has_counter?: boolean;
   price?: number;
   billing_cycle?: number;
   currency?: '¥' | '$' | '€' | '£';

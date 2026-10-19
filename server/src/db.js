@@ -591,6 +591,12 @@ const accumulateTraffic = (agentId, report, nowMs = Date.now()) => {
   return out;
 };
 
+// has_counter：traffic_state 已有绝对计数器基线（last_rx/last_tx 非 NULL）即视为 Go 口径节点。
+const hasTrafficCounter = (agentId) => {
+  const s = trafficCache.get(agentId);
+  return !!(s && s.last_rx !== null && s.last_rx !== undefined && s.last_tx !== null && s.last_tx !== undefined);
+};
+
 const flushTraffic = () => {
   if (!trafficDirty.size) return;
   const rows = [];
@@ -973,7 +979,7 @@ module.exports = {
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
-  getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic,
+  getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,

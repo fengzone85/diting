@@ -555,6 +555,8 @@ export const zhCN: Record<string, string> = {
   'agent.billingCycle': '计费周期',
   'agent.expireDate': '到期日',
   'agent.monthlyQuota': '月流量配额 (GB)',
+  'agent.monthRotate': '流量重置日',
+  'agent.monthRotateHint': '0=不限（累计口径），1–31=每月重置日；仅 Go 受控端生效，保存后下一条上报生效。留空表示采纳受控端上报值。',
   'agent.autoRenew': '自动续费',
   'agent.renewCycle': '手动续费一个周期',
   'agent.probeTargets': '探测目标',
