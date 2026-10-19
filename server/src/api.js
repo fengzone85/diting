@@ -188,28 +188,29 @@ function shQuote(s) {
 function psQuote(s) {
   return `'${String(s).replace(/'/g, `''`)}'`;
 }
-function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTargets) {
+function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTargets, monthRotate = 0) {
   const iv = interval || AGENT_INTERVAL_DEFAULT;
+  const mr = Number.isInteger(monthRotate) && monthRotate >= 0 && monthRotate <= 31 ? monthRotate : 0;
   const ptArg = probeTargets ? ` --probe-targets ${shQuote(probeTargets)}` : '';
   const ptEnv = probeTargets ? ` -e PROBE_TARGETS=${shQuote(probeTargets)}` : '';
   const ptWin = probeTargets ? ` -ProbeTargets ${psQuote(probeTargets)}` : '';
   // 原生版采用下载后执行风格：先下载成文件、chmod +x、再 sudo 执行（相对 curl|bash 更透明、可审阅）。
   const native = `curl -fsSL ${REPO_BASE}/diting.sh -o diting.sh
 chmod +x diting.sh
-sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv}${ptArg}`;
+sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUrl)} --id ${shQuote(agentId)} --token ${shQuote(agentToken)} --interval ${iv} --month-rotate ${mr}${ptArg}`;
   // Docker 版（M3 起 Go scratch 镜像，~7.5MB）：--network host 取真实流量；
   // /:/host:ro 是宿主磁盘监控的结构性依赖（见 agent-go/docker-compose.yml 注释）；
   // cap_drop ALL + no-new-privileges（纯 TCP 探测无需 NET_RAW）。
-  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     --network host --cap-drop ALL --security-opt no-new-privileges:true \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv} -e DISK_PATH=/host${ptEnv} \\\n     -v /:/host:ro -v diting-state:/data \\\n     diting-agent`;
+  const docker = `docker build -t diting-agent ${AGENT_GIT_REPO} \\\n  && docker run -d --name diting-agent --restart unless-stopped \\\n     --network host --cap-drop ALL --security-opt no-new-privileges:true \\\n     -e SERVER_URL=${shQuote(serverUrl)} -e AGENT_ID=${shQuote(agentId)} -e AGENT_TOKEN=${shQuote(agentToken)} -e INTERVAL=${iv} -e MONTH_ROTATE=${mr} -e DISK_PATH=/host${ptEnv} \\\n     -v /:/host:ro -v diting-state:/data \\\n     diting-agent`;
   // Windows 版（M3 起 Go 单二进制）：一条 PowerShell 命令。外层用双引号、内部一律
   // 单引号，避免引号嵌套。install-go.ps1 从 GitHub Release 下载 diting-agent.exe
-  // （SHA256 校验）并注册计划任务（AtStartup/SYSTEM/自动重启/单实例互斥）。
+  // （SHA256 校验）并注册计划任务（AtStartup/LocalService/自动重启/单实例互斥）。
   // 需以管理员身份运行。GO_RELEASE = agent-go Release 下载基址（latest）。
   const GO_RELEASE = 'https://github.com/fengzone85/diting/releases/latest/download';
-  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'diting-go-install.ps1'; iwr '${REPO_BASE}/agent-go/install-go.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RepoBase '${GO_RELEASE}' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv}${ptWin}"`;
+  const windows = `powershell -NoProfile -ExecutionPolicy Bypass -Command "\`$p=Join-Path \`$env:TEMP 'diting-go-install.ps1'; iwr '${REPO_BASE}/agent-go/install-go.ps1' -OutFile \`$p -UseBasicParsing; & \`$p -RepoBase '${GO_RELEASE}' -ServerUrl ${psQuote(serverUrl)} -AgentId ${psQuote(agentId)} -AgentToken ${psQuote(agentToken)} -Interval ${iv} -MonthRotate ${mr}${ptWin}"`;
   // Docker 版（M3 起同为 Go）：多阶段构建出 scratch 镜像（USER 1000 + cap-drop ALL），
   // 多盘识别在 Go collector 内优先读 /hostproc/mounts、回退 /proc/mounts，无需额外挂 /proc。
-  return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '' };
+  return { server_url: serverUrl, native_cmd: native, docker_cmd: docker, windows_cmd: windows, probe_targets: probeTargets || '', month_rotate: mr };
 }
 
 // 免 Token 的「修改探测目标」命令：已有受控端换 DNS 时，无需重装 / 无需 Token。
@@ -861,7 +862,7 @@ router.post('/agents', adminOnly, (req, res) => {
     probe_targets: probeTargets
   });
   // 创建时一次性把「地址 + 该客户端令牌 + 探测目标」预填进一键命令返回（令牌仅此刻明文可用）。
-  const install = buildInstallCommands(base, id, token, AGENT_INTERVAL_DEFAULT, probeTargets);
+  const install = buildInstallCommands(base, id, token, AGENT_INTERVAL_DEFAULT, probeTargets, 0);
   res.json({ id, token, install });
   auditLog(req, 'create_agent', `name=${req.body.name || ''} id=${id}`);
 });
@@ -925,7 +926,7 @@ router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
   // 重置后同样回带三条一键命令：用户直接复制重装即可，无需手改环境变量。
   // 探测目标沿用该受控端已保存的值，保证重装后 DNS 保持一致。
   const a = db.getAgent(req.params.id);
-  const install = buildInstallCommands(base, req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '');
+  const install = buildInstallCommands(base, req.params.id, token, AGENT_INTERVAL_DEFAULT, a ? a.probe_targets : '', a ? (a.month_rotate ?? 0) : 0);
   res.json({ ok: true, token, install });
   auditLog(req, 'reset_token', `id=${req.params.id}`);
 });
@@ -954,7 +955,7 @@ router.get('/agents/:id/commands', adminOnly, (req, res) => {
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const probeTargets = str(req.query.probe_targets, 600) || a.probe_targets || '';
-  const install = buildInstallCommands(base, a.id, '<token>', AGENT_INTERVAL_DEFAULT, probeTargets);
+  const install = buildInstallCommands(base, a.id, '<token>', AGENT_INTERVAL_DEFAULT, probeTargets, a.month_rotate ?? 0);
   const modify = buildModifyCommands(base, a.id, probeTargets);
   res.json({ id: a.id, probe_targets: probeTargets, install, modify });
 });

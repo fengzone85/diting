@@ -82,9 +82,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.7"
-SCRIPT_DATE="2026-09-15"
-SCRIPT_NOTES="界面语言可持久化：首次交互运行选择 中文/English，菜单新增「11 切换语言」随时切换（/etc/diting/ui.lang，优先级高于 LANG/LC_ALL 自动判定）"
+SCRIPT_VERSION="1.1.8"
+SCRIPT_DATE="2026-10-19"
+SCRIPT_NOTES="受控端安装/更新链路支持 --month-rotate（MONTH_ROTATE，0=累计，1–31=流量重置日），update_agent 会保留已存值"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
@@ -130,7 +130,7 @@ need_val_guard() {
 
 # ── 非交互参数（供 CI / 批量部署）─────────────────────────────────────────────
 ACTION=""
-A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""
+A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""; A_MONTH_ROTATE=""
 A_BACKUP_PATH=""; A_BACKUP_KEEP=""; A_BACKUP_SCHEDULE=""
 
 show_usage() {
@@ -206,6 +206,7 @@ show_usage() {
   --setup-name NAME       自助注册的节点显示名（可选）
   --interval SEC          上报间隔（秒，默认 15）
   --probe-targets LIST    网络质量自测目标（label:host[:port] 逗号分隔；覆盖默认）
+  --month-rotate N        流量重置日（0=累计口径，1–31；仅 Go 受控端，默认 0）
   --repo URL              自定义 raw 仓库地址（默认本项目 master 分支）
 EOF
 }
@@ -298,6 +299,7 @@ install_agent() {
     [[ -n "$A_SETUP_NAME" ]] && args+=(--setup-name "$A_SETUP_NAME")
     [[ -n "$A_INTERVAL" ]]   && args+=(--interval "$A_INTERVAL")
     [[ -n "$A_PROBE_TARGETS" ]] && args+=(--probe-targets "$A_PROBE_TARGETS")
+    [[ -n "$A_MONTH_ROTATE" ]] && args+=(--month-rotate "$A_MONTH_ROTATE")
 
     # 仓库内运行：直接复用本地 agent-go/install.sh（M3 起为 Go 版）
     if [[ -f "$SCRIPT_DIR/agent-go/install.sh" ]]; then
@@ -651,7 +653,7 @@ update_agent() {
         return 1
     fi
     # 从已存 env 读取注册身份，用户无需重新输入令牌
-    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 PROBE_TARGETS="" k v
+    local SERVER_URL="" AGENT_ID="" AGENT_TOKEN="" INTERVAL=15 PROBE_TARGETS="" MONTH_ROTATE=0 k v
     while IFS='=' read -r k v; do
         case "$k" in
             SERVER_URL)     SERVER_URL="$v" ;;
@@ -659,6 +661,7 @@ update_agent() {
             AGENT_TOKEN)    AGENT_TOKEN="$v" ;;
             INTERVAL)       INTERVAL="$v" ;;
             PROBE_TARGETS)  PROBE_TARGETS="$v" ;;
+            MONTH_ROTATE)   MONTH_ROTATE="$v" ;;
         esac
     done < "$envfile"
     if [[ -z "$SERVER_URL" || -z "$AGENT_ID" || -z "$AGENT_TOKEN" ]]; then
@@ -677,9 +680,9 @@ update_agent() {
     fi
     chmod +x "$tmp/install.sh"
     # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务。
-    # 必须回传 PROBE_TARGETS：install.sh 仅在显式传参时才写该键，否则更新后
-    # 用户自定义的探测目标会被覆盖丢失。
-    local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL")
+    # 必须回传 PROBE_TARGETS 与 MONTH_ROTATE：install.sh 仅在显式传参时才写这些键，
+    # 否则更新后用户自定义的探测目标 / 流量重置日会被覆盖丢失。
+    local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL" --month-rotate "${MONTH_ROTATE:-0}")
     [[ -n "$PROBE_TARGETS" ]] && re_args+=(--probe-targets "$PROBE_TARGETS")
     bash "$tmp/install.sh" "${re_args[@]}"
     rm -rf "$tmp"
@@ -2124,6 +2127,7 @@ while [[ $# -gt 0 ]]; do
         --setup-name)  need_val_guard "$1" "${2:-}"; A_SETUP_NAME="${2:-}"; shift 2 ;;
         --interval)    need_val_guard "$1" "${2:-}"; A_INTERVAL="${2:-}"; shift 2 ;;
         --probe-targets) need_val_guard "$1" "${2:-}"; A_PROBE_TARGETS="${2:-}"; shift 2 ;;
+        --month-rotate) need_val_guard "$1" "${2:-}"; A_MONTH_ROTATE="${2:-}"; shift 2 ;;
         --repo)        need_val_guard "$1" "${2:-}"; REPO_RAW="${2:-}"; shift 2 ;;
         -h|--help)     show_usage; exit 0 ;;
         *) echo -e "${RED}[错误] 未知参数: $1${NC}" >&2; show_usage; exit 1 ;;

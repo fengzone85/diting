@@ -33,6 +33,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "`$p=Join-Path `$env:TEMP
 - `-AgentId` / `-AgentToken`：后台分配的节点标识与令牌
 - `-Interval`：上报间隔（秒），默认 20，下限 5
 - `-ProbeTargets`：可选，网络质量自测目标（`label:host[:port]` 逗号分隔）
+- `-MonthRotate`：可选，流量重置日（`0`=累计口径，`1–31`；默认 0，越界回落 0）
 
 > 旧版 Python 受控端（`agent/windows/`）已冻结，新装一律走上述 Go 版；
 > 存量 Python 节点的卸载见文末「旧版（Python）受控端卸载」。
@@ -79,7 +80,7 @@ Get-ScheduledTaskInfo -TaskName "HostMonitorAgent-<AgentId>"
 > （计划任务本身在 session 0 运行，无窗口）。
 
 配置位于 `%ProgramData%\diting-agent\run_scheduled.bat`（环境变量 `SERVER_URL` / `AGENT_ID` /
-`AGENT_TOKEN` / `INTERVAL` / `STATE_FILE` / `PROBE_TARGETS`）。服务端「修改探测目标」命令
+`AGENT_TOKEN` / `INTERVAL` / `MONTH_ROTATE` / `STATE_FILE` / `PROBE_TARGETS`）。服务端「修改探测目标」命令
 改的就是该文件里的 `PROBE_TARGETS` 行并重启任务，无需重装、无需 Token。
 
 ## 卸载
