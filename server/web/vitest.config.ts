@@ -17,7 +17,10 @@ export default defineConfig({
       exclude: ['src/utils/i18n/**', 'src/services/types.ts', 'src/**/*.test.ts'],
       // 初始门禁 = 2026-09-07 排除测试文件后的真实基线（lines 40.58%）下浮 5%。
       // 约定：后续 PR 只允许上调、不允许下调；补测试后应逐步抬升。
-      thresholds: { lines: 35, functions: 35, branches: 70, statements: 35 }
+      // 2026-10-20 上调（S2-F5 补 adminApi 契约测试后实测 lines 58.3 / functions 76.42 /
+      // branches 81.69，按「实测下浮」留出小幅波动空间）：lines/statements 35→55、
+      // functions 35→70、branches 70→78。此前的 35% 函数门禁曾因 adminApi 方法增多被击穿。
+      thresholds: { lines: 55, functions: 70, branches: 78, statements: 55 }
     }
   },
 });
