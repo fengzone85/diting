@@ -429,3 +429,27 @@ export interface BackupState {
   total_bytes?: number;
   updated_at?: number;
 }
+
+// S2/F5：API Token（明文只在创建响应中出现一次；列表接口不含明文与哈希）
+export interface ApiToken {
+  id: string;
+  name: string;
+  scope: 'readonly' | 'admin';
+  agent_ids: string[];
+  expires_at: number;
+  last_used_at: number;
+  last_used_ip: string;
+  created_at: number;
+  created_by: string;
+  revoked: boolean;
+}
+
+export interface ApiTokenCreated {
+  id: string;
+  name: string;
+  scope: 'readonly' | 'admin';
+  agent_ids: string[];
+  expires_at: number;
+  token: string;
+  notice: string;
+}

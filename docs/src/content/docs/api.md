@@ -118,6 +118,8 @@ Content-Type: application/json
 
 ### 签发 / 吊销 API Token
 
+后台侧边栏「API Token」页可直接完成签发与吊销（明文一次性展示、支持复制），下列接口是该页面对应的 HTTP 形式。
+
 ```http
 POST /api/admin/api-tokens
 X-Admin-Token: <admin_token>

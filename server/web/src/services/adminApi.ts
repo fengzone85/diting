@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -77,6 +77,18 @@ export const adminApi = {
   deleteNotifyGroup: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/groups/${id}`),
   listNotifyEvents: () => api.get<{ events: string[] }>('/api/admin/notify/events'),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
+
+  // S2/F5：API Token 管理。明文只在创建响应里返回一次（ApiTokenCreated.token），
+  // 列表接口不含明文与哈希，故「丢失即吊销重建」。
+  listApiTokens: () => api.get<{ list: ApiToken[] }>('/api/admin/api-tokens'),
+  createApiToken: (body: {
+    name: string;
+    scope?: 'readonly' | 'admin';
+    agent_ids?: string[];
+    expires_in_days?: number;
+  }) => api.post<ApiTokenCreated>('/api/admin/api-tokens', body),
+  revokeApiToken: (id: string) =>
+    api.del<{ ok: boolean; id: string }>(`/api/admin/api-tokens/${encodeURIComponent(id)}`),
 
   // diagnostics
   clientIp: () => api.get<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string }>('/api/client-ip'),

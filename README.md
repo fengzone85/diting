@@ -383,7 +383,7 @@ cd server/web && npm install && npm run build
 
 ### API Token（推荐：可吊销 / 可限节点 / 有审计）
 
-后台签发（HTTP 调用，明文只返回一次）：
+在后台侧边栏「API Token」页可视化签发 / 吊销；也可直接调用 HTTP 接口（明文只返回一次）：
 
 ```bash
 curl -X POST https://your-server/api/admin/api-tokens \

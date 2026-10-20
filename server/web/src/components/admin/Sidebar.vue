@@ -22,6 +22,7 @@ const links = [
   { to: '/admin/settings', label: t('nav.settings') },
   { to: '/admin/template', label: t('nav.template') },
   { to: '/admin/audit-logs', label: t('nav.auditLogs') },
+  { to: '/admin/api-tokens', label: t('nav.apiTokens') },
 ];
 
 async function logout() {
