@@ -1628,7 +1628,9 @@ router.post('/admin/2fa/disable', requireAdmin, agentScope, agentGlobalOnly, (re
 });
 
 // ---- Admin: 审计日志查询 ----
-router.get('/admin/audit-logs', adminOnly, (req, res) => {
+// S2/F5：审计条目里含全部节点的 id/名称与操作轨迹（detail 如 `id=agt_xxx`），
+// 属跨节点信息，节点白名单 Token 不开放（它无法被裁剪成「只有自己的记录」）。
+router.get('/admin/audit-logs', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const logs = db.getAuditLogs(limit, offset);

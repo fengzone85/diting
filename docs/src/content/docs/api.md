@@ -28,7 +28,7 @@ DiTing 服务端提供 REST API。受控端（Agent）与管理端（浏览器 /
 `agent_ids` 为空数组 = 不限节点（等价于旧的只读/管理凭证）；非空时：
 
 - **单节点接口**越权 → `403 forbidden_node`：`GET /agents/:id`、`GET /agents/:id/metrics`、`PUT/DELETE /agents/:id`、`POST /agents/:id/{approve,renew,reset-token}`、`GET /agents/:id/commands`、`PUT/DELETE /admin/alert-rules/agent/:id`、`POST /ai/analyze-node/:id`、`GET /ai/node-reports?agent_id=`；
-- **全局聚合面** → `403 forbidden_scope`：`GET /overview`、`GET /agents/sparklines/overview`、`GET /billing`、`GET /admin/alert-rules`、`GET /ai/usage`、`GET /ai/reports`、`GET /ai/reports/:id`，以及 Token 管理端点自身；
+- **全局聚合面** → `403 forbidden_scope`：`GET /overview`、`GET /agents/sparklines/overview`、`GET /billing`、`GET /admin/alert-rules`、`GET /ai/usage`、`GET /ai/reports`、`GET /ai/reports/:id`、`GET /admin/audit-logs`，以及 Token 管理端点自身；
 - **全局配置 / 基础设施写接口**同样 `403 forbidden_scope`：`POST /agents`、`PUT /settings`、`POST /test-alert`、`PUT /ai/config`、`POST /ai/run`、通知渠道与通知组的增删改与测试、`PUT/DELETE /admin/alert-rules/group/:grp`、备份下载/删除/恢复、`/admin/2fa/*`、`POST /public/order`。理由：受限 Token 的授权范围是「这几个节点」，与节点无关的全局变更（关掉全站告警、改系统设置、重建 2FA）必须拒绝；
 - `GET /agents` 与 `GET /agents/sparklines` 按白名单**过滤**而非拒绝，只返回自己的节点。
 

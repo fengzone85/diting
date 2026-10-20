@@ -20,7 +20,8 @@
   `PUT`/`DELETE /agents/:id`、`approve` / `renew` / `reset-token` / `commands`、
   `/admin/alert-rules/agent/:id`、`/ai/analyze-node/:id`、`/ai/node-reports?agent_id=`。
 - **全局面拒绝 → `403 forbidden_scope`**：`/overview`、`/agents/sparklines/overview`、
-  `/billing`、`/admin/alert-rules`、`/ai/usage`、`/ai/reports`、`/ai/reports/:id`、Token 管理端点。
+  `/billing`、`/admin/alert-rules`、`/ai/usage`、`/ai/reports`、`/ai/reports/:id`、
+  `/admin/audit-logs`（含全部节点 id/操作轨迹，无法裁剪成「仅自己的记录」）、Token 管理端点。
 - **`/agents` 与 `/agents/sparklines` 改为按白名单过滤**（而非拒绝），受限 Token 仍能看自己的节点。
 - **全局配置 / 基础设施写接口同样 `403 forbidden_scope`**：`POST /agents`、`PUT /settings`、
   `POST /test-alert`、`PUT /ai/config`、`POST /ai/run`、通知渠道与通知组增删改/测试、
@@ -36,7 +37,7 @@
 - 创建校验：`name` 必填、`scope` 仅 `readonly|admin`（缺省 `readonly`）、`agent_ids`
   须为已存在节点（`400 unknown_agent_id`）、`expires_in_days` 为 1–3650 整数。
 - 吊销语义：不存在或已吊销统一 `404`（底层 `UPDATE` 对已吊销行同样算命中，故先查状态）。
-- 回归：`test/api-token-scope.test.js`（8 组）、`test/api-tokens-admin.test.js`（6 组），
+- 回归：`test/api-token-scope.test.js`（9 组）、`test/api-tokens-admin.test.js`（6 组），
   含「越权写不落库」「吊销后立即 401」「受限 Token 不能管理 Token」等断言。
 - 可选 E2E（真实浏览器，不进 `npm test`）：`npm run e2e:tokens`，覆盖
   登录→签发→一次性明文→复制→作用域→吊销全链路；Playwright 需在仓库外安装
