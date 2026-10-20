@@ -394,7 +394,7 @@ curl -X POST https://your-server/api/admin/api-tokens \
 
 - 调用方用请求头 `X-API-Token: diting_<48hex>`；服务端只存 SHA-256
 - `scope=readonly|admin`，缺省 `readonly`；`agent_ids` 为空数组表示不限节点
-- `agent_ids` 非空时：单节点接口越权返回 **403 `forbidden_node`**，全局聚合面（`/overview`、`/billing`、`/ai/reports` 等）与全局写接口（`/settings`、通知渠道/通知组、`/ai/config`、备份、2FA、`POST /agents`）返回 **403 `forbidden_scope`**，`/agents` 与 `/agents/sparklines` 按白名单过滤
+- `agent_ids` 非空时：单节点接口越权返回 **403 `forbidden_node`**，全局聚合面（`/overview`、`/billing`、`/ai/reports`、`/admin/audit-logs` 等）与全局写接口（`/settings`、通知渠道/通知组、`/ai/config`、备份、2FA、`POST /agents`）返回 **403 `forbidden_scope`**，`/agents` 与 `/agents/sparklines` 按白名单过滤
 - 吊销：`DELETE /api/admin/api-tokens/<id>`，下一次请求即刻 401；列表：`GET /api/admin/api-tokens`
 - 受限 Token 自身不能管理 Token（防止签发一个不限节点的 Token 绕过边界）
 - 适用于 Grafana / 第三方看板 / 交给他人查看指定节点的场景

@@ -151,6 +151,10 @@ try {
 
   const createRes = await anon.post(BASE + '/api/agents', { headers: hdr, data: { name: 'x' } });
   assert(createRes.status() === 403 && (await createRes.json()).error === 'forbidden_scope', 'POST /agents 应 forbidden_scope');
+
+  // 审计日志含全部节点 id 与操作轨迹，同样属跨节点信息
+  const auditRes = await anon.get(BASE + '/api/admin/audit-logs', { headers: hdr });
+  assert(auditRes.status() === 403 && (await auditRes.json()).error === 'forbidden_scope', '/admin/audit-logs 应 forbidden_scope');
   log('全局面拦截 OK');
 
   // 越权节点（需要库里有第二个节点）

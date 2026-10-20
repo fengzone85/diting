@@ -163,6 +163,21 @@ test('S2/F5: 受限 Token 不得触碰全局配置/基础设施写接口', async
   assert.strictEqual(settings.status, 200, '不受限 Token 仍可读设置');
 });
 
+test('S2/F5: 审计日志是跨节点信息，受限 Token 不可读', async () => {
+  const hdr = RO(adminScoped);
+  const res = await request(app).get('/api/admin/audit-logs').set(hdr);
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.body.error, 'forbidden_scope');
+
+  const globalRes = await request(app).get('/api/admin/audit-logs').set(RO(roGlobal));
+  assert.strictEqual(globalRes.status, 403, '只读 Token 仍应被 adminOnly 拦下');
+  assert.strictEqual(globalRes.body.error, 'admin required');
+
+  const adminRes = await request(app).get('/api/admin/audit-logs')
+    .set({ 'X-Admin-Token': process.env.ADMIN_TOKEN, 'X-Forwarded-Proto': 'https' });
+  assert.strictEqual(adminRes.status, 200, '管理员仍可读取审计日志');
+});
+
 test('S2/F5: agent_ids=[] 的 Token 不受作用域限制（无回归）', async () => {
   const list = await request(app).get('/api/agents').set(RO(roGlobal));
   assert.strictEqual(list.status, 200);
