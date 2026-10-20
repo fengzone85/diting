@@ -36,8 +36,11 @@
 - 创建校验：`name` 必填、`scope` 仅 `readonly|admin`（缺省 `readonly`）、`agent_ids`
   须为已存在节点（`400 unknown_agent_id`）、`expires_in_days` 为 1–3650 整数。
 - 吊销语义：不存在或已吊销统一 `404`（底层 `UPDATE` 对已吊销行同样算命中，故先查状态）。
-- 回归：`test/api-token-scope.test.js`（7 组）、`test/api-tokens-admin.test.js`（6 组），
+- 回归：`test/api-token-scope.test.js`（8 组）、`test/api-tokens-admin.test.js`（6 组），
   含「越权写不落库」「吊销后立即 401」「受限 Token 不能管理 Token」等断言。
+- 可选 E2E（真实浏览器，不进 `npm test`）：`npm run e2e:tokens`，覆盖
+  登录→签发→一次性明文→复制→作用域→吊销全链路；Playwright 需在仓库外安装
+  （见 `server/test/e2e/api-tokens.e2e.mjs` 头注释），避免 CI 拉浏览器。
 
 ## 2026-10-20 通用 Webhook 通知渠道 + 通知组（S1-F2）
 
