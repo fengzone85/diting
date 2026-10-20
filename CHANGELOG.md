@@ -2,6 +2,38 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-20 API Token 细粒度作用域 + 管理端点（S2-F5）
+
+### 新增
+
+- **`api_tokens` 表**：库中只存 `token_hash`（SHA-256），`agent_ids` 为 JSON 数组
+  （`[]` = 不限节点），另含 `scope` / `expires_at` / `last_used_*` / `revoked`。
+- **`X-API-Token` 认证通道**：`resolveRole` 只在该头查 Token；`Authorization: Bearer`
+  仍**仅**用于受控端上报与 `/metrics`，从协议层消除「同一 Bearer 是 Admin 还是 Agent」的歧义。
+- **中层 `agentScope` / `inAgentScope`**：`agent_ids` 非空时把请求标记为受限，供 handler 判定归属。
+- **Token 管理端点**（仅 admin）：`POST /api/admin/api-tokens`（明文 `diting_<48hex>`
+  只回显一次）、`GET`（列表脱敏，无明文/哈希）、`DELETE /:id`（吊销即时生效）。
+
+### ⚠️ 行为变更（仅影响受限 Token，全局凭证行为不变）
+
+- **单节点面越权 → `403 forbidden_node`**：`/agents/:id`、`/agents/:id/metrics`、
+  `PUT`/`DELETE /agents/:id`、`approve` / `renew` / `reset-token` / `commands`、
+  `/admin/alert-rules/agent/:id`、`/ai/analyze-node/:id`、`/ai/node-reports?agent_id=`。
+- **全局面拒绝 → `403 forbidden_scope`**：`/overview`、`/agents/sparklines/overview`、
+  `/billing`、`/admin/alert-rules`、`/ai/usage`、`/ai/reports`、`/ai/reports/:id`、Token 管理端点。
+- **`/agents` 与 `/agents/sparklines` 改为按白名单过滤**（而非拒绝），受限 Token 仍能看自己的节点。
+- `READONLY_TOKEN` / `X-Admin-Token` 等既有凭证不受影响（等价于 `agent_ids=[]`）。
+
+### 说明
+
+- **提权路径已封**：受限 Token 调用 Token 管理端点一律 `forbidden_scope`；否则签发一个
+  `agent_ids=[]` 的 Token 即可绕过节点边界。
+- 创建校验：`name` 必填、`scope` 仅 `readonly|admin`（缺省 `readonly`）、`agent_ids`
+  须为已存在节点（`400 unknown_agent_id`）、`expires_in_days` 为 1–3650 整数。
+- 吊销语义：不存在或已吊销统一 `404`（底层 `UPDATE` 对已吊销行同样算命中，故先查状态）。
+- 回归：`test/api-token-scope.test.js`（7 组）、`test/api-tokens-admin.test.js`（6 组），
+  含「越权写不落库」「吊销后立即 401」「受限 Token 不能管理 Token」等断言。
+
 ## 2026-10-20 通用 Webhook 通知渠道 + 通知组（S1-F2）
 
 ### ⚠️ 行为变更
