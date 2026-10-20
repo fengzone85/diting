@@ -214,7 +214,7 @@ diting/
 | `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、不阻止启动，未设时走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写；建议 ≥16 位，占位符 / 过短会启动告警） |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写；建议 ≥16 位，占位符 / 过短会启动告警）。全局静态凭证，不可吊销 / 无审计 / 不能限节点；需要这些能力请用 API Token（见下「只读账号与 API Token」） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌 |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
@@ -370,14 +370,34 @@ cd server/web && npm install && npm run build
 
 ---
 
-## 🔑 只读账号（READONLY_TOKEN）
+## 🔑 只读账号与 API Token
 
-为降低「全权限 Admin Token 被到处共享」的风险，可配置一个**仅只读**的账号：
+为降低「全权限 Admin Token 被到处共享」的风险，提供两级收窄方式。
+
+### 全局只读账号（`READONLY_TOKEN`）
 
 - 在 `.env` 设置可选的 `READONLY_TOKEN`（长度建议 ≥ 16）
 - 持有者**仅能调用只读 GET 接口**（查看客户端列表、最新指标、sparkline 等；**不含** `/metrics`，该端点只认 `ADMIN_TOKEN`）
 - 所有写操作（增删改客户端、重置 Token、测试告警）被 `adminOnly` 守卫拦截，返回 **403** `admin required`
-- 适用于 Grafana / 第三方看板等只读消费场景
+- 局限：全局静态凭证，改值才能失效（需重启）、无使用审计、**不能限制到具体节点**
+
+### API Token（推荐：可吊销 / 可限节点 / 有审计）
+
+在后台侧边栏「API Token」页可视化签发 / 吊销；也可直接调用 HTTP 接口（明文只返回一次）：
+
+```bash
+curl -X POST https://your-server/api/admin/api-tokens \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Token: <ADMIN_TOKEN>' \
+  -d '{"name":"panel-viewer","scope":"readonly","agent_ids":["agt_xxxx"],"expires_in_days":90}'
+```
+
+- 调用方用请求头 `X-API-Token: diting_<48hex>`；服务端只存 SHA-256
+- `scope=readonly|admin`，缺省 `readonly`；`agent_ids` 为空数组表示不限节点
+- `agent_ids` 非空时：单节点接口越权返回 **403 `forbidden_node`**，全局聚合面（`/overview`、`/billing`、`/ai/reports` 等）与全局写接口（`/settings`、通知渠道/通知组、`/ai/config`、备份、2FA、`POST /agents`）返回 **403 `forbidden_scope`**，`/agents` 与 `/agents/sparklines` 按白名单过滤
+- 吊销：`DELETE /api/admin/api-tokens/<id>`，下一次请求即刻 401；列表：`GET /api/admin/api-tokens`
+- 受限 Token 自身不能管理 Token（防止签发一个不限节点的 Token 绕过边界）
+- 适用于 Grafana / 第三方看板 / 交给他人查看指定节点的场景
 
 ---
 

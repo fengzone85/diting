@@ -76,6 +76,96 @@ CREATE TABLE IF NOT EXISTS alert_state (
   PRIMARY KEY(agent_id, type)
 );
 
+-- 告警规则覆盖（S1/F1）：NULL = 继承上层（分组 > 全局）。
+-- 刻意不声明 FOREIGN KEY：本库未启用 PRAGMA foreign_keys（better-sqlite3 默认关），
+-- 级联不会执行；删除 agent 时由 deleteAgent() 同事务显式清理本表。
+CREATE TABLE IF NOT EXISTS alert_overrides (
+  agent_id    TEXT PRIMARY KEY,
+  offline_sec INTEGER,
+  cpu_pct     REAL,
+  mem_pct     REAL,
+  disk_pct    REAL,
+  temp_c      REAL,
+  cooldown    INTEGER,
+  muted       INTEGER DEFAULT 0,
+  updated_at  INTEGER NOT NULL
+);
+
+-- 分组级覆盖：grp 为 agents.grp 的取值（'' = 未分组/默认组）。
+CREATE TABLE IF NOT EXISTS alert_group_overrides (
+  grp         TEXT PRIMARY KEY,
+  offline_sec INTEGER,
+  cpu_pct     REAL,
+  mem_pct     REAL,
+  disk_pct    REAL,
+  temp_c      REAL,
+  cooldown    INTEGER,
+  muted       INTEGER DEFAULT 0,
+  updated_at  INTEGER NOT NULL
+);
+
+-- S1/F2 通知渠道：type ∈ mail|telegram|webhook。
+-- 内置 mail/telegram 的凭据仍存 admin_config.notify_config（单一事实源，避免双写漂移），
+-- 本表只承载启用开关与展示名；webhook 的 URL/方法/头/模板存 config JSON。
+CREATE TABLE IF NOT EXISTS notify_channels (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  type       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  enabled    INTEGER DEFAULT 1,
+  config     TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(type, name)
+);
+
+-- S1/F2 通知组：events 为 JSON 数组（['*'] = 全部事件）；enabled 关闭后整组不投递。
+CREATE TABLE IF NOT EXISTS notify_groups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  events     TEXT NOT NULL DEFAULT '[]',
+  enabled    INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- 组与渠道多对多。刻意不声明外键（本库未启用 foreign_keys），删除时由函数显式清理。
+CREATE TABLE IF NOT EXISTS notify_group_channels (
+  group_id   INTEGER NOT NULL,
+  channel_id INTEGER NOT NULL,
+  PRIMARY KEY (group_id, channel_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_channels_channel ON notify_group_channels(channel_id);
+
+-- S2/F5 API Token：明文只在创建时返回一次，库中仅存 SHA-256。
+-- agent_ids：JSON 数组；'[]' = 全部节点（与 scope 组合收窄权限）。
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  token_hash   TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'readonly',
+  agent_ids    TEXT NOT NULL DEFAULT '[]',
+  expires_at   INTEGER NOT NULL DEFAULT 0,
+  last_used_at INTEGER NOT NULL DEFAULT 0,
+  last_used_ip TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL,
+  created_by   TEXT NOT NULL DEFAULT '',
+  revoked      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+-- S2/F6 登录会话：cookie 内只带 sid，吊销状态以本表为准；
+-- session_revoked_before 水位线保留为全局 kill switch。
+CREATE TABLE IF NOT EXISTS sessions (
+  id         TEXT PRIMARY KEY,
+  admin      TEXT NOT NULL DEFAULT 'admin',
+  ip         TEXT NOT NULL DEFAULT '',
+  ua         TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  last_seen  INTEGER NOT NULL,
+  revoked    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
+
 -- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
 CREATE TABLE IF NOT EXISTS traffic_state (
   agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -321,6 +411,68 @@ const stmts = {
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
   clearAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=? AND type=?'),
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
+  // ---- 告警覆盖（S1/F1）----
+  getAlertOverride: db.prepare('SELECT * FROM alert_overrides WHERE agent_id=?'),
+  listAlertOverrides: db.prepare('SELECT * FROM alert_overrides ORDER BY agent_id'),
+  deleteAlertOverride: db.prepare('DELETE FROM alert_overrides WHERE agent_id=?'),
+  upsertAlertOverride: db.prepare(`INSERT INTO alert_overrides
+    (agent_id, offline_sec, cpu_pct, mem_pct, disk_pct, temp_c, cooldown, muted, updated_at)
+    VALUES (@agent_id, @offline_sec, @cpu_pct, @mem_pct, @disk_pct, @temp_c, @cooldown, @muted, @updated_at)
+    ON CONFLICT(agent_id) DO UPDATE SET
+      offline_sec=@offline_sec, cpu_pct=@cpu_pct, mem_pct=@mem_pct, disk_pct=@disk_pct,
+      temp_c=@temp_c, cooldown=@cooldown, muted=@muted, updated_at=@updated_at`),
+  getGroupAlertOverride: db.prepare('SELECT * FROM alert_group_overrides WHERE grp=?'),
+  listGroupAlertOverrides: db.prepare('SELECT * FROM alert_group_overrides ORDER BY grp'),
+  deleteGroupAlertOverride: db.prepare('DELETE FROM alert_group_overrides WHERE grp=?'),
+  upsertGroupAlertOverride: db.prepare(`INSERT INTO alert_group_overrides
+    (grp, offline_sec, cpu_pct, mem_pct, disk_pct, temp_c, cooldown, muted, updated_at)
+    VALUES (@grp, @offline_sec, @cpu_pct, @mem_pct, @disk_pct, @temp_c, @cooldown, @muted, @updated_at)
+    ON CONFLICT(grp) DO UPDATE SET
+      offline_sec=@offline_sec, cpu_pct=@cpu_pct, mem_pct=@mem_pct, disk_pct=@disk_pct,
+      temp_c=@temp_c, cooldown=@cooldown, muted=@muted, updated_at=@updated_at`),
+  // ---- 通知渠道/通知组（S1/F2）----
+  insertChannelIfAbsent: db.prepare(`INSERT OR IGNORE INTO notify_channels
+    (type, name, enabled, config, created_at, updated_at) VALUES (?,?,1,'{}',?,?)`),
+  insertNotifyChannel: db.prepare(`INSERT INTO notify_channels
+    (type, name, enabled, config, created_at, updated_at) VALUES (@type, @name, @enabled, @config, @created_at, @updated_at)`),
+  getNotifyChannel: db.prepare('SELECT * FROM notify_channels WHERE id=?'),
+  listNotifyChannels: db.prepare('SELECT * FROM notify_channels ORDER BY id'),
+  updateNotifyChannel: db.prepare(`UPDATE notify_channels
+    SET name=@name, enabled=@enabled, config=@config, updated_at=@updated_at WHERE id=@id`),
+  deleteNotifyChannel: db.prepare('DELETE FROM notify_channels WHERE id=?'),
+  countNotifyGroups: db.prepare('SELECT COUNT(*) AS n FROM notify_groups'),
+  insertNotifyGroup: db.prepare(`INSERT INTO notify_groups
+    (name, events, enabled, created_at, updated_at) VALUES (@name, @events, @enabled, @created_at, @updated_at)`),
+  getNotifyGroup: db.prepare('SELECT * FROM notify_groups WHERE id=?'),
+  listNotifyGroups: db.prepare('SELECT * FROM notify_groups ORDER BY id'),
+  updateNotifyGroup: db.prepare(`UPDATE notify_groups
+    SET name=@name, events=@events, enabled=@enabled, updated_at=@updated_at WHERE id=@id`),
+  deleteNotifyGroup: db.prepare('DELETE FROM notify_groups WHERE id=?'),
+  listEnabledGroupsForEvent: db.prepare('SELECT * FROM notify_groups WHERE enabled=1'),
+  bindGroupChannel: db.prepare('INSERT OR IGNORE INTO notify_group_channels (group_id, channel_id) VALUES (?,?)'),
+  clearGroupChannels: db.prepare('DELETE FROM notify_group_channels WHERE group_id=?'),
+  deleteGroupChannelByChannel: db.prepare('DELETE FROM notify_group_channels WHERE channel_id=?'),
+  listGroupChannelIds: db.prepare('SELECT channel_id FROM notify_group_channels WHERE group_id=?'),
+  listGroupChannelRows: db.prepare(`SELECT g.group_id, g.channel_id FROM notify_group_channels g
+    JOIN notify_channels c ON c.id=g.channel_id WHERE c.enabled=1`),
+  // ---- S2/F5 API Token ----
+  insertApiToken: db.prepare(`INSERT INTO api_tokens
+    (id, name, token_hash, scope, agent_ids, expires_at, created_at, created_by)
+    VALUES (@id, @name, @token_hash, @scope, @agent_ids, @expires_at, @created_at, @created_by)`),
+  getApiTokenByHash: db.prepare('SELECT * FROM api_tokens WHERE token_hash=?'),
+  getApiTokenById: db.prepare('SELECT * FROM api_tokens WHERE id=?'),
+  listApiTokens: db.prepare('SELECT * FROM api_tokens ORDER BY created_at DESC'),
+  touchApiToken: db.prepare('UPDATE api_tokens SET last_used_at=?, last_used_ip=? WHERE id=?'),
+  revokeApiToken: db.prepare('UPDATE api_tokens SET revoked=1 WHERE id=?'),
+  // ---- S2/F6 会话 ----
+  insertSession: db.prepare(`INSERT INTO sessions (id, admin, ip, ua, created_at, last_seen)
+    VALUES (@id, @admin, @ip, @ua, @created_at, @last_seen)`),
+  getSessionRow: db.prepare('SELECT * FROM sessions WHERE id=?'),
+  listSessions: db.prepare('SELECT * FROM sessions WHERE revoked=0 ORDER BY last_seen DESC'),
+  touchSession: db.prepare('UPDATE sessions SET last_seen=? WHERE id=?'),
+  revokeSession: db.prepare('UPDATE sessions SET revoked=1 WHERE id=?'),
+  revokeAllSessionRows: db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0'),
+  pruneSessions: db.prepare('DELETE FROM sessions WHERE last_seen < ?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
@@ -541,8 +693,311 @@ const updateAgent = (id, f) => {
 
 const deleteAgent = (id) => {
   stmts.clearAllAlertState.run(id);
+  // F1：覆盖表无 FK 强制（见建表注释），同事务显式清理。
+  stmts.deleteAlertOverride.run(id);
   return stmts.deleteAgent.run(id);
 };
+
+// ---- 告警覆盖（S1/F1）-------------------------------------------------------
+// 字段范围与 resolveAlertThresholds() 保持一致；越界/非数字 → null（视为未设置）。
+const ALERT_OVERRIDE_LIMITS = {
+  offline_sec: [10, 86400],
+  cpu_pct: [1, 100],
+  mem_pct: [1, 100],
+  disk_pct: [1, 100],
+  temp_c: [-50, 200],
+  cooldown: [60, 86400]
+};
+const ALERT_OVERRIDE_KEYS = Object.keys(ALERT_OVERRIDE_LIMITS);
+
+function normAlertOverrideValue(key, v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const [min, max] = ALERT_OVERRIDE_LIMITS[key];
+  return Math.min(max, Math.max(min, n));
+}
+
+// 合并语义：fields 中出现的键覆盖旧值（显式 null = 清除该字段回退上层），
+// 未出现的键保留原值。muted 为并集语义（节点或分组任一为 1 即静音，见 alerts.js）。
+function mergeOverrideRow(base, fields) {
+  const row = {};
+  for (const k of ALERT_OVERRIDE_KEYS) {
+    row[k] = Object.prototype.hasOwnProperty.call(fields, k)
+      ? normAlertOverrideValue(k, fields[k])
+      : (base && base[k] !== undefined ? base[k] : null);
+  }
+  row.muted = Object.prototype.hasOwnProperty.call(fields, 'muted')
+    ? (fields.muted ? 1 : 0)
+    : (base && base.muted ? 1 : 0);
+  return row;
+}
+
+function upsertAlertOverride(agentId, fields) {
+  const base = stmts.getAlertOverride.get(agentId);
+  const row = mergeOverrideRow(base, fields || {});
+  stmts.upsertAlertOverride.run(Object.assign({ agent_id: agentId, updated_at: Date.now() }, row));
+  return stmts.getAlertOverride.get(agentId);
+}
+
+function upsertGroupAlertOverride(grp, fields) {
+  const key = typeof grp === 'string' ? grp : '';
+  const base = stmts.getGroupAlertOverride.get(key);
+  const row = mergeOverrideRow(base, fields || {});
+  stmts.upsertGroupAlertOverride.run(Object.assign({ grp: key, updated_at: Date.now() }, row));
+  return stmts.getGroupAlertOverride.get(key);
+}
+
+const getAlertOverride = (agentId) => stmts.getAlertOverride.get(agentId) || null;
+const listAlertOverrides = () => stmts.listAlertOverrides.all();
+const deleteAlertOverride = (agentId) => stmts.deleteAlertOverride.run(agentId).changes > 0;
+const getGroupAlertOverride = (grp) => stmts.getGroupAlertOverride.get(grp || '') || null;
+const listGroupAlertOverrides = () => stmts.listGroupAlertOverrides.all();
+const deleteGroupAlertOverride = (grp) => stmts.deleteGroupAlertOverride.run(grp || '').changes > 0;
+
+// ---- 通知渠道/通知组（S1/F2）----------------------------------------------
+function channelOut(r) {
+  let config = {};
+  try { config = JSON.parse(r.config || '{}'); } catch (e) { config = {}; }
+  return {
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    enabled: !!r.enabled,
+    config,
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  };
+}
+
+const listNotifyChannels = () => stmts.listNotifyChannels.all().map(channelOut);
+const getNotifyChannel = (id) => {
+  const r = stmts.getNotifyChannel.get(Number(id));
+  return r ? channelOut(r) : null;
+};
+
+function createNotifyChannel(input) {
+  const now = Date.now();
+  const r = stmts.insertNotifyChannel.run({
+    type: input.type,
+    name: input.name,
+    enabled: input.enabled === false ? 0 : 1,
+    config: JSON.stringify(input.config || {}),
+    created_at: now,
+    updated_at: now
+  });
+  return getNotifyChannel(Number(r.lastInsertRowid));
+}
+
+function updateNotifyChannel(id, patch) {
+  const cur = getNotifyChannel(id);
+  if (!cur) return null;
+  stmts.updateNotifyChannel.run({
+    id: Number(id),
+    name: patch.name !== undefined ? String(patch.name) : cur.name,
+    enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (cur.enabled ? 1 : 0),
+    config: patch.config !== undefined ? JSON.stringify(patch.config) : JSON.stringify(cur.config),
+    updated_at: Date.now()
+  });
+  return getNotifyChannel(id);
+}
+
+function deleteNotifyChannel(id) {
+  stmts.deleteGroupChannelByChannel.run(Number(id));
+  return stmts.deleteNotifyChannel.run(Number(id)).changes > 0;
+}
+
+function groupOut(g) {
+  let events = [];
+  try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+  return {
+    id: g.id,
+    name: g.name,
+    enabled: !!g.enabled,
+    events,
+    channel_ids: stmts.listGroupChannelIds.all(g.id).map((r) => r.channel_id),
+    created_at: g.created_at,
+    updated_at: g.updated_at
+  };
+}
+
+const listNotifyGroups = () => stmts.listNotifyGroups.all().map(groupOut);
+const getNotifyGroup = (id) => {
+  const g = stmts.getNotifyGroup.get(Number(id));
+  return g ? groupOut(g) : null;
+};
+
+function replaceGroupChannels(groupId, channelIds) {
+  stmts.clearGroupChannels.run(groupId);
+  for (const cid of channelIds || []) stmts.bindGroupChannel.run(groupId, Number(cid));
+}
+
+function createNotifyGroup(input) {
+  const now = Date.now();
+  const r = stmts.insertNotifyGroup.run({
+    name: input.name,
+    events: JSON.stringify(input.events || []),
+    enabled: input.enabled === false ? 0 : 1,
+    created_at: now,
+    updated_at: now
+  });
+  const id = Number(r.lastInsertRowid);
+  replaceGroupChannels(id, input.channel_ids);
+  return getNotifyGroup(id);
+}
+
+function updateNotifyGroup(id, patch) {
+  const cur = getNotifyGroup(id);
+  if (!cur) return null;
+  stmts.updateNotifyGroup.run({
+    id: Number(id),
+    name: patch.name !== undefined ? String(patch.name) : cur.name,
+    events: patch.events !== undefined ? JSON.stringify(patch.events) : JSON.stringify(cur.events),
+    enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (cur.enabled ? 1 : 0),
+    updated_at: Date.now()
+  });
+  if (patch.channel_ids !== undefined) replaceGroupChannels(Number(id), patch.channel_ids);
+  return getNotifyGroup(id);
+}
+
+function deleteNotifyGroup(id) {
+  stmts.clearGroupChannels.run(Number(id));
+  return stmts.deleteNotifyGroup.run(Number(id)).changes > 0;
+}
+
+// 投递用：启用组中订阅了 event（或 '*'）的所有启用渠道，按 channel_id 去重。
+// 每次调用直接查库（不做缓存）——配置修改即时生效，规模（组/渠道个位数）下开销可忽略。
+function listEnabledChannelsForEvent(event) {
+  const groupIds = new Set();
+  for (const g of stmts.listEnabledGroupsForEvent.all()) {
+    let events = [];
+    try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+    if (events.includes('*') || events.includes(event)) groupIds.add(g.id);
+  }
+  if (!groupIds.size) return [];
+  const channelIds = new Set();
+  for (const row of stmts.listGroupChannelRows.all()) {
+    if (groupIds.has(row.group_id)) channelIds.add(row.channel_id);
+  }
+  if (!channelIds.size) return [];
+  return stmts.listNotifyChannels.all().map(channelOut).filter((c) => c.enabled && channelIds.has(c.id));
+}
+
+// ---- S1/F2：通知种子迁移（幂等）----
+// 任何 require 本模块的入口（server/测试/CLI）都会执行。UNIQUE(type,name) +
+// INSERT OR IGNORE 保证重复启动不重复插；仅当 notify_groups 为空时建默认组。
+function initNotifyMigrationIfNeeded() {
+  try {
+    const now = Date.now();
+    stmts.insertChannelIfAbsent.run('mail', 'mail', now, now);
+    stmts.insertChannelIfAbsent.run('telegram', 'telegram', now, now);
+    if (stmts.countNotifyGroups.get().n === 0) {
+      const r = stmts.insertNotifyGroup.run({
+        name: 'default', events: JSON.stringify(['*']), enabled: 1, created_at: now, updated_at: now
+      });
+      const gid = Number(r.lastInsertRowid);
+      for (const ch of stmts.listNotifyChannels.all()) stmts.bindGroupChannel.run(gid, ch.id);
+    }
+  } catch (e) {
+    console.error('[db] notify seed migration failed:', e.message);
+  }
+}
+initNotifyMigrationIfNeeded();
+
+// ---- S2/F5：API Token -------------------------------------------------------
+// 明文格式 diting_<48hex>，仅在创建时返回一次；id 为 tok_<12hex>（可安全展示/审计）。
+const genApiTokenPlain = () => 'diting_' + crypto.randomBytes(24).toString('hex');
+const genApiTokenId = () => 'tok_' + crypto.randomBytes(6).toString('hex');
+
+function apiTokenOut(r) {
+  let agentIds = [];
+  try { agentIds = JSON.parse(r.agent_ids || '[]'); } catch (e) { agentIds = []; }
+  return {
+    id: r.id,
+    name: r.name,
+    scope: r.scope,
+    agent_ids: Array.isArray(agentIds) ? agentIds : [],
+    expires_at: r.expires_at,
+    last_used_at: r.last_used_at,
+    last_used_ip: r.last_used_ip,
+    created_at: r.created_at,
+    created_by: r.created_by,
+    revoked: !!r.revoked
+  };
+}
+
+function createApiToken(input) {
+  const id = genApiTokenId();
+  const token = genApiTokenPlain();
+  const agentIds = Array.isArray(input.agentIds) ? input.agentIds.map(String).slice(0, 500) : [];
+  stmts.insertApiToken.run({
+    id,
+    name: String(input.name || '').slice(0, 64),
+    token_hash: hashToken(token),
+    scope: input.scope === 'admin' ? 'admin' : 'readonly',
+    agent_ids: JSON.stringify(agentIds), // 显式写 '[]'，不依赖 DB 默认值
+    expires_at: Number(input.expiresAt) || 0,
+    created_at: Date.now(),
+    created_by: String(input.createdBy || '').slice(0, 64)
+  });
+  return { id, token };
+}
+
+const findApiTokenByHash = (hash) => {
+  const r = stmts.getApiTokenByHash.get(hash);
+  return r ? apiTokenOut(r) : null;
+};
+const getApiToken = (id) => {
+  const r = stmts.getApiTokenById.get(id);
+  return r ? apiTokenOut(r) : null;
+};
+const listApiTokens = () => stmts.listApiTokens.all().map(apiTokenOut);
+const revokeApiToken = (id) => stmts.revokeApiToken.run(id).changes > 0;
+
+// last_used 节流：同一 token 60s 内只写一次库（高频只读 Token 下避免每请求写放大）。
+const _apiTokenTouch = new Map();
+function touchApiToken(id, ip) {
+  const now = Date.now();
+  const last = _apiTokenTouch.get(id) || 0;
+  if (now - last < 60 * 1000) return;
+  if (_apiTokenTouch.size >= 10000) _apiTokenTouch.clear();
+  _apiTokenTouch.set(id, now);
+  try { stmts.touchApiToken.run(now, String(ip || '').slice(0, 64), id); } catch (e) { /* 追踪失败不影响鉴权 */ }
+}
+
+// ---- S2/F6：登录会话 --------------------------------------------------------
+const genSessionId = () => crypto.randomBytes(12).toString('hex');
+
+function createSessionRow({ id, admin, ip, ua }) {
+  const now = Date.now();
+  const sid = id || genSessionId();
+  stmts.insertSession.run({
+    id: sid,
+    admin: String(admin || 'admin').slice(0, 64),
+    ip: String(ip || '').slice(0, 64),
+    ua: String(ua || '').slice(0, 255),
+    created_at: now,
+    last_seen: now
+  });
+  return sid;
+}
+
+const getSessionRow = (id) => stmts.getSessionRow.get(id) || null;
+const listSessions = () => stmts.listSessions.all();
+const revokeSession = (id) => stmts.revokeSession.run(id).changes > 0;
+const revokeAllSessionRows = () => stmts.revokeAllSessionRows.run().changes;
+const pruneSessions = (before) => stmts.pruneSessions.run(Number(before) || 0).changes;
+
+// last_seen 节流：每会话 60s 写一次，避免每次 API 请求都写库。
+const _sessionTouch = new Map();
+function touchSession(id) {
+  const now = Date.now();
+  const last = _sessionTouch.get(id) || 0;
+  if (now - last < 60 * 1000) return;
+  if (_sessionTouch.size >= 10000) _sessionTouch.clear();
+  _sessionTouch.set(id, now);
+  try { stmts.touchSession.run(now, id); } catch (e) { /* 忽略 */ }
+}
 
 const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
 
@@ -984,6 +1439,14 @@ module.exports = {
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
+  getAlertOverride, listAlertOverrides, upsertAlertOverride, deleteAlertOverride,
+  getGroupAlertOverride, listGroupAlertOverrides, upsertGroupAlertOverride, deleteGroupAlertOverride,
+  ALERT_OVERRIDE_KEYS, ALERT_OVERRIDE_LIMITS,
+  listNotifyChannels, getNotifyChannel, createNotifyChannel, updateNotifyChannel, deleteNotifyChannel,
+  listNotifyGroups, getNotifyGroup, createNotifyGroup, updateNotifyGroup, deleteNotifyGroup,
+  listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
+  createApiToken, findApiTokenByHash, getApiToken, listApiTokens, revokeApiToken, touchApiToken,
+  createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, pruneSessions, touchSession,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   resolveAlertThresholds, observedIntervalSec,

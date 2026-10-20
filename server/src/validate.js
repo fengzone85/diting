@@ -138,4 +138,90 @@ const validateReport = (b) => {
   };
 };
 
-module.exports = { num, str, validateReport, sanitizeCss };
+// ---- S1/F2：通知渠道/通知组校验（纯函数）----------------------------------
+// 事件字典为单一事实源：notify.js 与前端（经 GET /admin/notify/events）同源。
+// 说明：恢复通知与对应指标事件同组投递（如 CPU 恢复归 'cpu'），不设独立 'recovery'
+// 事件——否则默认 '*' 组会对同一次恢复重复投递。
+const NOTIFY_EVENTS = [
+  'offline', 'online', 'cpu', 'mem', 'disk', 'temp', 'cert',
+  'expire', 'expired', 'quota', 'traffic_untrusted', 'ai_daily', 'login', 'system', 'test'
+];
+const WEBHOOK_METHODS = ['GET', 'POST'];
+const WEBHOOK_CONTENT_TYPES = ['json', 'form'];
+// 禁止用户覆盖请求头：主机/长度/连接类头由客户端控制，覆盖会破坏请求或绕过限制。
+const WEBHOOK_BLOCKED_HEADERS = new Set([
+  'host', 'content-length', 'connection', 'transfer-encoding', 'expect', 'upgrade'
+]);
+
+function validateWebhookConfig(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { ok: false, error: 'config_required' };
+  const url = typeof input.url === 'string' ? input.url.trim().slice(0, 2048) : '';
+  if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'url_invalid' };
+  const method = String(input.method || 'POST').toUpperCase();
+  if (!WEBHOOK_METHODS.includes(method)) return { ok: false, error: 'method_invalid' };
+  const contentType = String(input.content_type || 'json').toLowerCase();
+  if (!WEBHOOK_CONTENT_TYPES.includes(contentType)) return { ok: false, error: 'content_type_invalid' };
+  // headers 接受对象或 "Key: Value" 行文本；非法/危险头静默丢弃，最多 10 条。
+  let rawHeaders = input.headers;
+  if (typeof rawHeaders === 'string') {
+    const obj = {};
+    for (const line of rawHeaders.split('\n')) {
+      const i = line.indexOf(':');
+      if (i < 0) continue;
+      obj[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    }
+    rawHeaders = obj;
+  }
+  if (rawHeaders === undefined || rawHeaders === null) rawHeaders = {};
+  if (typeof rawHeaders !== 'object' || Array.isArray(rawHeaders)) return { ok: false, error: 'headers_invalid' };
+  const headers = {};
+  let n = 0;
+  for (const [k, v] of Object.entries(rawHeaders)) {
+    if (n >= 10) break;
+    const key = String(k).trim();
+    const val = String(v);
+    if (!key || key.length > 64 || val.length > 512) continue;
+    if (!/^[A-Za-z0-9-]+$/.test(key)) continue;
+    if (WEBHOOK_BLOCKED_HEADERS.has(key.toLowerCase())) continue;
+    headers[key] = val;
+    n++;
+  }
+  const bodyTemplate = typeof input.body_template === 'string' ? input.body_template.slice(0, 8000) : '';
+  return {
+    ok: true,
+    config: { url, method, content_type: contentType, headers, body_template: bodyTemplate, verify_tls: input.verify_tls !== false }
+  };
+}
+
+function validateNotifyChannelInput(body) {
+  const b = body || {};
+  const type = String(b.type || '').toLowerCase();
+  if (!['mail', 'telegram', 'webhook'].includes(type)) return { ok: false, error: 'type_invalid' };
+  const name = typeof b.name === 'string' ? b.name.trim().slice(0, 64) : '';
+  if (!name) return { ok: false, error: 'name_required' };
+  const enabled = b.enabled !== false;
+  if (type !== 'webhook') {
+    // 内置渠道凭据仍存 notify_config（单一事实源），渠道行不持配置。
+    return { ok: true, value: { type, name, enabled, config: {} } };
+  }
+  const v = validateWebhookConfig(b.config);
+  if (!v.ok) return v;
+  return { ok: true, value: { type, name, enabled, config: v.config } };
+}
+
+function validateNotifyGroupInput(body) {
+  const b = body || {};
+  const name = typeof b.name === 'string' ? b.name.trim().slice(0, 64) : '';
+  if (!name) return { ok: false, error: 'name_required' };
+  const raw = Array.isArray(b.events) ? b.events : [];
+  const events = [...new Set(raw.map((e) => String(e)).filter((e) => e === '*' || NOTIFY_EVENTS.includes(e)))].slice(0, NOTIFY_EVENTS.length + 1);
+  if (!events.length) return { ok: false, error: 'events_required' };
+  const channelIds = (Array.isArray(b.channel_ids) ? b.channel_ids : [])
+    .map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0).slice(0, 100);
+  return { ok: true, value: { name, events, enabled: b.enabled !== false, channel_ids: channelIds } };
+}
+
+module.exports = {
+  num, str, validateReport, sanitizeCss,
+  NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput
+};

@@ -119,7 +119,7 @@ DISK_PATH=/ \
 
 > **探测口径差异（审查 E7）**：Go 版为纯 TCP 探测，`loss` 只有二值（握手成功 0 / 预算内全失败 100），不代表链路丢包率；Python 版优先 ICMP，可统计真实丢包率（如 33%）。同一看板混合两种 agent 时，丢包列语义不同——跨版本对比丢包率请以 agent 类型区分，不要直接横向比较。
 
-> **告警阈值（审查 C-1/E2）**：`offline_sec`/`cpu_pct`/`mem_pct`/`disk_pct`/`temp_c` 按「后台显式设置 > 环境变量 > 默认」单一取值，告警、看板、AI 摘要三端同源；`DISK_ALERT_PCT`（默认 90）与 `TEMP_ALERT_C`（默认 80）为磁盘/温度告警阈值，`ALERT_SUSTAIN_SAMPLES`（默认 2）为触发所需的连续采样数，`ALERT_COOLDOWN_SEC`（默认 1800）为同类告警冷却。
+> **告警阈值（审查 C-1/E2）**：`offline_sec`/`cpu_pct`/`mem_pct`/`disk_pct`/`temp_c` 按「节点覆盖 > 分组覆盖 > 后台显式设置 > 环境变量 > 默认」解析（S1/F1，覆盖表为空时行为与旧版一致），告警、看板、AI 摘要三端同源；`DISK_ALERT_PCT`（默认 90）与 `TEMP_ALERT_C`（默认 80）为磁盘/温度告警阈值。触发判定采用采样窗口：默认 `ALERT_WINDOW_SAMPLES=5` 内超限占比 ≥ `ALERT_TRIGGER_RATIO=0.7`；显式设置 `ALERT_SUSTAIN_SAMPLES=N` 退回旧的「连续 N 次全超限」。`ALERT_COOLDOWN_SEC`（默认 1800）为同类告警冷却，`ONLINE_NOTIFY_GRACE_SEC`（默认 180）为上线通知宽限期。
 
 > **供应链完整性（审查 B3/B4）**：安装脚本以 root 执行，Python 版安装器**缺省强制 SHA256 校验**——未提供 `SP_AGENT_SHA256S`（按 `agent.py,collector.py,uninstall.sh` 顺序的哈希逗号串）将拒绝下载；Go 版从 GitHub Release 下载二进制并默认校验 `.sha256`（可用 `SP_AGENT_GO_SKIP_SHA256=1` 跳过，**生产切勿设置**）。更強的推荐：发布物附 cosign 或 gpg 签名，安装时先验签。敏感参数（`AGENT_TOKEN`/`SETUP_TOKEN`）建议用 `--token-file`/`--setup-token-file` 从文件读取，或经环境变量/临时文件传递——避免出现在 `ps` 输出与 shell history 中。
 

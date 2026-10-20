@@ -18,6 +18,8 @@ description: 服务端配置与管理
 | `RETENTION_DAYS` | 否 | 指标保留天数 | `30` |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | CPU/内存告警阈值（%） | `90` |
 | `ALERT_COOLDOWN_SEC` | 否 | 告警冷却（秒） | `1800` |
+| `ALERT_WINDOW_SAMPLES` / `ALERT_TRIGGER_RATIO` | 否 | 采样窗口 / 触发比例（窗口内超限占比） | `5` / `0.7` |
+| `ONLINE_NOTIFY_GRACE_SEC` | 否 | 上线通知宽限期（秒），`0` 关闭 | `180` |
 
 ## Docker Compose 配置
 

@@ -24,6 +24,13 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   'invalid totp': 'errors.invalidTotp',
   'agent not found': 'errors.agentNotFound',
   'not found': 'errors.notFound',
+  // S2/F5：节点白名单 Token 的两个作用域错误码，以及 Token 管理端点的参数校验码
+  forbidden_scope: 'errors.forbiddenScope',
+  forbidden_node: 'errors.forbiddenNode',
+  invalid_scope: 'errors.invalidScope',
+  unknown_agent_id: 'errors.unknownAgentId',
+  invalid_expires_in_days: 'errors.invalidExpiresInDays',
+  'name required': 'errors.nameRequired',
 };
 
 // 把请求异常转成可展示文案：优先按下发错误码本地化，其次退回服务端 message，最后用通用兜底。

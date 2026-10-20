@@ -3,9 +3,10 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
-import type { Settings, BackupFile } from '../../services/types';
+import type { Settings, BackupFile, AlertThresholds, AlertOverride } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
+import NotifyPanel from '../../components/admin/NotifyPanel.vue';
 
 interface ThemeOption {
   id: string;
@@ -129,6 +130,8 @@ onMounted(async () => {
   // 进入设置页暂停全局 10s 自动刷新（paused 标志，避免被父组件 start 覆盖），
   // 防止轮询重写表单清空未保存输入
   setAutoRefreshPaused(true);
+  // S1/F1：分组告警覆盖（失败静默，不阻塞其余设置项）
+  loadAlertRules();
   try {
     const list = await adminApi.listThemes();
     themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
@@ -301,6 +304,89 @@ async function save() {
     saving.value = false;
   }
 }
+
+// ---- S1/F1：分组告警阈值覆盖（与节点覆盖同语义：留空 = 继承全局）----
+const groupOverrides = ref<(AlertOverride & { grp: string })[]>([]);
+const globalThresholds = ref<AlertThresholds | null>(null);
+const groupBusy = ref(false);
+const groupForm = ref({
+  grp: '', cpu_pct: '', mem_pct: '', disk_pct: '', temp_c: '', offline_sec: '', cooldown: '', muted: false
+});
+type GroupFieldKey = 'cpu_pct' | 'mem_pct' | 'disk_pct' | 'temp_c' | 'offline_sec' | 'cooldown';
+const GROUP_FIELDS: GroupFieldKey[] = ['cpu_pct', 'mem_pct', 'disk_pct', 'temp_c', 'offline_sec', 'cooldown'];
+const groupFieldRows = computed(() => [
+  { key: 'cpu_pct' as GroupFieldKey, label: t('agents.cpuThreshold') },
+  { key: 'mem_pct' as GroupFieldKey, label: t('agents.memThreshold') },
+  { key: 'disk_pct' as GroupFieldKey, label: t('agents.diskThreshold') },
+  { key: 'temp_c' as GroupFieldKey, label: t('agents.tempThreshold') },
+  { key: 'offline_sec' as GroupFieldKey, label: t('agents.offlineThreshold') },
+  { key: 'cooldown' as GroupFieldKey, label: t('agents.cooldownThreshold') }
+]);
+
+async function loadAlertRules() {
+  try {
+    const rules = await adminApi.listAlertRules();
+    groupOverrides.value = rules.groups;
+    globalThresholds.value = rules.global;
+    if (groupForm.value.grp) applyGroupForm(groupForm.value.grp);
+  } catch {
+    // 只读 Token / 网络异常：静默，不影响设置页其余表单
+  }
+}
+
+function applyGroupForm(grp: string) {
+  const ov = groupOverrides.value.find((g) => g.grp === grp);
+  groupForm.value = {
+    grp, cpu_pct: '', mem_pct: '', disk_pct: '', temp_c: '', offline_sec: '', cooldown: '',
+    muted: !!ov?.muted
+  };
+  if (ov) {
+    for (const k of GROUP_FIELDS) {
+      const v = ov[k];
+      if (v !== null && v !== undefined) groupForm.value[k] = String(v);
+    }
+  }
+}
+
+function groupPlaceholder(key: GroupFieldKey): string {
+  const v = globalThresholds.value?.[key];
+  return v === undefined || v === null ? '' : String(v);
+}
+
+async function saveGroupAlert() {
+  groupBusy.value = true;
+  message.value = '';
+  try {
+    const payload: Record<string, unknown> = { muted: groupForm.value.muted };
+    for (const k of GROUP_FIELDS) {
+      const raw = String(groupForm.value[k] ?? '').trim();
+      payload[k] = raw === '' ? null : Number(raw);
+    }
+    await adminApi.setGroupAlertRule(groupForm.value.grp.trim(), payload);
+    message.value = t('settings.saved');
+    await loadAlertRules();
+  } catch (e) {
+    message.value = (e as Error).message || t('settings.saveFailed');
+  } finally {
+    groupBusy.value = false;
+  }
+}
+
+async function resetGroupAlert() {
+  const grp = groupForm.value.grp.trim();
+  if (!confirm(t('agents.alertResetConfirm'))) return;
+  groupBusy.value = true;
+  try {
+    await adminApi.resetGroupAlertRule(grp);
+    applyGroupForm(grp);
+    await loadAlertRules();
+    message.value = t('settings.saved');
+  } catch (e) {
+    message.value = (e as Error).message || t('settings.saveFailed');
+  } finally {
+    groupBusy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -368,6 +454,55 @@ async function save() {
         <FormInput v-model="local.ui.alert!.offline_sec" :label="t('settings.offlineSec')" type="number" />
         <FormInput v-model="local.ui.probe_targets" :label="t('settings.probeTargets')" type="textarea" />
 
+        <!-- S1/F1：分组告警覆盖（留空 = 继承全局） -->
+        <h2 class="mb-1 mt-8 text-lg font-semibold">{{ t('settings.groupAlertRules') }}</h2>
+        <p class="mb-3 text-xs text-slate-500">{{ t('settings.groupAlertHint') }}</p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label class="text-xs text-slate-400">
+            {{ t('settings.groupName') }}
+            <input
+              v-model="groupForm.grp"
+              list="diting-alert-groups"
+              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+              @change="applyGroupForm(groupForm.grp)"
+            />
+            <datalist id="diting-alert-groups">
+              <option v-for="g in groupOverrides" :key="g.grp" :value="g.grp" />
+            </datalist>
+          </label>
+          <label v-for="f in groupFieldRows" :key="f.key" class="text-xs text-slate-400">
+            {{ f.label }}
+            <input
+              v-model="groupForm[f.key]"
+              type="number"
+              :placeholder="groupPlaceholder(f.key)"
+              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+            />
+          </label>
+        </div>
+        <label class="mt-3 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+          <input v-model="groupForm.muted" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-rose-500" />
+          {{ t('agents.alertMuted') }}
+        </label>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50"
+            :disabled="groupBusy"
+            @click="saveGroupAlert"
+          >{{ t('common.save') }}</button>
+          <button
+            type="button"
+            class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+            :disabled="groupBusy"
+            @click="resetGroupAlert"
+          >{{ t('agents.alertReset') }}</button>
+          <span v-if="groupOverrides.length" class="text-xs text-slate-500">
+            {{ t('settings.existingGroupRules') }}:
+            {{ groupOverrides.map((g) => (g.grp === '' ? t('settings.defaultGroup') : g.grp)).join(' / ') }}
+          </span>
+        </div>
+
         <h2 class="mb-4 mt-8 text-lg font-semibold">{{ t('settings.notify') }}</h2>
         <FormInput v-model="local.notify.smtp_host" :label="t('settings.smtpHost')" />
         <FormInput v-model="local.notify.smtp_port" :label="t('settings.smtpPort')" type="number" />
@@ -378,6 +513,9 @@ async function save() {
         <FormInput v-model="local.notify.alert_to" :label="t('settings.alertTo')" />
         <FormInput v-model="local.notify.telegram_bot_token" label="Telegram Bot Token" />
         <FormInput v-model="local.notify.telegram_chat_id" label="Telegram Chat ID" />
+
+        <!-- S1/F2：通知渠道（Webhook）与通知组 -->
+        <NotifyPanel />
 
         <h2 class="mb-4 mt-8 text-lg font-semibold">{{ t('settings.socialLinks') }}</h2>
         <FormInput v-model="local.ui.social_email" :label="t('footer.email')" />

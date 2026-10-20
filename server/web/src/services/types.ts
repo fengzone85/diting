@@ -74,6 +74,75 @@ export interface Agent {
   auto_renewal?: boolean;
   probe_targets?: string;
   created_at?: string;
+  // S1/F1：告警规则解析结果（服务端下发，前端只渲染不重算）
+  alert?: {
+    effective: AlertThresholds;
+    overridden: boolean;
+    muted: boolean;
+  };
+}
+
+// ---- S1/F1 告警规则覆盖 ----
+export interface AlertThresholds {
+  offline_sec: number;
+  cpu_pct: number;
+  mem_pct: number;
+  disk_pct: number;
+  temp_c: number;
+  cooldown: number;
+}
+// 覆盖行：字段为 null 表示继承上层（分组 > 全局）；muted 为 0/1
+export interface AlertOverride {
+  offline_sec: number | null;
+  cpu_pct: number | null;
+  mem_pct: number | null;
+  disk_pct: number | null;
+  temp_c: number | null;
+  cooldown: number | null;
+  muted: number;
+  updated_at?: number;
+}
+export interface AlertOverrideInput {
+  offline_sec?: number | null;
+  cpu_pct?: number | null;
+  mem_pct?: number | null;
+  disk_pct?: number | null;
+  temp_c?: number | null;
+  cooldown?: number | null;
+  muted?: boolean;
+}
+export interface AlertRules {
+  global: AlertThresholds;
+  groups: (AlertOverride & { grp: string })[];
+  agents: (AlertOverride & { agent_id: string })[];
+}
+
+// ---- S1/F2：通知渠道与通知组 ----
+export interface WebhookConfig {
+  url: string;
+  method: 'GET' | 'POST';
+  content_type: 'json' | 'form';
+  headers: Record<string, string>;
+  body_template: string;
+  verify_tls: boolean;
+}
+export interface NotifyChannel {
+  id: number;
+  type: 'mail' | 'telegram' | 'webhook';
+  name: string;
+  enabled: boolean;
+  config: Partial<WebhookConfig>;
+  created_at?: number;
+  updated_at?: number;
+}
+export interface NotifyGroup {
+  id: number;
+  name: string;
+  enabled: boolean;
+  events: string[];
+  channel_ids: number[];
+  created_at?: number;
+  updated_at?: number;
 }
 
 export interface Overview {
@@ -359,4 +428,28 @@ export interface BackupState {
   backup_count?: number;
   total_bytes?: number;
   updated_at?: number;
+}
+
+// S2/F5：API Token（明文只在创建响应中出现一次；列表接口不含明文与哈希）
+export interface ApiToken {
+  id: string;
+  name: string;
+  scope: 'readonly' | 'admin';
+  agent_ids: string[];
+  expires_at: number;
+  last_used_at: number;
+  last_used_ip: string;
+  created_at: number;
+  created_by: string;
+  revoked: boolean;
+}
+
+export interface ApiTokenCreated {
+  id: string;
+  name: string;
+  scope: 'readonly' | 'admin';
+  agent_ids: string[];
+  expires_at: number;
+  token: string;
+  notice: string;
 }

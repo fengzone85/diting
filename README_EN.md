@@ -461,14 +461,34 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 - Provide `SMTP_PASS` in `.env` for mail (QQ Mail: Settings → Account → generate authorization code; not the login password). Telegram and email can be enabled independently.
 - **Send a test alert**: after configuring, verify with `curl -X POST -H 'X-Admin-Token: YOUR_TOKEN' http://localhost:8081/api/test-alert` (add `-H 'X-Forwarded-Proto: https'` when behind an Nginx proxy), or click the **📨 Test Alert** button on the dashboard top-right (fill in the admin token first).
 
-## Read-only account (READONLY_TOKEN)
+## Read-only account (READONLY_TOKEN) and API tokens
 
-To avoid sharing the full-privilege admin token around, configure an optional **read-only** account:
+To avoid sharing the full-privilege admin token around, there are two ways to narrow access.
+
+### Global read-only account (`READONLY_TOKEN`)
 
 - Set the optional `READONLY_TOKEN` in `.env` (also recommended ≥ 16 chars; the placeholder or a shorter value logs a startup warning — it stays effective).
 - Holders may **only call read-only `GET` endpoints** (client list, latest metrics, sparklines; **not** `/metrics`, which accepts `ADMIN_TOKEN` only); all write operations (`POST /agents`, `PUT/DELETE /agents/:id`, `reset-token`, `/test-alert`) are blocked by the `adminOnly` guard with `403 admin required`.
-- Ideal for read-only consumers like Grafana / third-party dashboards, so the admin token is not exposed to them.
+- Limitations: it is a **global static credential** — it cannot be revoked without editing `.env` and restarting, has no usage audit, and **cannot be limited to specific nodes**.
 - The read-only account is **not subject to 2FA** (2FA only constrains admin writes), keeping programmatic read pulls transparent.
+
+### API tokens (recommended: revocable, node-scoped, audited)
+
+Issue one over HTTP (the plaintext is returned only once):
+
+```bash
+curl -X POST https://your-server/api/admin/api-tokens \
+  -H 'Content-Type: application/json' \
+  -H 'X-Admin-Token: <ADMIN_TOKEN>' \
+  -d '{"name":"panel-viewer","scope":"readonly","agent_ids":["agt_xxxx"],"expires_in_days":90}'
+```
+
+- Callers send `X-API-Token: diting_<48hex>`; the server stores only its SHA-256.
+- `scope=readonly|admin` (default `readonly`); an empty `agent_ids` array means "all nodes".
+- With a non-empty `agent_ids`: per-node endpoints answer **403 `forbidden_node`** on out-of-scope ids, cluster-wide aggregates (`/overview`, `/billing`, `/ai/reports`, …) answer **403 `forbidden_scope`**, and `/agents` + `/agents/sparklines` are filtered to the allowlist.
+- Revoke with `DELETE /api/admin/api-tokens/<id>` (effective on the next request); list with `GET /api/admin/api-tokens`.
+- A scoped token cannot manage tokens itself — otherwise it could mint an unscoped one and escape the node boundary.
+- Ideal for Grafana / third-party dashboards / handing someone access to specific nodes only.
 
 ## Data retention (auto-cleanup)
 

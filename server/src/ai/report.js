@@ -310,7 +310,7 @@ async function generateAndSend(opts) {
 
   // 通知通道检查（与 /api/test-alert 同款，api.js:537-548）：无通道则不发，但仍落库报告。
   const channels = alerts.notifyStatus();
-  const hasChannel = channels.mail || channels.telegram;
+  const hasChannel = channels.mail || channels.telegram || channels.webhook > 0;
 
   const t0 = Date.now();   // 单次生成耗时起点（含 LLM 调用 + 投递），结果写 ai_state.last_duration_ms
 
@@ -401,7 +401,7 @@ async function generateAndSend(opts) {
 
   if (hasChannel) {
     try {
-      await alerts.sendAlert(subject, text);
+      await alerts.sendAlert(subject, text, 'ai_daily');
     } catch (e) {
       // 投递失败不影响报告已落库的事实；记录到状态供前端查看
       console.error('[ai] 日报投递失败：', e.message);

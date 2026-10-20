@@ -11,9 +11,28 @@ DiTing 服务端提供 REST API。受控端（Agent）与管理端（浏览器 /
 
 **受控端上报**：请求头携带 `X-Agent-ID: <id>` 与 `Authorization: Bearer <agent_token>`。
 
-**管理接口**：自定义头 `X-Admin-Token: <admin_token>` 或 `X-Readonly-Token: <readonly_token>`，或使用 Web 登录后的签名 Session Cookie（浏览器自动携带）。注意管理端**不解析** `Authorization: Bearer`——该头只用于受控端上报与 `/metrics`。
+**管理接口**：自定义头 `X-Admin-Token: <admin_token>`、`X-Readonly-Token: <readonly_token>` 或 `X-API-Token: <api_token>`，或使用 Web 登录后的签名 Session Cookie（浏览器自动携带）。注意管理端**不解析** `Authorization: Bearer`——该头只用于受控端上报与 `/metrics`。
 
-> 反代后须带 `X-Forwarded-Proto: https`（或本机调试设 `ADMIN_ALLOW_HTTP=1`），否则管理请求返回 `403 https required`。只读 Token 调用写接口返回 `403 admin required`。
+> 反代后须带 `X-Forwarded-Proto: https`（或本机调试设 `ADMIN_ALLOW_HTTP=1`），否则管理请求返回 `403 https required`。只读身份调用写接口返回 `403 admin required`。
+
+### 三层权限
+
+| 身份 | 来源 | 能力 |
+|---|---|---|
+| admin | Session Cookie / `X-Admin-Token` / `scope=admin` 的 API Token | 全部读写 |
+| readonly | `X-Readonly-Token` / `scope=readonly` 的 API Token | 只读 GET；写接口 `403 admin required` |
+| 节点白名单 | **带 `agent_ids`** 的 API Token（admin / readonly 皆可） | 在上述能力之上再收窄到白名单内节点 |
+
+### API Token 作用域（`agent_ids`）
+
+`agent_ids` 为空数组 = 不限节点（等价于旧的只读/管理凭证）；非空时：
+
+- **单节点接口**越权 → `403 forbidden_node`：`GET /agents/:id`、`GET /agents/:id/metrics`、`PUT/DELETE /agents/:id`、`POST /agents/:id/{approve,renew,reset-token}`、`GET /agents/:id/commands`、`PUT/DELETE /admin/alert-rules/agent/:id`、`POST /ai/analyze-node/:id`、`GET /ai/node-reports?agent_id=`；
+- **全局聚合面** → `403 forbidden_scope`：`GET /overview`、`GET /agents/sparklines/overview`、`GET /billing`、`GET /admin/alert-rules`、`GET /ai/usage`、`GET /ai/reports`、`GET /ai/reports/:id`，以及 Token 管理端点自身；
+- **全局配置 / 基础设施写接口**同样 `403 forbidden_scope`：`POST /agents`、`PUT /settings`、`POST /test-alert`、`PUT /ai/config`、`POST /ai/run`、通知渠道与通知组的增删改与测试、`PUT/DELETE /admin/alert-rules/group/:grp`、备份下载/删除/恢复、`/admin/2fa/*`、`POST /public/order`。理由：受限 Token 的授权范围是「这几个节点」，与节点无关的全局变更（关掉全站告警、改系统设置、重建 2FA）必须拒绝；
+- `GET /agents` 与 `GET /agents/sparklines` 按白名单**过滤**而非拒绝，只返回自己的节点。
+
+> 受限 Token 不能调用 `/admin/api-tokens`，否则可签发一个 `agent_ids=[]` 的 Token 绕过节点边界（提权路径已封）。
 
 ## Agent 上报
 
@@ -63,7 +82,16 @@ Content-Type: application/json
 | POST | `/api/agents/:id/renew` | 续期（计费周期顺延） |
 | GET | `/api/billing` | 计费总览 |
 | GET / PUT | `/api/settings` | 读取 / 保存设置 |
-| POST | `/api/test-alert` | 发送测试告警 |
+| POST | `/api/test-alert` | 发送测试告警（经通知组路由到全部启用通道） |
+| GET | `/api/admin/alert-rules` | 告警阈值总览（全局 / 分组 / 节点覆盖） |
+| PUT / DELETE | `/api/admin/alert-rules/agent/:id` | 节点告警覆盖 / 清除覆盖（回退继承） |
+| PUT / DELETE | `/api/admin/alert-rules/group/:grp` | 分组告警覆盖 / 清除（`-` 表示未分组默认组） |
+| GET / POST | `/api/admin/notify/channels` | 通知渠道列表 / 新建（webhook） |
+| PUT / DELETE | `/api/admin/notify/channels/:id` | 修改 / 删除渠道（内置 mail/telegram 配置只读且不可删） |
+| POST | `/api/admin/notify/channels/:id/test` | 单渠道测试消息 |
+| GET / POST | `/api/admin/notify/groups` | 通知组列表 / 新建 |
+| PUT / DELETE | `/api/admin/notify/groups/:id` | 修改 / 删除通知组 |
+| GET | `/api/admin/notify/events` | 可订阅事件字典 |
 | GET / PUT | `/api/ai/config` | AI 日报配置 |
 | POST | `/api/ai/run` | 手动触发 AI 日报（异步任务：`202` 已受理 / `400` 未启用 / `409` 执行中 / `429` 冷却带 `Retry-After`；`?force=1` 跳过冷却） |
 | GET | `/api/ai/reports` | AI 日报列表 |
@@ -86,6 +114,44 @@ Content-Type: application/json
 | GET | `/api/admin/audit-logs` | 管理员操作审计日志 |
 | GET | `/api/admin/2fa/status` | 2FA 状态 |
 | POST | `/api/admin/2fa/setup` `/enable` `/disable` | 绑定 / 启用 / 关闭 2FA |
+| GET / POST | `/api/admin/api-tokens` | API Token 列表（脱敏，无明文/哈希）/ 签发 |
+| DELETE | `/api/admin/api-tokens/:id` | 吊销 API Token（下一次请求即刻失效） |
+
+### 签发 / 吊销 API Token
+
+后台侧边栏「API Token」页可直接完成签发与吊销（明文一次性展示、支持复制），下列接口是该页面对应的 HTTP 形式。
+
+```http
+POST /api/admin/api-tokens
+X-Admin-Token: <admin_token>
+Content-Type: application/json
+
+{
+  "name": "panel-viewer",
+  "scope": "readonly",
+  "agent_ids": ["agt_aedf907909b1"],
+  "expires_in_days": 90
+}
+```
+
+```json
+{
+  "id": "tok_1a2b3c4d5e6f",
+  "name": "panel-viewer",
+  "scope": "readonly",
+  "agent_ids": ["agt_aedf907909b1"],
+  "expires_at": 1793000000000,
+  "token": "diting_<48hex>",
+  "notice": "明文只返回这一次，请立即保存；丢失只能吊销后重建"
+}
+```
+
+- `token` 明文**只在创建响应中出现一次**，服务端仅存 SHA-256；列表中不会回显。
+- `scope` 缺省为 `readonly`（最小权限）；非法值 `400 invalid_scope`。
+- `agent_ids` 须为**已存在节点**的 id（未知 id → `400 unknown_agent_id`），最多 500 个。
+- `expires_in_days` 为 1–3650 的整数，缺省 / 0 表示永不过期；越界或非整数 → `400 invalid_expires_in_days`。
+- 吊销：`DELETE /api/admin/api-tokens/:id`，返回 `200 {ok,id}`；不存在或已吊销返回 `404`。
+- Token 管理端点仅 admin 可用；调用方自身若是受限 Token（`agent_ids` 非空）→ `403 forbidden_scope`。
 
 ## 公开只读接口（脱敏）
 

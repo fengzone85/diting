@@ -15,7 +15,7 @@ description: 服务端与受控端环境变量参考
 | `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**——未设或过弱时首次访问走 Web 初始化向导生成） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥。⚠️ 生产务必设为随机长字符串（`openssl rand -hex 32`），留空则每次重启随机、所有已登录会话失效 |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
-| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口）。建议 ≥16 位随机值；占位符 / 过短时启动告警（仍生效），因其可读全部节点指标与备份列表 |
+| `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口）。建议 ≥16 位随机值；占位符 / 过短时启动告警（仍生效），因其可读全部节点指标与备份列表。⚠️ 这是**全局静态凭证**：不可吊销（改值需重启）、无审计、不能限节点——需要这些能力时改用后台签发的 API Token（`scope` + `agent_ids`，见「API 接口 → 签发 / 吊销 API Token」） |
 | `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌（`--setup-token` 用） |
 | `DB_PATH` | 否 | `/data/monitor.db` | SQLite 数据库路径 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
@@ -30,6 +30,13 @@ description: 服务端与受控端环境变量参考
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | `90` | CPU / 内存告警阈值（%） |
 | `ALERT_COOLDOWN_SEC` | 否 | `1800` | 告警冷却时间（秒） |
+| `ALERT_WINDOW_SAMPLES` | 否 | `5` | 告警采样窗口（2–20）：窗口内超限占比达到比例才触发/恢复 |
+| `ALERT_TRIGGER_RATIO` | 否 | `0.7` | 触发/恢复比例（0.1–1.0）；与窗口共同决定「持续多久算异常」 |
+| `ALERT_SUSTAIN_SAMPLES` | 否 | — | **兼容开关**：显式设置时退回旧行为（窗口=N、比例=1.0，即连续 N 次全超限） |
+| `ONLINE_NOTIFY_GRACE_SEC` | 否 | `180` | 离线超过该秒数后重连才发「已上线」通知；`0` = 关闭上线通知 |
+| `NOTIFY_CONCURRENCY` | 否 | `8` | 单次事件最多并发的通知渠道数 |
+| `ALLOW_PRIVATE_WEBHOOK` | 否 | — | 设为 `1` 允许 Webhook 指向私网/回环地址（默认拒绝，防 SSRF；内网自托管接收端按需开启） |
+| `ALLOW_INSECURE_WEBHOOK` | 否 | — | 设为 `1` 允许明文 `http://` Webhook（默认仅 `https://`） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | 否 | `smtp.qq.com` / `465` / `true` | 告警邮件 SMTP |
 | `SMTP_USER` / `SMTP_PASS` | 否 | — | SMTP 用户名 / 密码（QQ 邮箱用授权码） |
 | `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |

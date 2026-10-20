@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -42,7 +42,53 @@ export const adminApi = {
     api.get<{ id: string; probe_targets: string; install: InstallCommands; modify: ModifyCommands }>(
       `/api/agents/${encodeURIComponent(id)}/commands${probeTargets ? `?probe_targets=${encodeURIComponent(probeTargets)}` : ''}`
     ),
+
+  // S1/F1：告警规则覆盖（节点/分组）。NULL = 继承上层；DELETE = 整行回退。
+  // 分组路径参数用 '-' 表示未分组默认组（空字符串无法作为路径段）。
+  listAlertRules: () => api.get<AlertRules>('/api/admin/alert-rules'),
+  setAgentAlertRule: (id: string, payload: AlertOverrideInput) =>
+    api.put<{ ok: boolean; override: AlertOverride }>(
+      `/api/admin/alert-rules/agent/${encodeURIComponent(id)}`, payload
+    ),
+  resetAgentAlertRule: (id: string) =>
+    api.del<{ ok: boolean; id: string }>(`/api/admin/alert-rules/agent/${encodeURIComponent(id)}`),
+  setGroupAlertRule: (grp: string, payload: AlertOverrideInput) =>
+    api.put<{ ok: boolean; override: AlertOverride }>(
+      `/api/admin/alert-rules/group/${encodeURIComponent(grp === '' ? '-' : grp)}`, payload
+    ),
+  resetGroupAlertRule: (grp: string) =>
+    api.del<{ ok: boolean; grp: string }>(
+      `/api/admin/alert-rules/group/${encodeURIComponent(grp === '' ? '-' : grp)}`
+    ),
+
+  // S1/F2：通知渠道 / 通知组
+  listNotifyChannels: () => api.get<NotifyChannel[]>('/api/admin/notify/channels'),
+  createNotifyChannel: (body: { type: string; name: string; enabled?: boolean; config?: Partial<WebhookConfig> }) =>
+    api.post<NotifyChannel>('/api/admin/notify/channels', body),
+  updateNotifyChannel: (id: number, body: { name?: string; enabled?: boolean; config?: Partial<WebhookConfig> }) =>
+    api.put<NotifyChannel>(`/api/admin/notify/channels/${id}`, body),
+  deleteNotifyChannel: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/channels/${id}`),
+  testNotifyChannel: (id: number) => api.post<{ ok: boolean }>(`/api/admin/notify/channels/${id}/test`, {}),
+  listNotifyGroups: () => api.get<NotifyGroup[]>('/api/admin/notify/groups'),
+  createNotifyGroup: (body: { name: string; events: string[]; channel_ids: number[]; enabled?: boolean }) =>
+    api.post<NotifyGroup>('/api/admin/notify/groups', body),
+  updateNotifyGroup: (id: number, body: { name?: string; events?: string[]; channel_ids?: number[]; enabled?: boolean }) =>
+    api.put<NotifyGroup>(`/api/admin/notify/groups/${id}`, body),
+  deleteNotifyGroup: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/groups/${id}`),
+  listNotifyEvents: () => api.get<{ events: string[] }>('/api/admin/notify/events'),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
+
+  // S2/F5：API Token 管理。明文只在创建响应里返回一次（ApiTokenCreated.token），
+  // 列表接口不含明文与哈希，故「丢失即吊销重建」。
+  listApiTokens: () => api.get<{ list: ApiToken[] }>('/api/admin/api-tokens'),
+  createApiToken: (body: {
+    name: string;
+    scope?: 'readonly' | 'admin';
+    agent_ids?: string[];
+    expires_in_days?: number;
+  }) => api.post<ApiTokenCreated>('/api/admin/api-tokens', body),
+  revokeApiToken: (id: string) =>
+    api.del<{ ok: boolean; id: string }>(`/api/admin/api-tokens/${encodeURIComponent(id)}`),
 
   // diagnostics
   clientIp: () => api.get<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string }>('/api/client-ip'),
