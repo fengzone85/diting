@@ -136,6 +136,36 @@ CREATE TABLE IF NOT EXISTS notify_group_channels (
 );
 CREATE INDEX IF NOT EXISTS idx_group_channels_channel ON notify_group_channels(channel_id);
 
+-- S2/F5 API Token：明文只在创建时返回一次，库中仅存 SHA-256。
+-- agent_ids：JSON 数组；'[]' = 全部节点（与 scope 组合收窄权限）。
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  token_hash   TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'readonly',
+  agent_ids    TEXT NOT NULL DEFAULT '[]',
+  expires_at   INTEGER NOT NULL DEFAULT 0,
+  last_used_at INTEGER NOT NULL DEFAULT 0,
+  last_used_ip TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL,
+  created_by   TEXT NOT NULL DEFAULT '',
+  revoked      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+-- S2/F6 登录会话：cookie 内只带 sid，吊销状态以本表为准；
+-- session_revoked_before 水位线保留为全局 kill switch。
+CREATE TABLE IF NOT EXISTS sessions (
+  id         TEXT PRIMARY KEY,
+  admin      TEXT NOT NULL DEFAULT 'admin',
+  ip         TEXT NOT NULL DEFAULT '',
+  ua         TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  last_seen  INTEGER NOT NULL,
+  revoked    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
+
 -- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
 CREATE TABLE IF NOT EXISTS traffic_state (
   agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -425,6 +455,23 @@ const stmts = {
   listGroupChannelIds: db.prepare('SELECT channel_id FROM notify_group_channels WHERE group_id=?'),
   listGroupChannelRows: db.prepare(`SELECT g.group_id, g.channel_id FROM notify_group_channels g
     JOIN notify_channels c ON c.id=g.channel_id WHERE c.enabled=1`),
+  // ---- S2/F5 API Token ----
+  insertApiToken: db.prepare(`INSERT INTO api_tokens
+    (id, name, token_hash, scope, agent_ids, expires_at, created_at, created_by)
+    VALUES (@id, @name, @token_hash, @scope, @agent_ids, @expires_at, @created_at, @created_by)`),
+  getApiTokenByHash: db.prepare('SELECT * FROM api_tokens WHERE token_hash=?'),
+  listApiTokens: db.prepare('SELECT * FROM api_tokens ORDER BY created_at DESC'),
+  touchApiToken: db.prepare('UPDATE api_tokens SET last_used_at=?, last_used_ip=? WHERE id=?'),
+  revokeApiToken: db.prepare('UPDATE api_tokens SET revoked=1 WHERE id=?'),
+  // ---- S2/F6 会话 ----
+  insertSession: db.prepare(`INSERT INTO sessions (id, admin, ip, ua, created_at, last_seen)
+    VALUES (@id, @admin, @ip, @ua, @created_at, @last_seen)`),
+  getSessionRow: db.prepare('SELECT * FROM sessions WHERE id=?'),
+  listSessions: db.prepare('SELECT * FROM sessions WHERE revoked=0 ORDER BY last_seen DESC'),
+  touchSession: db.prepare('UPDATE sessions SET last_seen=? WHERE id=?'),
+  revokeSession: db.prepare('UPDATE sessions SET revoked=1 WHERE id=?'),
+  revokeAllSessionRows: db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0'),
+  pruneSessions: db.prepare('DELETE FROM sessions WHERE last_seen < ?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
@@ -855,6 +902,97 @@ function initNotifyMigrationIfNeeded() {
   }
 }
 initNotifyMigrationIfNeeded();
+
+// ---- S2/F5：API Token -------------------------------------------------------
+// 明文格式 diting_<48hex>，仅在创建时返回一次；id 为 tok_<12hex>（可安全展示/审计）。
+const genApiTokenPlain = () => 'diting_' + crypto.randomBytes(24).toString('hex');
+const genApiTokenId = () => 'tok_' + crypto.randomBytes(6).toString('hex');
+
+function apiTokenOut(r) {
+  let agentIds = [];
+  try { agentIds = JSON.parse(r.agent_ids || '[]'); } catch (e) { agentIds = []; }
+  return {
+    id: r.id,
+    name: r.name,
+    scope: r.scope,
+    agent_ids: Array.isArray(agentIds) ? agentIds : [],
+    expires_at: r.expires_at,
+    last_used_at: r.last_used_at,
+    last_used_ip: r.last_used_ip,
+    created_at: r.created_at,
+    created_by: r.created_by,
+    revoked: !!r.revoked
+  };
+}
+
+function createApiToken(input) {
+  const id = genApiTokenId();
+  const token = genApiTokenPlain();
+  const agentIds = Array.isArray(input.agentIds) ? input.agentIds.map(String).slice(0, 500) : [];
+  stmts.insertApiToken.run({
+    id,
+    name: String(input.name || '').slice(0, 64),
+    token_hash: hashToken(token),
+    scope: input.scope === 'admin' ? 'admin' : 'readonly',
+    agent_ids: JSON.stringify(agentIds), // 显式写 '[]'，不依赖 DB 默认值
+    expires_at: Number(input.expiresAt) || 0,
+    created_at: Date.now(),
+    created_by: String(input.createdBy || '').slice(0, 64)
+  });
+  return { id, token };
+}
+
+const findApiTokenByHash = (hash) => {
+  const r = stmts.getApiTokenByHash.get(hash);
+  return r ? apiTokenOut(r) : null;
+};
+const listApiTokens = () => stmts.listApiTokens.all().map(apiTokenOut);
+const revokeApiToken = (id) => stmts.revokeApiToken.run(id).changes > 0;
+
+// last_used 节流：同一 token 60s 内只写一次库（高频只读 Token 下避免每请求写放大）。
+const _apiTokenTouch = new Map();
+function touchApiToken(id, ip) {
+  const now = Date.now();
+  const last = _apiTokenTouch.get(id) || 0;
+  if (now - last < 60 * 1000) return;
+  if (_apiTokenTouch.size >= 10000) _apiTokenTouch.clear();
+  _apiTokenTouch.set(id, now);
+  try { stmts.touchApiToken.run(now, String(ip || '').slice(0, 64), id); } catch (e) { /* 追踪失败不影响鉴权 */ }
+}
+
+// ---- S2/F6：登录会话 --------------------------------------------------------
+const genSessionId = () => crypto.randomBytes(12).toString('hex');
+
+function createSessionRow({ id, admin, ip, ua }) {
+  const now = Date.now();
+  const sid = id || genSessionId();
+  stmts.insertSession.run({
+    id: sid,
+    admin: String(admin || 'admin').slice(0, 64),
+    ip: String(ip || '').slice(0, 64),
+    ua: String(ua || '').slice(0, 255),
+    created_at: now,
+    last_seen: now
+  });
+  return sid;
+}
+
+const getSessionRow = (id) => stmts.getSessionRow.get(id) || null;
+const listSessions = () => stmts.listSessions.all();
+const revokeSession = (id) => stmts.revokeSession.run(id).changes > 0;
+const revokeAllSessionRows = () => stmts.revokeAllSessionRows.run().changes;
+const pruneSessions = (before) => stmts.pruneSessions.run(Number(before) || 0).changes;
+
+// last_seen 节流：每会话 60s 写一次，避免每次 API 请求都写库。
+const _sessionTouch = new Map();
+function touchSession(id) {
+  const now = Date.now();
+  const last = _sessionTouch.get(id) || 0;
+  if (now - last < 60 * 1000) return;
+  if (_sessionTouch.size >= 10000) _sessionTouch.clear();
+  _sessionTouch.set(id, now);
+  try { stmts.touchSession.run(now, id); } catch (e) { /* 忽略 */ }
+}
 
 const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
 
@@ -1302,6 +1440,8 @@ module.exports = {
   listNotifyChannels, getNotifyChannel, createNotifyChannel, updateNotifyChannel, deleteNotifyChannel,
   listNotifyGroups, getNotifyGroup, createNotifyGroup, updateNotifyGroup, deleteNotifyGroup,
   listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
+  createApiToken, findApiTokenByHash, listApiTokens, revokeApiToken, touchApiToken,
+  createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, pruneSessions, touchSession,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   resolveAlertThresholds, observedIntervalSec,

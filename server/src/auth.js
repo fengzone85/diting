@@ -43,9 +43,15 @@ const COOKIE_NAME = 'hm_session';
 // 粒度为全局（管理员自己的其他标签页也会被踢下），自托管场景下更安全、实现最简。
 const SESSION_REVOKED_BEFORE = 'session_revoked_before';
 
+// S2/F6：DB 故障时的取舍——默认 fail-open（签名有效即放行，记错误日志），
+// 避免单机 SQLite 损坏把管理员永久锁死；STRICT_SESSION_DB=1 切换 fail-close。
+const STRICT_SESSION_DB = process.env.STRICT_SESSION_DB === '1';
+
 // 使本时刻之前签发的所有会话失效。安全状态变更（2FA 开关）与「退出所有设备」时调用。
 function revokeAllSessions() {
   db.setConfig(SESSION_REVOKED_BEFORE, String(Date.now()));
+  // S2/F6：同时吊销会话表记录（水位线是兜底，表状态是权威）。
+  try { db.revokeAllSessionRows(); } catch (e) { /* 表不存在/DB 异常时由水位线兜底 */ }
 }
 
 function isRevoked(p) {
@@ -73,6 +79,17 @@ function verifySession(cookieVal) {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
     if (!p.exp || p.exp < Date.now()) return null;
     if (isRevoked(p)) return null;
+    // S2/F6：会话表校验（单会话踢出）。旧 Cookie 无 sid → 放行至自然过期（兼容）。
+    if (p.sid) {
+      try {
+        const row = db.getSessionRow(p.sid);
+        if (!row || row.revoked) return null;
+        db.touchSession(p.sid);
+      } catch (e) {
+        if (STRICT_SESSION_DB) return null;
+        console.error('[auth] session lookup failed (fail-open):', e.message);
+      }
+    }
     return p;
   } catch { return null; }
 }
@@ -117,11 +134,30 @@ function requireProto(req, res) {
   return true;
 }
 
-// 解析请求角色。返回 {role, totp, via} 或 null。
-// 优先级：签名 Session Cookie（dashboard 登录态） > X-Admin-Token > X-Readonly-Token。
+// 解析请求角色。返回 {role, totp, via, token?} 或 null。
+// 优先级：签名 Session Cookie > X-API-Token > X-Admin-Token > X-Readonly-Token。
+//
+// S2/F5 认证分流（安全边界）：API Token 只认 X-API-Token 头，绝不接受
+// Authorization: Bearer —— 后者是 Agent 上报专用通道（agentAuth，X-Agent-ID+Bearer）。
+// 从协议层杜绝「同一 Bearer 到底是 Admin 还是 Agent」的歧义：
+// Agent Token 泄露无法用于管理路由，反之亦然。
 function resolveRole(req) {
   const sess = getSession(req);
   if (sess && sess.role === 'admin') return { role: 'admin', totp: !!sess.totp, via: 'cookie' };
+  const apiTok = req.header('X-API-Token');
+  if (apiTok) {
+    const rec = db.findApiTokenByHash(db.hashToken(apiTok));
+    if (rec && !rec.revoked && (!rec.expires_at || rec.expires_at > Date.now())) {
+      db.touchApiToken(rec.id, req.ip);
+      return {
+        role: rec.scope === 'admin' ? 'admin' : 'readonly',
+        totp: false,
+        via: 'api_token',
+        token: { id: rec.id, name: rec.name, scope: rec.scope, agentIds: rec.agent_ids }
+      };
+    }
+    // 未命中静默落入后续分支（不额外报错，避免 Token 枚举信号）。
+  }
   const at = req.header('X-Admin-Token');
   if (at && safeEqual(at, getAdminToken())) return { role: 'admin', totp: false, via: 'token' };
   const rt = req.header('X-Readonly-Token');
@@ -130,11 +166,27 @@ function resolveRole(req) {
   return null;
 }
 
+// S2/F5：可选节点白名单中间件。挂在鉴权中间件之后、具体 handler 之前。
+// agent_ids 为空数组 = 不限制；非空时由 handler 用 inAgentScope(req, id) 判定。
+function agentScope(req, res, next) {
+  const tok = req.auth && req.auth.token;
+  if (tok && Array.isArray(tok.agentIds) && tok.agentIds.length > 0) {
+    req.agentScope = new Set(tok.agentIds.map(String));
+  }
+  next();
+}
+
+function inAgentScope(req, id) {
+  if (!req.agentScope) return true;
+  return req.agentScope.has(String(id));
+}
+
 function adminAuth(req, res, next) {
   const r = resolveRole(req);
   if (!r || r.role !== 'admin') return res.status(401).json({ error: 'unauthorized' });
   if (!requireProto(req, res)) return;
   req.role = r.role;
+  req.auth = r;
   next();
 }
 
@@ -144,6 +196,7 @@ function adminOrReadonly(req, res, next) {
   if (!r) return res.status(401).json({ error: 'unauthorized' });
   if (!requireProto(req, res)) return;
   req.role = r.role;
+  req.auth = r;
   next();
 }
 
@@ -166,6 +219,7 @@ function adminOnly(req, res, next) {
   }
   if (!requireProto(req, res)) return;
   req.role = r.role;
+  req.auth = r;
   next();
 }
 
@@ -176,6 +230,7 @@ function requireAdmin(req, res, next) {
   if (r.role !== 'admin') return res.status(403).json({ error: 'admin required' });
   if (!requireProto(req, res)) return;
   req.role = r.role;
+  req.auth = r;
   next();
 }
 
@@ -369,7 +424,7 @@ function auditLog(req, action, detail) {
 
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
-  resolveRole,
+  resolveRole, agentScope, inAgentScope,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog,

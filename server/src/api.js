@@ -6,7 +6,7 @@ const router = express.Router();
 const db = require('./db');
 const { rateLimitTouch } = require('./ratelimit');
 const { heavyQuery } = require('./heavy-db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
@@ -320,7 +320,8 @@ router.post('/setup/register', registerRateLimit, (req, res) => {
 
 // ---- Admin: 批准自助注册的待确认 agent（审查 G4）----
 // 待确认 agent 无法上报也不进看板；管理员在后台批准后放行。
-router.post('/agents/:id/approve', adminOnly, asyncHandler(async (req, res) => {
+router.post('/agents/:id/approve', adminOnly, agentScope, asyncHandler(async (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   if (!a.pending) return res.json({ ok: true, id: a.id, pending: false, message: 'already approved' });
@@ -330,7 +331,7 @@ router.post('/agents/:id/approve', adminOnly, asyncHandler(async (req, res) => {
 }));
 
 // ---- Admin: list agents + latest metric + online status ----
-router.get('/agents', adminOrReadonly, (req, res) => {
+router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
   const now = Date.now();
   // S1/F1：在线判定与告警同源——按「节点 > 分组 > 全局」解析 offlineSec，
   // 避免出现「看板显示在线、告警判离线」的双源分裂（历史审查 C-1/E2 同类问题）。
@@ -339,7 +340,8 @@ router.get('/agents', adminOrReadonly, (req, res) => {
     groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
     nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
   };
-  const list = db.getAgents().map((a) => {
+  // S2/F5：带节点白名单的 API Token 只看到授权范围内的节点。
+  const list = db.getAgents().filter((a) => inAgentScope(req, a.id)).map((a) => {
     const latest = db.getLatestMetric(a.id);
     const eff = alerts.resolveAgentThresholds(a, ctx);
     const online = a.last_seen && (now - a.last_seen) < eff.offlineSec * 1000;
@@ -373,7 +375,9 @@ router.get('/agents', adminOrReadonly, (req, res) => {
 // 分组路径参数用 '-' 表示未分组默认组（空字符串无法作为路径段）。
 const alertGroupKey = (raw) => (raw === '-' ? '' : String(raw || '').slice(0, 64));
 
-router.get('/admin/alert-rules', adminOrReadonly, (req, res) => {
+router.get('/admin/alert-rules', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：告警阈值/覆盖列表含全局与全部节点配置，节点白名单 Token 不开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   res.json({
     global: db.resolveAlertThresholds(),
     groups: db.listGroupAlertOverrides(),
@@ -381,7 +385,8 @@ router.get('/admin/alert-rules', adminOrReadonly, (req, res) => {
   });
 });
 
-router.put('/admin/alert-rules/agent/:id', adminOnly, (req, res) => {
+router.put('/admin/alert-rules/agent/:id', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const body = req.body || {};
@@ -390,7 +395,8 @@ router.put('/admin/alert-rules/agent/:id', adminOnly, (req, res) => {
   res.json({ ok: true, override });
 });
 
-router.delete('/admin/alert-rules/agent/:id', adminOnly, (req, res) => {
+router.delete('/admin/alert-rules/agent/:id', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const ok = db.deleteAlertOverride(req.params.id);
   auditLog(req, 'alert_rule_reset', `scope=agent id=${req.params.id}`);
   res.json({ ok, id: req.params.id });
@@ -412,14 +418,16 @@ router.delete('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
 });
 
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----
-router.get('/agents/sparklines', adminOrReadonly, asyncHandler(async (req, res) => {
+router.get('/agents/sparklines', adminOrReadonly, agentScope, asyncHandler(async (req, res) => {
   const range = req.query.range;
   const sec = RANGES[range] || 21600;
   // 管理端 sparklines：用轻量列查询（不含 probes 大字段）+ SQL 层采样，避免 SELECT * 物化全行。
   const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
   // 审查 C4：重聚合移 worker 线程执行——同步执行会阻塞事件循环数秒，
   // 期间 /report、告警、全部请求一并挂起。
-  const rows = await heavyQuery('sparklinesAllSampled', Date.now() - sec * 1000, mp);
+  let rows = await heavyQuery('sparklinesAllSampled', Date.now() - sec * 1000, mp);
+  // S2/F5：节点白名单过滤（行内含 agent_id）
+  if (req.agentScope) rows = rows.filter((r) => req.agentScope.has(String(r.agent_id)));
   res.json(downsampleSparklines(rows, mp));
 }));
 
@@ -427,7 +435,9 @@ router.get('/agents/sparklines', adminOrReadonly, asyncHandler(async (req, res) 
 // 与 /agents/sparklines 不同：不做「每 agent 原始点」，而是由 SQL 引擎跨所有 agent 按时间桶
 // 直接聚合出集群平均曲线，只返回 ≤maxPoints 行（几十~几百个点）。彻底消除前端拉 62 台全量
 // 再逐点聚合的主线程卡顿。max_points 缺省用 sparkMaxPoints，与右侧趋势图桶粒度一致。
-router.get('/agents/sparklines/overview', adminOrReadonly, asyncHandler(async (req, res) => {
+router.get('/agents/sparklines/overview', adminOrReadonly, agentScope, asyncHandler(async (req, res) => {
+  // S2/F5：集群聚合面不向节点白名单 Token 开放（会泄露全局规模/均值）。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const range = req.query.range;
   const sec = RANGES[range] || 21600;
   const mp = clampInt(req.query.max_points, 60, 20000) || sparkMaxPoints(range);
@@ -442,7 +452,8 @@ router.get('/agents/sparklines/overview', adminOrReadonly, asyncHandler(async (r
 }));
 
 // ---- Admin: single agent info ----
-router.get('/agents/:id', adminOrReadonly, (req, res) => {
+router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const latest = db.getLatestMetric(a.id);
@@ -457,7 +468,8 @@ const RANGES = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 259
 // 各档默认点数（体检 L-6）：原先走 getMetrics(metricsRange=SELECT *) 全量拉取，
 // 30d 约 12.9 万行且含 probes/disks 大 JSON。改用 SQL 层均匀采样（保留首尾点）。
 const RANGE_POINTS = { '1h': 180, '6h': 360, '24h': 360, '7d': 360, '30d': 360 };
-router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
+router.get('/agents/:id/metrics', adminOrReadonly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const sec = RANGES[req.query.range] || 3600;
   // points 可显式覆盖（60–1440），供前端按需调整密度
   const points = Math.min(1440, Math.max(60, Number(req.query.points) || RANGE_POINTS[req.query.range] || 360));
@@ -472,7 +484,9 @@ router.get('/agents/:id/metrics', adminOrReadonly, (req, res) => {
 // ---- Admin: overview ----
 // 在原有「总数/在线/离线/平均 CPU/内存」基础上，补充「流量概览」与「分组概览」，
 // 供前端对标社区主题的流量/地区概览区块直接渲染。
-router.get('/overview', adminOrReadonly, (req, res) => {
+router.get('/overview', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：全局统计不向节点白名单 Token 开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
   const agents = db.getMonitoredAgents();
@@ -508,7 +522,9 @@ router.get('/overview', adminOrReadonly, (req, res) => {
 });
 
 // ---- Admin: billing overview（月度费用 + 分组费用 + 7 天内到期列表）----
-router.get('/billing', adminOrReadonly, (req, res) => {
+router.get('/billing', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：月度总费用/分组费用/到期列表均为全集群聚合，节点白名单 Token 不开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const agents = db.getMonitoredAgents();
   let monthlyTotal = 0;
   const perGroup = {};
@@ -932,7 +948,8 @@ router.post('/agents', adminOnly, (req, res) => {
 });
 
 // ---- Admin: update agent metadata ----
-router.put('/agents/:id', adminOnly, (req, res) => {
+router.put('/agents/:id', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const priceUp = Number(req.body.price);
@@ -973,14 +990,16 @@ router.put('/agents/:id', adminOnly, (req, res) => {
 });
 
 // ---- Admin: delete agent ----
-router.delete('/agents/:id', adminOnly, (req, res) => {
+router.delete('/agents/:id', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   db.deleteAgent(req.params.id);
   res.json({ ok: true });
   auditLog(req, 'delete_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
-router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
+router.post('/agents/:id/reset-token', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   // 校验必须前置到轮换之前：resetAgentToken 会让旧 Token 立即失效，若之后才发现无法生成
   // 命令，就会留下「旧 Token 已废、管理员也没有新安装命令」的不可逆状态。
   const base = getPublicBaseUrl();
@@ -996,7 +1015,8 @@ router.post('/agents/:id/reset-token', adminOnly, (req, res) => {
 });
 
 // ---- Admin: renew agent（续费一个周期）----
-router.post('/agents/:id/renew', adminOnly, (req, res) => {
+router.post('/agents/:id/renew', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   // billing_cycle=0 表示白嫖/免费（无计费周期），须显式保留 0，不能用 || 30 吞掉。
@@ -1013,7 +1033,8 @@ router.post('/agents/:id/renew', adminOnly, (req, res) => {
 // ---- Admin: 生成某受控端的「安装命令」与「修改探测目标命令」----
 // 修改命令无需 Token（仅改本地 systemd drop-in / bat 后重启），可由管理员按需生成。
 // query.probe_targets 可临时覆盖（用于预览不同 DNS 的命令），缺省用该受控端已存值。
-router.get('/agents/:id/commands', adminOnly, (req, res) => {
+router.get('/agents/:id/commands', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const base = getPublicBaseUrl();
   if (!base) return serverUrlUnconfigured(res);
   const a = db.getAgent(req.params.id);
@@ -1366,7 +1387,8 @@ router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
 }));
 // 单节点按需分析（T11）：同一节点+同一窗口的结果缓存 30 分钟，避免重复点击重复计费。
 // ?hours= 窗口可选：24（默认）/ 168（7 天）/ 720（30 天），clamp 到 24–720（与 ai/index.js 同界）。
-router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => {
+router.post('/ai/analyze-node/:id', adminOnly, agentScope, asyncHandler(async (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const periodHours = Math.max(24, Math.min(720, Math.round(Number(req.query.hours)) || 24));
   const r = await ai.analyzeNode(String(req.params.id), { periodHours });
   auditLog(req, 'ai_analyze_node', `agent=${req.params.id} status=${r.status} hours=${periodHours}`);
@@ -1383,7 +1405,9 @@ router.post('/ai/analyze-node/:id', adminOnly, asyncHandler(async (req, res) => 
 
 // AI 用量趋势（近 N 天按 UTC 日聚合 token 消耗）。默认 7 天，clamp 1–90。
 // 老报告的 token 列为 0（加列前的数据），不影响聚合正确性。
-router.get('/ai/usage', adminOrReadonly, (req, res) => {
+router.get('/ai/usage', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：AI 用量为全集群聚合，节点白名单 Token 不开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const days = Math.max(1, Math.min(90, Number(req.query.days) || 7));
   const rows = db.aiUsageDaily(Date.now() - days * 86400000);
   const list = rows.map((r) => ({
@@ -1398,9 +1422,10 @@ router.get('/ai/usage', adminOrReadonly, (req, res) => {
 
 // 单节点分析历史（§8 T17）：?agent_id=&limit=1..50（默认 10）。
 // 列表刻意不含 report_json（单条可达数十 KB），只给渲染历史条目所需字段。
-router.get('/ai/node-reports', adminOrReadonly, (req, res) => {
+router.get('/ai/node-reports', adminOrReadonly, agentScope, (req, res) => {
   const agentId = String(req.query.agent_id || '').trim();
   if (!agentId) return res.status(400).json({ error: 'agent_id required' });
+  if (!inAgentScope(req, agentId)) return res.status(403).json({ error: 'forbidden_node' });
   if (!db.getAgent(agentId)) return res.status(404).json({ error: 'agent not found' });
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
   res.json({ agent_id: agentId, limit, list: db.listAiNodeReports(agentId, limit) });
@@ -1411,14 +1436,18 @@ router.get('/ai/status', adminOrReadonly, (req, res) => {
   res.json(ai.getStatus());
 });
 // 报告列表（分页）
-router.get('/ai/reports', adminOrReadonly, (req, res) => {
+router.get('/ai/reports', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：报告可能涵盖其他节点数据，节点白名单 Token 不开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
   const offset = Math.max(0, Number(req.query.offset) || 0);
   const list = db.listAiReports(limit, offset);
   res.json({ total: db.countAiReports(), limit, offset, list });
 });
 // 单条报告详情（含 report_json，供前端渲染完整分析）
-router.get('/ai/reports/:id', adminOrReadonly, (req, res) => {
+router.get('/ai/reports/:id', adminOrReadonly, agentScope, (req, res) => {
+  // S2/F5：单份报告含 report_json（可能覆盖其他节点），节点白名单 Token 不开放。
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'invalid id' });
   const r = db.getAiReport(id);
