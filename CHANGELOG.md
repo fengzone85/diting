@@ -2,6 +2,35 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-19 告警规则精细化：节点/分组覆盖 + 采样窗口 + 上线通知（S1-F1）
+
+### ⚠️ 行为变更
+
+- **告警判定从「连续 N 次全超限」改为「窗口内 ≥70% 超限」**：默认 5 个采样窗口、触发/恢复
+  比例 0.7（env `ALERT_WINDOW_SAMPLES` / `ALERT_TRIGGER_RATIO`）。单次尖刺不再告警，持续超阈
+  触发最多比旧行为晚 2 个采样。**要恢复旧的「连续 2 次」行为，显式设置 `ALERT_SUSTAIN_SAMPLES=2`**
+  （内部转为窗口=2、比例=1.0）。
+- **缺数据语义显式化**：`null` 样本不参与窗口计算；已知样本不足 2 个时既不触发也不恢复
+  （对齐 nezha known=false）。此前 null 会被静默过滤但恢复路径可能误判。
+- **新增上线通知**：离线超过 `ONLINE_NOTIFY_GRACE_SEC`（默认 180 秒）后重连发送「已上线」；
+  此前恢复只清告警态、不发通知。设 `0` 关闭。
+- **告警阈值支持按节点/分组覆盖**：解析链 `节点 > 分组 > 全局`，字段独立继承，留空 = 继承。
+  新增管理 API `GET /api/admin/alert-rules`、`PUT/DELETE /api/admin/alert-rules/agent/:id`、
+  `PUT/DELETE /api/admin/alert-rules/group/:grp`（分组 `-` 表示未分组默认组）。
+  管理端「受控端」列表新增「告警」入口，「设置 → 分组告警覆盖」新增分组面板。
+- **`muted` 只压制指标类告警**（cpu/mem/disk/temp）；离线、到期、配额、流量不可信属经营告警，
+  永不被静音（防「静音=失联」）。
+- `/api/agents` 响应新增 `alert.effective/overridden/muted`；**在线状态判定同步改用节点生效的
+  `offline_sec`**，修复「看板显示在线、告警判离线」的双源分裂。
+
+### 说明
+
+- 新表 `alert_overrides` / `alert_group_overrides` 刻意不声明外键：本库未启用
+  `PRAGMA foreign_keys`，级联不会执行；删除受控端时由 `db.deleteAgent` 同事务清理。
+- 覆盖值按与全局阈值一致的范围钳制（越界/非数字视为未设置）。
+- 审计：覆盖写/清操作记录 `alert_rule_update` / `alert_rule_reset`。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F1。
+
 ## 2026-10-19 流量周期口径：month_rotate / net_rx / net_tx（P1–P4 安装链路）
 
 ### ⚠️ 行为变更

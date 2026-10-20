@@ -76,6 +76,34 @@ CREATE TABLE IF NOT EXISTS alert_state (
   PRIMARY KEY(agent_id, type)
 );
 
+-- 告警规则覆盖（S1/F1）：NULL = 继承上层（分组 > 全局）。
+-- 刻意不声明 FOREIGN KEY：本库未启用 PRAGMA foreign_keys（better-sqlite3 默认关），
+-- 级联不会执行；删除 agent 时由 deleteAgent() 同事务显式清理本表。
+CREATE TABLE IF NOT EXISTS alert_overrides (
+  agent_id    TEXT PRIMARY KEY,
+  offline_sec INTEGER,
+  cpu_pct     REAL,
+  mem_pct     REAL,
+  disk_pct    REAL,
+  temp_c      REAL,
+  cooldown    INTEGER,
+  muted       INTEGER DEFAULT 0,
+  updated_at  INTEGER NOT NULL
+);
+
+-- 分组级覆盖：grp 为 agents.grp 的取值（'' = 未分组/默认组）。
+CREATE TABLE IF NOT EXISTS alert_group_overrides (
+  grp         TEXT PRIMARY KEY,
+  offline_sec INTEGER,
+  cpu_pct     REAL,
+  mem_pct     REAL,
+  disk_pct    REAL,
+  temp_c      REAL,
+  cooldown    INTEGER,
+  muted       INTEGER DEFAULT 0,
+  updated_at  INTEGER NOT NULL
+);
+
 -- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
 CREATE TABLE IF NOT EXISTS traffic_state (
   agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -321,6 +349,25 @@ const stmts = {
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
   clearAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=? AND type=?'),
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
+  // ---- 告警覆盖（S1/F1）----
+  getAlertOverride: db.prepare('SELECT * FROM alert_overrides WHERE agent_id=?'),
+  listAlertOverrides: db.prepare('SELECT * FROM alert_overrides ORDER BY agent_id'),
+  deleteAlertOverride: db.prepare('DELETE FROM alert_overrides WHERE agent_id=?'),
+  upsertAlertOverride: db.prepare(`INSERT INTO alert_overrides
+    (agent_id, offline_sec, cpu_pct, mem_pct, disk_pct, temp_c, cooldown, muted, updated_at)
+    VALUES (@agent_id, @offline_sec, @cpu_pct, @mem_pct, @disk_pct, @temp_c, @cooldown, @muted, @updated_at)
+    ON CONFLICT(agent_id) DO UPDATE SET
+      offline_sec=@offline_sec, cpu_pct=@cpu_pct, mem_pct=@mem_pct, disk_pct=@disk_pct,
+      temp_c=@temp_c, cooldown=@cooldown, muted=@muted, updated_at=@updated_at`),
+  getGroupAlertOverride: db.prepare('SELECT * FROM alert_group_overrides WHERE grp=?'),
+  listGroupAlertOverrides: db.prepare('SELECT * FROM alert_group_overrides ORDER BY grp'),
+  deleteGroupAlertOverride: db.prepare('DELETE FROM alert_group_overrides WHERE grp=?'),
+  upsertGroupAlertOverride: db.prepare(`INSERT INTO alert_group_overrides
+    (grp, offline_sec, cpu_pct, mem_pct, disk_pct, temp_c, cooldown, muted, updated_at)
+    VALUES (@grp, @offline_sec, @cpu_pct, @mem_pct, @disk_pct, @temp_c, @cooldown, @muted, @updated_at)
+    ON CONFLICT(grp) DO UPDATE SET
+      offline_sec=@offline_sec, cpu_pct=@cpu_pct, mem_pct=@mem_pct, disk_pct=@disk_pct,
+      temp_c=@temp_c, cooldown=@cooldown, muted=@muted, updated_at=@updated_at`),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
@@ -541,8 +588,67 @@ const updateAgent = (id, f) => {
 
 const deleteAgent = (id) => {
   stmts.clearAllAlertState.run(id);
+  // F1：覆盖表无 FK 强制（见建表注释），同事务显式清理。
+  stmts.deleteAlertOverride.run(id);
   return stmts.deleteAgent.run(id);
 };
+
+// ---- 告警覆盖（S1/F1）-------------------------------------------------------
+// 字段范围与 resolveAlertThresholds() 保持一致；越界/非数字 → null（视为未设置）。
+const ALERT_OVERRIDE_LIMITS = {
+  offline_sec: [10, 86400],
+  cpu_pct: [1, 100],
+  mem_pct: [1, 100],
+  disk_pct: [1, 100],
+  temp_c: [-50, 200],
+  cooldown: [60, 86400]
+};
+const ALERT_OVERRIDE_KEYS = Object.keys(ALERT_OVERRIDE_LIMITS);
+
+function normAlertOverrideValue(key, v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const [min, max] = ALERT_OVERRIDE_LIMITS[key];
+  return Math.min(max, Math.max(min, n));
+}
+
+// 合并语义：fields 中出现的键覆盖旧值（显式 null = 清除该字段回退上层），
+// 未出现的键保留原值。muted 为并集语义（节点或分组任一为 1 即静音，见 alerts.js）。
+function mergeOverrideRow(base, fields) {
+  const row = {};
+  for (const k of ALERT_OVERRIDE_KEYS) {
+    row[k] = Object.prototype.hasOwnProperty.call(fields, k)
+      ? normAlertOverrideValue(k, fields[k])
+      : (base && base[k] !== undefined ? base[k] : null);
+  }
+  row.muted = Object.prototype.hasOwnProperty.call(fields, 'muted')
+    ? (fields.muted ? 1 : 0)
+    : (base && base.muted ? 1 : 0);
+  return row;
+}
+
+function upsertAlertOverride(agentId, fields) {
+  const base = stmts.getAlertOverride.get(agentId);
+  const row = mergeOverrideRow(base, fields || {});
+  stmts.upsertAlertOverride.run(Object.assign({ agent_id: agentId, updated_at: Date.now() }, row));
+  return stmts.getAlertOverride.get(agentId);
+}
+
+function upsertGroupAlertOverride(grp, fields) {
+  const key = typeof grp === 'string' ? grp : '';
+  const base = stmts.getGroupAlertOverride.get(key);
+  const row = mergeOverrideRow(base, fields || {});
+  stmts.upsertGroupAlertOverride.run(Object.assign({ grp: key, updated_at: Date.now() }, row));
+  return stmts.getGroupAlertOverride.get(key);
+}
+
+const getAlertOverride = (agentId) => stmts.getAlertOverride.get(agentId) || null;
+const listAlertOverrides = () => stmts.listAlertOverrides.all();
+const deleteAlertOverride = (agentId) => stmts.deleteAlertOverride.run(agentId).changes > 0;
+const getGroupAlertOverride = (grp) => stmts.getGroupAlertOverride.get(grp || '') || null;
+const listGroupAlertOverrides = () => stmts.listGroupAlertOverrides.all();
+const deleteGroupAlertOverride = (grp) => stmts.deleteGroupAlertOverride.run(grp || '').changes > 0;
 
 const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
 
@@ -984,6 +1090,9 @@ module.exports = {
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
+  getAlertOverride, listAlertOverrides, upsertAlertOverride, deleteAlertOverride,
+  getGroupAlertOverride, listGroupAlertOverrides, upsertGroupAlertOverride, deleteGroupAlertOverride,
+  ALERT_OVERRIDE_KEYS, ALERT_OVERRIDE_LIMITS,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   resolveAlertThresholds, observedIntervalSec,

@@ -7,9 +7,56 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// 审查 E1：阈值告警需连续 N 个采样超限才触发（单样本 spike 不报），恢复同样
-// 需连续确认。ALERT_SUSTAIN_SAMPLES=1 可关闭持续确认（恢复旧的单样本行为）。
-const SUSTAIN_N = Math.max(1, Number(process.env.ALERT_SUSTAIN_SAMPLES || 2));
+// 采样窗口判定（S1/F1）：窗口内「超限样本占比 ≥ 触发比例」才触发/恢复。
+// - 默认：窗口 5 个采样、触发比例 0.7（对齐 nezha「70% 采样点」语义）。
+// - 兼容：显式设置 ALERT_SUSTAIN_SAMPLES=N 时退回旧行为（窗口 N、比例 1.0
+//   = 连续 N 次全超限），零重命名风险。
+// - known 语义：缺数据（null/undefined）样本直接排除；已知样本 < 2 本轮不判定
+//   —— 对齐 nezha known=false：缺数据既不触发也不恢复。
+const LEGACY_SUSTAIN_MODE = process.env.ALERT_SUSTAIN_SAMPLES !== undefined
+  && process.env.ALERT_SUSTAIN_SAMPLES !== '';
+const WINDOW_SAMPLES = LEGACY_SUSTAIN_MODE
+  ? Math.max(1, Math.min(20, Math.floor(Number(process.env.ALERT_SUSTAIN_SAMPLES) || 2)))
+  : Math.max(2, Math.min(20, Math.floor(Number(process.env.ALERT_WINDOW_SAMPLES) || 5)));
+const TRIGGER_RATIO = LEGACY_SUSTAIN_MODE
+  ? 1
+  : Math.min(1, Math.max(0.1, Number(process.env.ALERT_TRIGGER_RATIO) || 0.7));
+const MIN_KNOWN_SAMPLES = Math.min(WINDOW_SAMPLES, 2);
+
+// 上线通知宽限期（S1/F1）：离线超过该秒数后重连才发「已上线」，防抖动刷屏；0 = 关闭。
+const ONLINE_GRACE_SEC = Math.max(0, Number(process.env.ONLINE_NOTIFY_GRACE_SEC || 180));
+// 内存态离线起点：agent_id -> 首次观测到离线的时刻。
+// 进程重启后为空——首个检查轮只会记录起点，不会误发上线通知。
+const OFFLINE_SINCE = new Map();
+
+// 阈值解析链（S1/F1）：节点覆盖 > 分组覆盖 > 全局（UI/env/默认），字段独立继承。
+// ctx 可传入预取的 Map（groupCache/nodeCache），避免逐节点重复查询。
+function resolveAgentThresholds(a, ctx) {
+  // ctx.global 可由调用方预取（批量场景下一次解析，避免逐节点重复读配置）
+  const global = (ctx && ctx.global) || db.resolveAlertThresholds();
+  const grp = (a && a.grp) || '';
+  const groupCache = ctx && ctx.groupCache;
+  const nodeCache = ctx && ctx.nodeCache;
+  const gr = groupCache ? (groupCache.get(grp) || null) : db.getGroupAlertOverride(grp);
+  const node = nodeCache ? (nodeCache.get(a.id) || null) : db.getAlertOverride(a.id);
+  const pick = (key, fallback) => {
+    if (node && node[key] !== null && node[key] !== undefined) return node[key];
+    if (gr && gr[key] !== null && gr[key] !== undefined) return gr[key];
+    return fallback;
+  };
+  const cooldownEnv = Number(process.env.ALERT_COOLDOWN_SEC || 1800);
+  return {
+    offlineSec: pick('offline_sec', global.offline_sec),
+    cpuAlert: pick('cpu_pct', global.cpu_pct),
+    memAlert: pick('mem_pct', global.mem_pct),
+    diskAlert: pick('disk_pct', global.disk_pct),
+    tempAlert: pick('temp_c', global.temp_c),
+    cooldown: pick('cooldown', cooldownEnv),
+    // 静音并集语义：节点或分组任一 muted=1 即静音指标类告警；
+    // 经营告警（离线/上线/到期/配额/流量不可信）不受 muted 影响。
+    muted: !!(node && node.muted) || !!(gr && gr.muted)
+  };
+}
 
 // 邮件通道：从「设置中心 / 环境变量」读取。审查 D3/C-5：transport 按配置指纹
 // 缓存复用（此前每次发送都 createTransport），并显式设置连接/问候/socket 三类
@@ -124,48 +171,71 @@ async function alertThreshold(agent, type, msg, now, cooldown) {
 }
 
 // 单个 agent 的检查。返回 Promise（可能为空）。
+// cfg 可显式传入（测试/回放路径，兼容旧签名）；省略时按「节点 > 分组 > 全局」解析。
+// ctx 为预取的覆盖表 Map（见 check()），仅在没有显式 cfg 时生效。
 // 注意：db.setAlertState 必须在 await sendAlert 之前同步写入 —— better-sqlite3 为同步 API，
 // 这样即便定时任务重入也不会重复发信（冷却窗口已在此点生效）。
-function checkAgent(a, now, cfg) {
+function checkAgent(a, now, cfg, ctx) {
   try {
-    const online = a.last_seen && (now - a.last_seen) < cfg.offlineSec * 1000;
+    const c = cfg || resolveAgentThresholds(a, ctx);
+    const online = a.last_seen && (now - a.last_seen) < c.offlineSec * 1000;
     if (!online) {
+      // 记录离线起点（内存态）：供上线通知的宽限期判定。
+      if (!OFFLINE_SINCE.has(a.id)) OFFLINE_SINCE.set(a.id, now);
       const st = db.getAlertState(a.id, 'offline');
-      if (!st || now - st.last_sent > cfg.cooldown * 1000) {
-        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${cfg.offlineSec}s 未上报，可能已宕机或断网。`);
+      if (!st || now - st.last_sent > c.cooldown * 1000) {
+        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${c.offlineSec}s 未上报，可能已宕机或断网。`);
       }
       return null;
     }
     // recovered -> allow future offline alerts
     db.clearAlertState(a.id, 'offline');
-    const m = db.getLatestMetric(a.id);
-    if (!m) return null;
-    // 审查 E1：连续 N 个采样超限才触发（单样本 spike 不报），恢复同样需连续
-    // 确认，并补"已恢复"通知——此前 cpu/mem 的 alert state 从不清理，指标降回
-    // 正常后无任何感知，且下次超阈会被旧 state 的冷却压住。
-    const recent = db.getRecentMetrics(a.id, SUSTAIN_N);
     const jobs = [];
+    // 上线通知（S1/F1）：离线时长 ≥ 宽限期才发，防抖动刷屏；不受 muted 压制。
+    const offlineSince = OFFLINE_SINCE.get(a.id);
+    if (offlineSince !== undefined) {
+      OFFLINE_SINCE.delete(a.id);
+      const offlineSec = Math.round((now - offlineSince) / 1000);
+      if (ONLINE_GRACE_SEC > 0 && offlineSec >= ONLINE_GRACE_SEC) {
+        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`));
+      }
+    }
+    const m = db.getLatestMetric(a.id);
+    if (!m) return jobs.length ? Promise.allSettled(jobs) : null;
+    // 采样窗口判定（S1/F1）：recent 为 DESC（新→旧），反转为 ASC 后
+    // 最后一个元素才是「当前」样本（旧实现 vals[length-1] 实为最旧样本）。
+    const windowRows = db.getRecentMetrics(a.id, WINDOW_SAMPLES);
     const checkMetric = (type, field, limit, unit, label) => {
-      const vals = recent.map((r) => r[field]).filter((v) => typeof v === 'number');
-      if (vals.length < SUSTAIN_N) return; // 样本不足：本轮不判定（宁可不报，不可误报）
-      const newest = vals.slice(-SUSTAIN_N);
+      // 指标类静音：muted 只压制 cpu/mem/disk/temp，经营告警永不静音。
+      if (c.muted) return;
+      const vals = windowRows.slice().reverse()
+        .map((r) => ({ v: r[field], known: typeof r[field] === 'number' }))
+        .filter((s) => s.known)
+        .map((s) => s.v);
+      // known 语义：缺数据样本排除；已知样本不足 2 个 → 本轮不判定（不触发也不恢复）。
+      if (vals.length < MIN_KNOWN_SAMPLES) return;
+      const exceed = vals.filter((v) => v >= limit).length;
+      const below = vals.length - exceed;
+      const cur = vals[vals.length - 1];
       const st = db.getAlertState(a.id, type);
-      if (newest.every((v) => v >= limit)) {
-        if (!st || now - st.last_sent > cfg.cooldown * 1000) {
-          const cur = vals[vals.length - 1];
-          jobs.push(alertThreshold(a, type, `${label} 连续 ${SUSTAIN_N} 个采样 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`, now, cfg.cooldown));
+      if (exceed / vals.length >= TRIGGER_RATIO) {
+        if (!st || now - st.last_sent > c.cooldown * 1000) {
+          const detail = LEGACY_SUSTAIN_MODE
+            ? `连续 ${vals.length} 个采样 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`
+            : `${vals.length} 个采样中 ${exceed} 个 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`;
+          jobs.push(alertThreshold(a, type, `${label} ${detail}`, now, c.cooldown));
         }
-      } else if (st && newest.every((v) => v < limit)) {
+      } else if (st && below / vals.length >= TRIGGER_RATIO) {
         // 持续低于阈值：发一次"已恢复"并清状态（清除后不会重复发送）
         db.clearAlertState(a.id, type);
-        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已连续 ${SUSTAIN_N} 个采样低于 ${limit}${unit}。`));
+        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`));
       }
     };
-    checkMetric('cpu', 'cpu', cfg.cpuAlert, '%', 'CPU');
-    checkMetric('mem', 'mem_pct', cfg.memAlert, '%', '内存');
+    checkMetric('cpu', 'cpu', c.cpuAlert, '%', 'CPU');
+    checkMetric('mem', 'mem_pct', c.memAlert, '%', '内存');
     // 审查 E6：补磁盘/温度告警（disk_pct/temp 一直采集，此前无规则）
-    checkMetric('disk', 'disk_pct', cfg.diskAlert, '%', '磁盘');
-    checkMetric('temp', 'temp', cfg.tempAlert, '°C', '温度');
+    checkMetric('disk', 'disk_pct', c.diskAlert, '%', '磁盘');
+    checkMetric('temp', 'temp', c.tempAlert, '°C', '温度');
     return Promise.allSettled(jobs);
   } catch (e) {
     // 单个 agent 异常（如 DB 读取失败）不应中断其余 agent 的告警检查
@@ -189,22 +259,19 @@ async function check() {
     // 待确认 agent 尚未获准上报，不参与告警（审查 G4，否则被误判"离线"刷误报）
     const agents = db.getMonitoredAgents();
     const now = Date.now();
-    // 审查 C-1/E2：阈值单一取值（UI 显式值 > env > 默认）。
-    // 此前直接读 getUiSettings().alert——其嵌套合并使默认值恒真，env 分支不可达，
-    // 导致看板（直读 env）与告警（UI 默认）对"在线"的判断不一致、平稳期误报离线。
-    const t = db.resolveAlertThresholds();
-    const cfg = {
-      offlineSec: t.offline_sec,
-      cpuAlert: t.cpu_pct,
-      memAlert: t.mem_pct,
-      diskAlert: t.disk_pct,
-      tempAlert: t.temp_c,
-      cooldown: Number(process.env.ALERT_COOLDOWN_SEC || 1800)
+    // S1/F1：覆盖表一次预取，避免逐节点 N×2 查询；阈值解析链在 checkAgent 内完成。
+    const ctx = {
+      global: db.resolveAlertThresholds(),
+      groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
+      nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
     };
+    // 清理已删除节点的内存离线起点，防 Map 无界增长。
+    const alive = new Set(agents.map((a) => a.id));
+    for (const k of OFFLINE_SINCE.keys()) if (!alive.has(k)) OFFLINE_SINCE.delete(k);
     // 限并发而非全并发：SMTP 普遍有速率/连接限制，100 台同时离线时一次性并发易被拒收。
     const CONCURRENCY = Math.max(1, Number(process.env.ALERT_CONCURRENCY || 8));
     for (let i = 0; i < agents.length; i += CONCURRENCY) {
-      await Promise.allSettled(agents.slice(i, i + CONCURRENCY).map((a) => checkAgent(a, now, cfg)));
+      await Promise.allSettled(agents.slice(i, i + CONCURRENCY).map((a) => checkAgent(a, now, null, ctx)));
     }
     console.log(`[alerts] check done: ${agents.length} agents in ${Date.now() - t0}ms`);
     return true;
@@ -361,4 +428,13 @@ function stop() { if (timer) clearInterval(timer); if (dailyTimer) clearInterval
 
 // 导出 check / checkAgent：便于单测与手动排查（此前未导出，只能靠定时触发观察）。
 // checkAgent 供 E1（连续 N 采样 / 恢复通知）与 E6（disk/temp 告警）的回归断言直接驱动。
-module.exports = { start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota };
+module.exports = {
+  start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota,
+  resolveAgentThresholds,
+  // 供测试断言窗口配置（S1/F1）
+  getAlertWindowConfig: () => ({
+    window: WINDOW_SAMPLES,
+    ratio: TRIGGER_RATIO,
+    legacy: LEGACY_SUSTAIN_MODE
+  })
+};

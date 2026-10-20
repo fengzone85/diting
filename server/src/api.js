@@ -330,21 +330,84 @@ router.post('/agents/:id/approve', adminOnly, asyncHandler(async (req, res) => {
 
 // ---- Admin: list agents + latest metric + online status ----
 router.get('/agents', adminOrReadonly, (req, res) => {
-  const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
+  // S1/F1：在线判定与告警同源——按「节点 > 分组 > 全局」解析 offlineSec，
+  // 避免出现「看板显示在线、告警判离线」的双源分裂（历史审查 C-1/E2 同类问题）。
+  const ctx = {
+    global: db.resolveAlertThresholds(),
+    groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
+    nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
+  };
   const list = db.getAgents().map((a) => {
     const latest = db.getLatestMetric(a.id);
-    const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
+    const eff = alerts.resolveAgentThresholds(a, ctx);
+    const online = a.last_seen && (now - a.last_seen) < eff.offlineSec * 1000;
     const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
     return Object.assign({}, a, {
       group: a.grp || '',
       online: !!online,
       has_counter: db.hasTrafficCounter(a.id),
       latest: latestOut,
-      hostname: shortHost(a.hostname)
+      hostname: shortHost(a.hostname),
+      alert: {
+        effective: {
+          offline_sec: eff.offlineSec,
+          cpu_pct: eff.cpuAlert,
+          mem_pct: eff.memAlert,
+          disk_pct: eff.diskAlert,
+          temp_c: eff.tempAlert,
+          cooldown: eff.cooldown
+        },
+        overridden: ctx.nodeCache.has(a.id),
+        muted: eff.muted
+      }
     });
   });
   res.json(list);
+});
+
+// ---- Admin: 告警规则覆盖（S1/F1）----
+// 语义：NULL/缺省 = 继承上层；PUT 为部分更新（body 中出现的键才覆盖，
+// 显式 null 清除该字段回退上层）；DELETE 删除整行（全部回退）。
+// 分组路径参数用 '-' 表示未分组默认组（空字符串无法作为路径段）。
+const alertGroupKey = (raw) => (raw === '-' ? '' : String(raw || '').slice(0, 64));
+
+router.get('/admin/alert-rules', adminOrReadonly, (req, res) => {
+  res.json({
+    global: db.resolveAlertThresholds(),
+    groups: db.listGroupAlertOverrides(),
+    agents: db.listAlertOverrides()
+  });
+});
+
+router.put('/admin/alert-rules/agent/:id', adminOnly, (req, res) => {
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  const body = req.body || {};
+  const override = db.upsertAlertOverride(a.id, body);
+  auditLog(req, 'alert_rule_update', `scope=agent id=${a.id} fields=${Object.keys(body).sort().join(',')}`);
+  res.json({ ok: true, override });
+});
+
+router.delete('/admin/alert-rules/agent/:id', adminOnly, (req, res) => {
+  const ok = db.deleteAlertOverride(req.params.id);
+  auditLog(req, 'alert_rule_reset', `scope=agent id=${req.params.id}`);
+  res.json({ ok, id: req.params.id });
+});
+
+router.put('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
+  const grp = alertGroupKey(req.params.grp);
+  const body = req.body || {};
+  const override = db.upsertGroupAlertOverride(grp, body);
+  auditLog(req, 'alert_rule_update', `scope=group grp=${grp || '(default)'} fields=${Object.keys(body).sort().join(',')}`);
+  res.json({ ok: true, override });
+});
+
+router.delete('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
+  const grp = alertGroupKey(req.params.grp);
+  const ok = db.deleteGroupAlertOverride(grp);
+  auditLog(req, 'alert_rule_reset', `scope=group grp=${grp || '(default)'}`);
+  res.json({ ok, grp });
 });
 
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----

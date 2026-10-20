@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -41,6 +41,24 @@ export const adminApi = {
   getCommands: (id: string, probeTargets?: string) =>
     api.get<{ id: string; probe_targets: string; install: InstallCommands; modify: ModifyCommands }>(
       `/api/agents/${encodeURIComponent(id)}/commands${probeTargets ? `?probe_targets=${encodeURIComponent(probeTargets)}` : ''}`
+    ),
+
+  // S1/F1：告警规则覆盖（节点/分组）。NULL = 继承上层；DELETE = 整行回退。
+  // 分组路径参数用 '-' 表示未分组默认组（空字符串无法作为路径段）。
+  listAlertRules: () => api.get<AlertRules>('/api/admin/alert-rules'),
+  setAgentAlertRule: (id: string, payload: AlertOverrideInput) =>
+    api.put<{ ok: boolean; override: AlertOverride }>(
+      `/api/admin/alert-rules/agent/${encodeURIComponent(id)}`, payload
+    ),
+  resetAgentAlertRule: (id: string) =>
+    api.del<{ ok: boolean; id: string }>(`/api/admin/alert-rules/agent/${encodeURIComponent(id)}`),
+  setGroupAlertRule: (grp: string, payload: AlertOverrideInput) =>
+    api.put<{ ok: boolean; override: AlertOverride }>(
+      `/api/admin/alert-rules/group/${encodeURIComponent(grp === '' ? '-' : grp)}`, payload
+    ),
+  resetGroupAlertRule: (grp: string) =>
+    api.del<{ ok: boolean; grp: string }>(
+      `/api/admin/alert-rules/group/${encodeURIComponent(grp === '' ? '-' : grp)}`
     ),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
 

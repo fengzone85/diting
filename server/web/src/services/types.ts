@@ -74,6 +74,47 @@ export interface Agent {
   auto_renewal?: boolean;
   probe_targets?: string;
   created_at?: string;
+  // S1/F1：告警规则解析结果（服务端下发，前端只渲染不重算）
+  alert?: {
+    effective: AlertThresholds;
+    overridden: boolean;
+    muted: boolean;
+  };
+}
+
+// ---- S1/F1 告警规则覆盖 ----
+export interface AlertThresholds {
+  offline_sec: number;
+  cpu_pct: number;
+  mem_pct: number;
+  disk_pct: number;
+  temp_c: number;
+  cooldown: number;
+}
+// 覆盖行：字段为 null 表示继承上层（分组 > 全局）；muted 为 0/1
+export interface AlertOverride {
+  offline_sec: number | null;
+  cpu_pct: number | null;
+  mem_pct: number | null;
+  disk_pct: number | null;
+  temp_c: number | null;
+  cooldown: number | null;
+  muted: number;
+  updated_at?: number;
+}
+export interface AlertOverrideInput {
+  offline_sec?: number | null;
+  cpu_pct?: number | null;
+  mem_pct?: number | null;
+  disk_pct?: number | null;
+  temp_c?: number | null;
+  cooldown?: number | null;
+  muted?: boolean;
+}
+export interface AlertRules {
+  global: AlertThresholds;
+  groups: (AlertOverride & { grp: string })[];
+  agents: (AlertOverride & { agent_id: string })[];
 }
 
 export interface Overview {

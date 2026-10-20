@@ -30,6 +30,10 @@ description: 服务端与受控端环境变量参考
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | `90` | CPU / 内存告警阈值（%） |
 | `ALERT_COOLDOWN_SEC` | 否 | `1800` | 告警冷却时间（秒） |
+| `ALERT_WINDOW_SAMPLES` | 否 | `5` | 告警采样窗口（2–20）：窗口内超限占比达到比例才触发/恢复 |
+| `ALERT_TRIGGER_RATIO` | 否 | `0.7` | 触发/恢复比例（0.1–1.0）；与窗口共同决定「持续多久算异常」 |
+| `ALERT_SUSTAIN_SAMPLES` | 否 | — | **兼容开关**：显式设置时退回旧行为（窗口=N、比例=1.0，即连续 N 次全超限） |
+| `ONLINE_NOTIFY_GRACE_SEC` | 否 | `180` | 离线超过该秒数后重连才发「已上线」通知；`0` = 关闭上线通知 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | 否 | `smtp.qq.com` / `465` / `true` | 告警邮件 SMTP |
 | `SMTP_USER` / `SMTP_PASS` | 否 | — | SMTP 用户名 / 密码（QQ 邮箱用授权码） |
 | `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |
