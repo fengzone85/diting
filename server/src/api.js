@@ -417,6 +417,81 @@ router.delete('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
   res.json({ ok, grp });
 });
 
+// ---- Admin: API Token 管理（S2/F5）----
+// 明文仅在创建响应中出现一次，库中只存 SHA-256；列表接口不回显哈希。
+// agent_ids=[] 表示不限节点；非空时该 Token 只能访问白名单内的节点（见 auth.agentScope）。
+//
+// 注意：本组接口对「自身已受限」的 Token 一律拒绝（forbidden_scope）。否则一个
+// agent_ids=[A] 的 admin Token 只要再签发一个 agent_ids=[] 的 Token，就能绕过
+// S2/F5 的节点边界实现越权——这是必须堵住的提权路径。
+const API_TOKEN_SCOPES = ['readonly', 'admin'];
+
+function parseAgentIds(raw) {
+  if (raw === undefined || raw === null) return { ids: [] };
+  if (!Array.isArray(raw)) return { error: 'invalid agent_ids' };
+  const ids = Array.from(new Set(raw.map((x) => String(x).trim()).filter(Boolean))).slice(0, 500);
+  for (const id of ids) {
+    if (!db.getAgent(id)) return { error: 'unknown_agent_id' };
+  }
+  return { ids };
+}
+
+router.get('/admin/api-tokens', adminOnly, agentScope, (req, res) => {
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
+  res.json({ list: db.listApiTokens() });
+});
+
+router.post('/admin/api-tokens', adminOnly, agentScope, (req, res) => {
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
+  const body = req.body || {};
+  const name = str(body.name, 64);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  // 缺省最小权限（readonly）；非法值直接报错，避免静默降级成用户没预期的 scope。
+  const scope = body.scope === undefined ? 'readonly' : String(body.scope);
+  if (!API_TOKEN_SCOPES.includes(scope)) return res.status(400).json({ error: 'invalid_scope' });
+  const parsed = parseAgentIds(body.agent_ids);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  let expiresAt = 0;
+  if (body.expires_in_days !== undefined && body.expires_in_days !== null && body.expires_in_days !== '') {
+    const days = Number(body.expires_in_days);
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      return res.status(400).json({ error: 'invalid_expires_in_days' });
+    }
+    expiresAt = Date.now() + days * 86400000;
+  }
+  const created = db.createApiToken({
+    name,
+    scope,
+    agentIds: parsed.ids,
+    expiresAt,
+    createdBy: req.auth && req.auth.via ? String(req.auth.via).slice(0, 64) : ''
+  });
+  auditLog(req, 'api_token_create', `id=${created.id} name=${name} scope=${scope} agents=${parsed.ids.length || 'all'}`);
+  res.json({
+    id: created.id,
+    name,
+    scope,
+    agent_ids: parsed.ids,
+    expires_at: expiresAt,
+    token: created.token,
+    notice: '明文只返回这一次，请立即保存；丢失只能吊销后重建'
+  });
+});
+
+router.delete('/admin/api-tokens/:id', adminOnly, agentScope, (req, res) => {
+  if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
+  const id = String(req.params.id || '');
+  // 不存在或已吊销统一 404：UPDATE 对「已 revoked」的行同样算命中，
+  // 不先查状态会让重复吊销返回 200，掩盖调用方拼错了 id 的情况。
+  const tok = db.getApiToken(id);
+  if (!tok || tok.revoked) return res.status(404).json({ error: 'not found' });
+  // 吊销即时生效：resolveRole 每次请求都校验 revoked 标记。
+  const ok = db.revokeApiToken(id);
+  if (!ok) return res.status(404).json({ error: 'not found' });
+  auditLog(req, 'api_token_revoke', `id=${id}`);
+  res.json({ ok: true, id });
+});
+
 // ---- Admin: batch sparkline history for all agents (avoids N+1 on the frontend) ----
 router.get('/agents/sparklines', adminOrReadonly, agentScope, asyncHandler(async (req, res) => {
   const range = req.query.range;

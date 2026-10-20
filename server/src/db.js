@@ -460,6 +460,7 @@ const stmts = {
     (id, name, token_hash, scope, agent_ids, expires_at, created_at, created_by)
     VALUES (@id, @name, @token_hash, @scope, @agent_ids, @expires_at, @created_at, @created_by)`),
   getApiTokenByHash: db.prepare('SELECT * FROM api_tokens WHERE token_hash=?'),
+  getApiTokenById: db.prepare('SELECT * FROM api_tokens WHERE id=?'),
   listApiTokens: db.prepare('SELECT * FROM api_tokens ORDER BY created_at DESC'),
   touchApiToken: db.prepare('UPDATE api_tokens SET last_used_at=?, last_used_ip=? WHERE id=?'),
   revokeApiToken: db.prepare('UPDATE api_tokens SET revoked=1 WHERE id=?'),
@@ -944,6 +945,10 @@ function createApiToken(input) {
 
 const findApiTokenByHash = (hash) => {
   const r = stmts.getApiTokenByHash.get(hash);
+  return r ? apiTokenOut(r) : null;
+};
+const getApiToken = (id) => {
+  const r = stmts.getApiTokenById.get(id);
   return r ? apiTokenOut(r) : null;
 };
 const listApiTokens = () => stmts.listApiTokens.all().map(apiTokenOut);
@@ -1440,7 +1445,7 @@ module.exports = {
   listNotifyChannels, getNotifyChannel, createNotifyChannel, updateNotifyChannel, deleteNotifyChannel,
   listNotifyGroups, getNotifyGroup, createNotifyGroup, updateNotifyGroup, deleteNotifyGroup,
   listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
-  createApiToken, findApiTokenByHash, listApiTokens, revokeApiToken, touchApiToken,
+  createApiToken, findApiTokenByHash, getApiToken, listApiTokens, revokeApiToken, touchApiToken,
   createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, pruneSessions, touchSession,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
