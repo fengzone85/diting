@@ -2,6 +2,36 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-20 通用 Webhook 通知渠道 + 通知组（S1-F2）
+
+### ⚠️ 行为变更
+
+- **通知投递改为「通知组 × 事件」路由**：新增 `notify_channels` / `notify_groups` /
+  `notify_group_channels` 三表，启动时幂等种子化（mail/telegram 内置渠道 + `default`
+  组订阅 `*`）。升级后默认行为与旧版一致，无需配置迁移。
+- **新增通用 Webhook 渠道**：支持 URL / GET-POST / JSON-Form / 自定义头 / 请求体模板
+  （`{{title}} {{message}} {{event}} {{agent}} {{agent_id}} {{time}} {{emoji}}`，
+  JSON 值自动转义），可对接钉钉/飞书/企业微信/Bark/Server酱等。
+- **出站安全默认收紧**：Webhook 仅允许 `https://` 且目标解析地址不得为私网/回环/
+  链路本地/保留段（含 `169.254.169.254` 云元数据），禁重定向，禁止覆盖
+  `Host`/`Content-Length`/`Connection`/`Transfer-Encoding` 等头。内网自托管接收端需显式
+  `ALLOW_PRIVATE_WEBHOOK=1`（明文 http 另需 `ALLOW_INSECURE_WEBHOOK=1`）。
+- **恢复通知与指标同组**：CPU/内存/磁盘/温度恢复使用对应指标事件（不设独立
+  `recovery` 事件），避免 `*` 组对同一次恢复重复投递。
+- **测试告警语义**：`POST /api/test-alert` 经通知组路由，任一启用通道（邮件 / Telegram /
+  Webhook）即可；全部通道失败返回 `502`（此前恒 `200`）。
+- **AI 日报通道判定**：`notifyStatus()` 现同时统计启用 Webhook；仅有 Webhook 时日报也会发送。
+
+### 说明
+
+- 内置 mail/telegram 渠道的凭据仍存 `notify_config`（单一事实源），渠道行只承载启用开关；
+  管理端渠道表对内置渠道仅开放启用/禁用与测试。
+- 同一 `(agent, event)` 的告警→恢复串行投递并保证顺序，链完成即清理（内存有界）。
+- 单通道失败隔离：一个渠道 5xx/超时不影响同组其它渠道；全失败才回滚告警态。
+- 新增 env：`NOTIFY_CONCURRENCY`（默认 8）、`ALLOW_PRIVATE_WEBHOOK`、
+  `ALLOW_INSECURE_WEBHOOK`。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F2。
+
 ## 2026-10-19 告警规则精细化：节点/分组覆盖 + 采样窗口 + 上线通知（S1-F1）
 
 ### ⚠️ 行为变更

@@ -6,6 +6,7 @@ import { t } from '../../composables/useI18n';
 import type { Settings, BackupFile, AlertThresholds, AlertOverride } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
+import NotifyPanel from '../../components/admin/NotifyPanel.vue';
 
 interface ThemeOption {
   id: string;
@@ -512,6 +513,9 @@ async function resetGroupAlert() {
         <FormInput v-model="local.notify.alert_to" :label="t('settings.alertTo')" />
         <FormInput v-model="local.notify.telegram_bot_token" label="Telegram Bot Token" />
         <FormInput v-model="local.notify.telegram_chat_id" label="Telegram Chat ID" />
+
+        <!-- S1/F2：通知渠道（Webhook）与通知组 -->
+        <NotifyPanel />
 
         <h2 class="mb-4 mt-8 text-lg font-semibold">{{ t('settings.socialLinks') }}</h2>
         <FormInput v-model="local.ui.social_email" :label="t('footer.email')" />

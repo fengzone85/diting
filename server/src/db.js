@@ -104,6 +104,38 @@ CREATE TABLE IF NOT EXISTS alert_group_overrides (
   updated_at  INTEGER NOT NULL
 );
 
+-- S1/F2 通知渠道：type ∈ mail|telegram|webhook。
+-- 内置 mail/telegram 的凭据仍存 admin_config.notify_config（单一事实源，避免双写漂移），
+-- 本表只承载启用开关与展示名；webhook 的 URL/方法/头/模板存 config JSON。
+CREATE TABLE IF NOT EXISTS notify_channels (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  type       TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  enabled    INTEGER DEFAULT 1,
+  config     TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(type, name)
+);
+
+-- S1/F2 通知组：events 为 JSON 数组（['*'] = 全部事件）；enabled 关闭后整组不投递。
+CREATE TABLE IF NOT EXISTS notify_groups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE,
+  events     TEXT NOT NULL DEFAULT '[]',
+  enabled    INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- 组与渠道多对多。刻意不声明外键（本库未启用 foreign_keys），删除时由函数显式清理。
+CREATE TABLE IF NOT EXISTS notify_group_channels (
+  group_id   INTEGER NOT NULL,
+  channel_id INTEGER NOT NULL,
+  PRIMARY KEY (group_id, channel_id)
+);
+CREATE INDEX IF NOT EXISTS idx_group_channels_channel ON notify_group_channels(channel_id);
+
 -- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
 CREATE TABLE IF NOT EXISTS traffic_state (
   agent_id    TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
@@ -368,6 +400,31 @@ const stmts = {
     ON CONFLICT(grp) DO UPDATE SET
       offline_sec=@offline_sec, cpu_pct=@cpu_pct, mem_pct=@mem_pct, disk_pct=@disk_pct,
       temp_c=@temp_c, cooldown=@cooldown, muted=@muted, updated_at=@updated_at`),
+  // ---- 通知渠道/通知组（S1/F2）----
+  insertChannelIfAbsent: db.prepare(`INSERT OR IGNORE INTO notify_channels
+    (type, name, enabled, config, created_at, updated_at) VALUES (?,?,1,'{}',?,?)`),
+  insertNotifyChannel: db.prepare(`INSERT INTO notify_channels
+    (type, name, enabled, config, created_at, updated_at) VALUES (@type, @name, @enabled, @config, @created_at, @updated_at)`),
+  getNotifyChannel: db.prepare('SELECT * FROM notify_channels WHERE id=?'),
+  listNotifyChannels: db.prepare('SELECT * FROM notify_channels ORDER BY id'),
+  updateNotifyChannel: db.prepare(`UPDATE notify_channels
+    SET name=@name, enabled=@enabled, config=@config, updated_at=@updated_at WHERE id=@id`),
+  deleteNotifyChannel: db.prepare('DELETE FROM notify_channels WHERE id=?'),
+  countNotifyGroups: db.prepare('SELECT COUNT(*) AS n FROM notify_groups'),
+  insertNotifyGroup: db.prepare(`INSERT INTO notify_groups
+    (name, events, enabled, created_at, updated_at) VALUES (@name, @events, @enabled, @created_at, @updated_at)`),
+  getNotifyGroup: db.prepare('SELECT * FROM notify_groups WHERE id=?'),
+  listNotifyGroups: db.prepare('SELECT * FROM notify_groups ORDER BY id'),
+  updateNotifyGroup: db.prepare(`UPDATE notify_groups
+    SET name=@name, events=@events, enabled=@enabled, updated_at=@updated_at WHERE id=@id`),
+  deleteNotifyGroup: db.prepare('DELETE FROM notify_groups WHERE id=?'),
+  listEnabledGroupsForEvent: db.prepare('SELECT * FROM notify_groups WHERE enabled=1'),
+  bindGroupChannel: db.prepare('INSERT OR IGNORE INTO notify_group_channels (group_id, channel_id) VALUES (?,?)'),
+  clearGroupChannels: db.prepare('DELETE FROM notify_group_channels WHERE group_id=?'),
+  deleteGroupChannelByChannel: db.prepare('DELETE FROM notify_group_channels WHERE channel_id=?'),
+  listGroupChannelIds: db.prepare('SELECT channel_id FROM notify_group_channels WHERE group_id=?'),
+  listGroupChannelRows: db.prepare(`SELECT g.group_id, g.channel_id FROM notify_group_channels g
+    JOIN notify_channels c ON c.id=g.channel_id WHERE c.enabled=1`),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
@@ -649,6 +706,155 @@ const deleteAlertOverride = (agentId) => stmts.deleteAlertOverride.run(agentId).
 const getGroupAlertOverride = (grp) => stmts.getGroupAlertOverride.get(grp || '') || null;
 const listGroupAlertOverrides = () => stmts.listGroupAlertOverrides.all();
 const deleteGroupAlertOverride = (grp) => stmts.deleteGroupAlertOverride.run(grp || '').changes > 0;
+
+// ---- 通知渠道/通知组（S1/F2）----------------------------------------------
+function channelOut(r) {
+  let config = {};
+  try { config = JSON.parse(r.config || '{}'); } catch (e) { config = {}; }
+  return {
+    id: r.id,
+    type: r.type,
+    name: r.name,
+    enabled: !!r.enabled,
+    config,
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  };
+}
+
+const listNotifyChannels = () => stmts.listNotifyChannels.all().map(channelOut);
+const getNotifyChannel = (id) => {
+  const r = stmts.getNotifyChannel.get(Number(id));
+  return r ? channelOut(r) : null;
+};
+
+function createNotifyChannel(input) {
+  const now = Date.now();
+  const r = stmts.insertNotifyChannel.run({
+    type: input.type,
+    name: input.name,
+    enabled: input.enabled === false ? 0 : 1,
+    config: JSON.stringify(input.config || {}),
+    created_at: now,
+    updated_at: now
+  });
+  return getNotifyChannel(Number(r.lastInsertRowid));
+}
+
+function updateNotifyChannel(id, patch) {
+  const cur = getNotifyChannel(id);
+  if (!cur) return null;
+  stmts.updateNotifyChannel.run({
+    id: Number(id),
+    name: patch.name !== undefined ? String(patch.name) : cur.name,
+    enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (cur.enabled ? 1 : 0),
+    config: patch.config !== undefined ? JSON.stringify(patch.config) : JSON.stringify(cur.config),
+    updated_at: Date.now()
+  });
+  return getNotifyChannel(id);
+}
+
+function deleteNotifyChannel(id) {
+  stmts.deleteGroupChannelByChannel.run(Number(id));
+  return stmts.deleteNotifyChannel.run(Number(id)).changes > 0;
+}
+
+function groupOut(g) {
+  let events = [];
+  try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+  return {
+    id: g.id,
+    name: g.name,
+    enabled: !!g.enabled,
+    events,
+    channel_ids: stmts.listGroupChannelIds.all(g.id).map((r) => r.channel_id),
+    created_at: g.created_at,
+    updated_at: g.updated_at
+  };
+}
+
+const listNotifyGroups = () => stmts.listNotifyGroups.all().map(groupOut);
+const getNotifyGroup = (id) => {
+  const g = stmts.getNotifyGroup.get(Number(id));
+  return g ? groupOut(g) : null;
+};
+
+function replaceGroupChannels(groupId, channelIds) {
+  stmts.clearGroupChannels.run(groupId);
+  for (const cid of channelIds || []) stmts.bindGroupChannel.run(groupId, Number(cid));
+}
+
+function createNotifyGroup(input) {
+  const now = Date.now();
+  const r = stmts.insertNotifyGroup.run({
+    name: input.name,
+    events: JSON.stringify(input.events || []),
+    enabled: input.enabled === false ? 0 : 1,
+    created_at: now,
+    updated_at: now
+  });
+  const id = Number(r.lastInsertRowid);
+  replaceGroupChannels(id, input.channel_ids);
+  return getNotifyGroup(id);
+}
+
+function updateNotifyGroup(id, patch) {
+  const cur = getNotifyGroup(id);
+  if (!cur) return null;
+  stmts.updateNotifyGroup.run({
+    id: Number(id),
+    name: patch.name !== undefined ? String(patch.name) : cur.name,
+    events: patch.events !== undefined ? JSON.stringify(patch.events) : JSON.stringify(cur.events),
+    enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (cur.enabled ? 1 : 0),
+    updated_at: Date.now()
+  });
+  if (patch.channel_ids !== undefined) replaceGroupChannels(Number(id), patch.channel_ids);
+  return getNotifyGroup(id);
+}
+
+function deleteNotifyGroup(id) {
+  stmts.clearGroupChannels.run(Number(id));
+  return stmts.deleteNotifyGroup.run(Number(id)).changes > 0;
+}
+
+// 投递用：启用组中订阅了 event（或 '*'）的所有启用渠道，按 channel_id 去重。
+// 每次调用直接查库（不做缓存）——配置修改即时生效，规模（组/渠道个位数）下开销可忽略。
+function listEnabledChannelsForEvent(event) {
+  const groupIds = new Set();
+  for (const g of stmts.listEnabledGroupsForEvent.all()) {
+    let events = [];
+    try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+    if (events.includes('*') || events.includes(event)) groupIds.add(g.id);
+  }
+  if (!groupIds.size) return [];
+  const channelIds = new Set();
+  for (const row of stmts.listGroupChannelRows.all()) {
+    if (groupIds.has(row.group_id)) channelIds.add(row.channel_id);
+  }
+  if (!channelIds.size) return [];
+  return stmts.listNotifyChannels.all().map(channelOut).filter((c) => c.enabled && channelIds.has(c.id));
+}
+
+// ---- S1/F2：通知种子迁移（幂等）----
+// 任何 require 本模块的入口（server/测试/CLI）都会执行。UNIQUE(type,name) +
+// INSERT OR IGNORE 保证重复启动不重复插；仅当 notify_groups 为空时建默认组。
+function initNotifyMigrationIfNeeded() {
+  try {
+    const now = Date.now();
+    stmts.insertChannelIfAbsent.run('mail', 'mail', now, now);
+    stmts.insertChannelIfAbsent.run('telegram', 'telegram', now, now);
+    if (stmts.countNotifyGroups.get().n === 0) {
+      const r = stmts.insertNotifyGroup.run({
+        name: 'default', events: JSON.stringify(['*']), enabled: 1, created_at: now, updated_at: now
+      });
+      const gid = Number(r.lastInsertRowid);
+      for (const ch of stmts.listNotifyChannels.all()) stmts.bindGroupChannel.run(gid, ch.id);
+    }
+  } catch (e) {
+    console.error('[db] notify seed migration failed:', e.message);
+  }
+}
+initNotifyMigrationIfNeeded();
 
 const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
 
@@ -1093,6 +1299,9 @@ module.exports = {
   getAlertOverride, listAlertOverrides, upsertAlertOverride, deleteAlertOverride,
   getGroupAlertOverride, listGroupAlertOverrides, upsertGroupAlertOverride, deleteGroupAlertOverride,
   ALERT_OVERRIDE_KEYS, ALERT_OVERRIDE_LIMITS,
+  listNotifyChannels, getNotifyChannel, createNotifyChannel, updateNotifyChannel, deleteNotifyChannel,
+  listNotifyGroups, getNotifyGroup, createNotifyGroup, updateNotifyGroup, deleteNotifyGroup,
+  listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   resolveAlertThresholds, observedIntervalSec,

@@ -76,7 +76,8 @@ const loginRateLimit = (req, res, next) => {
 };
 
 // ---- helpers ----
-const { num, str, validateReport, sanitizeCss } = require('./validate');
+const { num, str, validateReport, sanitizeCss, NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput } = require('./validate');
+const notify = require('./notify');
 
 // ---- 首次部署初始化向导 ----
 router.get('/setup/status', (req, res) => {
@@ -1153,15 +1154,137 @@ router.put('/settings', adminOnly, (req, res) => {
 });
 
 
-// ---- Admin: send a test alert to verify notify channels (email / Telegram) ----
-router.post('/test-alert', adminOnly, asyncHandler(async (req, res) => {
-  const st = alerts.notifyStatus();
-  if (!st.mail && !st.telegram) {
-    return res.status(400).json({ error: '未配置任何通知通道（SMTP 或 TELEGRAM）', status: st });
+// ---- Admin: 通知渠道 / 通知组（S1/F2）------------------------------------
+// 渠道：mail/telegram 为内置（凭据仍在 notify_config，config 只读），webhook 可编辑。
+// 组：events 支持 '*'；channel_ids 会过滤为实际存在的渠道，避免悬空绑定。
+router.get('/admin/notify/events', adminOrReadonly, (req, res) => {
+  res.json({ events: NOTIFY_EVENTS });
+});
+
+router.get('/admin/notify/channels', adminOrReadonly, (req, res) => {
+  res.json(db.listNotifyChannels());
+});
+
+router.post('/admin/notify/channels', adminOnly, (req, res) => {
+  const v = validateNotifyChannelInput(req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  try {
+    const ch = db.createNotifyChannel(v.value);
+    auditLog(req, 'notify_channel_create', `id=${ch.id} type=${ch.type} name=${ch.name}`);
+    res.status(201).json(ch);
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
+    throw e;
+  }
+});
+
+router.put('/admin/notify/channels/:id', adminOnly, (req, res) => {
+  const cur = db.getNotifyChannel(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'not_found' });
+  const b = req.body || {};
+  const patch = {};
+  if (b.name !== undefined) {
+    const name = String(b.name).trim().slice(0, 64);
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    patch.name = name;
+  }
+  if (b.enabled !== undefined) patch.enabled = !!b.enabled;
+  if (b.config !== undefined) {
+    if (cur.type !== 'webhook') return res.status(400).json({ error: 'builtin_config_readonly' });
+    const v = validateWebhookConfig(b.config);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    patch.config = v.config;
   }
   try {
-    await alerts.sendAlert('[监控] 测试告警', '这是一条测试消息，用于验证通知通道（邮件 / Telegram）是否配置正确。若你收到了，说明配置生效。');
-    res.json({ ok: true, message: '测试告警已发送，请检查邮件 / Telegram。', status: st });
+    const ch = db.updateNotifyChannel(cur.id, patch);
+    auditLog(req, 'notify_channel_update', `id=${ch.id} fields=${Object.keys(patch).sort().join(',')}`);
+    res.json(ch);
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
+    throw e;
+  }
+});
+
+router.delete('/admin/notify/channels/:id', adminOnly, (req, res) => {
+  const cur = db.getNotifyChannel(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'not_found' });
+  if (cur.type !== 'webhook') return res.status(400).json({ error: 'builtin_channel' });
+  db.deleteNotifyChannel(cur.id);
+  auditLog(req, 'notify_channel_delete', `id=${cur.id} name=${cur.name}`);
+  res.json({ ok: true, id: cur.id });
+});
+
+router.post('/admin/notify/channels/:id/test', adminOnly, asyncHandler(async (req, res) => {
+  const ch = db.getNotifyChannel(req.params.id);
+  if (!ch) return res.status(404).json({ error: 'not_found' });
+  try {
+    await notify.testChannel(ch.id);
+    auditLog(req, 'notify_channel_test', `id=${ch.id} name=${ch.name}`);
+    res.json({ ok: true });
+  } catch (e) {
+    // 细节只落日志（可能含目标信息），不回显客户端
+    console.error(`[notify] test channel ${ch.id} failed:`, e.message);
+    res.status(500).json({ error: 'send_failed', message: e.message });
+  }
+}));
+
+router.get('/admin/notify/groups', adminOrReadonly, (req, res) => {
+  res.json(db.listNotifyGroups());
+});
+
+router.post('/admin/notify/groups', adminOnly, (req, res) => {
+  const v = validateNotifyGroupInput(req.body);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const valid = new Set(db.listNotifyChannels().map((c) => c.id));
+  v.value.channel_ids = v.value.channel_ids.filter((id) => valid.has(id));
+  try {
+    const g = db.createNotifyGroup(v.value);
+    auditLog(req, 'notify_group_create', `id=${g.id} name=${g.name} events=${g.events.join(',')}`);
+    res.status(201).json(g);
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
+    throw e;
+  }
+});
+
+router.put('/admin/notify/groups/:id', adminOnly, (req, res) => {
+  const cur = db.getNotifyGroup(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'not_found' });
+  const b = req.body || {};
+  const v = validateNotifyGroupInput(Object.assign({}, cur, b));
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  const valid = new Set(db.listNotifyChannels().map((c) => c.id));
+  v.value.channel_ids = v.value.channel_ids.filter((id) => valid.has(id));
+  try {
+    const g = db.updateNotifyGroup(cur.id, v.value);
+    auditLog(req, 'notify_group_update', `id=${g.id} name=${g.name} events=${g.events.join(',')}`);
+    res.json(g);
+  } catch (e) {
+    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
+    throw e;
+  }
+});
+
+router.delete('/admin/notify/groups/:id', adminOnly, (req, res) => {
+  const cur = db.getNotifyGroup(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'not_found' });
+  db.deleteNotifyGroup(cur.id);
+  auditLog(req, 'notify_group_delete', `id=${cur.id} name=${cur.name}`);
+  res.json({ ok: true, id: cur.id });
+});
+
+// ---- Admin: send a test alert through all matching channels ----
+router.post('/test-alert', adminOnly, asyncHandler(async (req, res) => {
+  const st = alerts.notifyStatus();
+  if (!st.mail && !st.telegram && !st.webhook) {
+    return res.status(400).json({ error: '未配置任何启用的通知通道（邮件 / Telegram / Webhook）', status: st });
+  }
+  try {
+    const ok = await alerts.sendAlert('[监控] 测试告警', '这是一条测试消息，用于验证通知通道（邮件 / Telegram / Webhook）是否配置正确。若你收到了，说明配置生效。', 'test');
+    if (!ok) {
+      return res.status(502).json({ error: 'send_failed', message: '测试告警投递失败，请检查服务端日志与通知配置', status: st });
+    }
+    res.json({ ok: true, message: '测试告警已发送，请检查各通知渠道。', status: st });
   } catch (e) {
     // 审查 G6：细节（SMTP 错误串，可能含主机名/凭据片段）只落日志，不回显客户端
     console.error('[test-alert] 发送失败:', e.message);

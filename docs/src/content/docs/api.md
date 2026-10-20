@@ -63,7 +63,16 @@ Content-Type: application/json
 | POST | `/api/agents/:id/renew` | 续期（计费周期顺延） |
 | GET | `/api/billing` | 计费总览 |
 | GET / PUT | `/api/settings` | 读取 / 保存设置 |
-| POST | `/api/test-alert` | 发送测试告警 |
+| POST | `/api/test-alert` | 发送测试告警（经通知组路由到全部启用通道） |
+| GET | `/api/admin/alert-rules` | 告警阈值总览（全局 / 分组 / 节点覆盖） |
+| PUT / DELETE | `/api/admin/alert-rules/agent/:id` | 节点告警覆盖 / 清除覆盖（回退继承） |
+| PUT / DELETE | `/api/admin/alert-rules/group/:grp` | 分组告警覆盖 / 清除（`-` 表示未分组默认组） |
+| GET / POST | `/api/admin/notify/channels` | 通知渠道列表 / 新建（webhook） |
+| PUT / DELETE | `/api/admin/notify/channels/:id` | 修改 / 删除渠道（内置 mail/telegram 配置只读且不可删） |
+| POST | `/api/admin/notify/channels/:id/test` | 单渠道测试消息 |
+| GET / POST | `/api/admin/notify/groups` | 通知组列表 / 新建 |
+| PUT / DELETE | `/api/admin/notify/groups/:id` | 修改 / 删除通知组 |
+| GET | `/api/admin/notify/events` | 可订阅事件字典 |
 | GET / PUT | `/api/ai/config` | AI 日报配置 |
 | POST | `/api/ai/run` | 手动触发 AI 日报（异步任务：`202` 已受理 / `400` 未启用 / `409` 执行中 / `429` 冷却带 `Retry-After`；`?force=1` 跳过冷却） |
 | GET | `/api/ai/reports` | AI 日报列表 |

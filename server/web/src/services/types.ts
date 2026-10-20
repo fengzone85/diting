@@ -117,6 +117,34 @@ export interface AlertRules {
   agents: (AlertOverride & { agent_id: string })[];
 }
 
+// ---- S1/F2：通知渠道与通知组 ----
+export interface WebhookConfig {
+  url: string;
+  method: 'GET' | 'POST';
+  content_type: 'json' | 'form';
+  headers: Record<string, string>;
+  body_template: string;
+  verify_tls: boolean;
+}
+export interface NotifyChannel {
+  id: number;
+  type: 'mail' | 'telegram' | 'webhook';
+  name: string;
+  enabled: boolean;
+  config: Partial<WebhookConfig>;
+  created_at?: number;
+  updated_at?: number;
+}
+export interface NotifyGroup {
+  id: number;
+  name: string;
+  enabled: boolean;
+  events: string[];
+  channel_ids: number[];
+  created_at?: number;
+  updated_at?: number;
+}
+
 export interface Overview {
   total: number;
   online: number;

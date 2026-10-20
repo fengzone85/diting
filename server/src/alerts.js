@@ -1,11 +1,6 @@
-const https = require('https');
-const nodemailer = require('nodemailer');
 const db = require('./db');
+const notify = require('./notify');
 const { daysUntil } = require('./util');
-
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 // 采样窗口判定（S1/F1）：窗口内「超限样本占比 ≥ 触发比例」才触发/恢复。
 // - 默认：窗口 5 个采样、触发比例 0.7（对齐 nezha「70% 采样点」语义）。
@@ -58,107 +53,20 @@ function resolveAgentThresholds(a, ctx) {
   };
 }
 
-// 邮件通道：从「设置中心 / 环境变量」读取。审查 D3/C-5：transport 按配置指纹
-// 缓存复用（此前每次发送都 createTransport），并显式设置连接/问候/socket 三类
-// 超时——此前无超时，慢 SMTP 下发送挂起会让"先写 state 后发送"的告警被整个
-// 冷却期吞掉。配置变更时指纹变化自动重建实例。
-let _mailCache = { fp: '', transporter: null };
-function mailTransport() {
-  const c = db.getNotifyConfig();
-  if (!c.smtp_user || !c.smtp_pass) return null;
-  const fp = JSON.stringify([c.smtp_host, c.smtp_port, c.smtp_secure, c.smtp_user, c.smtp_pass]);
-  if (_mailCache.fp !== fp || !_mailCache.transporter) {
-    _mailCache = {
-      fp,
-      transporter: nodemailer.createTransport({
-        host: c.smtp_host || 'smtp.qq.com',
-        port: Number(c.smtp_port || 465),
-        secure: c.smtp_secure !== false,
-        auth: { user: c.smtp_user, pass: c.smtp_pass },
-        connectionTimeout: 10000,  // TCP 建连
-        greetingTimeout: 10000,    // SMTP 220 问候
-        socketTimeout: 20000       // socket 空闲
-      })
-    };
-  }
-  return _mailCache.transporter;
-}
-
-// 通过 Telegram Bot API 发送消息。返回 Promise，但任何错误都在内部吞掉，
-// 绝不让电报故障影响邮件通道或告警主流程。
-function sendTelegram(text) {
-  return new Promise((resolve) => {
-    const c = db.getNotifyConfig();
-    if (!c.telegram_bot_token || !c.telegram_chat_id) return resolve();
-    const payload = JSON.stringify({
-      chat_id: c.telegram_chat_id,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    });
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${c.telegram_bot_token}/sendMessage`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    }, (res) => {
-      let body = '';
-      res.on('data', (c2) => { body += c2; });
-      res.on('end', () => {
-        if (res.statusCode !== 200) console.error('[alerts] telegram http', res.statusCode, body);
-        resolve();
-      });
-    });
-    req.on('error', (e) => { console.error('[alerts] telegram error:', e.message); resolve(); });
-    // 审查 D3/C-5：Telegram 请求补超时（此前无超时，挂起会拖住整个告警轮）
-    req.setTimeout(15000, () => { req.destroy(); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-// 返回是否至少一个通道发送成功——供调用方在失败时回滚 alert state（审查 D3）。
-async function sendAlert(subject, text) {
-  const c = db.getNotifyConfig();
-  let ok = false;
-  // 通道一：邮件
-  const transporter = mailTransport();
-  if (transporter) {
-    try {
-      await transporter.sendMail({
-        from: c.alert_from || c.smtp_user,
-        to: c.alert_to || c.smtp_user,
-        subject,
-        text
-      });
-      ok = true;
-      console.log('[alerts] mail sent:', subject);
-    } catch (e) {
-      console.error('[alerts] mail error:', e.message);
-    }
-  }
-  // 通道二：Telegram（HTML 转义，防止标题/正文里的特殊字符破坏解析）
-  if (c.telegram_bot_token && c.telegram_chat_id) {
-    try {
-      await sendTelegram(`<b>${escapeHtml(subject)}</b>\n\n${escapeHtml(text)}`);
-      ok = true;
-      console.log('[alerts] telegram sent:', subject);
-    } catch (e) {
-      console.error('[alerts] telegram error:', e.message);
-    }
-  }
-  return ok;
+// ---- 通知投递（S1/F2）-------------------------------------------------------
+// 统一走 notify.js：渠道 = 邮件 / Telegram / Webhook，按「通知组 × 事件」路由。
+// sendAlert 保留旧签名（subject, text）供 ai/report.js 等存量调用方使用；
+// 第三参 event 决定路由（默认 'system'，默认组 '*' 可收到），第四参透传节点上下文。
+async function sendAlert(subject, text, event, ctx) {
+  return notify.sendEvent(event || 'system', Object.assign({}, ctx || {}, { subject, text }));
 }
 
 // 审查 D3：带"失败回滚"的告警发送。先同步写 state 占位（冷却即时生效，防定时
 // 任务重入重复发信），发送失败立即清除 state——下一轮重试，避免通道故障把
 // 后续告警吞掉整个冷却期。
-async function sendAlertGuarded(agentId, type, subject, text) {
+async function sendAlertGuarded(agentId, type, subject, text, agentName) {
   db.setAlertState(agentId, type, Date.now());
-  const ok = await sendAlert(subject, text);
+  const ok = await sendAlert(subject, text, type, { agentId, agentName });
   if (!ok) db.clearAlertState(agentId, type);
   return ok;
 }
@@ -166,7 +74,7 @@ async function sendAlertGuarded(agentId, type, subject, text) {
 async function alertThreshold(agent, type, msg, now, cooldown) {
   const st = db.getAlertState(agent.id, type);
   if (!st || now - st.last_sent > cooldown * 1000) {
-    await sendAlertGuarded(agent.id, type, `[监控] ${agent.name} ${type} 告警`, `客户端 ${agent.name}(${agent.id}) ${msg}。`);
+    await sendAlertGuarded(agent.id, type, `[监控] ${agent.name} ${type} 告警`, `客户端 ${agent.name}(${agent.id}) ${msg}。`, agent.name);
   }
 }
 
@@ -184,7 +92,7 @@ function checkAgent(a, now, cfg, ctx) {
       if (!OFFLINE_SINCE.has(a.id)) OFFLINE_SINCE.set(a.id, now);
       const st = db.getAlertState(a.id, 'offline');
       if (!st || now - st.last_sent > c.cooldown * 1000) {
-        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${c.offlineSec}s 未上报，可能已宕机或断网。`);
+        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${c.offlineSec}s 未上报，可能已宕机或断网。`, a.name);
       }
       return null;
     }
@@ -197,7 +105,7 @@ function checkAgent(a, now, cfg, ctx) {
       OFFLINE_SINCE.delete(a.id);
       const offlineSec = Math.round((now - offlineSince) / 1000);
       if (ONLINE_GRACE_SEC > 0 && offlineSec >= ONLINE_GRACE_SEC) {
-        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`));
+        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`, 'online', { agentId: a.id, agentName: a.name }));
       }
     }
     const m = db.getLatestMetric(a.id);
@@ -228,7 +136,8 @@ function checkAgent(a, now, cfg, ctx) {
       } else if (st && below / vals.length >= TRIGGER_RATIO) {
         // 持续低于阈值：发一次"已恢复"并清状态（清除后不会重复发送）
         db.clearAlertState(a.id, type);
-        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`));
+        // 恢复与对应指标同事件组投递（不设独立 recovery 事件，避免 '*' 组重复投递）
+        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`, type, { agentId: a.id, agentName: a.name }));
       }
     };
     checkMetric('cpu', 'cpu', c.cpuAlert, '%', 'CPU');
@@ -302,7 +211,7 @@ async function checkExpiringAgents(now) {
           const when = expired ? '已过期' : `将于 ${days} 天后到期`;
           await sendAlertGuarded(a.id, type,
             `[监控] ${a.name} ${expired ? '已过期' : '即将到期'}`,
-            `客户端 ${a.name}(${a.id}) ${when}${expired ? '' : `，到期日 ${a.expire_at}`}。请及时处理续费或下线，避免服务中断。`);
+            `客户端 ${a.name}(${a.id}) ${when}${expired ? '' : `，到期日 ${a.expire_at}`}。请及时处理续费或下线，避免服务中断。`, a.name);
         }
         if (!expired) db.clearAlertState(a.id, 'expired');
       } else {
@@ -339,7 +248,7 @@ async function checkTrafficQuota(now) {
             if (!st || now - st.last_sent > 24 * 3600 * 1000) {
               await sendAlertGuarded(a.id, 'traffic_untrusted',
                 `[监控] ${a.name} 月流量计数不可信`,
-                `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`);
+                `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`, a.name);
             }
           } else {
             db.clearAlertState(a.id, 'traffic_untrusted');
@@ -351,7 +260,7 @@ async function checkTrafficQuota(now) {
         if (!st || now - st.last_sent > 24 * 3600 * 1000) {
           await sendAlertGuarded(a.id, 'quota',
             `[监控] ${a.name} 月流量超额`,
-            `客户端 ${a.name}(${a.id}) 本月已用 ${usedGb.toFixed(2)} GB，超过配额 ${a.monthly_quota_gb} GB。请关注是否产生额外费用或被限速。`
+            `客户端 ${a.name}(${a.id}) 本月已用 ${usedGb.toFixed(2)} GB，超过配额 ${a.monthly_quota_gb} GB。请关注是否产生额外费用或被限速。`, a.name
           );
         }
       } else {
@@ -364,11 +273,8 @@ async function checkTrafficQuota(now) {
 }
 
 function notifyStatus() {
-  const c = db.getNotifyConfig();
-  return {
-    mail: !!(c.smtp_user && c.smtp_pass),
-    telegram: !!(c.telegram_bot_token && c.telegram_chat_id)
-  };
+  // S1/F2：渠道状态由 notify 统一计算（含 webhook 数量、启用组数）。
+  return notify.notifyStatus();
 }
 
 let timer = null;

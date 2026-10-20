@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -60,6 +60,22 @@ export const adminApi = {
     api.del<{ ok: boolean; grp: string }>(
       `/api/admin/alert-rules/group/${encodeURIComponent(grp === '' ? '-' : grp)}`
     ),
+
+  // S1/F2：通知渠道 / 通知组
+  listNotifyChannels: () => api.get<NotifyChannel[]>('/api/admin/notify/channels'),
+  createNotifyChannel: (body: { type: string; name: string; enabled?: boolean; config?: Partial<WebhookConfig> }) =>
+    api.post<NotifyChannel>('/api/admin/notify/channels', body),
+  updateNotifyChannel: (id: number, body: { name?: string; enabled?: boolean; config?: Partial<WebhookConfig> }) =>
+    api.put<NotifyChannel>(`/api/admin/notify/channels/${id}`, body),
+  deleteNotifyChannel: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/channels/${id}`),
+  testNotifyChannel: (id: number) => api.post<{ ok: boolean }>(`/api/admin/notify/channels/${id}/test`, {}),
+  listNotifyGroups: () => api.get<NotifyGroup[]>('/api/admin/notify/groups'),
+  createNotifyGroup: (body: { name: string; events: string[]; channel_ids: number[]; enabled?: boolean }) =>
+    api.post<NotifyGroup>('/api/admin/notify/groups', body),
+  updateNotifyGroup: (id: number, body: { name?: string; events?: string[]; channel_ids?: number[]; enabled?: boolean }) =>
+    api.put<NotifyGroup>(`/api/admin/notify/groups/${id}`, body),
+  deleteNotifyGroup: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/groups/${id}`),
+  listNotifyEvents: () => api.get<{ events: string[] }>('/api/admin/notify/events'),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
 
   // diagnostics
