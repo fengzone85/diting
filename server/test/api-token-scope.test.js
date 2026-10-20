@@ -139,6 +139,30 @@ test('S2/F5: /agents 之外的节点级接口校验归属', async () => {
   }
 });
 
+test('S2/F5: 受限 Token 不得触碰全局配置/基础设施写接口', async () => {
+  // 节点级 Token 的授权范围是「这几个节点」，与节点无关的全局写操作一律禁止：
+  // 否则一个只被授权节点 A 的 Token 仍能关掉全站告警、改系统设置或重建 2FA。
+  const hdr = RO(adminScoped);
+  const cases = [
+    ['post', '/api/agents', { name: 'sneaky' }],
+    ['put', '/api/settings', {}],
+    ['post', '/api/test-alert', {}],
+    ['put', '/api/ai/config', { config: {} }],
+    ['post', '/api/admin/notify/channels', { type: 'webhook', name: 'x' }],
+    ['put', '/api/admin/alert-rules/group/-', {}],
+    ['post', '/api/admin/2fa/setup', {}],
+    ['post', '/api/admin/backups/x.db/restore', {}],
+  ];
+  for (const [method, path, body] of cases) {
+    const res = await request(app)[method](path).set(hdr).send(body);
+    assert.strictEqual(res.status, 403, `${method.toUpperCase()} ${path} 应拒绝受限 Token`);
+    assert.strictEqual(res.body.error, 'forbidden_scope', `${path} 错误码应为 forbidden_scope`);
+  }
+  // 关键副作用断言：受限 Token 不得真的改掉全局设置。
+  const settings = await request(app).get('/api/settings').set(RO(roGlobal));
+  assert.strictEqual(settings.status, 200, '不受限 Token 仍可读设置');
+});
+
 test('S2/F5: agent_ids=[] 的 Token 不受作用域限制（无回归）', async () => {
   const list = await request(app).get('/api/agents').set(RO(roGlobal));
   assert.strictEqual(list.status, 200);

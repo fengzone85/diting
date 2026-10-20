@@ -79,6 +79,14 @@ const loginRateLimit = (req, res, next) => {
 const { num, str, validateReport, sanitizeCss, NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput } = require('./validate');
 const notify = require('./notify');
 
+// 全局配置 / 基础设施写接口的守卫：受限 Token（agent_ids 非空）只被授权操作白名单节点，
+// 不得改动全局设置、告警分组阈值、通知渠道、AI 配置、备份与 2FA —— 否则「只授权节点 A」
+// 的 Token 仍能关掉全站告警或改系统设置，等于绕过了节点边界。
+// 挂载顺序固定为 adminOnly/requireAdmin → agentScope → agentGlobalOnly。
+const agentGlobalOnly = (req, res, next) =>
+  (req.agentScope ? res.status(403).json({ error: 'forbidden_scope' }) : next());
+
+
 // ---- 首次部署初始化向导 ----
 router.get('/setup/status', (req, res) => {
   res.json({ needs_setup: !getAdminToken() });
@@ -402,7 +410,7 @@ router.delete('/admin/alert-rules/agent/:id', adminOnly, agentScope, (req, res) 
   res.json({ ok, id: req.params.id });
 });
 
-router.put('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
+router.put('/admin/alert-rules/group/:grp', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const grp = alertGroupKey(req.params.grp);
   const body = req.body || {};
   const override = db.upsertGroupAlertOverride(grp, body);
@@ -410,7 +418,7 @@ router.put('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
   res.json({ ok: true, override });
 });
 
-router.delete('/admin/alert-rules/group/:grp', adminOnly, (req, res) => {
+router.delete('/admin/alert-rules/group/:grp', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const grp = alertGroupKey(req.params.grp);
   const ok = db.deleteGroupAlertOverride(grp);
   auditLog(req, 'alert_rule_reset', `scope=group grp=${grp || '(default)'}`);
@@ -965,7 +973,7 @@ router.get('/public/visitor', (req, res) => {
 
 // 游客页卡片自定义排序（需管理员会话，避免游客随意更改全局顺序）。
 // 管理员在前台拖拽后调用此接口，所有人访问即看到固定顺序。
-router.post('/public/order', adminOnly, (req, res) => {
+router.post('/public/order', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const order = (req.body && Array.isArray(req.body.order))
     ? req.body.order.filter(x => typeof x === 'string').slice(0, 2000)
     : [];
@@ -993,7 +1001,7 @@ router.get('/public/themes', (req, res) => {
 });
 
 // ---- Admin: create agent ----
-router.post('/agents', adminOnly, (req, res) => {
+router.post('/agents', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   // 校验必须前置到写操作之前：否则会在拿不到安装命令的情况下白白创建一个 agent。
   const base = getPublicBaseUrl();
   if (!base) return serverUrlUnconfigured(res);
@@ -1188,7 +1196,7 @@ router.get('/admin/backups', adminOrReadonly, (req, res) => {
 });
 
 // 下载：流式返回，支持大文件；文件名经白名单校验，杜绝任意文件读取
-router.get('/admin/backups/:name/download', adminOnly, (req, res) => {
+router.get('/admin/backups/:name/download', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const full = backups.resolveBackupFile(req.params.name);
   if (!full) return res.status(400).json({ error: 'invalid backup name' });
   let st;
@@ -1205,7 +1213,7 @@ router.get('/admin/backups/:name/download', adminOnly, (req, res) => {
   stream.pipe(res);
 });
 
-router.delete('/admin/backups/:name', adminOnly, (req, res) => {
+router.delete('/admin/backups/:name', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const r = backups.deleteBackup(req.params.name);
   if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
   res.json({ ok: true, name: r.name });
@@ -1214,7 +1222,7 @@ router.delete('/admin/backups/:name', adminOnly, (req, res) => {
 
 // 恢复：不直接改数据库，而是投递恢复请求文件，由宿主侧 diting.sh 消费执行
 // （脚本会先备份当前状态、校验完整性、停服原子替换再重启）。
-router.post('/admin/backups/:name/restore', adminOnly, (req, res) => {
+router.post('/admin/backups/:name/restore', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const r = backups.requestRestore(req.params.name);
   if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
   res.json({ ok: true, name: r.name, trigger: r.trigger, queued: true });
@@ -1228,7 +1236,7 @@ router.get('/settings', adminOrReadonly, (req, res) => {
   if (safe.telegram_bot_token) safe.telegram_bot_token = '';
   res.json({ ui: db.getUiSettings(), notify: safe });
 });
-router.put('/settings', adminOnly, (req, res) => {
+router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const b = req.body || {};
   // 写库前取旧值快照，供审计记录变更字段名（体检 L-4）
   const uiBefore = db.getUiSettings();
@@ -1261,7 +1269,7 @@ router.get('/admin/notify/channels', adminOrReadonly, (req, res) => {
   res.json(db.listNotifyChannels());
 });
 
-router.post('/admin/notify/channels', adminOnly, (req, res) => {
+router.post('/admin/notify/channels', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const v = validateNotifyChannelInput(req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   try {
@@ -1274,7 +1282,7 @@ router.post('/admin/notify/channels', adminOnly, (req, res) => {
   }
 });
 
-router.put('/admin/notify/channels/:id', adminOnly, (req, res) => {
+router.put('/admin/notify/channels/:id', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const cur = db.getNotifyChannel(req.params.id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   const b = req.body || {};
@@ -1301,7 +1309,7 @@ router.put('/admin/notify/channels/:id', adminOnly, (req, res) => {
   }
 });
 
-router.delete('/admin/notify/channels/:id', adminOnly, (req, res) => {
+router.delete('/admin/notify/channels/:id', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const cur = db.getNotifyChannel(req.params.id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   if (cur.type !== 'webhook') return res.status(400).json({ error: 'builtin_channel' });
@@ -1310,7 +1318,7 @@ router.delete('/admin/notify/channels/:id', adminOnly, (req, res) => {
   res.json({ ok: true, id: cur.id });
 });
 
-router.post('/admin/notify/channels/:id/test', adminOnly, asyncHandler(async (req, res) => {
+router.post('/admin/notify/channels/:id/test', adminOnly, agentScope, agentGlobalOnly, asyncHandler(async (req, res) => {
   const ch = db.getNotifyChannel(req.params.id);
   if (!ch) return res.status(404).json({ error: 'not_found' });
   try {
@@ -1328,7 +1336,7 @@ router.get('/admin/notify/groups', adminOrReadonly, (req, res) => {
   res.json(db.listNotifyGroups());
 });
 
-router.post('/admin/notify/groups', adminOnly, (req, res) => {
+router.post('/admin/notify/groups', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const v = validateNotifyGroupInput(req.body);
   if (!v.ok) return res.status(400).json({ error: v.error });
   const valid = new Set(db.listNotifyChannels().map((c) => c.id));
@@ -1343,7 +1351,7 @@ router.post('/admin/notify/groups', adminOnly, (req, res) => {
   }
 });
 
-router.put('/admin/notify/groups/:id', adminOnly, (req, res) => {
+router.put('/admin/notify/groups/:id', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const cur = db.getNotifyGroup(req.params.id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   const b = req.body || {};
@@ -1361,7 +1369,7 @@ router.put('/admin/notify/groups/:id', adminOnly, (req, res) => {
   }
 });
 
-router.delete('/admin/notify/groups/:id', adminOnly, (req, res) => {
+router.delete('/admin/notify/groups/:id', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const cur = db.getNotifyGroup(req.params.id);
   if (!cur) return res.status(404).json({ error: 'not_found' });
   db.deleteNotifyGroup(cur.id);
@@ -1370,7 +1378,7 @@ router.delete('/admin/notify/groups/:id', adminOnly, (req, res) => {
 });
 
 // ---- Admin: send a test alert through all matching channels ----
-router.post('/test-alert', adminOnly, asyncHandler(async (req, res) => {
+router.post('/test-alert', adminOnly, agentScope, agentGlobalOnly, asyncHandler(async (req, res) => {
   const st = alerts.notifyStatus();
   if (!st.mail && !st.telegram && !st.webhook) {
     return res.status(400).json({ error: '未配置任何启用的通知通道（邮件 / Telegram / Webhook）', status: st });
@@ -1405,7 +1413,7 @@ router.get('/ai/config', adminOrReadonly, (req, res) => {
   res.json({ config: safe });
 });
 // PUT 配置：api_key 留空保持不变（同 setNotifyConfig 模式，db.js setAiConfig 内部处理）
-router.put('/ai/config', adminOnly, (req, res) => {
+router.put('/ai/config', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const b = (req.body && req.body.config) || {};
   const allowed = {};
   // 白名单字段，避免前端塞入未预期字段
@@ -1442,7 +1450,7 @@ router.put('/ai/config', adminOnly, (req, res) => {
 // 状态码：202 已受理 / 400 未启用 / 409 已有任务在执行 / 429 冷却中（带 Retry-After）。
 // 之所以不阻塞等待：单次生成最长 180s（推理模型），同步等待会被反代按默认 60s 超时截断成 504，
 // 而服务端仍会跑完并发报，用户以为失败会重复点击 → 重复计费。
-router.post('/ai/run', adminOnly, asyncHandler(async (req, res) => {
+router.post('/ai/run', adminOnly, agentScope, agentGlobalOnly, asyncHandler(async (req, res) => {
   const force = req.query.force === '1';
   try {
     const r = await ai.triggerRun({ force });
@@ -1578,14 +1586,14 @@ router.get('/admin/2fa/status', adminOrReadonly, (req, res) => {
 });
 
 // 生成密钥（尚未启用）。仅 admin 可调用；返回明文密钥仅此一次，供手动录入 Authenticator。
-router.post('/admin/2fa/setup', requireAdmin, (req, res) => {
+router.post('/admin/2fa/setup', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
   if (db.is2FAEnabled()) return res.status(400).json({ error: '2fa already enabled' });
   const secret = totp.generateSecret();
   db.set2FASecret(secret);
   res.json({ secret, otpauth_uri: totp.otpauthUri(secret), enabled: false });
 });
 
-router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
+router.post('/admin/2fa/enable', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
   const { code } = req.body || {};
   const secret = db.get2FASecret();
   if (!secret) return res.status(400).json({ error: 'run setup first' });
@@ -1602,7 +1610,7 @@ router.post('/admin/2fa/enable', requireAdmin, (req, res) => {
   auditLog(req, '2fa_enable', 'sessions revoked');
 });
 
-router.post('/admin/2fa/disable', requireAdmin, (req, res) => {
+router.post('/admin/2fa/disable', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
   const { code } = req.body || {};
   if (!db.is2FAEnabled()) return res.status(400).json({ error: '2fa not enabled' });
   const secret = db.get2FASecret();

@@ -22,6 +22,11 @@
 - **全局面拒绝 → `403 forbidden_scope`**：`/overview`、`/agents/sparklines/overview`、
   `/billing`、`/admin/alert-rules`、`/ai/usage`、`/ai/reports`、`/ai/reports/:id`、Token 管理端点。
 - **`/agents` 与 `/agents/sparklines` 改为按白名单过滤**（而非拒绝），受限 Token 仍能看自己的节点。
+- **全局配置 / 基础设施写接口同样 `403 forbidden_scope`**：`POST /agents`、`PUT /settings`、
+  `POST /test-alert`、`PUT /ai/config`、`POST /ai/run`、通知渠道与通知组增删改/测试、
+  `PUT/DELETE /admin/alert-rules/group/:grp`、备份下载/删除/恢复、`/admin/2fa/*`、
+  `POST /public/order`。受限 Token 的授权范围是「这几个节点」，全局变更（关掉全站告警、
+  改系统设置、重建 2FA）与节点边界无关，必须拒绝。
 - `READONLY_TOKEN` / `X-Admin-Token` 等既有凭证不受影响（等价于 `agent_ids=[]`）。
 
 ### 说明
