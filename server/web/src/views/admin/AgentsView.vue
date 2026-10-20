@@ -6,7 +6,7 @@ import { adminApi } from '../../services/adminApi';
 import { formatBytes, formatDuration } from '../../utils/format';
 import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
-import type { InstallCommands } from '../../services/types';
+import type { InstallCommands, Agent } from '../../services/types';
 
 const { state } = useAdmin();
 const router = useRouter();
@@ -120,6 +120,85 @@ async function renew(id: string) {
     await loadAdmin();
   } catch (e) {
     error.value = (e as Error).message || t('agents.renewFailed');
+  }
+}
+
+// ---- S1/F1：节点告警阈值覆盖 ----
+// 语义：输入留空 = 继承上层（分组 → 全局），占位符展示当前生效值；
+// 保存只提交已填写的字段（空 → null），不会把全局值固化到节点。
+const alertTarget = ref<Agent | null>(null);
+const alertBusy = ref(false);
+const alertForm = ref({
+  cpu_pct: '', mem_pct: '', disk_pct: '', temp_c: '', offline_sec: '', cooldown: '', muted: false
+});
+type AlertFieldKey = 'cpu_pct' | 'mem_pct' | 'disk_pct' | 'temp_c' | 'offline_sec' | 'cooldown';
+const ALERT_FIELDS: AlertFieldKey[] = ['cpu_pct', 'mem_pct', 'disk_pct', 'temp_c', 'offline_sec', 'cooldown'];
+const alertFieldRows = computed(() => [
+  { key: 'cpu_pct' as AlertFieldKey, label: t('agents.cpuThreshold') },
+  { key: 'mem_pct' as AlertFieldKey, label: t('agents.memThreshold') },
+  { key: 'disk_pct' as AlertFieldKey, label: t('agents.diskThreshold') },
+  { key: 'temp_c' as AlertFieldKey, label: t('agents.tempThreshold') },
+  { key: 'offline_sec' as AlertFieldKey, label: t('agents.offlineThreshold') },
+  { key: 'cooldown' as AlertFieldKey, label: t('agents.cooldownThreshold') }
+]);
+
+function effectiveAlert(key: AlertFieldKey): string {
+  const v = alertTarget.value?.alert?.effective?.[key];
+  return v === undefined || v === null ? '' : String(v);
+}
+
+async function openAlert(a: Agent) {
+  alertTarget.value = a;
+  alertForm.value = {
+    cpu_pct: '', mem_pct: '', disk_pct: '', temp_c: '', offline_sec: '', cooldown: '',
+    muted: !!a.alert?.muted
+  };
+  try {
+    const rules = await adminApi.listAlertRules();
+    const ov = rules.agents.find((x) => x.agent_id === a.id);
+    if (ov) {
+      for (const k of ALERT_FIELDS) {
+        const v = ov[k];
+        if (v !== null && v !== undefined) alertForm.value[k] = String(v);
+      }
+      alertForm.value.muted = !!ov.muted;
+    }
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agents.alertLoadFailed');
+  }
+}
+
+async function saveAlert() {
+  if (!alertTarget.value) return;
+  alertBusy.value = true;
+  try {
+    const payload: Record<string, unknown> = { muted: alertForm.value.muted };
+    for (const k of ALERT_FIELDS) {
+      const raw = String(alertForm.value[k] ?? '').trim();
+      payload[k] = raw === '' ? null : Number(raw);
+    }
+    await adminApi.setAgentAlertRule(alertTarget.value.id, payload);
+    await loadAdmin();
+    alertTarget.value = null;
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agents.alertSaveFailed');
+  } finally {
+    alertBusy.value = false;
+  }
+}
+
+async function resetAlert() {
+  if (!alertTarget.value) return;
+  if (!confirm(t('agents.alertResetConfirm'))) return;
+  alertBusy.value = true;
+  try {
+    await adminApi.resetAgentAlertRule(alertTarget.value.id);
+    await loadAdmin();
+    alertTarget.value = null;
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agents.alertSaveFailed');
+  } finally {
+    alertBusy.value = false;
   }
 }
 
@@ -258,15 +337,55 @@ async function batchRenew() {
         <div class="flex min-w-0 items-center gap-3">
           <input type="checkbox" :checked="selected.has(agent.id)" @change="toggleOne(agent.id)" class="h-4 w-4 flex-shrink-0 rounded border-slate-600 bg-slate-800 text-sky-500" />
           <div class="min-w-0">
-            <p class="truncate font-semibold">{{ agent.name }}</p>
+            <p class="truncate font-semibold">
+              {{ agent.name }}
+              <span v-if="agent.alert?.muted" class="ml-2 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-normal text-rose-300">{{ t('common.muted') }}</span>
+              <span v-else-if="agent.alert?.overridden" class="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-300">{{ t('common.custom') }}</span>
+            </p>
             <p class="truncate text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
           </div>
         </div>
         <div class="flex flex-shrink-0 gap-2">
+          <button class="rounded-lg px-3 py-1 text-sm text-violet-400 hover:bg-violet-500/10" @click="openAlert(agent)">{{ t('agents.alert') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-sky-400 hover:bg-sky-500/10" @click="router.push(`/admin/agents/${agent.id}`)">{{ t('common.detail') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-amber-400 hover:bg-amber-500/10" @click="resetToken(agent.id)">{{ t('common.reset') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-emerald-400 hover:bg-emerald-500/10" @click="renew(agent.id)">{{ t('common.renew') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-rose-400 hover:bg-rose-500/10" @click="remove(agent.id)">{{ t('common.delete') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- S1/F1：告警阈值覆盖弹窗（留空 = 继承） -->
+    <div
+      v-if="alertTarget"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      @click.self="alertTarget = null"
+    >
+      <div class="glass w-full max-w-lg p-5">
+        <div class="mb-1 flex items-center justify-between">
+          <h2 class="text-lg font-semibold">{{ t('agents.alertTitle', { name: alertTarget.name }) }}</h2>
+          <button class="text-slate-400 hover:text-white" @click="alertTarget = null">✕</button>
+        </div>
+        <p class="mb-4 text-xs text-slate-500">{{ t('agents.alertInheritHint') }}</p>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label v-for="f in alertFieldRows" :key="f.key" class="text-xs text-slate-400">
+            {{ f.label }}
+            <input
+              v-model="alertForm[f.key]"
+              type="number"
+              :placeholder="effectiveAlert(f.key)"
+              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+            />
+          </label>
+        </div>
+        <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+          <input v-model="alertForm.muted" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-rose-500" />
+          {{ t('agents.alertMuted') }}
+        </label>
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800" @click="alertTarget = null">{{ t('common.cancel') }}</button>
+          <button class="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-50" :disabled="alertBusy" @click="resetAlert">{{ t('agents.alertReset') }}</button>
+          <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50" :disabled="alertBusy" @click="saveAlert">{{ t('agents.alertSave') }}</button>
         </div>
       </div>
     </div>

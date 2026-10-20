@@ -1,117 +1,72 @@
-const https = require('https');
-const nodemailer = require('nodemailer');
 const db = require('./db');
+const notify = require('./notify');
 const { daysUntil } = require('./util');
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 采样窗口判定（S1/F1）：窗口内「超限样本占比 ≥ 触发比例」才触发/恢复。
+// - 默认：窗口 5 个采样、触发比例 0.7（对齐 nezha「70% 采样点」语义）。
+// - 兼容：显式设置 ALERT_SUSTAIN_SAMPLES=N 时退回旧行为（窗口 N、比例 1.0
+//   = 连续 N 次全超限），零重命名风险。
+// - known 语义：缺数据（null/undefined）样本直接排除；已知样本 < 2 本轮不判定
+//   —— 对齐 nezha known=false：缺数据既不触发也不恢复。
+const LEGACY_SUSTAIN_MODE = process.env.ALERT_SUSTAIN_SAMPLES !== undefined
+  && process.env.ALERT_SUSTAIN_SAMPLES !== '';
+const WINDOW_SAMPLES = LEGACY_SUSTAIN_MODE
+  ? Math.max(1, Math.min(20, Math.floor(Number(process.env.ALERT_SUSTAIN_SAMPLES) || 2)))
+  : Math.max(2, Math.min(20, Math.floor(Number(process.env.ALERT_WINDOW_SAMPLES) || 5)));
+const TRIGGER_RATIO = LEGACY_SUSTAIN_MODE
+  ? 1
+  : Math.min(1, Math.max(0.1, Number(process.env.ALERT_TRIGGER_RATIO) || 0.7));
+const MIN_KNOWN_SAMPLES = Math.min(WINDOW_SAMPLES, 2);
+
+// 上线通知宽限期（S1/F1）：离线超过该秒数后重连才发「已上线」，防抖动刷屏；0 = 关闭。
+const ONLINE_GRACE_SEC = Math.max(0, Number(process.env.ONLINE_NOTIFY_GRACE_SEC || 180));
+// 内存态离线起点：agent_id -> 首次观测到离线的时刻。
+// 进程重启后为空——首个检查轮只会记录起点，不会误发上线通知。
+const OFFLINE_SINCE = new Map();
+
+// 阈值解析链（S1/F1）：节点覆盖 > 分组覆盖 > 全局（UI/env/默认），字段独立继承。
+// ctx 可传入预取的 Map（groupCache/nodeCache），避免逐节点重复查询。
+function resolveAgentThresholds(a, ctx) {
+  // ctx.global 可由调用方预取（批量场景下一次解析，避免逐节点重复读配置）
+  const global = (ctx && ctx.global) || db.resolveAlertThresholds();
+  const grp = (a && a.grp) || '';
+  const groupCache = ctx && ctx.groupCache;
+  const nodeCache = ctx && ctx.nodeCache;
+  const gr = groupCache ? (groupCache.get(grp) || null) : db.getGroupAlertOverride(grp);
+  const node = nodeCache ? (nodeCache.get(a.id) || null) : db.getAlertOverride(a.id);
+  const pick = (key, fallback) => {
+    if (node && node[key] !== null && node[key] !== undefined) return node[key];
+    if (gr && gr[key] !== null && gr[key] !== undefined) return gr[key];
+    return fallback;
+  };
+  const cooldownEnv = Number(process.env.ALERT_COOLDOWN_SEC || 1800);
+  return {
+    offlineSec: pick('offline_sec', global.offline_sec),
+    cpuAlert: pick('cpu_pct', global.cpu_pct),
+    memAlert: pick('mem_pct', global.mem_pct),
+    diskAlert: pick('disk_pct', global.disk_pct),
+    tempAlert: pick('temp_c', global.temp_c),
+    cooldown: pick('cooldown', cooldownEnv),
+    // 静音并集语义：节点或分组任一 muted=1 即静音指标类告警；
+    // 经营告警（离线/上线/到期/配额/流量不可信）不受 muted 影响。
+    muted: !!(node && node.muted) || !!(gr && gr.muted)
+  };
 }
 
-// 审查 E1：阈值告警需连续 N 个采样超限才触发（单样本 spike 不报），恢复同样
-// 需连续确认。ALERT_SUSTAIN_SAMPLES=1 可关闭持续确认（恢复旧的单样本行为）。
-const SUSTAIN_N = Math.max(1, Number(process.env.ALERT_SUSTAIN_SAMPLES || 2));
-
-// 邮件通道：从「设置中心 / 环境变量」读取。审查 D3/C-5：transport 按配置指纹
-// 缓存复用（此前每次发送都 createTransport），并显式设置连接/问候/socket 三类
-// 超时——此前无超时，慢 SMTP 下发送挂起会让"先写 state 后发送"的告警被整个
-// 冷却期吞掉。配置变更时指纹变化自动重建实例。
-let _mailCache = { fp: '', transporter: null };
-function mailTransport() {
-  const c = db.getNotifyConfig();
-  if (!c.smtp_user || !c.smtp_pass) return null;
-  const fp = JSON.stringify([c.smtp_host, c.smtp_port, c.smtp_secure, c.smtp_user, c.smtp_pass]);
-  if (_mailCache.fp !== fp || !_mailCache.transporter) {
-    _mailCache = {
-      fp,
-      transporter: nodemailer.createTransport({
-        host: c.smtp_host || 'smtp.qq.com',
-        port: Number(c.smtp_port || 465),
-        secure: c.smtp_secure !== false,
-        auth: { user: c.smtp_user, pass: c.smtp_pass },
-        connectionTimeout: 10000,  // TCP 建连
-        greetingTimeout: 10000,    // SMTP 220 问候
-        socketTimeout: 20000       // socket 空闲
-      })
-    };
-  }
-  return _mailCache.transporter;
-}
-
-// 通过 Telegram Bot API 发送消息。返回 Promise，但任何错误都在内部吞掉，
-// 绝不让电报故障影响邮件通道或告警主流程。
-function sendTelegram(text) {
-  return new Promise((resolve) => {
-    const c = db.getNotifyConfig();
-    if (!c.telegram_bot_token || !c.telegram_chat_id) return resolve();
-    const payload = JSON.stringify({
-      chat_id: c.telegram_chat_id,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true
-    });
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${c.telegram_bot_token}/sendMessage`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    }, (res) => {
-      let body = '';
-      res.on('data', (c2) => { body += c2; });
-      res.on('end', () => {
-        if (res.statusCode !== 200) console.error('[alerts] telegram http', res.statusCode, body);
-        resolve();
-      });
-    });
-    req.on('error', (e) => { console.error('[alerts] telegram error:', e.message); resolve(); });
-    // 审查 D3/C-5：Telegram 请求补超时（此前无超时，挂起会拖住整个告警轮）
-    req.setTimeout(15000, () => { req.destroy(); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-// 返回是否至少一个通道发送成功——供调用方在失败时回滚 alert state（审查 D3）。
-async function sendAlert(subject, text) {
-  const c = db.getNotifyConfig();
-  let ok = false;
-  // 通道一：邮件
-  const transporter = mailTransport();
-  if (transporter) {
-    try {
-      await transporter.sendMail({
-        from: c.alert_from || c.smtp_user,
-        to: c.alert_to || c.smtp_user,
-        subject,
-        text
-      });
-      ok = true;
-      console.log('[alerts] mail sent:', subject);
-    } catch (e) {
-      console.error('[alerts] mail error:', e.message);
-    }
-  }
-  // 通道二：Telegram（HTML 转义，防止标题/正文里的特殊字符破坏解析）
-  if (c.telegram_bot_token && c.telegram_chat_id) {
-    try {
-      await sendTelegram(`<b>${escapeHtml(subject)}</b>\n\n${escapeHtml(text)}`);
-      ok = true;
-      console.log('[alerts] telegram sent:', subject);
-    } catch (e) {
-      console.error('[alerts] telegram error:', e.message);
-    }
-  }
-  return ok;
+// ---- 通知投递（S1/F2）-------------------------------------------------------
+// 统一走 notify.js：渠道 = 邮件 / Telegram / Webhook，按「通知组 × 事件」路由。
+// sendAlert 保留旧签名（subject, text）供 ai/report.js 等存量调用方使用；
+// 第三参 event 决定路由（默认 'system'，默认组 '*' 可收到），第四参透传节点上下文。
+async function sendAlert(subject, text, event, ctx) {
+  return notify.sendEvent(event || 'system', Object.assign({}, ctx || {}, { subject, text }));
 }
 
 // 审查 D3：带"失败回滚"的告警发送。先同步写 state 占位（冷却即时生效，防定时
 // 任务重入重复发信），发送失败立即清除 state——下一轮重试，避免通道故障把
 // 后续告警吞掉整个冷却期。
-async function sendAlertGuarded(agentId, type, subject, text) {
+async function sendAlertGuarded(agentId, type, subject, text, agentName) {
   db.setAlertState(agentId, type, Date.now());
-  const ok = await sendAlert(subject, text);
+  const ok = await sendAlert(subject, text, type, { agentId, agentName });
   if (!ok) db.clearAlertState(agentId, type);
   return ok;
 }
@@ -119,53 +74,77 @@ async function sendAlertGuarded(agentId, type, subject, text) {
 async function alertThreshold(agent, type, msg, now, cooldown) {
   const st = db.getAlertState(agent.id, type);
   if (!st || now - st.last_sent > cooldown * 1000) {
-    await sendAlertGuarded(agent.id, type, `[监控] ${agent.name} ${type} 告警`, `客户端 ${agent.name}(${agent.id}) ${msg}。`);
+    await sendAlertGuarded(agent.id, type, `[监控] ${agent.name} ${type} 告警`, `客户端 ${agent.name}(${agent.id}) ${msg}。`, agent.name);
   }
 }
 
 // 单个 agent 的检查。返回 Promise（可能为空）。
+// cfg 可显式传入（测试/回放路径，兼容旧签名）；省略时按「节点 > 分组 > 全局」解析。
+// ctx 为预取的覆盖表 Map（见 check()），仅在没有显式 cfg 时生效。
 // 注意：db.setAlertState 必须在 await sendAlert 之前同步写入 —— better-sqlite3 为同步 API，
 // 这样即便定时任务重入也不会重复发信（冷却窗口已在此点生效）。
-function checkAgent(a, now, cfg) {
+function checkAgent(a, now, cfg, ctx) {
   try {
-    const online = a.last_seen && (now - a.last_seen) < cfg.offlineSec * 1000;
+    const c = cfg || resolveAgentThresholds(a, ctx);
+    const online = a.last_seen && (now - a.last_seen) < c.offlineSec * 1000;
     if (!online) {
+      // 记录离线起点（内存态）：供上线通知的宽限期判定。
+      if (!OFFLINE_SINCE.has(a.id)) OFFLINE_SINCE.set(a.id, now);
       const st = db.getAlertState(a.id, 'offline');
-      if (!st || now - st.last_sent > cfg.cooldown * 1000) {
-        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${cfg.offlineSec}s 未上报，可能已宕机或断网。`);
+      if (!st || now - st.last_sent > c.cooldown * 1000) {
+        return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${c.offlineSec}s 未上报，可能已宕机或断网。`, a.name);
       }
       return null;
     }
     // recovered -> allow future offline alerts
     db.clearAlertState(a.id, 'offline');
-    const m = db.getLatestMetric(a.id);
-    if (!m) return null;
-    // 审查 E1：连续 N 个采样超限才触发（单样本 spike 不报），恢复同样需连续
-    // 确认，并补"已恢复"通知——此前 cpu/mem 的 alert state 从不清理，指标降回
-    // 正常后无任何感知，且下次超阈会被旧 state 的冷却压住。
-    const recent = db.getRecentMetrics(a.id, SUSTAIN_N);
     const jobs = [];
+    // 上线通知（S1/F1）：离线时长 ≥ 宽限期才发，防抖动刷屏；不受 muted 压制。
+    const offlineSince = OFFLINE_SINCE.get(a.id);
+    if (offlineSince !== undefined) {
+      OFFLINE_SINCE.delete(a.id);
+      const offlineSec = Math.round((now - offlineSince) / 1000);
+      if (ONLINE_GRACE_SEC > 0 && offlineSec >= ONLINE_GRACE_SEC) {
+        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`, 'online', { agentId: a.id, agentName: a.name }));
+      }
+    }
+    const m = db.getLatestMetric(a.id);
+    if (!m) return jobs.length ? Promise.allSettled(jobs) : null;
+    // 采样窗口判定（S1/F1）：recent 为 DESC（新→旧），反转为 ASC 后
+    // 最后一个元素才是「当前」样本（旧实现 vals[length-1] 实为最旧样本）。
+    const windowRows = db.getRecentMetrics(a.id, WINDOW_SAMPLES);
     const checkMetric = (type, field, limit, unit, label) => {
-      const vals = recent.map((r) => r[field]).filter((v) => typeof v === 'number');
-      if (vals.length < SUSTAIN_N) return; // 样本不足：本轮不判定（宁可不报，不可误报）
-      const newest = vals.slice(-SUSTAIN_N);
+      // 指标类静音：muted 只压制 cpu/mem/disk/temp，经营告警永不静音。
+      if (c.muted) return;
+      const vals = windowRows.slice().reverse()
+        .map((r) => ({ v: r[field], known: typeof r[field] === 'number' }))
+        .filter((s) => s.known)
+        .map((s) => s.v);
+      // known 语义：缺数据样本排除；已知样本不足 2 个 → 本轮不判定（不触发也不恢复）。
+      if (vals.length < MIN_KNOWN_SAMPLES) return;
+      const exceed = vals.filter((v) => v >= limit).length;
+      const below = vals.length - exceed;
+      const cur = vals[vals.length - 1];
       const st = db.getAlertState(a.id, type);
-      if (newest.every((v) => v >= limit)) {
-        if (!st || now - st.last_sent > cfg.cooldown * 1000) {
-          const cur = vals[vals.length - 1];
-          jobs.push(alertThreshold(a, type, `${label} 连续 ${SUSTAIN_N} 个采样 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`, now, cfg.cooldown));
+      if (exceed / vals.length >= TRIGGER_RATIO) {
+        if (!st || now - st.last_sent > c.cooldown * 1000) {
+          const detail = LEGACY_SUSTAIN_MODE
+            ? `连续 ${vals.length} 个采样 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`
+            : `${vals.length} 个采样中 ${exceed} 个 ≥ ${limit}${unit}（当前 ${cur.toFixed(1)}${unit}）`;
+          jobs.push(alertThreshold(a, type, `${label} ${detail}`, now, c.cooldown));
         }
-      } else if (st && newest.every((v) => v < limit)) {
+      } else if (st && below / vals.length >= TRIGGER_RATIO) {
         // 持续低于阈值：发一次"已恢复"并清状态（清除后不会重复发送）
         db.clearAlertState(a.id, type);
-        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已连续 ${SUSTAIN_N} 个采样低于 ${limit}${unit}。`));
+        // 恢复与对应指标同事件组投递（不设独立 recovery 事件，避免 '*' 组重复投递）
+        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`, type, { agentId: a.id, agentName: a.name }));
       }
     };
-    checkMetric('cpu', 'cpu', cfg.cpuAlert, '%', 'CPU');
-    checkMetric('mem', 'mem_pct', cfg.memAlert, '%', '内存');
+    checkMetric('cpu', 'cpu', c.cpuAlert, '%', 'CPU');
+    checkMetric('mem', 'mem_pct', c.memAlert, '%', '内存');
     // 审查 E6：补磁盘/温度告警（disk_pct/temp 一直采集，此前无规则）
-    checkMetric('disk', 'disk_pct', cfg.diskAlert, '%', '磁盘');
-    checkMetric('temp', 'temp', cfg.tempAlert, '°C', '温度');
+    checkMetric('disk', 'disk_pct', c.diskAlert, '%', '磁盘');
+    checkMetric('temp', 'temp', c.tempAlert, '°C', '温度');
     return Promise.allSettled(jobs);
   } catch (e) {
     // 单个 agent 异常（如 DB 读取失败）不应中断其余 agent 的告警检查
@@ -189,22 +168,19 @@ async function check() {
     // 待确认 agent 尚未获准上报，不参与告警（审查 G4，否则被误判"离线"刷误报）
     const agents = db.getMonitoredAgents();
     const now = Date.now();
-    // 审查 C-1/E2：阈值单一取值（UI 显式值 > env > 默认）。
-    // 此前直接读 getUiSettings().alert——其嵌套合并使默认值恒真，env 分支不可达，
-    // 导致看板（直读 env）与告警（UI 默认）对"在线"的判断不一致、平稳期误报离线。
-    const t = db.resolveAlertThresholds();
-    const cfg = {
-      offlineSec: t.offline_sec,
-      cpuAlert: t.cpu_pct,
-      memAlert: t.mem_pct,
-      diskAlert: t.disk_pct,
-      tempAlert: t.temp_c,
-      cooldown: Number(process.env.ALERT_COOLDOWN_SEC || 1800)
+    // S1/F1：覆盖表一次预取，避免逐节点 N×2 查询；阈值解析链在 checkAgent 内完成。
+    const ctx = {
+      global: db.resolveAlertThresholds(),
+      groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
+      nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
     };
+    // 清理已删除节点的内存离线起点，防 Map 无界增长。
+    const alive = new Set(agents.map((a) => a.id));
+    for (const k of OFFLINE_SINCE.keys()) if (!alive.has(k)) OFFLINE_SINCE.delete(k);
     // 限并发而非全并发：SMTP 普遍有速率/连接限制，100 台同时离线时一次性并发易被拒收。
     const CONCURRENCY = Math.max(1, Number(process.env.ALERT_CONCURRENCY || 8));
     for (let i = 0; i < agents.length; i += CONCURRENCY) {
-      await Promise.allSettled(agents.slice(i, i + CONCURRENCY).map((a) => checkAgent(a, now, cfg)));
+      await Promise.allSettled(agents.slice(i, i + CONCURRENCY).map((a) => checkAgent(a, now, null, ctx)));
     }
     console.log(`[alerts] check done: ${agents.length} agents in ${Date.now() - t0}ms`);
     return true;
@@ -235,7 +211,7 @@ async function checkExpiringAgents(now) {
           const when = expired ? '已过期' : `将于 ${days} 天后到期`;
           await sendAlertGuarded(a.id, type,
             `[监控] ${a.name} ${expired ? '已过期' : '即将到期'}`,
-            `客户端 ${a.name}(${a.id}) ${when}${expired ? '' : `，到期日 ${a.expire_at}`}。请及时处理续费或下线，避免服务中断。`);
+            `客户端 ${a.name}(${a.id}) ${when}${expired ? '' : `，到期日 ${a.expire_at}`}。请及时处理续费或下线，避免服务中断。`, a.name);
         }
         if (!expired) db.clearAlertState(a.id, 'expired');
       } else {
@@ -272,7 +248,7 @@ async function checkTrafficQuota(now) {
             if (!st || now - st.last_sent > 24 * 3600 * 1000) {
               await sendAlertGuarded(a.id, 'traffic_untrusted',
                 `[监控] ${a.name} 月流量计数不可信`,
-                `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`);
+                `客户端 ${a.name}(${a.id}) 上报本月 ${usedGb.toFixed(2)}GB，服务端按速率积分估算约 ${estGb.toFixed(2)}GB，偏差过大——可能接口计数已重置或本地状态丢失，配额告警可能漏报，请人工核对。`, a.name);
             }
           } else {
             db.clearAlertState(a.id, 'traffic_untrusted');
@@ -284,7 +260,7 @@ async function checkTrafficQuota(now) {
         if (!st || now - st.last_sent > 24 * 3600 * 1000) {
           await sendAlertGuarded(a.id, 'quota',
             `[监控] ${a.name} 月流量超额`,
-            `客户端 ${a.name}(${a.id}) 本月已用 ${usedGb.toFixed(2)} GB，超过配额 ${a.monthly_quota_gb} GB。请关注是否产生额外费用或被限速。`
+            `客户端 ${a.name}(${a.id}) 本月已用 ${usedGb.toFixed(2)} GB，超过配额 ${a.monthly_quota_gb} GB。请关注是否产生额外费用或被限速。`, a.name
           );
         }
       } else {
@@ -297,11 +273,8 @@ async function checkTrafficQuota(now) {
 }
 
 function notifyStatus() {
-  const c = db.getNotifyConfig();
-  return {
-    mail: !!(c.smtp_user && c.smtp_pass),
-    telegram: !!(c.telegram_bot_token && c.telegram_chat_id)
-  };
+  // S1/F2：渠道状态由 notify 统一计算（含 webhook 数量、启用组数）。
+  return notify.notifyStatus();
 }
 
 let timer = null;
@@ -361,4 +334,13 @@ function stop() { if (timer) clearInterval(timer); if (dailyTimer) clearInterval
 
 // 导出 check / checkAgent：便于单测与手动排查（此前未导出，只能靠定时触发观察）。
 // checkAgent 供 E1（连续 N 采样 / 恢复通知）与 E6（disk/temp 告警）的回归断言直接驱动。
-module.exports = { start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota };
+module.exports = {
+  start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota,
+  resolveAgentThresholds,
+  // 供测试断言窗口配置（S1/F1）
+  getAlertWindowConfig: () => ({
+    window: WINDOW_SAMPLES,
+    ratio: TRIGGER_RATIO,
+    legacy: LEGACY_SUSTAIN_MODE
+  })
+};

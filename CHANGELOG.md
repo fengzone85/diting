@@ -2,6 +2,105 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-20 API Token 细粒度作用域 + 管理端点（S2-F5）
+
+### 新增
+
+- **`api_tokens` 表**：库中只存 `token_hash`（SHA-256），`agent_ids` 为 JSON 数组
+  （`[]` = 不限节点），另含 `scope` / `expires_at` / `last_used_*` / `revoked`。
+- **`X-API-Token` 认证通道**：`resolveRole` 只在该头查 Token；`Authorization: Bearer`
+  仍**仅**用于受控端上报与 `/metrics`，从协议层消除「同一 Bearer 是 Admin 还是 Agent」的歧义。
+- **中层 `agentScope` / `inAgentScope`**：`agent_ids` 非空时把请求标记为受限，供 handler 判定归属。
+- **Token 管理端点**（仅 admin）：`POST /api/admin/api-tokens`（明文 `diting_<48hex>`
+  只回显一次）、`GET`（列表脱敏，无明文/哈希）、`DELETE /:id`（吊销即时生效）。
+
+### ⚠️ 行为变更（仅影响受限 Token，全局凭证行为不变）
+
+- **单节点面越权 → `403 forbidden_node`**：`/agents/:id`、`/agents/:id/metrics`、
+  `PUT`/`DELETE /agents/:id`、`approve` / `renew` / `reset-token` / `commands`、
+  `/admin/alert-rules/agent/:id`、`/ai/analyze-node/:id`、`/ai/node-reports?agent_id=`。
+- **全局面拒绝 → `403 forbidden_scope`**：`/overview`、`/agents/sparklines/overview`、
+  `/billing`、`/admin/alert-rules`、`/ai/usage`、`/ai/reports`、`/ai/reports/:id`、Token 管理端点。
+- **`/agents` 与 `/agents/sparklines` 改为按白名单过滤**（而非拒绝），受限 Token 仍能看自己的节点。
+- **全局配置 / 基础设施写接口同样 `403 forbidden_scope`**：`POST /agents`、`PUT /settings`、
+  `POST /test-alert`、`PUT /ai/config`、`POST /ai/run`、通知渠道与通知组增删改/测试、
+  `PUT/DELETE /admin/alert-rules/group/:grp`、备份下载/删除/恢复、`/admin/2fa/*`、
+  `POST /public/order`。受限 Token 的授权范围是「这几个节点」，全局变更（关掉全站告警、
+  改系统设置、重建 2FA）与节点边界无关，必须拒绝。
+- `READONLY_TOKEN` / `X-Admin-Token` 等既有凭证不受影响（等价于 `agent_ids=[]`）。
+
+### 说明
+
+- **提权路径已封**：受限 Token 调用 Token 管理端点一律 `forbidden_scope`；否则签发一个
+  `agent_ids=[]` 的 Token 即可绕过节点边界。
+- 创建校验：`name` 必填、`scope` 仅 `readonly|admin`（缺省 `readonly`）、`agent_ids`
+  须为已存在节点（`400 unknown_agent_id`）、`expires_in_days` 为 1–3650 整数。
+- 吊销语义：不存在或已吊销统一 `404`（底层 `UPDATE` 对已吊销行同样算命中，故先查状态）。
+- 回归：`test/api-token-scope.test.js`（8 组）、`test/api-tokens-admin.test.js`（6 组），
+  含「越权写不落库」「吊销后立即 401」「受限 Token 不能管理 Token」等断言。
+- 可选 E2E（真实浏览器，不进 `npm test`）：`npm run e2e:tokens`，覆盖
+  登录→签发→一次性明文→复制→作用域→吊销全链路；Playwright 需在仓库外安装
+  （见 `server/test/e2e/api-tokens.e2e.mjs` 头注释），避免 CI 拉浏览器。
+
+## 2026-10-20 通用 Webhook 通知渠道 + 通知组（S1-F2）
+
+### ⚠️ 行为变更
+
+- **通知投递改为「通知组 × 事件」路由**：新增 `notify_channels` / `notify_groups` /
+  `notify_group_channels` 三表，启动时幂等种子化（mail/telegram 内置渠道 + `default`
+  组订阅 `*`）。升级后默认行为与旧版一致，无需配置迁移。
+- **新增通用 Webhook 渠道**：支持 URL / GET-POST / JSON-Form / 自定义头 / 请求体模板
+  （`{{title}} {{message}} {{event}} {{agent}} {{agent_id}} {{time}} {{emoji}}`，
+  JSON 值自动转义），可对接钉钉/飞书/企业微信/Bark/Server酱等。
+- **出站安全默认收紧**：Webhook 仅允许 `https://` 且目标解析地址不得为私网/回环/
+  链路本地/保留段（含 `169.254.169.254` 云元数据），禁重定向，禁止覆盖
+  `Host`/`Content-Length`/`Connection`/`Transfer-Encoding` 等头。内网自托管接收端需显式
+  `ALLOW_PRIVATE_WEBHOOK=1`（明文 http 另需 `ALLOW_INSECURE_WEBHOOK=1`）。
+- **恢复通知与指标同组**：CPU/内存/磁盘/温度恢复使用对应指标事件（不设独立
+  `recovery` 事件），避免 `*` 组对同一次恢复重复投递。
+- **测试告警语义**：`POST /api/test-alert` 经通知组路由，任一启用通道（邮件 / Telegram /
+  Webhook）即可；全部通道失败返回 `502`（此前恒 `200`）。
+- **AI 日报通道判定**：`notifyStatus()` 现同时统计启用 Webhook；仅有 Webhook 时日报也会发送。
+
+### 说明
+
+- 内置 mail/telegram 渠道的凭据仍存 `notify_config`（单一事实源），渠道行只承载启用开关；
+  管理端渠道表对内置渠道仅开放启用/禁用与测试。
+- 同一 `(agent, event)` 的告警→恢复串行投递并保证顺序，链完成即清理（内存有界）。
+- 单通道失败隔离：一个渠道 5xx/超时不影响同组其它渠道；全失败才回滚告警态。
+- 新增 env：`NOTIFY_CONCURRENCY`（默认 8）、`ALLOW_PRIVATE_WEBHOOK`、
+  `ALLOW_INSECURE_WEBHOOK`。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F2。
+
+## 2026-10-19 告警规则精细化：节点/分组覆盖 + 采样窗口 + 上线通知（S1-F1）
+
+### ⚠️ 行为变更
+
+- **告警判定从「连续 N 次全超限」改为「窗口内 ≥70% 超限」**：默认 5 个采样窗口、触发/恢复
+  比例 0.7（env `ALERT_WINDOW_SAMPLES` / `ALERT_TRIGGER_RATIO`）。单次尖刺不再告警，持续超阈
+  触发最多比旧行为晚 2 个采样。**要恢复旧的「连续 2 次」行为，显式设置 `ALERT_SUSTAIN_SAMPLES=2`**
+  （内部转为窗口=2、比例=1.0）。
+- **缺数据语义显式化**：`null` 样本不参与窗口计算；已知样本不足 2 个时既不触发也不恢复
+  （对齐 nezha known=false）。此前 null 会被静默过滤但恢复路径可能误判。
+- **新增上线通知**：离线超过 `ONLINE_NOTIFY_GRACE_SEC`（默认 180 秒）后重连发送「已上线」；
+  此前恢复只清告警态、不发通知。设 `0` 关闭。
+- **告警阈值支持按节点/分组覆盖**：解析链 `节点 > 分组 > 全局`，字段独立继承，留空 = 继承。
+  新增管理 API `GET /api/admin/alert-rules`、`PUT/DELETE /api/admin/alert-rules/agent/:id`、
+  `PUT/DELETE /api/admin/alert-rules/group/:grp`（分组 `-` 表示未分组默认组）。
+  管理端「受控端」列表新增「告警」入口，「设置 → 分组告警覆盖」新增分组面板。
+- **`muted` 只压制指标类告警**（cpu/mem/disk/temp）；离线、到期、配额、流量不可信属经营告警，
+  永不被静音（防「静音=失联」）。
+- `/api/agents` 响应新增 `alert.effective/overridden/muted`；**在线状态判定同步改用节点生效的
+  `offline_sec`**，修复「看板显示在线、告警判离线」的双源分裂。
+
+### 说明
+
+- 新表 `alert_overrides` / `alert_group_overrides` 刻意不声明外键：本库未启用
+  `PRAGMA foreign_keys`，级联不会执行；删除受控端时由 `db.deleteAgent` 同事务清理。
+- 覆盖值按与全局阈值一致的范围钳制（越界/非数字视为未设置）。
+- 审计：覆盖写/清操作记录 `alert_rule_update` / `alert_rule_reset`。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F1。
+
 ## 2026-10-19 流量周期口径：month_rotate / net_rx / net_tx（P1–P4 安装链路）
 
 ### ⚠️ 行为变更

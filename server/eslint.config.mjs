@@ -35,5 +35,19 @@ export default [
         before: 'readonly', after: 'readonly', beforeEach: 'readonly', afterEach: 'readonly'
       }
     }
+  },
+  {
+    // 浏览器端 E2E（Playwright）：ESM + Node 运行时，但 page.evaluate 回调里用到浏览器全局。
+    files: ['test/e2e/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: { ...globals.node, navigator: 'readonly', document: 'readonly', window: 'readonly' }
+    },
+    rules: {
+      'no-console': 'off',
+      'no-empty': ['warn', { allowEmptyCatch: true }],
+      eqeqeq: ['warn', 'smart']
+    }
   }
 ];
