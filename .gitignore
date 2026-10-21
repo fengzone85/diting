@@ -36,6 +36,9 @@ server/public.bak-*/
 server/public/assets/
 server/public/index.html
 
+# 构建时间戳（diting.sh 部署时写入 build_time.txt，运行产物）
+server/build_time.txt
+
 # 测试覆盖率报告（vitest --coverage 输出，npm run test:cov 重新生成）
 server/web/coverage/
 

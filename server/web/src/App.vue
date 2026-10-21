@@ -3,15 +3,33 @@ import { computed, ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useApp } from './composables/useApp';
 import { t } from './composables/useI18n';
+import { publicApi } from './services/publicApi';
 import AppFooter from './components/AppFooter.vue';
 
 const { state } = useApp();
+
+// 页脚版本 / 构建时间：匿名访问服务端只回主版本号（G5 防 CVE 匹配），
+// 登录后才拿到精确版本与 build_time，此时才显示构建时间。
+const version = ref('');
+const buildTime = ref('');
+async function loadVersion() {
+  try {
+    const info = await publicApi.version();
+    version.value = info.version || info.data?.version || '';
+    buildTime.value = info.build_time || info.data?.build_time || '';
+  } catch {
+    version.value = '';
+    buildTime.value = '';
+  }
+}
 
 // 首屏加载态：router.beforeEach 里 await getAuthStatus() 是异步的，慢网络下
 // RouterView 会长时间空白；等路由就绪再渲染，避免「假死」观感。
 const router = useRouter();
 const ready = ref(false);
 onMounted(async () => {
+  // 版本信息与路由就绪互不依赖，并行发起，不拖慢首屏
+  void loadVersion();
   await router.isReady();
   ready.value = true;
 });
@@ -40,7 +58,13 @@ const cvLabel: Record<string, string> = {
 
   <template v-else>
     <RouterView />
-    <AppFooter :meta="state.meta" :ip="state.visitor?.ip" :browser="state.visitor?.browser" />
+    <AppFooter
+      :meta="state.meta"
+      :version="version"
+      :build-time="buildTime"
+      :ip="state.visitor?.ip"
+      :browser="state.visitor?.browser"
+    />
 
     <!-- 色觉辅助提示条 -->
     <div v-if="colorVision !== 'normal'" class="cv-banner glass text-muted">

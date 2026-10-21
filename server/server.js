@@ -227,10 +227,17 @@ app.use('/api', (req, res, next) => {
 // 遮蔽成为死代码（那条只回静态占位符，从不泄露真实版本，但也从未生效）。
 app.get('/api/version', (req, res) => {
   const role = resolveRole(req);
-  const envelope = { status: 'success', message: '', data: { hash: '-', version: String(APP_VERSION).split('.')[0] } };
-  if (!role) return res.json(envelope);
-  envelope.data.version = APP_VERSION;
-  return res.json(Object.assign(envelope, { version: APP_VERSION, build_time: APP_BUILD_TIME }));
+  // 匿名只给主版本号（G5：精确版本可被用于匹配 CVE）；构建时间属部署元信息，
+  // 匿名一并下发以支持页脚「Build Time」展示，不构成版本指纹。
+  const payload = role
+    ? { version: APP_VERSION, build_time: APP_BUILD_TIME }
+    : { version: String(APP_VERSION).split('.')[0], build_time: APP_BUILD_TIME };
+  return res.json({
+    status: 'success',
+    message: '',
+    data: Object.assign({ hash: '-' }, payload),
+    ...payload,
+  });
 });
 app.use('/api', api);
 // 标准公开只读 API 层（/api/v1/*）：语义清晰、与皮肤协议解耦，供独立 adapter 翻译
