@@ -97,6 +97,9 @@ export const adminApi = {
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
   getSettings: () => api.get<Settings>('/api/settings'),
   saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
+  // 后台仪表盘可选卡片（只写 ui.admin_card_keys，不影响其他设置）
+  saveDashboardCards: (keys: string[]) =>
+    api.put<{ ok: boolean; keys: string[] }>('/api/admin/dashboard/cards', { keys }),
 
   // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
   getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),

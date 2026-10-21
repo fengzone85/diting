@@ -221,7 +221,27 @@ function validateNotifyGroupInput(body) {
   return { ok: true, value: { name, events, enabled: b.enabled !== false, channel_ids: channelIds } };
 }
 
+// ---- 后台仪表盘可选卡片 --------------------------------------------------
+// 卡片键白名单是唯一事实来源：前端只能提交这些键，顺序即渲染顺序。
+// 数组为空视为「未配置」→ 由前端回退到默认全量，避免误清空后仪表盘一片空白。
+const DASHBOARD_CARD_KEYS = [
+  'total', 'online', 'offline', 'monthly_cost',
+  'avg_cpu', 'avg_mem', 'db_size', 'public_nodes',
+];
+
+function validateDashboardCardKeys(input) {
+  if (!Array.isArray(input)) return { ok: false, error: 'card_keys_invalid' };
+  const out = [];
+  for (const raw of input) {
+    if (typeof raw !== 'string') continue;
+    if (!DASHBOARD_CARD_KEYS.includes(raw)) continue;
+    if (!out.includes(raw)) out.push(raw);
+  }
+  return { ok: true, value: out };
+}
+
 module.exports = {
   num, str, validateReport, sanitizeCss,
-  NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput
+  NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput,
+  DASHBOARD_CARD_KEYS, validateDashboardCardKeys
 };

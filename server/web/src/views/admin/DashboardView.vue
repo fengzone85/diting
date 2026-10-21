@@ -2,6 +2,7 @@
 import { computed, ref, onMounted } from 'vue';
 import StatCard from '../../components/ui/StatCard.vue';
 import ChartLatency from '../../components/ChartLatency.vue';
+import CardPicker from '../../components/admin/CardPicker.vue';
 import { useAdmin } from '../../composables/useAdmin';
 import { useApp } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
@@ -25,6 +26,60 @@ const avgMem = computed(() => {
   const vals = admin.state.agents.map(a => a.latest?.mem_pct).filter((v): v is number => v != null);
   return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : undefined;
 });
+
+// ---- 仪表盘卡片（可选择多卡片）------------------------------------------
+// 对齐 Komari 后台仪表盘：卡片集合与顺序由管理员勾选（全局配置 ui.admin_card_keys），
+// 未配置时回退到全量默认顺序（与历史布局一致）。
+const CARD_KEYS = ['total', 'online', 'offline', 'monthly_cost', 'avg_cpu', 'avg_mem', 'db_size', 'public_nodes'] as const;
+type CardKey = typeof CARD_KEYS[number];
+
+const cardMeta = computed<Record<CardKey, { label: string; value: string | number; variant?: 'default' | 'success' | 'warning' | 'danger' }>>(() => ({
+  total: { label: t('dashboard.totalAgents'), value: (admin.state.overview?.total as number) ?? '-' },
+  online: { label: t('dashboard.online'), value: (admin.state.overview?.online as number) ?? '-', variant: 'success' },
+  offline: { label: t('dashboard.offline'), value: (admin.state.overview?.offline as number) ?? '-', variant: 'danger' },
+  monthly_cost: {
+    label: t('dashboard.monthlyCost'),
+    value: billing.value ? billing.value.currency + billing.value.monthly_total.toFixed(2) : '-',
+    variant: 'warning',
+  },
+  avg_cpu: { label: t('dashboard.avgCpu'), value: formatPercent(avgCpu.value) },
+  avg_mem: { label: t('dashboard.avgMem'), value: formatPercent(avgMem.value) },
+  db_size: { label: t('dashboard.dbSize'), value: formatBytes(admin.state.overview?.db_size_bytes as number | undefined) },
+  public_nodes: { label: t('public.nodes'), value: app.state.meta?.public_enabled ? 'ON' : 'OFF' },
+}));
+
+const cardOptions = computed(() => CARD_KEYS.map((k) => ({ key: k as string, label: cardMeta.value[k].label })));
+
+// 服务端已保存的选择：过滤掉白名单外的脏值；空数组 = 未配置 → 全量默认
+const savedCardKeys = computed<string[]>(() => {
+  const raw = (admin.state.settings?.ui as Record<string, unknown> | undefined)?.admin_card_keys;
+  const list = Array.isArray(raw)
+    ? raw.filter((k): k is string => typeof k === 'string' && (CARD_KEYS as readonly string[]).includes(k))
+    : [];
+  return list.length ? list : [...CARD_KEYS];
+});
+
+const visibleCards = computed(() => savedCardKeys.value.map((k) => ({ key: k, ...cardMeta.value[k as CardKey] })));
+
+const savingCards = ref(false);
+const cardsError = ref('');
+const cardsSaved = ref(false);
+
+async function applyCards(keys: string[]) {
+  savingCards.value = true;
+  cardsError.value = '';
+  cardsSaved.value = false;
+  try {
+    await adminApi.saveDashboardCards(keys);
+    await admin.refresh();
+    cardsSaved.value = true;
+    setTimeout(() => { cardsSaved.value = false; }, 2000);
+  } catch (e) {
+    cardsError.value = t('dashboard.cardsFailed', { msg: (e as Error).message || t('common.unknownError') });
+  } finally {
+    savingCards.value = false;
+  }
+}
 
 // B5: 集群平均 CPU/内存趋势（聚合所有受控端时序）
 // 后端 /agents/sparklines/overview 已按时间桶跨所有 agent 在 SQL 层聚合出平均曲线，
@@ -76,21 +131,25 @@ async function testAlert() {
 
 <template>
   <div>
-    <h1 class="mb-6 text-2xl font-bold">{{ t('dashboard.title') }}</h1>
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-2xl font-bold">{{ t('dashboard.title') }}</h1>
+      <div class="flex items-center gap-2">
+        <span v-if="cardsSaved" class="text-xs text-emerald-400">{{ t('dashboard.cardsSaved') }}</span>
+        <span v-if="cardsError" class="text-xs text-rose-300">{{ cardsError }}</span>
+        <CardPicker :model="savedCardKeys" :options="cardOptions" :saving="savingCards" @apply="applyCards" />
+      </div>
+    </div>
     <div v-if="admin.state.error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
       {{ admin.state.error }}
     </div>
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard :label="t('dashboard.totalAgents')" :value="(admin.state.overview?.total as number) ?? '-'" />
-      <StatCard :label="t('dashboard.online')" :value="(admin.state.overview?.online as number) ?? '-'" variant="success" />
-      <StatCard :label="t('dashboard.offline')" :value="(admin.state.overview?.offline as number) ?? '-'" variant="danger" />
-      <StatCard :label="t('dashboard.monthlyCost')" :value="billing ? (billing.currency + billing.monthly_total.toFixed(2)) : '-'" variant="warning" />
-    </div>
-    <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard :label="t('dashboard.avgCpu')" :value="formatPercent(avgCpu)" />
-      <StatCard :label="t('dashboard.avgMem')" :value="formatPercent(avgMem)" />
-      <StatCard :label="t('dashboard.dbSize')" :value="formatBytes(admin.state.overview?.db_size_bytes as number | undefined)" />
-      <StatCard :label="t('public.nodes')" :value="app.state.meta?.public_enabled ? 'ON' : 'OFF'" />
+      <StatCard
+        v-for="c in visibleCards"
+        :key="c.key"
+        :label="c.label"
+        :value="c.value"
+        :variant="c.variant"
+      />
     </div>
     <div class="mt-6">
       <div class="mb-3 flex items-center justify-between">
