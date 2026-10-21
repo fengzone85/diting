@@ -140,3 +140,24 @@ python -m pip uninstall -y psutil
 > （以便服务端「修改探测目标」命令在 Python → Go 升级后继续生效）。若该机已升级到
 > Go 版，上述第 2 步的删任务会**一并删除 Go 版受控端**；只想清理 Python 残留文件时，
 > 只删除 `windows_agent.py` / `win_collector.py` / `requirements.txt` / `__pycache__`。
+
+### 旧版已知问题（仅历史记录，Python 端已冻结）
+
+**症状**：重启后月流量从 0 重新累计，日志里没有任何线索。
+
+**原因**：旧 Python 端的 `_load_state()` 把「文件读不出来」与「首次运行」都当成空状态，
+随后按「新月」写盘，把原月累计覆盖掉；`_save_state()` 又是直接覆写（非原子），
+失败只打 `debug` 日志（默认级别 WARNING，等于不可见）。真机复盘出现过连续 28 天
+写入失败、每次重启静默归零的情况。
+
+**排查**：查看 `%ProgramData%\diting-agent\state.json` 是否存在、是否为合法 JSON、
+当前运行账户（计划任务默认 `LocalService`）是否有该目录的写权限：
+
+```powershell
+$f = "$env:ProgramData\diting-agent\state.json"
+Test-Path $f; Get-Content $f -Raw | ConvertFrom-Json
+icacls "$env:ProgramData\diting-agent"
+```
+
+> Go 版不受此问题影响：月累计由**服务端** `traffic_state` 计算，受控端不再持久化本地状态；
+> 该修复分支（`fix/win-agent-state-persistence`）验证有效但因目标模块冻结未并入主分支。
