@@ -106,6 +106,22 @@ const overviewCards = computed(() => {
   const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
   // 上行/下行哪边速率大，哪边用主值大字（活跃方向自适应高亮）
   const rateBigDown = totalRxRate >= totalTxRate;
+  // 实时速率双行卡：official 方案的「总即时流量」与 traffic 方案的「实时速率」共用同一份数据
+  const liveTraffic = {
+    // 位置固定：下行恒在主行、上行恒在副行；字号动态——哪边速率大哪边放大
+    // （上行活跃时 subBig 让副行放大、主值收小）。格式无空格紧凑（如 ↓1.2M/s）。
+    value: `↓${rateText(totalRxRate)}`,
+    sub: `↑${rateText(totalTxRate)}`,
+    compact: true,
+    subBig: !rateBigDown,
+    variant: 'default' as const,
+  };
+  // 流量配额（finance 方案）：各节点月配额汇总 vs 本月已用流量（下行+上行）
+  const totalQuotaGb = sum((a) => a.monthly_quota_gb || 0);
+  const trafficUsed = totalRx + totalTx;
+  const quotaBytes = totalQuotaGb * 1024 ** 3;
+  const quotaPct = quotaBytes > 0 ? (trafficUsed / quotaBytes) * 100 : 0;
+  const usedText = trafficUsed > 0 ? fmtBytes(trafficUsed) : '0B';
   const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; subBig?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
@@ -115,27 +131,27 @@ const overviewCards = computed(() => {
     mem: { label: t('public.avgMem'), value: o?.mem_avg != null ? `${o.mem_avg.toFixed(1)}%` : '-', variant: 'default' },
     load: { label: t('public.highLoad'), value: String(highLoad), variant: 'warning' },
     disk: { label: t('public.diskUsage'), value: '-', variant: 'default' },
-    net: { label: t('public.netRate'), value: '-', variant: 'default' },
+    net: { label: t('public.netRate'), ...liveTraffic },
     swap: { label: t('public.swap'), value: '-', variant: 'default' },
     // 总即时流量（2026-10-12 用户指定）：替换原「运行时间(uptime)」占位卡
     // （其 value 一直是 '-' 未实现）。下行主行 + 上行副行；空闲显示 0 B/s 而非 '-'。
-    instant_traffic: {
-      label: t('public.instantTraffic'),
-      // 位置固定：下行恒在主行、上行恒在副行；字号动态——哪边速率大哪边放大
-      // （上行活跃时 subBig 让副行放大、主值收小）。格式无空格紧凑（如 ↓1.2M/s）。
-      value: `↓${rateText(totalRxRate)}`,
-      sub: `↑${rateText(totalTxRate)}`,
-      compact: true,
-      subBig: !rateBigDown,
-      variant: 'default'
-    },
+    instant_traffic: { label: t('public.instantTraffic'), ...liveTraffic },
     traffic: { label: t('public.traffic'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     traffic_total: { label: t('public.trafficTotal'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     rx_month: { label: t('public.rxMonth'), value: fmtBytes(totalRx), variant: 'default' },
     tx_month: { label: t('public.txMonth'), value: fmtBytes(totalTx), variant: 'default' },
     price: { label: t('public.monthlyCost'), value: fmtPrice(sum((a) => a.price || 0)), variant: 'default' },
     expire: { label: t('public.expiring'), value: String(expiring), variant: 'warning' },
-    quota: { label: t('public.quota'), value: '-', variant: 'default' },
+    // 流量配额（2026-10-21）：原为写死 '-'。有配额时主值显示使用率、
+    // 副行显示「已用 / 配额」；未配置配额（全为 0）时显示已用量 + ∞。
+    quota: totalQuotaGb > 0
+      ? {
+          label: t('public.quota'),
+          value: `${quotaPct.toFixed(1)}%`,
+          sub: `${usedText} / ${fmtBytes(quotaBytes)}`,
+          variant: quotaPct >= 90 ? 'danger' : quotaPct >= 75 ? 'warning' : 'default',
+        }
+      : { label: t('public.quota'), value: usedText, sub: `/ ∞`, variant: 'default' },
     groups: { label: t('public.groups'), value: String(Object.keys(groupedAgents.value).length), variant: 'default' },
     country: { label: t('public.countries'), value: String(new Set(ags.map((a) => a.country_code).filter(Boolean)).size), variant: 'default' },
     merchant: { label: t('public.merchants'), value: String(new Set(ags.map((a) => a.merchant).filter(Boolean)).size), variant: 'default' },
