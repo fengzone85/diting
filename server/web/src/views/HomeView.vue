@@ -153,7 +153,19 @@ const overviewCards = computed(() => {
     // 总即时流量（2026-10-12 用户指定）：替换原「运行时间(uptime)」占位卡
     // （其 value 一直是 '-' 未实现）。下行主行 + 上行副行；空闲显示 0 B/s 而非 '-'。
     instant_traffic: { label: t('public.instantTraffic'), ...liveTraffic },
-    traffic: { label: t('public.traffic'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
+    // 当前在线（2026-10-21 用户指定）：合并原「在线」+「受控端总数」两张卡，值为 在线 / 总数
+    online_total: {
+      label: t('public.currentOnline'),
+      value: `${o?.online ?? '-'} / ${o?.total ?? '-'}`,
+      variant: 'success',
+    },
+    // 流量概览（2026-10-21 用户指定）：原「TFC」卡改为显示本月上行/下行
+    traffic: {
+      label: t('public.trafficOverview'),
+      value: `↑ ${fmtTraffic(totalTx)} / ↓ ${fmtTraffic(totalRx)}`,
+      compact: true,
+      variant: 'default',
+    },
     traffic_total: { label: t('public.trafficTotal'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     rx_month: { label: t('public.rxMonth'), value: fmtBytes(totalRx), variant: 'default' },
     tx_month: { label: t('public.txMonth'), value: fmtBytes(totalTx), variant: 'default' },
@@ -191,6 +203,15 @@ function fmtBytes(n: number): string {
   let i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(1)} ${u[i]}`;
+}
+// 流量概览卡专用：保留两位小数（如 "4.12 GB"），与总览其余卡片的整数位口径区分
+function fmtTraffic(n: number): string {
+  if (!n || n <= 0) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(2)} ${u[i]}`;
 }
 // 紧凑速率格式（总即时流量卡专用）：无空格、单位缩写——如 "1.2M"、"340K"、"0B"
 function fmtRateCompact(n: number): string {
@@ -257,7 +278,8 @@ const filteredAgents = computed(() => {
     <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
 
-      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 sm:gap-4">
+      <!-- 总览卡片：列数随卡片数量自适应（合并卡片后不再固定 6 列留空格） -->
+      <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 sm:gap-4">
         <StatCard
           v-for="(c, i) in overviewCards.items"
           :key="i"
