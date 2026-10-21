@@ -31,19 +31,19 @@ const isSm = props.size === 'sm';
 const padClass = isSm ? 'p-4' : 'p-5';
 // 前台总览：标题加粗、数值常规字重（后台卡片维持原样式）
 const labelClass = isSm ? 'text-xs font-semibold' : 'text-sm';
-// spread（上行/下行成对指标）：两行字号一致，数值大的一行加粗、小的一行常规；
-// 非 spread 时 sm 档主值统一 16px（此前紧凑卡降到 12px，和相邻卡片明显不一致）。
+// spread（上行/下行成对指标，流量概览/实时速率）：两行 14px，比单值卡轻一档；
+// 非 spread 的单值卡（当前在线/CPU/内存）sm 档加大到 20px，突出核心数字。
 const spreadOn = props.spread === true;
 const valueClass = spreadOn
-  ? 'text-base'
+  ? 'text-sm'
   : isSm
-    ? 'text-base'
+    ? 'text-xl'
     : (props.compact ? (props.subBig ? 'text-xs' : 'text-base') : 'text-2xl font-semibold');
 // 字重必须响应式：boldSub 随每次轮询数据变化（哪边数值大哪边加粗），
 // 用普通常量只会在组件创建时求值一次，之后永不更新——这就是「加粗方向不变」的原因。
 const valueWeight = computed(() =>
   spreadOn ? (props.boldSub ? 'font-normal' : 'font-semibold') : (isSm ? 'font-normal' : ''));
-const subClass = spreadOn ? 'text-base' : (isSm ? 'text-xs' : (props.subBig ? 'text-base' : 'text-xs'));
+const subClass = spreadOn ? 'text-sm' : (isSm ? 'text-xs' : (props.subBig ? 'text-base' : 'text-xs'));
 const subWeight = computed(() =>
   spreadOn ? (props.boldSub ? 'font-semibold' : 'font-normal') : '');
 </script>
