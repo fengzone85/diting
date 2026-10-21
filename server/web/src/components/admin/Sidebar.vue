@@ -90,12 +90,12 @@ function isActive(to: string) {
   >
     <!-- 品牌 + 收起/展开 -->
     <div class="mb-4 flex items-center gap-2 px-1">
-      <RouterLink to="/admin" class="flex min-w-0 items-center gap-2" :title="t('nav.admin')">
+      <RouterLink to="/admin" class="brand flex min-w-0 items-center gap-2" :title="t('nav.admin')">
         <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sm font-bold text-sky-300">D</span>
         <span class="label truncate text-lg font-bold text-sky-400">Diting</span>
       </RouterLink>
       <button
-        class="ml-auto hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/40 hover:text-white lg:flex"
+        class="collapse-toggle ml-auto hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/40 hover:text-white lg:flex"
         :title="collapsed ? t('nav.expand') : t('nav.collapse')"
         :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')"
         :aria-expanded="!collapsed"
@@ -203,6 +203,15 @@ function isActive(to: string) {
      覆盖（scoped 样式注入更晚），只能同层覆盖。 */
   .sidebar.is-collapsed {
     width: 4.5rem;
+  }
+  /* 收起态用「展开」图标顶替品牌位（对齐 Komari）：隐藏 D 字标与站名，
+     收起/展开按钮居中占据原来 D 的位置，避免两个元素挤在一起重叠。 */
+  .sidebar.is-collapsed .brand {
+    display: none;
+  }
+  .sidebar.is-collapsed .collapse-toggle {
+    margin-left: auto;
+    margin-right: auto;
   }
 }
 /* 移动端抽屉始终全宽显示文案，忽略收起态 */
