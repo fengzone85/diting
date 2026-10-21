@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 
+-- S5/F10 主题市场源：管理员可增删的 catalog 地址（config.Set("theme", ...) 的同构物）。
+-- url 唯一保证幂等：同一地址重复添加不会产生第二条。enabled=0 的源不参与聚合。
+CREATE TABLE IF NOT EXISTS theme_market_sources (
+  id         TEXT PRIMARY KEY,            -- 'src_' + 12 hex
+  name       TEXT NOT NULL,
+  url        TEXT NOT NULL UNIQUE,
+  enabled    INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 -- S2/F6 登录会话：cookie 内只带 sid，吊销状态以本表为准；
 -- session_revoked_before 水位线保留为全局 kill switch。
 CREATE TABLE IF NOT EXISTS sessions (
@@ -1436,6 +1447,78 @@ function getDbFileSize() {
   return size;
 }
 
+// ---- S5/F10：主题市场源 ----------------------------------------------------
+const genThemeSourceId = () => 'src_' + crypto.randomBytes(6).toString('hex');
+const marketSourceOut = (r) => ({
+  id: r.id, name: r.name, url: r.url, enabled: !!r.enabled,
+  created_at: r.created_at, updated_at: r.updated_at
+});
+
+const listThemeMarketSources = () =>
+  db.prepare('SELECT * FROM theme_market_sources ORDER BY created_at ASC').all().map(marketSourceOut);
+
+const getThemeMarketSource = (id) => {
+  const r = db.prepare('SELECT * FROM theme_market_sources WHERE id = ?').get(String(id));
+  return r ? marketSourceOut(r) : null;
+};
+
+/** 幂等创建：url 已存在时返回已有行（不覆盖管理员改过的 name/enabled）。 */
+function createThemeMarketSource({ name, url, enabled = true }) {
+  const now = Date.now();
+  const existing = db.prepare('SELECT * FROM theme_market_sources WHERE url = ?').get(String(url));
+  if (existing) return marketSourceOut(existing);
+  const id = genThemeSourceId();
+  db.prepare(`INSERT INTO theme_market_sources (id, name, url, enabled, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, String(name).slice(0, 64), String(url), enabled ? 1 : 0, now, now);
+  return getThemeMarketSource(id);
+}
+
+function updateThemeMarketSource(id, patch = {}) {
+  const cur = getThemeMarketSource(id);
+  if (!cur) return null;
+  const next = {
+    name: patch.name !== undefined ? String(patch.name).slice(0, 64) : cur.name,
+    url: patch.url !== undefined ? String(patch.url) : cur.url,
+    enabled: patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : (cur.enabled ? 1 : 0)
+  };
+  db.prepare('UPDATE theme_market_sources SET name = ?, url = ?, enabled = ?, updated_at = ? WHERE id = ?')
+    .run(next.name, next.url, next.enabled, Date.now(), String(id));
+  return getThemeMarketSource(id);
+}
+
+const deleteThemeMarketSource = (id) =>
+  db.prepare('DELETE FROM theme_market_sources WHERE id = ?').run(String(id)).changes > 0;
+
+// 官方源种子。仓库已上线（fengzone85/diting-theme-market）并已收录首个主题，默认启用。
+const OFFICIAL_THEME_MARKET = {
+  id: 'official',
+  name: 'Diting Official',
+  url: 'https://raw.githubusercontent.com/fengzone85/diting-theme-market/main/v1.json',
+  enabled: true
+};
+function seedThemeMarketSources() {
+  try {
+    const now = Date.now();
+    db.prepare(`INSERT OR IGNORE INTO theme_market_sources (id, name, url, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(OFFICIAL_THEME_MARKET.id, OFFICIAL_THEME_MARKET.name, OFFICIAL_THEME_MARKET.url,
+        OFFICIAL_THEME_MARKET.enabled ? 1 : 0, now, now);
+  } catch (e) { /* 种子失败不应阻塞启动（如历史库已有同 URL 的自定义源） */ }
+}
+
+// ---- S5/F10：主题配置值（admin_config key-value，键名 theme_config_<short>）----
+const THEME_CONFIG_PREFIX = 'theme_config_';
+const getThemeConfig = (short) => {
+  try { return JSON.parse(getConfig(THEME_CONFIG_PREFIX + String(short)) || '{}') || {}; }
+  catch (e) { return {}; }
+};
+const setThemeConfig = (short, obj) => setConfig(THEME_CONFIG_PREFIX + String(short), JSON.stringify(obj || {}));
+const deleteThemeConfig = (short) =>
+  db.prepare('DELETE FROM admin_config WHERE key = ?').run(THEME_CONFIG_PREFIX + String(short)).changes > 0;
+
+seedThemeMarketSources();
+
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
@@ -1460,6 +1543,9 @@ module.exports = {
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,
+  listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,
+  deleteThemeMarketSource, OFFICIAL_THEME_MARKET,
+  getThemeConfig, setThemeConfig, deleteThemeConfig,
   insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
   insertAiNodeReport, listAiNodeReports, pruneAiNodeReports,
   addAuditLog, getAuditLogs, countAudit, pruneAudit

@@ -78,6 +78,41 @@ export const adminApi = {
   listNotifyEvents: () => api.get<{ events: string[] }>('/api/admin/notify/events'),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
 
+  // S5/F10：主题市场。读接口 readonly Token 也可用，写接口需 admin。
+  listInstalledThemes: () => api.get<ThemeInfo[]>('/api/admin/theme/list'),
+  listThemeSources: () => api.get<ThemeSource[]>('/api/admin/theme/market/sources'),
+  createThemeSource: (body: { name: string; url: string; enabled?: boolean }) =>
+    api.post<ThemeSource>('/api/admin/theme/market/sources', body),
+  updateThemeSource: (id: string, body: { name?: string; url?: string; enabled?: boolean }) =>
+    api.put<ThemeSource>(`/api/admin/theme/market/sources/${encodeURIComponent(id)}`, body),
+  deleteThemeSource: (id: string) =>
+    api.del<{ deleted: boolean }>(`/api/admin/theme/market/sources/${encodeURIComponent(id)}`),
+  themeCatalog: (refresh = false) =>
+    api.get<ThemeCatalog>(`/api/admin/theme/market/catalog${refresh ? '?refresh=true' : ''}`),
+  installTheme: (source_id: string, short: string) =>
+    api.post<{ manifest: ThemeInfo }>('/api/admin/theme/market/install', { source_id, short }),
+  importTheme: (url: string, preview = false) =>
+    api.post<{ manifest: ThemeInfo; exists?: boolean }>(
+      `/api/admin/theme/import${preview ? '?preview=true' : ''}`, { url }
+    ),
+  updateTheme: (short: string, body: { url?: string; git_owner?: string; git_repo?: string } = {}) =>
+    api.post<{ manifest: ThemeInfo }>('/api/admin/theme/update', { short, ...body }),
+  rollbackTheme: (short: string, backup: string) =>
+    api.post<{ manifest: ThemeInfo }>('/api/admin/theme/rollback', { short, backup }),
+  listThemeBackups: (short: string) =>
+    api.get<ThemeBackup[]>(`/api/admin/theme/backups?short=${encodeURIComponent(short)}`),
+  setTheme: (theme: string) => api.post<{ enabled: string }>('/api/admin/theme/set', { theme }),
+  deleteTheme: (short: string) =>
+    api.post<{ deleted: boolean; fallbackTheme: string | null }>('/api/admin/theme/delete', { short }),
+  getThemeConfig: (theme: string) =>
+    api.get<{ theme: string; configuration: ThemeConfiguration; values: Record<string, unknown> }>(
+      `/api/admin/theme/config?theme=${encodeURIComponent(theme)}`
+    ),
+  saveThemeConfig: (theme: string, values: Record<string, unknown>) =>
+    api.post<{ saved: boolean; values: Record<string, unknown> }>(
+      `/api/admin/theme/config?theme=${encodeURIComponent(theme)}`, values
+    ),
+
   // S2/F5：API Token 管理。明文只在创建响应里返回一次（ApiTokenCreated.token），
   // 列表接口不含明文与哈希，故「丢失即吊销重建」。
   listApiTokens: () => api.get<{ list: ApiToken[] }>('/api/admin/api-tokens'),
@@ -182,4 +217,68 @@ export interface AuditLogList {
   total: number;
   limit: number;
   offset: number;
+}
+
+// ---- S5/F10 主题市场 -------------------------------------------------------
+export interface ThemeConfigField {
+  key: string;
+  name: string;
+  type: 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'color';
+  options: string[];
+  default: unknown;
+  required: boolean;
+  help: string;
+}
+export interface ThemeConfiguration {
+  type: 'managed';
+  fields: ThemeConfigField[];
+}
+export interface ThemeInfo {
+  short: string;
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  url: string;
+  preview: string;
+  configuration: ThemeConfiguration | null;
+  diting: { compatibility: string; needsRelaxedCsp: boolean };
+  installed_at: number;
+  enabled: boolean;
+  configurable: boolean;
+  bundled: boolean;
+  manifest_file?: string;
+  legacy?: boolean;
+}
+export interface ThemeSource {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+export interface ThemeCatalogEntry {
+  short: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  url: string;
+  preview: string;
+  download: string;
+  sha256: string;
+  installable: boolean;
+  source_id: string;
+  source_name: string;
+}
+export interface ThemeCatalog {
+  themes: ThemeCatalogEntry[];
+  sources: { id: string; name: string; count: number; error: string | null }[];
+}
+export interface ThemeBackup {
+  name: string;
+  created_at: number;
+  size: number;
 }

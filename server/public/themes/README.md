@@ -22,6 +22,67 @@ public/themes/<id>/
 | `author`     | 作者                                   |
 | `description`| 简介                                   |
 
+## 目录策略（S5/F10）
+
+| 目录 | 位置 | 说明 |
+| ---- | ---- | ---- |
+| 内置主题 | `server/public/themes/<id>/` | 随镜像发布，**只读**；后台不可删除/更新 |
+| 安装主题 | `THEMES_DIR`（默认 `<DB_PATH 同级>/data/themes`） | 市场安装 / URL 导入落盘处，随数据卷持久 |
+| 备份 | `<THEMES_DIR 同级>/theme-backups/` | 覆盖安装或更新前的自动备份，回滚用 |
+
+两级查找顺序：安装目录 → 内置目录，同名时安装版覆盖内置版。
+
+## manifest 规范（新）
+
+推荐文件名 `diting-theme.json`，兼容链为
+`diting-theme.json` → `komari-theme.json` → `manifest.json`（最后一个为旧格式，`version`/`compatibility` 校验豁免）。
+
+```json
+{
+  "short": "my-theme",
+  "name": { "zh_CN": "我的主题", "en": "My Theme" },
+  "description": { "zh_CN": "简介", "en": "Description" },
+  "version": "1.0.0",
+  "author": "your-name",
+  "url": "https://github.com/you/my-theme",
+  "preview": "https://example.com/preview.png",
+  "diting": {
+    "compatibility": ">=1.0.0",
+    "needsRelaxedCsp": false
+  },
+  "configuration": {
+    "type": "managed",
+    "data": [
+      { "key": "accent", "name": "主色", "type": "color", "default": "#3b82f6" },
+      { "key": "mode", "name": "模式", "type": "select", "options": ["a", "b"], "default": "a" }
+    ]
+  }
+}
+```
+
+- `short`：目录名 / 唯一标识，仅 `[A-Za-z0-9_-]`，不可为 `default`；ZIP 安装时必填且需与目录名一致。
+- `name` / `description`：字符串或 i18n map（优先级 `zh_CN → zh → en → en_US → 首个值`）。
+- `configuration.type`：仅支持 `managed`；字段类型限 `text | textarea | number | select | boolean | color`。
+- `diting.needsRelaxedCsp`：主题含内联脚本时设为 `true`，服务端会为其放宽 CSP 并注入 nonce。
+- 旧 `manifest.json` 继续可用，但建议迁移；`/api/public/themes` 仍返回 `id` 字段保持兼容。
+
+## 主题配置读取
+
+启用了 `configuration` 的主题，前端可读取管理员保存的配置值：
+
+```
+GET /themes/<short>/config        # 受 public_enabled 开关控制，返回扁平 { key: value }
+```
+
+该路由注册在 `/themes/<short>/*` 静态资源路由之前，不会被当作文件路径。
+
+## 主题市场
+
+后台「设置 → 主题市场」支持：启用/删除已安装主题、浏览市场源目录并安装、从 URL / GitHub 仓库导入、
+更新与备份回滚、编辑 managed 配置。市场源下载默认拒绝私网与明文 http
+（自托管场景可用 `ALLOW_PRIVATE_WEBHOOK=1` / `ALLOW_INSECURE_WEBHOOK=1` 放行）。
+
+
 ## 启用方式
 
 1. 在后台「设置 → 皮肤模板」选择该皮肤并保存；
@@ -62,7 +123,6 @@ public/themes/<id>/
 
 ## 参考实现
 
-- `demo/`：最小可运行皮肤（极简列表），基于 `/api/public/*`，可直接复制改造。
 - `komari-demo/`：适配版 Komari 皮肤示例，基于上面的 Komari 兼容 API，证明 Komari 社区皮肤可在本项目运行。
 
 ## 关于复用 Komari 社区皮肤

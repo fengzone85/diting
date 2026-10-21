@@ -7,6 +7,7 @@ import type { Settings, BackupFile, AlertThresholds, AlertOverride } from '../..
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 import NotifyPanel from '../../components/admin/NotifyPanel.vue';
+import ThemePanel from '../../components/admin/ThemePanel.vue';
 
 interface ThemeOption {
   id: string;
@@ -131,18 +132,22 @@ const isPrivateSeenIp = computed(() => {
   return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|::1$|::ffff:127\.)/.test(ip);
 });
 
+async function loadThemes() {
+  try {
+    const list = await adminApi.listThemes();
+    themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
+  } catch {
+    // 忽略：主题市场面板会单独展示错误
+  }
+}
+
 onMounted(async () => {
   // 进入设置页暂停全局 10s 自动刷新（paused 标志，避免被父组件 start 覆盖），
   // 防止轮询重写表单清空未保存输入
   setAutoRefreshPaused(true);
   // S1/F1：分组告警覆盖（失败静默，不阻塞其余设置项）
   loadAlertRules();
-  try {
-    const list = await adminApi.listThemes();
-    themes.value = [{ id: 'default', name: t('settings.builtinTheme') }, ...list];
-  } catch {
-    // ignore
-  }
+  void loadThemes();
   try {
     clientIp.value = await adminApi.clientIp();
   } catch {
@@ -528,6 +533,9 @@ async function resetGroupAlert() {
         <FormInput v-model="local.ui.social_qq" label="QQ" />
         <FormInput v-model="local.ui.social_website" :label="t('footer.website')" />
       </div>
+
+      <!-- S5/F10：主题市场（已安装 / 市场 / 来源） -->
+      <ThemePanel @changed="loadThemes" />
 
       <!-- 数据库备份：策略由本页下发，实际执行在宿主机（diting.sh + cron） -->
       <div class="glass p-6 lg:col-span-2">
