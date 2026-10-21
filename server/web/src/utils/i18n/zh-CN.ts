@@ -44,6 +44,7 @@ export const zhCN: Record<string, string> = {
   'common.back': '返回',
   'common.copy': '复制',
   'common.copied': '已复制',
+  'common.close': '关闭',
   'common.hide': '隐藏',
   'common.muted': '静音',
   'common.custom': '已覆盖',
@@ -67,6 +68,12 @@ export const zhCN: Record<string, string> = {
   'nav.apiTokens': 'API Token',
   'nav.template': '模板设置',
   'nav.menu': '菜单',
+  'nav.group.monitor': '监控',
+  'nav.group.ops': '运维',
+  'nav.group.system': '系统',
+  'nav.home': '返回主页',
+  'nav.collapse': '收起侧栏',
+  'nav.expand': '展开侧栏',
 
   // 受控端列表
   'agents.title': '受控端',
