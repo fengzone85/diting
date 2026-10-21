@@ -25,8 +25,10 @@ const isSm = props.size === 'sm';
 const padClass = isSm ? 'p-4' : 'p-5';
 // 前台总览：标题加粗、数值常规字重（后台卡片维持原样式）
 const labelClass = isSm ? 'text-xs font-semibold' : 'text-sm';
+// sm 档所有卡片主值统一 16px（此前紧凑卡降到 12px，和相邻卡片明显不一致）；
+// 只有「subBig」这一个历史场景保留一档差异。
 const valueClass = isSm
-  ? (props.compact ? (props.subBig ? 'text-[11px]' : 'text-xs') : 'text-lg')
+  ? (props.subBig ? 'text-sm' : 'text-base')
   : (props.compact ? (props.subBig ? 'text-xs' : 'text-base') : 'text-2xl font-semibold');
 // sm 档数值不加粗，用 align 后的常规字重保证「↓1.2M/s ↑340K/s」这类横排不被撑满
 const valueWeight = isSm ? 'font-normal' : '';
