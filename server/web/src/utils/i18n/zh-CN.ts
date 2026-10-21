@@ -377,7 +377,7 @@ export const zhCN: Record<string, string> = {
   'public.disk': '磁盘',
   'public.network': '网络',
   'public.uptime': '运行时间',
-  'public.instantTraffic': '总即时流量',
+  'public.instantTraffic': '实时流量',
   'public.listCols': '排布',
   'public.cols1': '1 列',
   'public.cols2': '2 列',

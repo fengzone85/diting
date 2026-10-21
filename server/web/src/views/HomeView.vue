@@ -104,16 +104,11 @@ const overviewCards = computed(() => {
   const totalTxRate = sum((a) => a.net_tx_rate || 0);
   // 紧凑速率文案（无空格、单位缩写）：如 "1.2M/s"、"340K/s"、"0B/s"
   const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
-  // 上行/下行哪边速率大，哪边用主值大字（活跃方向自适应高亮）
-  const rateBigDown = totalRxRate >= totalTxRate;
-  // 实时速率双行卡：official 方案的「总即时流量」与 traffic 方案的「实时速率」共用同一份数据
+  // 实时流量卡（2026-10-21 用户指定）：下行与上行改为同一行横排，不再上下两行。
+  // official 方案的「实时流量」与 traffic 方案的「实时速率」共用同一份数据。
   const liveTraffic = {
-    // 位置固定：下行恒在主行、上行恒在副行；字号动态——哪边速率大哪边放大
-    // （上行活跃时 subBig 让副行放大、主值收小）。格式无空格紧凑（如 ↓1.2M/s）。
-    value: `↓${rateText(totalRxRate)}`,
-    sub: `↑${rateText(totalTxRate)}`,
+    value: `↓${rateText(totalRxRate)}　↑${rateText(totalTxRate)}`,
     compact: true,
-    subBig: !rateBigDown,
     variant: 'default' as const,
   };
   // 流量配额（finance 方案）：各节点月配额汇总 vs 本月已用流量（下行+上行）
