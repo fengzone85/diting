@@ -229,8 +229,12 @@ function validateNotifyGroupInput(body) {
 // 空数组合法（用户把卡片全部移除，前端显示「暂无卡片」引导）；
 // 非法元素整条丢弃而不报 400，避免历史脏数据把整份布局卡死。
 const DASHBOARD_WIDGET_IDS = [
-  'total', 'online', 'offline', 'monthly_cost',
+  // 单指标卡
+  'total', 'online', 'offline', 'monthly_cost', 'remaining_value',
   'avg_cpu', 'avg_mem', 'db_size', 'public_nodes',
+  // 复合卡（对齐 Komari：概览 / 资源 / 排行 / 流量 / 到期 / 网络 / 分组 / 快捷操作）
+  'overview', 'capacity', 'cpu_rank', 'mem_rank', 'disk_rank',
+  'traffic', 'expiry', 'ping', 'groups', 'shortcuts',
 ];
 const DASHBOARD_WIDTHS = ['compact', 'wide', 'full'];
 const DASHBOARD_HEIGHTS = ['short', 'normal', 'tall'];

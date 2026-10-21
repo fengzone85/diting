@@ -4,10 +4,12 @@ const {
   DASHBOARD_WIDGET_IDS, DASHBOARD_WIDTHS, DASHBOARD_HEIGHTS, validateDashboardLayout,
 } = require('../src/validate');
 
-test('卡片键白名单覆盖现有 8 张仪表盘卡片', () => {
+test('卡片键白名单：9 张单指标卡 + 10 张复合卡', () => {
   assert.deepStrictEqual(DASHBOARD_WIDGET_IDS, [
-    'total', 'online', 'offline', 'monthly_cost',
+    'total', 'online', 'offline', 'monthly_cost', 'remaining_value',
     'avg_cpu', 'avg_mem', 'db_size', 'public_nodes',
+    'overview', 'capacity', 'cpu_rank', 'mem_rank', 'disk_rank',
+    'traffic', 'expiry', 'ping', 'groups', 'shortcuts',
   ]);
   assert.deepStrictEqual(DASHBOARD_WIDTHS, ['compact', 'wide', 'full']);
   assert.deepStrictEqual(DASHBOARD_HEIGHTS, ['short', 'normal', 'tall']);
