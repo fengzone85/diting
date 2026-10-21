@@ -687,6 +687,7 @@ export const enUS: Record<string, string> = {
 
   // billing
   'billing.title': 'Billing',
+  'billing.perMonth': '/ mo',
   'billing.monthlyTotal': 'Monthly total',
   'billing.perGroup': 'Per group',
   'billing.expiringSoon': 'Expiring soon',
