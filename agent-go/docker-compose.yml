@@ -1,4 +1,4 @@
-# Diting Agent (Go) — Docker Compose 示例（与 agent/ 的 Python 版同约定）
+# Diting Agent (Go) — Docker Compose 示例
 # 使用：填好 SERVER_URL / AGENT_ID / AGENT_TOKEN 后 `docker compose up -d`
 services:
   agent:
@@ -26,7 +26,7 @@ services:
       DISK_PATH: "/host"
       # 网络质量自测目标（可选；不填用代码默认：移动门户 + 电信/联通 DNS + 谷歌 DNS）
       # PROBE_TARGETS: "CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
-    # ── 磁盘监控的结构性依赖（与 Python 版同约定）────────────────────────────
+    # ── 磁盘监控的结构性依赖 ──────────────────────────────────────────────────
     # /:/host:ro 不是安全欠账，而是宿主磁盘监控的架构必须：
     #   - disk_info  → statvfs("/host") 取宿主根盘使用率
     #   - disk_list  → 递归 bind 宿主 / 后，容器 mount 命名空间中生成 /host、
