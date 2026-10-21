@@ -30,7 +30,7 @@ const variantClass = {
 const isSm = props.size === 'sm';
 const padClass = isSm ? 'p-4' : 'p-5';
 // 前台总览：标题加粗、数值常规字重（后台卡片维持原样式）
-const labelClass = isSm ? 'text-xs font-semibold' : 'text-sm';
+const labelClass = isSm ? 'text-xs font-bold' : 'text-sm';
 // spread（上行/下行成对指标，流量概览/实时速率）：两行 14px，比单值卡轻一档；
 // 非 spread 的单值卡（当前在线/CPU/内存）sm 档加大到 20px，突出核心数字。
 const spreadOn = props.spread === true;
@@ -49,14 +49,14 @@ const subWeight = computed(() =>
 </script>
 
 <template>
-  <!-- spread 时根容器纵向弹性布局：标题/主值在上，副行被 mt-auto 推到卡底 -->
+  <!-- 成对指标卡（spread）：标题、主值、副行依次紧凑排列，两行数值间距固定 4px -->
   <div class="glass card-hover flex flex-col" :class="[padClass, variantClass]">
     <p :class="labelClass" class="shrink-0 text-secondary">{{ label }}</p>
     <p class="mt-1.5 shrink-0 text-content" :class="[valueClass, valueWeight]">{{ value }}</p>
     <p
       v-if="sub"
       class="text-secondary"
-      :class="[subClass, subWeight, spread ? 'mt-auto pt-1.5' : 'mt-1']"
+      :class="[subClass, subWeight, 'mt-1']"
     >{{ sub }}</p>
   </div>
 </template>
