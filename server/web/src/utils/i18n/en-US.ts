@@ -371,6 +371,8 @@ export const enUS: Record<string, string> = {
   'public.rxMonth': 'Monthly RX',
   'public.txMonth': 'Monthly TX',
   'public.monthlyCost': 'Monthly cost',
+  'public.remainingValue': 'Remaining value',
+  'public.totalValue': 'Total value',
   'public.quota': 'Quota',
   'public.groups': 'Groups',
   'public.countries': 'Countries',

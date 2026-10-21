@@ -129,6 +129,10 @@ const overviewCards = computed(() => {
   const anyFree = priced.some((a) => a.price! < 0);
   const costCurrency = priced.find((a) => a.price! > 0)?.currency || '¥';
   const monthlyCostText = paidTotal > 0 ? `${costCurrency}${paidTotal.toFixed(2)}` : (anyFree ? t('public.free') : '—');
+  // 剩余价值（Komari 资产统计口径）：各节点服务端折算值之和；总价值 = 正价之和
+  const remainingTotal = ags.reduce((s, a) => s + (typeof a.remaining_value === 'number' ? a.remaining_value : 0), 0);
+  const assetTotalText = paidTotal > 0 ? `${costCurrency}${paidTotal.toFixed(2)}` : '—';
+  const remainingText = remainingTotal > 0 ? `${costCurrency}${remainingTotal.toFixed(2)}` : (anyFree ? t('public.free') : '—');
   // 平均系统负载（ops 方案）：仅统计有 load1 上报的节点
   const loadValues = ags.map((a) => a.load1).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const avgLoad = loadValues.length ? loadValues.reduce((s, v) => s + v, 0) / loadValues.length : null;
@@ -154,6 +158,12 @@ const overviewCards = computed(() => {
     rx_month: { label: t('public.rxMonth'), value: fmtBytes(totalRx), variant: 'default' },
     tx_month: { label: t('public.txMonth'), value: fmtBytes(totalTx), variant: 'default' },
     price: { label: t('public.monthlyCost'), value: monthlyCostText, variant: 'default' },
+    remaining: {
+      label: t('public.remainingValue'),
+      value: remainingText,
+      sub: `${t('public.totalValue')} ${assetTotalText}`,
+      variant: 'success',
+    },
     expire: { label: t('public.expiring'), value: String(expiring), variant: 'warning' },
     // 流量配额（2026-10-21）：原为写死 '-'。有配额时主值显示使用率、
     // 副行显示「已用 / 配额」；未配置配额（全为 0）时显示已用量 + ∞。

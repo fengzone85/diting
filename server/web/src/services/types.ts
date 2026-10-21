@@ -72,6 +72,11 @@ export interface Agent {
   billing_cycle?: number;
   // 对齐 Komari：¥ 人民币 / $ 美元 / € 欧元 / £ 英镑 / ₽ 卢布 / ₣ 法郎 / ₹ 卢比 / ₫ 越南盾 / ฿ 泰铢
   currency?: '¥' | '$' | '€' | '£' | '₽' | '₣' | '₹' | '₫' | '฿';
+  // 服务端计费折算（server/src/billing.js，对齐 Komari 剩余价值口径）
+  remaining_days?: number | null;
+  remaining_value?: number | null;
+  monthly_cost?: number | null;
+  billing_status?: 'unset' | 'free' | 'long_term' | 'one_off' | 'expired' | 'active' | 'invalid';
   auto_renewal?: boolean;
   probe_targets?: string;
   created_at?: string;

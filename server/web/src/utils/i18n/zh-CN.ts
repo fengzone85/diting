@@ -360,6 +360,8 @@ export const zhCN: Record<string, string> = {
   'public.rxMonth': '月下载',
   'public.txMonth': '月上传',
   'public.monthlyCost': '月度费用',
+  'public.remainingValue': '剩余价值',
+  'public.totalValue': '总价值',
   'public.quota': '流量配额',
   'public.groups': '分组数',
   'public.countries': '地区数',
