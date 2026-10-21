@@ -182,6 +182,15 @@
 .bg-background\/70,
 .hover\:bg-background\/70:hover { background-color: var(--bg-secondary); }
 .hover\:text-accent:hover { color: var(--accent); }
+/* 卡片内部次级区块（背景 / 公告等设置面板）：比主卡片略浅、带细边框，
+   随暗/亮主题自动切换。不要用 .bg-surface —— 那是 hover/accent 的深灰 #3a3e44，
+   放进暗色 glass 卡片里会明显发亮、与整体不一致。 */
+.inner-panel {
+  background: var(--glass-inner-tint);
+  border: 1px solid var(--glass-inner-border);
+  border-radius: var(--radius);
+}
+
 .bg-surface { background-color: var(--bg-surface); }
 .border-divider { border-color: var(--border-divider); }
 
