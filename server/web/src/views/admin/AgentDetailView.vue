@@ -5,6 +5,7 @@ import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
 import { apiErrorMessage } from '../../utils/apiError';
+import { BILLING_CYCLES, CURRENCIES } from '../../utils/billing';
 import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
@@ -33,18 +34,9 @@ const showToken = ref(false);
 // 单节点按需分析：入口按钮 + 弹窗（弹窗内自带窗口切换、登录态与错误码分支）
 const showNodeDialog = ref(false);
 
-const billingCycles = [
-  { value: 0, key: 'free' },
-  { value: 30, key: 'monthly' },
-  { value: 60, key: 'biMonthly' },
-  { value: 90, key: 'quarterly' },
-  { value: 180, key: 'halfYear' },
-  { value: 365, key: 'yearly' },
-  { value: 730, key: 'twoYear' },
-  { value: 1095, key: 'threeYear' },
-];
-
-const currencies = ['¥', '$', '€', '£'];
+// 计费周期与货币选项与「服务器列表账单卡片」共用一份常量（对齐 Komari 的 9 种货币 + -1 一次性）
+const billingCycles = BILLING_CYCLES;
+const currencies = CURRENCIES;
 
 // 用户是否已修改过表单（脏标志）。为 true 时不再用轮询回来的数据覆盖表单，
 // 避免 10s 自动刷新把正在编辑的输入清空（双保险，第一道是 onMounted 的 setAutoRefreshPaused）。
@@ -273,7 +265,7 @@ function formatDate(ts?: number) {
             <div>
               <label class="mb-1 block text-sm text-slate-400">{{ t('agent.currency') }}</label>
               <select v-model="form.currency" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
-                <option v-for="c in currencies" :key="c" :value="c">{{ c }}</option>
+                <option v-for="c in currencies" :key="c.symbol" :value="c.symbol">{{ c.symbol }} {{ t('agent.currency.' + c.key) }}</option>
               </select>
             </div>
             <div>

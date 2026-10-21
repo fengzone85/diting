@@ -6,6 +6,7 @@ import { adminApi } from '../../services/adminApi';
 import { formatBytes, formatDuration } from '../../utils/format';
 import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
+import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import type { InstallCommands, Agent } from '../../services/types';
 
 const { state } = useAdmin();
@@ -346,6 +347,8 @@ async function batchRenew() {
           </div>
         </div>
         <div class="flex flex-shrink-0 gap-2">
+          <!-- 账单：图标 + 弹出账单卡片（价格/货币/周期/到期/自动续费） -->
+          <AgentBillingCard :agent="agent" @saved="loadAdmin" />
           <button class="rounded-lg px-3 py-1 text-sm text-violet-400 hover:bg-violet-500/10" @click="openAlert(agent)">{{ t('agents.alert') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-sky-400 hover:bg-sky-500/10" @click="router.push(`/admin/agents/${agent.id}`)">{{ t('common.detail') }}</button>
           <button class="rounded-lg px-3 py-1 text-sm text-amber-400 hover:bg-amber-500/10" @click="resetToken(agent.id)">{{ t('common.reset') }}</button>

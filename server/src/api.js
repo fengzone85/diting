@@ -11,7 +11,16 @@ const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
 const { daysUntil, asyncHandler } = require('./util');
-const { nextExpire } = require('./renew');
+const { nextExpire, autoRenewExpire } = require('./renew');
+
+// 计费字段口径（对齐 Komari）：
+//   价格 price：0 = 不显示、-1 = 免费、>0 = 实际金额
+//   货币 currency：¥ $ € £ ₽ ₣ ₹ ₫ ฿
+//   计费周期 billing_cycle：-1 = 一次性（不续期）、0 = 白嫖/免费、>0 = 天数
+const CURRENCIES = ['¥', '$', '€', '£', '₽', '₣', '₹', '₫', '฿'];
+const BILLING_CYCLES = [-1, 0, 30, 60, 90, 180, 365, 730, 1095];
+const isValidCurrency = (c) => CURRENCIES.includes(c);
+const isValidCycle = (n) => BILLING_CYCLES.includes(n);
 // Admin Token 唯一来源与强度判定：统一在 ./token-policy（与 auth.js / server.js 共用）。
 const { getAdminToken } = require('./token-policy');
 
@@ -253,6 +262,22 @@ Stop-ScheduledTask -TaskName "HostMonitorAgent-$id"; Start-ScheduledTask -TaskNa
 }
 
 // ---- Agent report (push) ----
+// 自动续费（对齐 Komari utils/renewal/renewal.go）：
+// 受控端每次上报即代表「当前在线」，此时若 auto_renewal 开启且已到期（或今天到期），
+// 就把到期日推进一个计费周期。周期 <= 0（白嫖/一次性）不动。
+function maybeAutoRenew(agent) {
+  if (!agent || !agent.auto_renewal) return;
+  const next = autoRenewExpire(agent.expire_at, Date.now(), agent.billing_cycle);
+  if (!next) return;
+  try {
+    // updateAgent 是全字段写入：必须先把现有行合并进去，否则未提交字段会被清空
+    db.updateAgent(agent.id, { ...agent, expire_at: next });
+    console.log(`[renew] auto-renewed ${agent.name || agent.id}: ${agent.expire_at} -> ${next}`);
+  } catch (e) {
+    console.warn('[renew] auto-renew failed:', e && e.message);
+  }
+}
+
 router.post('/report', agentAuth, (req, res) => {
   const m = validateReport(req.body);
   if (!m || m.cpu === null || m.mem_total === null) {
@@ -265,6 +290,7 @@ router.post('/report', agentAuth, (req, res) => {
   db.touchAgent(req.agent.id, m.os, m.hostname);
   // CPU 核数（§9 T18）：老 agent 不带该字段 → m.cores = 0 → 不写，库中保持 0 = 未知
   if (m.cores > 0) db.setAgentCores(req.agent.id, m.cores);
+  maybeAutoRenew(req.agent);
   res.json({ ok: true });
 });
 
@@ -1016,9 +1042,9 @@ router.post('/agents', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
     note: str(req.body.note, 500),
     expire_at: str(req.body.expire_at, 40),
     monthly_quota_gb: req.body.monthly_quota_gb,
-    price: Number.isFinite(price) ? Math.max(0, Math.min(99999, price)) : undefined,
-    billing_cycle: Number.isFinite(cycleNum) && [0, 30, 60, 90, 180, 365, 730, 1095].includes(cycleNum) ? cycleNum : undefined,
-    currency: ['¥', '$', '€', '£'].includes(req.body.currency) ? req.body.currency : undefined,
+    price: Number.isFinite(price) ? Math.max(-1, Math.min(99999, price)) : undefined,
+    billing_cycle: Number.isFinite(cycleNum) && isValidCycle(cycleNum) ? cycleNum : undefined,
+    currency: isValidCurrency(req.body.currency) ? req.body.currency : undefined,
     auto_renewal: typeof req.body.auto_renewal === 'boolean' ? req.body.auto_renewal : undefined,
     grp: str(req.body.group, 60),
     country: str(req.body.country, 2),
@@ -1059,9 +1085,9 @@ router.put('/agents/:id', adminOnly, agentScope, (req, res) => {
       updates.month_rotate = rotate;
     }
   }
-  if (Number.isFinite(priceUp)) updates.price = Math.max(0, Math.min(99999, priceUp));
-  if (Number.isFinite(cycleUp) && [0, 30, 60, 90, 180, 365, 730, 1095].includes(cycleUp)) updates.billing_cycle = cycleUp;
-  if (['¥', '$', '€', '£'].includes(req.body.currency)) updates.currency = req.body.currency;
+  if (Number.isFinite(priceUp)) updates.price = Math.max(-1, Math.min(99999, priceUp));
+  if (Number.isFinite(cycleUp) && isValidCycle(cycleUp)) updates.billing_cycle = cycleUp;
+  if (isValidCurrency(req.body.currency)) updates.currency = req.body.currency;
   if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
   db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
