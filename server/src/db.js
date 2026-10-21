@@ -1134,8 +1134,9 @@ function getUiSettings() {
     color_vision: 'normal',           // 色觉辅助：normal/protanopia/deuteranopia/tritanopia
     card_scheme: 'official',          // 首页总览卡片方案：official/basic/ops/resource/finance/traffic/gpu/asset/full
     card_size: 'comfortable',         // 节点卡片尺寸：mini/compact/comfortable/large
-    // 后台仪表盘可选卡片（顺序即渲染顺序）；空数组 = 未配置，前端回退默认全量
-    admin_card_keys: [],
+    // 后台仪表盘布局（对齐 Komari）：[{id,width,height}] 有序数组；
+    // null = 从未配置（前端用默认布局），[] = 用户清空全部卡片
+    admin_dashboard_layout: null,
     background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 }, // 背景图/视频
     announcement: { enabled: false, title: '', content: '' }, // 公告
     provider_aliases: {},             // 厂商别名映射 { "原始厂商": "显示名" }
