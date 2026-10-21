@@ -4,6 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const db = require('./src/db');
+// 主题目录解析 / nonce 集合的唯一事实源（S5/F10）。变量名避开下文 SPA 路由里的局部 theme。
+const themeStore = require('./src/theme');
 const api = require('./src/api');
 const compat = require('./src/compat');
 const { handleRpc } = require('./src/compat-rpc');
@@ -281,7 +283,17 @@ function themeRelaxedCsp(nonce) {
 function injectNonce(html, nonce) {
   return html.replace(/<script(?![^>]*\bsrc=)/g, `<script nonce="${nonce}"`);
 }
-const THEMES_DIR = path.join(__dirname, 'public', 'themes');
+// 主题根目录：安装目录（THEMES_DIR，随数据卷持久）优先，其次只读内置目录（public/themes）。
+// 由 src/theme.js 统一解析，避免两处目录策略漂移。
+function resolveThemeRoot(id) {
+  if (typeof id !== 'string' || id === 'default') return null;
+  const found = themeStore.resolveThemeDir(id);
+  return found ? found.dir : null;
+}
+// nonce 集合由 src/theme.js 持有（同一 Set 实例，原地 clear/add），启动时按 manifest 重建。
+// 主题若含内联脚本，需在 manifest 声明 diting.needsRelaxedCsp: true，勿再硬编码主题名。
+const THEME_NEEDS_NONCE = themeStore.themeNonceSet;
+themeStore.rebuildNonceSet();
 const THEME_MIME = {
   '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
@@ -289,8 +301,7 @@ const THEME_MIME = {
   '.ico': 'image/x-icon', '.webp': 'image/webp',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf'
 };
-// 需要 nonce 注入才能正常运行的社区主题白名单（CSP 仅对这些主题放宽）
-const THEME_NEEDS_NONCE = new Set(['glassmorphism']);
+// 需要放宽 CSP 的主题集合：由 manifest 的 diting.needsRelaxedCsp 动态声明（见上方）。
 
 // 审查 C5：静态资源流统一投放。此前三处裸 `fs.createReadStream(fp).pipe(res)`：
 // 流错误（文件竞态删除 / 权限不足 / 读中途失败）会成为未捕获异常，客户端拿到
@@ -307,6 +318,16 @@ function serveFileStream(res, fp) {
   return stream.pipe(res);
 }
 
+// 主题配置值只读端点（S5/F10）：主题前端 SPA 读取管理员保存的表单值。
+// 必须注册在下面两个 /themes/:short(/*) 正则路由之前，否则 "config" 会被当作子路径去读文件。
+app.get(/^\/themes\/([A-Za-z0-9_-]+)\/config\/?$/, (req, res) => {
+  const id = req.params[0];
+  if (!themeStore.isValidShort(id)) return res.status(400).json({ error: 'short_invalid' });
+  if (!db.getUiSettings().public_enabled) return res.status(403).json({ error: 'public_disabled' });
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  res.json(db.getThemeConfig(id));
+});
+
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
 // 规避前置 Nginx / Docker 部署时静态目录未被代理 / 未打进镜像导致的 404。
 // 主题目录名与路径均经白名单校验，杜绝路径穿越；按官方文档 /themes/{short}/... 映射主题包根目录。
@@ -315,7 +336,8 @@ function serveFileStream(res, fp) {
 app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
   const id = req.params[0];
   const subPath = req.params[1] || '';
-  const baseDir = path.join(THEMES_DIR, id);
+  const baseDir = resolveThemeRoot(id);
+  if (!baseDir) return next();
   const fp = path.join(baseDir, subPath);
   if (!fp.startsWith(baseDir + path.sep)) return res.status(404).end();
   // 真实静态资源（带后缀）：存在则返回，否则 404 交给后续处理链。
@@ -340,10 +362,11 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
   return res.sendFile(indexPath);
 });
 
-// 裸主题根路径（如 /themes/glassmorphism）：返回主题 index.html。
+// 裸主题根路径（如 /themes/<short>）：返回主题 index.html。
 app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   const id = req.params[0];
-  const baseDir = path.join(THEMES_DIR, id);
+  const baseDir = resolveThemeRoot(id);
+  if (!baseDir) return next();
   const indexPath = path.join(baseDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
   if (THEME_NEEDS_NONCE.has(id)) {
@@ -400,11 +423,13 @@ app.get('*', (req, res, next) => {
   // 带后缀文件：优先尝试当前主题根目录映射，未命中再交给 express.static
   if (path.extname(req.path)) {
     if (!isSpaRoute && theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
-      const fp = path.join(THEMES_DIR, theme, req.path);
+      const themeRoot = resolveThemeRoot(theme);
+      if (!themeRoot) return next();
+      const fp = path.join(themeRoot, req.path);
       // 防路径穿越（与上方 /themes/:id 显式路由的守卫一致）：req.path 原样来自请求行，
       // `?theme=<非default>` 可被任意访问者指定，join 归一化后必须仍落在主题目录内，
       // 否则可读任意带扩展名文件（活体 PoC：8 层 ../ 读出 /etc/resolv.conf）。
-      if (!fp.startsWith(THEMES_DIR + path.sep)) return next();
+      if (!fp.startsWith(themeRoot + path.sep)) return next();
       if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
         const ext = path.extname(fp).toLowerCase();
@@ -422,8 +447,9 @@ app.get('*', (req, res, next) => {
 
   // 无后缀：返回主题 index.html（官方主题在 dist/ 下也按根目录 index.html 处理）
   if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
-    const fp = path.join(THEMES_DIR, theme, 'index.html');
-    if (fs.existsSync(fp)) {
+    const themeRoot = resolveThemeRoot(theme);
+    const fp = themeRoot ? path.join(themeRoot, 'index.html') : '';
+    if (fp && fs.existsSync(fp)) {
       // 第三方社区主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
       // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
       if (THEME_NEEDS_NONCE.has(theme)) {
@@ -452,7 +478,7 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Komari 社区主题兼容兜底：第三方主题（如 glassmorphism）硬编码以根路径
+// Komari 社区主题兼容兜底：第三方主题硬编码以根路径
 // /images/logo/* 与 /images/flags/* 取 OS logo / 国旗，而 diting 原生将其平铺在
 // public/ 根（os-*.svg、flags/），目录层级不同会 404。此处仅在静态资源未命中时，
 // 按当前启用主题回退到 themes/<id>/images/ 目录（那里本就含完整 logo/flags 集），
@@ -465,7 +491,9 @@ app.use((req, res, next) => {
   const theme = ui.public_theme;
   if (!theme || theme === 'default' || !/^[A-Za-z0-9_-]+$/.test(theme)) return next();
   const sub = p.slice('/images/'.length); // logo/os-x.svg 或 flags/CN.svg
-  const baseDir = path.join(THEMES_DIR, theme, 'images');
+  const themeRoot = resolveThemeRoot(theme);
+  if (!themeRoot) return next();
+  const baseDir = path.join(themeRoot, 'images');
   const fp = path.join(baseDir, sub);
   if (!fp.startsWith(baseDir + path.sep)) return next(); // 防路径穿越
   if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();

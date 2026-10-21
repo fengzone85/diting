@@ -35,6 +35,7 @@ description: 服务端与受控端环境变量参考
 | `ALERT_SUSTAIN_SAMPLES` | 否 | — | **兼容开关**：显式设置时退回旧行为（窗口=N、比例=1.0，即连续 N 次全超限） |
 | `ONLINE_NOTIFY_GRACE_SEC` | 否 | `180` | 离线超过该秒数后重连才发「已上线」通知；`0` = 关闭上线通知 |
 | `NOTIFY_CONCURRENCY` | 否 | `8` | 单次事件最多并发的通知渠道数 |
+| `THEMES_DIR` | 否 | `<DB_PATH 同级>/data/themes` | 主题市场安装目录（随数据卷持久）；`public/themes` 仅作为只读内置目录 |
 | `ALLOW_PRIVATE_WEBHOOK` | 否 | — | 设为 `1` 允许 Webhook 指向私网/回环地址（默认拒绝，防 SSRF；内网自托管接收端按需开启） |
 | `ALLOW_INSECURE_WEBHOOK` | 否 | — | 设为 `1` 允许明文 `http://` Webhook（默认仅 `https://`） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | 否 | `smtp.qq.com` / `465` / `true` | 告警邮件 SMTP |
