@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { adminApi } from '../services/adminApi';
 import { useI18n } from '../composables/useI18n';
+import { apiErrorMessage } from '../utils/apiError';
 
 const route = useRoute();
 const router = useRouter();
@@ -44,7 +45,9 @@ async function submit() {
     }
     router.replace((route.query.redirect as string) || '/admin');
   } catch (e) {
-    error.value = (e as Error).message || t('login.failed');
+    // 走统一错误码映射（apiErrorMessage）：登录失败/限流/封禁等服务端 error 码本地化，
+    // 避免把 "login_blocked (HTTP 429)" 这类原始串直接甩给用户。
+    error.value = apiErrorMessage(e, 'login.failed');
   } finally {
     loading.value = false;
   }

@@ -92,6 +92,7 @@ Content-Type: application/json
 | GET / POST | `/api/admin/notify/groups` | 通知组列表 / 新建 |
 | PUT / DELETE | `/api/admin/notify/groups/:id` | 修改 / 删除通知组 |
 | GET | `/api/admin/notify/events` | 可订阅事件字典 |
+| GET | `/api/admin/notify/migration-status` | 旧通知配置迁移状态（`banner`=是否提示迁移横幅；`groups_enabled`=通知组路由是否启用） |
 | GET / PUT | `/api/ai/config` | AI 日报配置 |
 | POST | `/api/ai/run` | 手动触发 AI 日报（异步任务：`202` 已受理 / `400` 未启用 / `409` 执行中 / `429` 冷却带 `Retry-After`；`?force=1` 跳过冷却） |
 | GET | `/api/ai/reports` | AI 日报列表 |
@@ -103,6 +104,9 @@ Content-Type: application/json
 | GET | `/api/agents/:id/commands` | 生成该节点的一键安装 / 「修改探测目标」命令（免 Token，凭管理员身份） |
 | GET | `/api/client-ip` | 当前请求所见 IP 与反代信任判定（排查白名单 / 限流归属） |
 | POST | `/api/login` · POST `/api/logout` | Web 登录 / 登出（签发表态 Cookie） |
+| GET | `/api/admin/sessions` | 登录会话列表（来源 IP / UA / 当前设备标记；仅全局作用域管理员，节点白名单 Token 返回 403） |
+| DELETE | `/api/admin/sessions/:id` | 踢出单个会话（立即生效，被踢设备下一次请求即 401） |
+| POST | `/api/admin/sessions/revoke-all` | 批量注销（body `{ keep_current?: boolean }`，默认保留当前会话；`false` 为全局吊销） |
 | GET | `/api/setup/status` | 初始化向导状态 |
 | POST | `/api/setup/generate` | 首次访问生成管理员 Token（独立限流） |
 | POST | `/api/setup/register` | 受控端自助注册（需 `SETUP_TOKEN`，独立限流） |
@@ -202,3 +206,4 @@ monitor_agent_net_rx_rate_bytes{agent="agt_xxx",name="web-01"} 1024
 
 - 真实边界在 Nginx `limit_req`（基于 TCP 对端 IP）；应用层限流仅作兜底。`req.ip` 的转发头采信范围由 `TRUST_PROXY` 决定，**默认只信任 loopback**（H-02 收紧）：反代在其它主机 / 容器时必须显式配置 `TRUST_PROXY`，否则 `req.ip` 会算到反代头上；直连场景伪造 `X-Forwarded-For` 不影响 `req.ip`
 - 自助注册 `/api/setup/register` 与初始化 `/api/setup/generate` 有独立限流
+- **登录 `/api/login` 另有指数封禁**（F9）：连续失败 3 次起按「失败次数 ^ 4」秒封禁（3 次 → 81 秒，上限 24 小时），封禁期返回 `429` + `Retry-After` 响应头（响应体 `error=login_blocked` + `retry_after` 秒数）；成功登录即清零。计数维度为来源 IP，状态在内存中（重启服务即解除）。详见[安全设计 → 登录暴力防护](security.md#登录暴力防护f9)

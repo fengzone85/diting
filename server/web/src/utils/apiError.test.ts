@@ -32,6 +32,14 @@ describe('apiErrorMessage 错误码映射', () => {
     expect(apiErrorMessage(err('unauthorized', 401))).toBe(t('errors.unauthorized'));
   });
 
+  it('maps "login_blocked"（S2/F9 登录封禁）', () => {
+    expect(apiErrorMessage(err('login_blocked', 429))).toBe(t('errors.loginBlocked'));
+  });
+
+  it('maps "too many totp failures"（2FA 连续输错）', () => {
+    expect(apiErrorMessage(err('too many totp failures', 429))).toBe(t('errors.totpFailures'));
+  });
+
   it('未收录的错误码回落到服务端 message', () => {
     const e = Object.assign(new Error('AI 分析未启用，请先在配置中开启 (HTTP 400)'), {
       status: 400,

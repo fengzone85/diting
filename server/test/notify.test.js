@@ -95,27 +95,9 @@ function resetNotifyState() {
   for (const c of db.listNotifyChannels()) db.updateNotifyChannel(c.id, { enabled: false });
 }
 
-// ---- 1. 种子迁移 ------------------------------------------------------------
-
-test('种子迁移：mail/telegram 内置渠道 + default 组绑定，且幂等', () => {
-  const channels = db.listNotifyChannels();
-  const types = channels.map((c) => c.type).sort();
-  assert.deepStrictEqual(types, ['mail', 'telegram']);
-
-  const groups = db.listNotifyGroups();
-  assert.strictEqual(groups.length, 1);
-  assert.strictEqual(groups[0].name, 'default');
-  assert.deepStrictEqual(groups[0].events, ['*']);
-  assert.strictEqual(groups[0].channel_ids.length, 2);
-
-  // 重复执行不重复插
-  db.initNotifyMigrationIfNeeded();
-  db.initNotifyMigrationIfNeeded();
-  assert.strictEqual(db.listNotifyChannels().length, 2);
-  assert.strictEqual(db.listNotifyGroups().length, 1);
-});
-
-// ---- 2. 模板渲染 ------------------------------------------------------------
+// ---- 1. 模板渲染 ------------------------------------------------------------
+// 注：原「种子迁移」用例已独立到 notify-migration.test.js（S2/F2 收尾），
+// 与组路由 / 模板 / 保序等投递行为解耦，避免本文件因种子前提变化而失败。
 
 test('模板渲染：JSON 转义 / form 编码 / 未知占位符置空', () => {
   const { render, buildRequestBody } = notify._internal;

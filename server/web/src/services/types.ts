@@ -468,3 +468,14 @@ export interface ApiTokenCreated {
   token: string;
   notice: string;
 }
+
+// S2/F6：登录会话（后台「会话管理」页）。current=true 表示发起本次请求的那台设备。
+export interface AdminSession {
+  id: string;
+  admin: string;
+  ip: string;
+  ua: string;
+  created_at: number;
+  last_seen: number;
+  current: boolean;
+}

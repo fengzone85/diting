@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -76,6 +76,13 @@ export const adminApi = {
     api.put<NotifyGroup>(`/api/admin/notify/groups/${id}`, body),
   deleteNotifyGroup: (id: number) => api.del<{ ok: boolean; id: number }>(`/api/admin/notify/groups/${id}`),
   listNotifyEvents: () => api.get<{ events: string[] }>('/api/admin/notify/events'),
+  // S2/F2：旧 notify_config 是否已被默认通知组接管（用于后台迁移提示横幅）
+  notifyMigrationStatus: () => api.get<{
+    legacy_config_present: boolean;
+    default_group_present: boolean;
+    banner: boolean;
+    groups_enabled: boolean;
+  }>('/api/admin/notify/migration-status'),
   listThemes: () => api.get<{ id: string; name: string; author?: string; description?: string }[]>('/api/public/themes'),
 
   // S5/F10：主题市场。读接口 readonly Token 也可用，写接口需 admin。
@@ -124,6 +131,15 @@ export const adminApi = {
   }) => api.post<ApiTokenCreated>('/api/admin/api-tokens', body),
   revokeApiToken: (id: string) =>
     api.del<{ ok: boolean; id: string }>(`/api/admin/api-tokens/${encodeURIComponent(id)}`),
+
+  // S2/F6：登录会话管理。列表含来源 IP 与 UA，属跨设备敏感信息（后端限定全局作用域管理员）。
+  listSessions: () => api.get<{ list: AdminSession[] }>('/api/admin/sessions'),
+  revokeSession: (id: string) =>
+    api.del<{ ok: boolean }>(`/api/admin/sessions/${encodeURIComponent(id)}`),
+  // keepCurrent=true：踢掉其它设备但保留当前会话；false：全局吊销（含当前会话）。
+  revokeAllSessions: (keepCurrent = true) =>
+    api.post<{ ok: boolean; revoked: number; kept_current: boolean }>(
+      '/api/admin/sessions/revoke-all', { keep_current: keepCurrent }),
 
   // diagnostics
   clientIp: () => api.get<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string }>('/api/client-ip'),

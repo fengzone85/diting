@@ -2,6 +2,82 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-21 通知组收尾：迁移提示 + NOTIFY_GROUPS=0 回退开关（S2-F2 收尾）
+
+补齐 S1-F2 方案（§8/§9）遗留的两项与测试独立化。
+
+### 说明
+
+- **新增回退开关 `NOTIFY_GROUPS=0`**：设为 `0` 时整体退回 F2 之前的「邮件 + Telegram 直发」路径
+  （按 `notify_config` 凭据投递，完全绕开通知组与事件路由），供通知组上线后的紧急灰度回退；
+  默认 `1` = 通知组路由。`notify.groupsEnabled()` 供端点与测试查询当前态。
+- **新增迁移状态端点** `GET /api/admin/notify/migration-status`：返回
+  `{ legacy_config_present, default_group_present, banner, groups_enabled }`。
+  判定幂等（不依赖一次性状态位）：旧凭据仍在 `notify_config` 且 `default` 组已存在 ⇒ 迁移已生效。
+- **后台通知面板新增迁移提示横幅**：检测到上述条件时提示「旧版通知配置已自动迁移到 default 通知组，
+  行为与升级前一致」；用户点「知道了」后记入 `localStorage` 不再出现。
+  `groups_enabled=false` 时额外提示当前正按旧版直发。
+- **测试独立化**：种子迁移用例从 `notify.test.js` 移入新文件 `notify-migration.test.js`
+  （幂等 / default 组恢复 / 端点三种判定 / 启用态对照），新增 `notify-legacy-path.test.js`
+  专测 `NOTIFY_GROUPS=0` 回退态（含「配了 webhook 渠道也零请求」的绕开证明）。
+- 文档：`docs/env.md` 补 `NOTIFY_GROUPS`，`docs/api.md` 补迁移状态端点。
+
+## 2026-10-21 登录会话管理：列表 / 单点踢出 / 批量注销（S2-F6）
+
+### ⚠️ 行为变更
+
+- **登录态可按会话粒度吊销**：登录成功后服务端写入 `sessions` 表，并把 `sid`（24 位 hex）放进签名
+  Cookie。此前只有全局水位线（`session_revoked_before`），无法踢出单台设备。
+- **新增后台「登录会话」页**（系统 → 登录会话）：列出每台已登录设备的来源 IP、浏览器标识、登录时间与
+  最后活动，可逐条踢出，或「踢出其它设备」（保留当前会话）/「全部注销」（含当前会话）。
+- **吊销立即生效**：吊销时同步失效服务端会话校验缓存，被踢设备的下一次请求即 401（不等缓存 TTL）。
+- **DB 故障时的会话校验取舍（需安全评审知悉）**：查 `sessions` 表异常时**默认 fail-open**（Cookie 签名
+  有效且未过全局水位线即放行并记错误日志），避免单机 SQLite 损坏把管理员永久锁死；设
+  `STRICT_SESSION_DB=1` 切换 fail-close（DB 故障时拒绝一切会话）。
+- **旧 Cookie 兼容**：升级前签发、不带 `sid` 的 Cookie 仍放行至自然过期（12 小时 TTL），下次登录即带 `sid`。
+- **会话行自动清理**：每小时 prune 任务删除 `last_seen` 超过 2×SESSION_TTL 的会话行（含已吊销行）。
+
+### 说明
+
+- 会话列表含来源 IP 与浏览器标识，属跨设备敏感信息：仅全局作用域管理员可读；节点白名单 Token
+  （`agent_ids` 非空）一律返回 `403 forbidden_scope`。
+- 新增管理端点：`GET /api/admin/sessions`、`DELETE /api/admin/sessions/:id`、
+  `POST /api/admin/sessions/revoke-all`（body `{ keep_current?: boolean }`，默认保留当前会话）。
+- 审计：单点吊销记 `session_revoke`，批量吊销记 `session_revoke_all`。
+- 会话校验带 5 秒内存缓存（每 sid 每 5 秒查一次表）；缓存上限 1000 条，吊销时立即失效。
+- 登录时若会话行写入失败（DB 异常），降级为不带 `sid` 的旧格式 Cookie —— 与 fail-open 取舍一致，
+  不让 DB 故障把管理员挡在门外。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F6。
+
+## 2026-10-21 登录暴力防护：失败计数 + 指数封禁（S2-F9）
+
+### ⚠️ 行为变更
+
+- **登录失败 3 次起按 IP 指数封禁**：封禁时长 = 失败次数 ^ 4（3 次 → 81 秒、4 次 → 256 秒、
+  5 次 → 625 秒，上限 24 小时）。封禁期内 `POST /api/login` 返回 `429` + `Retry-After` 响应头
+  （响应体 `error=login_blocked` + `retry_after` 秒数）。
+- **成功登录即清零**：该 IP 的失败计数与封禁一并解除 —— 管理员自己输错后不必再等封禁结束。
+- **计数维度是来源 IP**：diting 登录是「管理员 Token + TOTP」，Token 唯一且共享、本就没有
+  用户名维度，故以 IP 为计数单元。同一出口 NAT 下的他人输错会一并影响你，反之亦然。
+- **管理员本人输错 3 次同样会被封**：需等 `Retry-After` 到期，或重启服务端立即解除
+  （封禁状态在内存中，重启即清零）。
+- **原有固定窗口限流保留**：`每 IP 每 60 秒 5 次` 仍在，与指数封禁叠加；两者 429 的错误码不同
+  （`too many login attempts, retry in 60s` = 窗口限流，`login_blocked` = 指数封禁）。
+- **登录页错误提示改为统一错误码映射**（`apiErrorMessage`）：`login_blocked`、
+  `too many totp failures` 等已本地化，不再把原始错误码（如 `login_blocked (HTTP 429)`）
+  直接显示给用户。
+
+### 说明
+
+- 封禁公式对齐 nezha `model/waf.go` 的 `count^4`；封禁触发时写审计（action=`login_banned`，
+  detail 只记 IP 的 sha256 前 16 位哈希，不落明文）。
+- 内存态实现（`server/src/ratelimit.js` 的 `loginGuard`）：状态经 `loadState`/`saveState`/
+  `deleteState` 三个钩子存取，将来升级持久化只需替换钩子实现；状态表有上限（10000 条）并
+  惰性淘汰，内存有界。
+- 失败计数保留 1 小时（无失败则归零）；封禁条目的存活期覆盖封禁期，避免 24 小时封禁在
+  1 小时后被 TTL 清零而使计数意外归零。
+- 实施计划见 `dev-docs/IMPLEMENTATION_PLAN_2026-10-19.md` F9。
+
 ## 2026-10-21 S5：主题市场
 
 主题从「只能把目录拷进镜像」升级为可安装、可配置、可回滚的市场体系（插件市场暂不做）。
