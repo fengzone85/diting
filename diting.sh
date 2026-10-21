@@ -478,8 +478,9 @@ install_server() {
     fi
 
     echo -e "${YELLOW}[信息] 构建并启动服务端（首次需编译 better-sqlite3，约 1-2 分钟）…${NC}"
-    # 写入构建时间（供页脚显示）
+    # 写入构建时间与 commit hash（供页脚显示）
     date +"%Y-%m-%d %H:%M:%S (%Z)" > build_time.txt
+    git rev-parse --short HEAD > git_hash.txt 2>/dev/null || echo "-" > git_hash.txt
     echo -e "${GREEN}[OK]   构建时间已写入 build_time.txt${NC}"
     # 先清理本项目旧实例，避免重跑/升级时端口或容器冲突（如 8081 已被占用）
     docker compose down 2>/dev/null || true
@@ -640,6 +641,7 @@ update_server() {
     fi
     echo -e "${YELLOW}[信息] 重建并重启服务端…${NC}"
     date +"%Y-%m-%d %H:%M:%S (%Z)" > build_time.txt
+    git rev-parse --short HEAD > git_hash.txt 2>/dev/null || echo "-" > git_hash.txt
     docker compose up -d --build
     echo -e "${GREEN}[OK]   服务端已更新并重启${NC}"
 }

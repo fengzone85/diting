@@ -8,18 +8,20 @@ import AppFooter from './components/AppFooter.vue';
 
 const { state } = useApp();
 
-// 页脚版本 / 构建时间：匿名访问服务端只回主版本号（G5 防 CVE 匹配），
-// 登录后才拿到精确版本与 build_time，此时才显示构建时间。
+// 页脚版本 / 构建时间 / commit hash：公开展示（匿名与登录一致）
 const version = ref('');
 const buildTime = ref('');
+const hash = ref('');
 async function loadVersion() {
   try {
     const info = await publicApi.version();
     version.value = info.version || info.data?.version || '';
     buildTime.value = info.build_time || info.data?.build_time || '';
+    hash.value = info.hash || info.data?.hash || '';
   } catch {
     version.value = '';
     buildTime.value = '';
+    hash.value = '';
   }
 }
 
@@ -62,6 +64,7 @@ const cvLabel: Record<string, string> = {
       :meta="state.meta"
       :version="version"
       :build-time="buildTime"
+      :hash="hash"
       :ip="state.visitor?.ip"
       :browser="state.visitor?.browser"
     />
