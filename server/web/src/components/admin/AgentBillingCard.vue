@@ -30,6 +30,8 @@ const form = reactive({
   currency: DEFAULT_CURRENCY as Currency,
   billing_cycle: DEFAULT_CYCLE as number,
   expire_at: '',
+  /** 长期：无到期日（对齐 Komari：到期时间可设为「长期」，即不设过期时间） */
+  long_term: false,
   auto_renewal: true,
 });
 
@@ -38,6 +40,7 @@ function reset() {
   form.currency = props.agent.currency || (DEFAULT_CURRENCY as Currency);
   form.billing_cycle = props.agent.billing_cycle ?? DEFAULT_CYCLE;
   form.expire_at = (props.agent.expire_at || '').slice(0, 10);
+  form.long_term = !form.expire_at;
   form.auto_renewal = props.agent.auto_renewal !== false;
 }
 
@@ -68,7 +71,7 @@ async function save() {
       name: props.agent.name,
       merchant: props.agent.merchant || '',
       note: props.agent.note || '',
-      expire_at: form.expire_at || '',
+      expire_at: form.long_term ? '' : (form.expire_at || ''),
       monthly_quota_gb: props.agent.monthly_quota_gb ?? 0,
       group: props.agent.group || props.agent.grp || '',
       country: props.agent.country || '',
@@ -119,12 +122,13 @@ onBeforeUnmount(() => {
   <button
     ref="trigger"
     type="button"
-    class="flex items-center gap-1 rounded-lg px-3 py-1 text-sm text-orange-300 hover:bg-orange-500/10"
+    class="flex h-7 w-7 items-center justify-center rounded-lg text-orange-300 hover:bg-orange-500/10"
+    :title="t('billing.card')"
+    :aria-label="t('billing.card')"
     :aria-expanded="open"
     @click.stop="toggle"
   >
-    <Ticket :size="14" theme="outline" />
-    {{ t('billing.card') }}
+    <Ticket :size="16" theme="outline" />
   </button>
 
   <Teleport to="body">
@@ -175,14 +179,26 @@ onBeforeUnmount(() => {
         </select>
       </label>
 
-      <label class="mb-3 block text-xs text-slate-400">
-        {{ t('agent.expireDate') }}
+      <div class="mb-3 text-xs text-slate-400">
+        <div class="mb-1 flex items-center justify-between">
+          <span>{{ t('agent.expireDate') }}</span>
+          <label class="flex cursor-pointer items-center gap-1 text-slate-300">
+            <input
+              v-model="form.long_term"
+              type="checkbox"
+              class="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-sky-500"
+            />
+            {{ t('agent.longTerm') }}
+          </label>
+        </div>
         <input
           v-model="form.expire_at"
           type="date"
-          class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+          :disabled="form.long_term"
+          class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
         />
-      </label>
+        <span v-if="form.long_term" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
+      </div>
 
       <label class="flex items-center gap-2 text-xs text-slate-300">
         <input

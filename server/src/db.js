@@ -277,6 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   if (!existing.has('billing_cycle')) db.exec("ALTER TABLE agents ADD COLUMN billing_cycle INTEGER DEFAULT 30");
   if (!existing.has('currency')) db.exec("ALTER TABLE agents ADD COLUMN currency TEXT DEFAULT '¥'");
   if (!existing.has('auto_renewal')) db.exec("ALTER TABLE agents ADD COLUMN auto_renewal INTEGER DEFAULT 1");
+  // 受控端版本：从上报请求的 User-Agent（diting-agent-go/x.y.z / diting-agent/x.y）解析而来
+  if (!existing.has('version')) db.exec("ALTER TABLE agents ADD COLUMN version TEXT DEFAULT ''");
 }
 // schema migration: agents 增加 CPU 核数列（受控端上报的静态硬件属性，§9 T18）。
 // 语义：0 = 未上报/未知（老 agent 不带该字段）——**不可当作 1 用**，摘要侧会标 cores_unknown。
@@ -339,7 +341,8 @@ const stmts = {
   approveAgent: db.prepare('UPDATE agents SET pending=0 WHERE id=?'),
   // 审查 E1：最近 N 条指标（旧→新），供告警"连续 N 个采样超限"判定
   recentMetrics: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT ?'),
-  touch: db.prepare('UPDATE agents SET last_seen=?, os=?, hostname=? WHERE id=?'),
+  // version 用 COALESCE(NULLIF(...)) 保留旧值：老 agent 或无法解析 UA 时不覆盖已知版本
+  touch: db.prepare("UPDATE agents SET last_seen=?, os=?, hostname=?, version=COALESCE(NULLIF(?,''), version) WHERE id=?"),
   // 仅当核数变化时才写（静态属性，避免每次上报都触发写事务）；cores<=0 不写入
   setAgentCores: db.prepare('UPDATE agents SET cores=? WHERE id=? AND cores<>?'),
   insertMetric: db.prepare(`INSERT INTO metrics
@@ -999,7 +1002,8 @@ function touchSession(id) {
   try { stmts.touchSession.run(now, id); } catch (e) { /* 忽略 */ }
 }
 
-const touchAgent = (id, os, hostname) => stmts.touch.run(Date.now(), os || '', hostname || '', id);
+const touchAgent = (id, os, hostname, version) =>
+  stmts.touch.run(Date.now(), os || '', hostname || '', version || '', id);
 
 // 记录受控端核数（§9 T18）：仅接受 1–1024 的整数；其余（含老 agent 的缺失）一律忽略，
 // 保持库中为 0 = 未知——摘要侧据此输出 cores_unknown，绝不用 0/1 冒充分母。

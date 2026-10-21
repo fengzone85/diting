@@ -7,11 +7,16 @@ import { formatBytes, formatDuration } from '../../utils/format';
 import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
+import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
 import type { InstallCommands, Agent } from '../../services/types';
 
 const { state } = useAdmin();
 const router = useRouter();
 const { t } = useI18n();
+
+// 列表行附加信息：分组（group/grp 两种字段名兼容）、agent 版本
+const agentGroup = (a: Agent) => a.group || a.grp || '';
+const agentVersion = (a: Agent) => (a.version ? `v${String(a.version).replace(/^v/i, '')}` : '');
 
 const newName = ref('');
 const error = ref('');
@@ -337,23 +342,46 @@ async function batchRenew() {
       >
         <div class="flex min-w-0 items-center gap-3">
           <input type="checkbox" :checked="selected.has(agent.id)" @change="toggleOne(agent.id)" class="h-4 w-4 flex-shrink-0 rounded border-slate-600 bg-slate-800 text-sky-500" />
+          <!-- 国旗（ISO 3166-1 alpha-2 → /flags/xx.svg） -->
+          <img
+            v-if="agent.country"
+            :src="`/flags/${agent.country.toLowerCase()}.svg`"
+            :alt="agent.country"
+            :title="agent.country"
+            class="h-4 w-6 flex-shrink-0 rounded-sm object-cover"
+            @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')"
+          />
           <div class="min-w-0">
-            <p class="truncate font-semibold">
-              {{ agent.name }}
-              <span v-if="agent.alert?.muted" class="ml-2 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-normal text-rose-300">{{ t('common.muted') }}</span>
-              <span v-else-if="agent.alert?.overridden" class="ml-2 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-300">{{ t('common.custom') }}</span>
+            <p class="flex min-w-0 items-center gap-2 truncate font-semibold">
+              <span class="truncate">{{ agent.name }}</span>
+              <span v-if="agentVersion(agent)" class="shrink-0 rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] font-normal text-slate-300">{{ agentVersion(agent) }}</span>
+              <span v-if="agentGroup(agent)" class="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-normal text-sky-300">{{ agentGroup(agent) }}</span>
+              <span v-if="agent.alert?.muted" class="shrink-0 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-normal text-rose-300">{{ t('common.muted') }}</span>
+              <span v-else-if="agent.alert?.overridden" class="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-300">{{ t('common.custom') }}</span>
             </p>
             <p class="truncate text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
+            <p v-if="agent.note" class="truncate text-xs text-slate-500" :title="agent.note">{{ t('agent.note') }}：{{ agent.note }}</p>
           </div>
         </div>
-        <div class="flex flex-shrink-0 gap-2">
-          <!-- 账单：图标 + 弹出账单卡片（价格/货币/周期/到期/自动续费） -->
+        <!-- 操作项统一为图标按钮（hover 显示名称） -->
+        <div class="flex flex-shrink-0 items-center gap-1">
+          <!-- 账单：图标 + 弹出账单卡片（价格/货币/周期/到期时间含「长期」/自动续费） -->
           <AgentBillingCard :agent="agent" @saved="loadAdmin" />
-          <button class="rounded-lg px-3 py-1 text-sm text-violet-400 hover:bg-violet-500/10" @click="openAlert(agent)">{{ t('agents.alert') }}</button>
-          <button class="rounded-lg px-3 py-1 text-sm text-sky-400 hover:bg-sky-500/10" @click="router.push(`/admin/agents/${agent.id}`)">{{ t('common.detail') }}</button>
-          <button class="rounded-lg px-3 py-1 text-sm text-amber-400 hover:bg-amber-500/10" @click="resetToken(agent.id)">{{ t('common.reset') }}</button>
-          <button class="rounded-lg px-3 py-1 text-sm text-emerald-400 hover:bg-emerald-500/10" @click="renew(agent.id)">{{ t('common.renew') }}</button>
-          <button class="rounded-lg px-3 py-1 text-sm text-rose-400 hover:bg-rose-500/10" @click="remove(agent.id)">{{ t('common.delete') }}</button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg text-violet-400 hover:bg-violet-500/10" :title="t('agents.alert')" :aria-label="t('agents.alert')" @click="openAlert(agent)">
+            <Remind :size="16" theme="outline" />
+          </button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg text-sky-400 hover:bg-sky-500/10" :title="t('common.detail')" :aria-label="t('common.detail')" @click="router.push(`/admin/agents/${agent.id}`)">
+            <FileText :size="16" theme="outline" />
+          </button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg text-amber-400 hover:bg-amber-500/10" :title="t('common.reset')" :aria-label="t('common.reset')" @click="resetToken(agent.id)">
+            <Refresh :size="16" theme="outline" />
+          </button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg text-emerald-400 hover:bg-emerald-500/10" :title="t('common.renew')" :aria-label="t('common.renew')" @click="renew(agent.id)">
+            <Time :size="16" theme="outline" />
+          </button>
+          <button class="flex h-7 w-7 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-500/10" :title="t('common.delete')" :aria-label="t('common.delete')" @click="remove(agent.id)">
+            <Delete :size="16" theme="outline" />
+          </button>
         </div>
       </div>
     </div>
