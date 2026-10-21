@@ -679,7 +679,7 @@ update_agent() {
         rm -rf "$tmp"; return 1
     fi
     chmod +x "$tmp/install.sh"
-    # 复用受控端安装脚本，传入已存身份 → 覆盖 agent.py 等并重启服务。
+    # 复用 agent-go/install.sh，传入已存身份 → 覆盖二进制与 unit 并重启服务。
     # 必须回传 PROBE_TARGETS 与 MONTH_ROTATE：install.sh 仅在显式传参时才写这些键，
     # 否则更新后用户自定义的探测目标 / 流量重置日会被覆盖丢失。
     local -a re_args=(--server "$SERVER_URL" --id "$AGENT_ID" --token "$AGENT_TOKEN" --interval "$INTERVAL" --month-rotate "${MONTH_ROTATE:-0}")
