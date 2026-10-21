@@ -2,11 +2,12 @@
 // 服务器列表里的「账单」图标 + 弹出账单卡片（对齐 Komari 后台服务器列表的账单弹卡）：
 // 价格（0 不显示 / -1 免费）、货币（9 种）、计费周期（-1 一次性 / 0 白嫖 / >0 天数）、
 // 到期时间、自动续费（附续费规则提示）。卡片内直接可编辑并保存。
-import { nextTick, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { Ticket } from '@icon-park/vue-next';
 import type { Agent } from '../../services/types';
 import { adminApi } from '../../services/adminApi';
 import { apiErrorMessage } from '../../utils/apiError';
+import { formatCurrency, formatRemaining } from '../../utils/format';
 import { useI18n } from '../../composables/useI18n';
 import { BILLING_CYCLES, CURRENCIES, DEFAULT_CURRENCY, DEFAULT_CYCLE } from '../../utils/billing';
 
@@ -14,6 +15,26 @@ const props = defineProps<{ agent: Agent }>();
 const emit = defineEmits<{ (e: 'saved'): void }>();
 
 const { t } = useI18n();
+
+// 剩余价值（服务端 server/src/billing.js 计算，Komari 口径）：
+// 免费 → 显示「免费」；长期/未填价/日期非法 → —；其余按 价格×剩余天数÷周期天数。
+const currencyOf = computed(() => props.agent.currency || '¥');
+const remainingText = computed(() => {
+  if (props.agent.billing_status === 'free') return t('public.free');
+  const v = props.agent.remaining_value;
+  return typeof v === 'number' ? formatCurrency(v, currencyOf.value) : '—';
+});
+const remainingDaysText = computed(() => {
+  const d = props.agent.remaining_days;
+  if (typeof d === 'number') return d > 0 ? `${d}` : t('card.expired');
+  return '—';
+});
+const monthlyCostText = computed(() => {
+  if (props.agent.billing_status === 'free') return t('public.free');
+  const m = props.agent.monthly_cost;
+  return typeof m === 'number' ? `${formatCurrency(m, currencyOf.value)} ${t('billing.perMonth')}` : '—';
+});
+const remainingTimeText = computed(() => formatRemaining(props.agent.expire_at).text);
 
 const open = ref(false);
 const saving = ref(false);
@@ -198,6 +219,25 @@ onBeforeUnmount(() => {
           class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
         />
         <span v-if="form.long_term" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
+      </div>
+
+      <!-- 只读汇总：剩余价值 / 剩余时间 / 月均支出（Komari 资产统计口径） -->
+      <div class="inner-panel mb-3 px-3 py-2 text-[11px]">
+        <div class="flex items-center justify-between py-0.5">
+          <span class="text-slate-400">{{ t('node.billing.remainingValue') }}</span>
+          <span class="tabular-nums text-slate-200">{{ remainingText }}</span>
+        </div>
+        <div class="flex items-center justify-between py-0.5">
+          <span class="text-slate-400">{{ t('node.billing.remainingTime') }}</span>
+          <span class="tabular-nums text-slate-200">
+            {{ remainingTimeText }}
+            <span v-if="remainingDaysText !== '—'" class="text-slate-500">· {{ remainingDaysText }}</span>
+          </span>
+        </div>
+        <div class="flex items-center justify-between py-0.5">
+          <span class="text-slate-400">{{ t('node.billing.monthlyCost') }}</span>
+          <span class="tabular-nums text-slate-200">{{ monthlyCostText }}</span>
+        </div>
       </div>
 
       <label class="flex items-center gap-2 text-xs text-slate-300">

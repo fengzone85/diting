@@ -12,6 +12,7 @@ const alerts = require('./alerts');
 const backups = require('./backups');
 const { daysUntil, asyncHandler } = require('./util');
 const { nextExpire, autoRenewExpire } = require('./renew');
+const { computeBilling } = require('./billing');
 
 // 计费字段口径（对齐 Komari）：
 //   价格 price：0 = 不显示、-1 = 免费、>0 = 实际金额
@@ -391,6 +392,8 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
     return Object.assign({}, a, {
       group: a.grp || '',
       online: !!online,
+      // 剩余价值/月均支出（Komari 口径，见 src/billing.js）
+      ...computeBilling(a, now),
       has_counter: db.hasTrafficCounter(a.id),
       latest: latestOut,
       hostname: shortHost(a.hostname),
@@ -577,7 +580,7 @@ router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const online = a.last_seen && (Date.now() - a.last_seen) < offlineSec * 1000;
   const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
-  res.json(Object.assign({}, a, { group: a.grp || '', online: !!online, latest: latestOut, hostname: shortHost(a.hostname) }));
+  res.json(Object.assign({}, a, { group: a.grp || '', online: !!online, latest: latestOut, hostname: shortHost(a.hostname), ...computeBilling(a) }));
 });
 
 // ---- Admin: metrics time-series ----
@@ -759,7 +762,9 @@ router.get('/public/agents', (req, res) => {
       monthly_quota_gb: a.monthly_quota_gb || 0,
       price: a.price || 0,
       billing_cycle: a.billing_cycle || 30,
-      currency: a.currency || '¥'
+      currency: a.currency || '¥',
+      // 剩余价值 / 月均支出 / 剩余天数（Komari 口径，见 src/billing.js）
+      ...computeBilling(a)
     });
   });
   res.json(list);

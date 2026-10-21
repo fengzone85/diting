@@ -92,9 +92,12 @@ const billingCards = computed(() => {
   const currency = a.currency || '¥';
   const monthly = price != null && cycle != null ? price / cycle : null;
   const rem = formatRemaining(a.expire_at);
-  // 剩余价值 = 剩余月数 × 月均支出
+  // 剩余价值：优先用服务端计算结果（server/src/billing.js，Komari 口径
+  // = 价格 × 剩余天数 ÷ 计费周期天数，UTC 整日）；接口未返回时回退本地折算。
   let remainingValue: number | null = null;
-  if (monthly != null && a.expire_at) {
+  if (typeof a.remaining_value === 'number') {
+    remainingValue = a.remaining_value;
+  } else if (monthly != null && a.expire_at) {
     const exp = new Date(a.expire_at).getTime();
     if (!Number.isNaN(exp)) {
       const months = (exp - Date.now()) / (86400000 * 30);
@@ -113,7 +116,11 @@ const billingCards = computed(() => {
       key: 'monthlyCost',
       label: t('node.billing.monthlyCost'),
       icon: markRaw(ShoppingBag),
-      value: monthly != null ? `${formatCurrency(monthly, currency)} / 月` : '—',
+      value: a.billing_status === 'free'
+        ? t('public.free')
+        : (typeof a.monthly_cost === 'number'
+            ? `${formatCurrency(a.monthly_cost, currency)} / 月`
+            : (monthly != null ? `${formatCurrency(monthly, currency)} / 月` : '—')),
       status: 'normal' as const,
     },
     {
@@ -127,7 +134,9 @@ const billingCards = computed(() => {
       key: 'remainingValue',
       label: t('node.billing.remainingValue'),
       icon: markRaw(Wallet),
-      value: remainingValue != null ? formatCurrency(remainingValue, currency) : '—',
+      value: a.billing_status === 'free'
+        ? t('public.free')
+        : (remainingValue != null ? formatCurrency(remainingValue, currency) : '—'),
       status: 'normal' as const,
     },
   ];
