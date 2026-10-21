@@ -1,5 +1,12 @@
 <script setup lang="ts">
+// 后台侧栏：参考 Komari 后台的信息架构——按「监控 / 运维 / 系统」分组，
+// 桌面端可收起成图标轨（localStorage 记忆），移动端保持抽屉式全宽。
+import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import {
+  DashboardOne, Monitor, Wallet, Robot, Log, Key, SettingTwo, LayoutTwo,
+  Home, Logout, MenuFold, MenuUnfold,
+} from '@icon-park/vue-next';
 import { useI18n } from '../../composables/useI18n';
 
 defineProps<{
@@ -14,16 +21,43 @@ const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 
-const links = [
-  { to: '/admin', label: t('nav.dashboard') },
-  { to: '/admin/agents', label: t('nav.agents') },
-  { to: '/admin/billing', label: t('nav.billing') },
-  { to: '/admin/ai', label: t('nav.ai') },
-  { to: '/admin/settings', label: t('nav.settings') },
-  { to: '/admin/template', label: t('nav.template') },
-  { to: '/admin/audit-logs', label: t('nav.auditLogs') },
-  { to: '/admin/api-tokens', label: t('nav.apiTokens') },
-];
+const COLLAPSE_KEY = 'diting.admin.sidebar.collapsed';
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1');
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value;
+  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0');
+}
+
+// 用 computed 而非一次性数组：切换语言时菜单文案需要跟着变（t() 内部读取 locale ref）。
+const groups = computed(() => [
+  {
+    key: 'monitor',
+    title: t('nav.group.monitor'),
+    items: [
+      { to: '/admin', label: t('nav.dashboard'), icon: DashboardOne },
+      { to: '/admin/agents', label: t('nav.agents'), icon: Monitor },
+      { to: '/admin/billing', label: t('nav.billing'), icon: Wallet },
+    ],
+  },
+  {
+    key: 'ops',
+    title: t('nav.group.ops'),
+    items: [
+      { to: '/admin/ai', label: t('nav.ai'), icon: Robot },
+      { to: '/admin/audit-logs', label: t('nav.auditLogs'), icon: Log },
+    ],
+  },
+  {
+    key: 'system',
+    title: t('nav.group.system'),
+    items: [
+      { to: '/admin/api-tokens', label: t('nav.apiTokens'), icon: Key },
+      { to: '/admin/settings', label: t('nav.settings'), icon: SettingTwo },
+      { to: '/admin/template', label: t('nav.template'), icon: LayoutTwo },
+    ],
+  },
+]);
 
 async function logout() {
   try {
@@ -33,7 +67,9 @@ async function logout() {
   }
 }
 
+// 首页 /admin 必须精确匹配：用 startsWith 会让「仪表盘」在任意子页面都高亮。
 function isActive(to: string) {
+  if (to === '/admin') return route.path === '/admin';
   return route.path === to || route.path.startsWith(to + '/');
 }
 </script>
@@ -46,31 +82,80 @@ function isActive(to: string) {
     @click="emit('close')"
   />
   <aside
-    class="sidebar glass z-50 flex-shrink-0 p-4 transition-transform duration-200 lg:static lg:w-60 lg:translate-x-0"
-    :class="open ? 'sidebar-open' : 'sidebar-closed'"
+    class="sidebar glass z-50 flex flex-shrink-0 flex-col p-3 transition-all duration-200 lg:static lg:translate-x-0"
+    :class="[
+      open ? 'sidebar-open' : 'sidebar-closed',
+      collapsed ? 'is-collapsed' : '',
+    ]"
   >
-    <div class="mb-4 flex items-center justify-between lg:hidden">
-      <span class="text-lg font-bold text-sky-400">Diting</span>
-      <button class="text-slate-400 hover:text-white" @click="emit('close')">✕</button>
-    </div>
-    <nav class="space-y-2">
-      <RouterLink
-        v-for="link in links"
-        :key="link.to"
-        :to="link.to"
-        class="block rounded-lg px-4 py-2 text-sm transition-colors"
-        :class="isActive(link.to) ? 'bg-sky-500/20 text-sky-300' : 'text-content hover:bg-slate-700/30'"
-        @click="emit('close')"
-      >
-        {{ link.label }}
+    <!-- 品牌 + 收起/展开 -->
+    <div class="mb-4 flex items-center gap-2 px-1">
+      <RouterLink to="/admin" class="flex min-w-0 items-center gap-2" :title="t('nav.admin')">
+        <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sm font-bold text-sky-300">D</span>
+        <span class="label truncate text-lg font-bold text-sky-400">Diting</span>
       </RouterLink>
       <button
-        class="mt-4 block w-full rounded-lg px-4 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
+        class="ml-auto hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/40 hover:text-white lg:flex"
+        :title="collapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-expanded="!collapsed"
+        @click="toggleCollapsed"
+      >
+        <MenuUnfold v-if="collapsed" :size="18" />
+        <MenuFold v-else :size="18" />
+      </button>
+      <button
+        class="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-white lg:hidden"
+        :aria-label="t('common.close')"
+        @click="emit('close')"
+      >✕</button>
+    </div>
+
+    <!-- 分组菜单 -->
+    <nav class="flex-1 space-y-4 overflow-y-auto">
+      <div v-for="group in groups" :key="group.key">
+        <p
+          class="group-title mb-1 px-3 text-[11px] font-medium uppercase tracking-wider text-slate-500"
+        >{{ group.title }}</p>
+        <div class="space-y-1">
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.to"
+            :to="item.to"
+            :title="item.label"
+            class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="isActive(item.to)
+              ? 'bg-sky-500/20 text-sky-300'
+              : 'text-content hover:bg-slate-700/30'"
+            @click="emit('close')"
+          >
+            <component :is="item.icon" :size="18" class="flex-shrink-0" />
+            <span class="label truncate">{{ item.label }}</span>
+          </RouterLink>
+        </div>
+      </div>
+    </nav>
+
+    <!-- 底部：返回主页 + 退出 -->
+    <div class="mt-4 space-y-1 border-t border-white/10 pt-3">
+      <RouterLink
+        to="/"
+        :title="t('nav.home')"
+        class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-700/30 hover:text-white"
+        @click="emit('close')"
+      >
+        <Home :size="18" class="flex-shrink-0" />
+        <span class="label truncate">{{ t('nav.home') }}</span>
+      </RouterLink>
+      <button
+        :title="t('nav.logout')"
+        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
         @click="logout"
       >
-        {{ t('nav.logout') }}
+        <Logout :size="18" class="flex-shrink-0" />
+        <span class="label truncate">{{ t('nav.logout') }}</span>
       </button>
-    </nav>
+    </div>
   </aside>
 </template>
 
@@ -88,13 +173,43 @@ function isActive(to: string) {
 .sidebar-open {
   transform: translateX(0);
 }
+/* 收起态：图标居中、隐藏文案与分组标题 */
+.sidebar.is-collapsed .label,
+.sidebar.is-collapsed .group-title {
+  display: none;
+}
+.sidebar.is-collapsed nav a,
+.sidebar.is-collapsed .mt-4 a,
+.sidebar.is-collapsed .mt-4 button {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
 @media (min-width: 1024px) {
+  /* 桌面端改为 sticky 满高：页面很长时「返回主页/退出」仍固定在视口底部，
+     中间菜单区自己滚动（此前 position: static 会让 footer 掉到长页面最下面）。 */
   .sidebar {
-    position: static;
+    position: sticky;
+    top: 0;
+    bottom: auto;
+    height: 100vh;
+    align-self: flex-start;
   }
   .sidebar-closed,
   .sidebar-open {
     transform: translateX(0);
+  }
+  /* 收起态宽度写在这里：Tailwind 的 lg:w-* 工具类会被上面 .sidebar 的 width
+     覆盖（scoped 样式注入更晚），只能同层覆盖。 */
+  .sidebar.is-collapsed {
+    width: 4.5rem;
+  }
+}
+/* 移动端抽屉始终全宽显示文案，忽略收起态 */
+@media (max-width: 1023px) {
+  .sidebar.is-collapsed .label,
+  .sidebar.is-collapsed .group-title {
+    display: revert;
   }
 }
 </style>

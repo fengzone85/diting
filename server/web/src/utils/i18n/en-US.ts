@@ -44,6 +44,7 @@ export const enUS: Record<string, string> = {
   'common.back': 'Back',
   'common.copy': 'Copy',
   'common.copied': 'Copied',
+  'common.close': 'Close',
   'common.hide': 'Hide',
   'common.muted': 'Muted',
   'common.custom': 'Custom',
@@ -67,6 +68,12 @@ export const enUS: Record<string, string> = {
   'nav.apiTokens': 'API Tokens',
   'nav.template': 'Template',
   'nav.menu': 'Menu',
+  'nav.group.monitor': 'Monitoring',
+  'nav.group.ops': 'Operations',
+  'nav.group.system': 'System',
+  'nav.home': 'Back to site',
+  'nav.collapse': 'Collapse sidebar',
+  'nav.expand': 'Expand sidebar',
 
   // agents
   'agents.title': 'Agents',
