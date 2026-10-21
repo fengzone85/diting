@@ -10,6 +10,8 @@ interface Props {
   variant?: 'default' | 'success' | 'warning' | 'danger';
   /** sm：前台总览这类「一排多张」的场景用更小的字与内边距；md 为默认（后台卡片） */
   size?: 'sm' | 'md';
+  /** 双行上下分布：主值贴标题、副行贴卡底（用于「上行/下行」这类成对指标） */
+  spread?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), { variant: 'default', size: 'md' });
@@ -38,9 +40,14 @@ const subClass = isSm
 </script>
 
 <template>
-  <div class="glass card-hover" :class="[padClass, variantClass]">
-    <p :class="labelClass" class="text-secondary">{{ label }}</p>
-    <p class="mt-1.5 text-content" :class="[valueClass, valueWeight]">{{ value }}</p>
-    <p v-if="sub" class="mt-1 text-secondary" :class="subClass">{{ sub }}</p>
+  <!-- spread 时根容器纵向弹性布局：标题/主值在上，副行被 mt-auto 推到卡底 -->
+  <div class="glass card-hover flex flex-col" :class="[padClass, variantClass]">
+    <p :class="labelClass" class="shrink-0 text-secondary">{{ label }}</p>
+    <p class="mt-1.5 shrink-0 text-content" :class="[valueClass, valueWeight]">{{ value }}</p>
+    <p
+      v-if="sub"
+      class="text-secondary"
+      :class="[subClass, spread ? 'mt-auto pt-1.5' : 'mt-1']"
+    >{{ sub }}</p>
   </div>
 </template>
