@@ -116,7 +116,8 @@ export function customTag(agentId: string): string {
 const CARD_SCHEMES: Record<string, string[]> = {
   // uptime → instant_traffic（2026-10-12 用户指定）：原「运行时间」卡 value 一直未实现，
   // 改为「总即时流量」（所有节点实时速率之和）
-  official: ['online', 'total', 'cpu', 'mem', 'traffic', 'instant_traffic'],
+  // online_total（2026-10-21 用户指定）：原「在线」+「受控端总数」合并为「当前在线 x / y」
+  official: ['online_total', 'cpu', 'mem', 'traffic', 'instant_traffic'],
   basic: ['online', 'total', 'cpu', 'mem'],
   ops: ['online', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
   resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'instant_traffic'],
