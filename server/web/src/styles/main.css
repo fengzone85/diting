@@ -375,3 +375,6 @@ body {
 .badge { font-size: 10px; padding: 2px 8px; border-radius: 20px; background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-muted); flex-shrink: 0; }
 .badge-warn { color: var(--warning); border-color: var(--warning); }
 .badge-danger { color: var(--danger); border-color: var(--danger); }
+/* 自定义标签（meta.custom_tags）— 与简约卡/列表行同一套 sky 配色 */
+.badge-tag { color: #38bdf8; border-color: rgb(56 189 248 / 0.4); background: rgb(56 189 248 / 0.12); }
+[data-theme="light"] .badge.badge-tag { color: #0369a1 !important; border-color: rgb(2 132 199 / 0.35); background: rgb(2 132 199 / 0.1); }
