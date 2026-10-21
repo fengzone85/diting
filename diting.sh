@@ -1694,7 +1694,7 @@ do_reset_admin_token() {
 
 uninstall_all() {
     echo "== 卸载受控端 =="
-    # 受控端实际部署的是 /opt/diting/uninstall.sh（见 agent/install.sh）；
+    # 受控端实际部署的是 /opt/diting/uninstall.sh（见 agent-go/install.sh）；
     # 兼容早期重命名失误遗留的 unditing.sh。
     if [[ -f /opt/diting/uninstall.sh ]]; then
         bash /opt/diting/uninstall.sh || true

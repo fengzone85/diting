@@ -15,11 +15,11 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 **受控端**：
 - Docker 形态：需要 Docker Engine，内存 65-150MB
-- 原生 systemd 形态：仅需 Python 3.8+，内存 12-25MB
+- 原生 systemd 形态：无前置依赖（单文件静态二进制），内存 <10MB
 
 ### Q: 支持 ARM / 树莓派吗？
 
-✅ 支持。受控端有 Go 单二进制（linux/amd64、linux/arm64）与 Python 两种实现，均无架构限制；服务端是 Node.js，同样支持 ARM。
+✅ 支持。受控端为 Go 单二进制（linux/amd64、linux/arm64，及 Windows amd64），无架构限制；服务端是 Node.js，同样支持 ARM。
 
 ### Q: 可以不用 Docker 吗？
 

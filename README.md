@@ -15,7 +15,6 @@
   <img src="https://img.shields.io/github/actions/workflow/status/fengzone85/diting/test.yml?branch=master&label=tests&style=flat-square" alt="tests">
   <img src="https://img.shields.io/badge/Node.js-22-339933?style=flat-square&logo=node.js" alt="node">
   <img src="https://img.shields.io/badge/SQLite-3-003b57?style=flat-square&logo=sqlite" alt="sqlite">
-  <img src="https://img.shields.io/badge/Python-3.8+-3776AB?style=flat-square&logo=python" alt="python">
   <img src="https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go" alt="go">
   <img src="https://img.shields.io/badge/Linux-Docker-2496ED?style=flat-square&logo=docker" alt="linux">
   <img src="https://img.shields.io/badge/Windows-原生-0078D4?style=flat-square&logo=windows" alt="windows">
@@ -55,9 +54,9 @@
 <td width="50%">
 
 ### 🌐 轻量跨平台
-- **Python Agent（Linux Docker）** — 纯标准库，65–150MB
-- **Go Agent（Linux 原生）** — 单文件二进制 + systemd，无 Python 依赖
-- **Windows Agent（原生）** — psutil，登录自启计划任务
+- **Go Agent（Linux 原生）** — 单文件二进制 + systemd，零外部依赖，<10MB
+- **Windows Agent（原生）** — 同一份 Go 代码编译的 exe，登录自启计划任务
+- **Docker Agent** — Go 多阶段构建的 scratch 镜像，65–150MB（含守护进程）
 - **Agent 零耦合** — 彼此不知互存在
 - **数据最小化** — 不采内核/GPU/公网IP/连接数
 - **多盘支持** — 自动识别物理磁盘（过滤 tmpfs/proc/伪盘）</td>
@@ -111,15 +110,13 @@ sudo REPO_BRANCH=v1.2.0 bash diting.sh --install-server
 # 2) 校验脚本自身（可在 Release notes 里核对）
 sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-script
 
-# 3) 受控端载荷校验：diting.sh --install-agent 现在只走 Go 版，二进制由 install.sh
+# 3) 受控端载荷校验：diting.sh --install-agent 只走 Go 版，二进制由 install.sh
 #    强制比对 Release 随附的 .sha256（不提供即失败），无需再传哈希。
-#    仅当直接执行旧 Python 安装器 agent/install.sh 时，才需按下载清单顺序传入：
-# sudo SP_AGENT_SHA256S=<s1>,<s2>,<s3> bash agent/install.sh ...
 ```
 
 > 两种校验口径：`SP_INSTALL_SHA256`（脚本自身）未提供时 `--update-script` 不校验，
 > 但会把本次下载文件的 SHA256 打印到终端，便于留档与下次强校验；受控端安装器
-> （Go 的 `.sha256` 与 Python 的 `SP_AGENT_SHA256S`）则是**未提供即拒绝安装**。
+> （Go 的 `.sha256`）则是**未提供即拒绝安装**。
 > 发布流程：打 tag → 编译/打包 → `sha256sum` 各产物 → 写入 Release notes。
 
 ---
@@ -128,9 +125,8 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 
 ```
    受控端（零入站、仅出站 HTTPS + Token）
-   ├─ Python agent   (Docker, 纯标准库)
-   ├─ Go agent       (单文件二进制, systemd)
-   └─ Windows agent  (psutil, 计划任务)
+   ├─ Go agent       (Linux: 单文件二进制 + systemd)
+   └─ Windows agent  (同一份 Go 代码, 计划任务)
              │
              │  POST /api/report（单向；响应仅用于错误日志，从不执行）
              ▼
@@ -182,15 +178,11 @@ diting/
 │   ├── web/                 # Vue3 + Vite + Tailwind v4 + TypeScript SPA
 │   │   └── src/             # 公开页 / 管理页 / 组件 / composables / services
 │   ├── public/              # SPA 构建产物 + setup 向导 + 主题
-│   │   └── themes/          # 第三方 Komari 皮肤（如 glassmorphism）
+│   │   └── themes/          # 第三方皮肤（自研 + Komari 兼容）
 │   └── test/security.test.js   # 安全单元测试
-├── agent/                   # Python 受控端（Docker，纯标准库）
-│   ├── agent.py / collector.py
-│   ├── windows/             # Windows 原生（psutil）
-│   ├── install.sh / uninstall.sh / diting-agent.service
-│   └── Dockerfile / docker-compose.yml
-├── agent-go/                # Go 受控端（单文件二进制，原生部署）
+├── agent-go/                # Go 受控端（Linux / Windows / Docker 共用一套代码）
 │   ├── main.go              # 主循环 + 自适应采样
+│   ├── install-go.ps1       # Windows 一键安装（计划任务）
 │   ├── collector/           # 采集子模块（cpu/mem/disk/diskio/network/probe/…）
 │   ├── reporter/            # 上报 + 压缩 + 重试
 │   └── config/              # 环境变量解析
@@ -253,7 +245,7 @@ diting/
 
 该开关与「公开页启用（`public_enabled`）」相互独立：关闭公开页时，两类接口一律返回 403。
 
-### 受控端（Python 与 Go 共用）
+### 受控端
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
@@ -355,7 +347,7 @@ cd server/web && npm install && npm run build
 - **RPC2**：`/api/rpc2`（POST / WS）
 - 本项目另暴露标准 `/api/v1/*`（与 Komari 同形，供自研 SPA 复用）
 
-主题挂载到 `server/public/themes/<id>/`，访问 `/?theme=<id>` 启用；`glassmorphism` 已在 CSP nonce 白名单。
+主题挂载到 `server/public/themes/<id>/`，访问 `/?theme=<id>` 启用。含内联脚本的社区主题由服务端注入一次性 CSP nonce 后放宽该响应的 `script-src`（见 `server.js` 的 `THEME_NEEDS_NONCE`）。
 
 ---
 
@@ -411,35 +403,16 @@ curl -X POST https://your-server/api/admin/api-tokens \
 
 ---
 
-## 🐍 Python 受控端（Linux Docker）
+## 🐹 Go 受控端（Linux / Windows / Docker）
 
-`agent/agent.py` + `collector.py`，纯标准库、无第三方依赖：
+`agent-go/` 是唯一受控端实现（原 Python 版已于 2026-10 下线）：
 
-- 采集：`/proc/stat`（CPU）、`/proc/meminfo`（内存）、`/proc/mounts`+`statvfs`（按 st_dev 去重真实盘，过滤 tmpfs/伪盘）
-- 网络流量：`/proc/net/dev`（容器内需 `--network host` 才能拿到真实流量）
-- 温度：`/sys/class/thermal`（可选）；网络质量：ICMP ping 优先、TCP 兜底、多目标并行
-- 月流量累计：服务端 `traffic_state` 累加器基于绝对计数器 `net_rx/net_tx` 计算，agent 无本地状态
-- 401/403 → 10 分钟长退避（静态 Token 无法自愈）；瞬时错误指数退避（最多 3 次）
-
----
-
-## 🐹 Go 受控端（Linux 原生）
-
-`agent-go/` 提供 Go 重写版，与 Python Agent **并行口径**、可任选其一：
-
-- **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / supervisord）
+- **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / 计划任务）
 - **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 10s ↔ 60s 自动调整（需服务端 `OFFLINE_THRESHOLD_SEC ≥ 120`）
-- **月流量**：`STATE_FILE` 与 Python 同格式可平滑切换
-- **资源占用**：常驻内存约 10MB（Python 版约 12-25MB，视采集项与系统而定），不依赖 Python / Docker
-
----
-
-## 🖥️ Windows 受控端
-
-- 基于 `psutil`，采集 CPU/内存/磁盘/网络/开机时长
-- 上报字段与 Linux Agent 完全一致，服务端零改动
-- 安装：运行 `agent/windows/install.ps1` 自动安装依赖并注册计划任务
-- Windows 无 load average，`load1/load5/load15` 固定占位 `0.0`
+- **月流量**：只上报绝对计数器 `net_rx/net_tx` + `month_rotate`，月累计由服务端 `traffic_state` 计算，agent 无本地状态
+- **资源占用**：常驻内存约 10MB，不依赖 Python / Docker
+- **Windows**：同一份代码编译的 exe（`agent-go/install-go.ps1` 一键注册计划任务），`load1/5/15` 固定 `0.0`
+- **Docker**：多阶段构建的 scratch 镜像，`--network host` 下取真实流量
 
 ---
 
@@ -689,7 +662,7 @@ Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的�
 
 > 一句话：本项目用「功能减法」（无指令通道、无指纹、Agent 互不感知）换取「安全加法」。攻击者无法利用根本不存在的东西。需要更新时，请走本地运维通道，而非远端自更新。
 >
-> **供应链完整性（L-6）**：Go 受控端从 Release 下载二进制后强制比对随附 `.sha256`；旧 Python 受控端则通过 `SP_AGENT_SHA256S` 钉死已知良好版本的 SHA-256 哈希。两者**缺少校验和时都拒绝安装（fail closed）**，不会静默信任下载内容。详见 [Agent 安全原则](agent/README.md#安全原则)。
+> **供应链完整性（L-6）**：受控端安装器从 Release 下载二进制后强制比对随附 `.sha256`；**缺少校验和时拒绝安装（fail closed）**，不会静默信任下载内容。详见《受控端部署》。
 
 > 补充：GPU 型号（`nvidia-smi` / `lspci` 取得的硬件标识）属于**主机指纹**，与本项目「不采内核/GPU/公网IP」原则冲突，因此**不做 GPU 监控**。
 

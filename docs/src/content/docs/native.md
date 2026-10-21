@@ -15,7 +15,7 @@ description: 无 Docker 的原生 systemd 部署方式
 | **原生 systemd** | 服务端 30-60MB + Go 受控端 <10MB | 无（受控端零依赖） | 二进制 ~5MB |
 | 差值 | **省 ~125MB** | — | — |
 
-> 受控端另有 Python 实现（内存 12-25MB），已冻结、仅存量节点使用，新装一律 Go。
+> 受控端只有 Go 实现（原 Python 版已于 2026-10 下线并从仓库移除）。
 
 ## 一键安装（受控端）
 
@@ -78,8 +78,7 @@ ReadWritePaths=/var/lib/diting
 WantedBy=multi-user.target
 ```
 
-> Python 版 unit（`agent/diting-agent.service`）另有内核 / cgroup 隔离与
-> `AmbientCapabilities=CAP_NET_RAW`（ICMP 探测需要），已随 Python 端冻结、不再演进。
+> Go 版为纯 TCP 探测，不需要 `CAP_NET_RAW`，因此 unit 中未启用 AmbientCapabilities。
 
 ## 管理命令
 
@@ -112,4 +111,4 @@ curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/u
 ## 另见
 
 本页即 **Go 二进制形态**的 systemd 部署说明（安装 / 布局 / unit / 卸载）。Docker 形态、
-环境变量全表与「修改探测目标」见《受控端部署》；旧 Python 受控端（`agent/`）已冻结，仅存量节点参考。
+环境变量全表与「修改探测目标」见《受控端部署》。

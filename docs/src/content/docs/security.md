@@ -66,7 +66,7 @@ Agent 之间互不通信，互不知道彼此存在。
 | HTTPS 强制 | 非 localhost 请求 `exit(1)` |
 | 401/403 长退避 | 认证失败退避 600 秒，防爆破 |
 | 非 root 运行 | Docker 内 uid 1000（用户 `diting`）+ 只读挂载 `/:/host:ro` |
-| systemd 加固 | `NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome`、`ReadWritePaths=/var/lib/diting`、`PrivateTmp`（Go 版共 5 项；Python 版另有内核 / cgroup 隔离与 `AmbientCapabilities=CAP_NET_RAW`，见《受控端部署》） |
+| systemd 加固 | `NoNewPrivileges`、`ProtectSystem=strict`、`ProtectHome`、`ReadWritePaths=/var/lib/diting`、`PrivateTmp`（共 5 项，见《受控端部署》） |
 | 无 shell 调用 | `probe_one()` 使用 list 形式命令，不经过 shell |
 | 本地固定探测目标 | 探测目标写在 agent 本地环境变量；**运行期**服务端无任何下发通道（安装期由一键命令注入一次） |
 

@@ -31,7 +31,7 @@ function safeName(v) {
   return String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 50);
 }
 
-const DEFAULT_AGENT_INTERVAL = 20;   // 秒；与 agent/agent.py 的 INTERVAL 默认值保持一致
+const DEFAULT_AGENT_INTERVAL = 20;   // 秒；与 agent-go 的 INTERVAL 默认值保持一致
 const AI_TREND_FETCH_DAYS = 14;      // 趋势查询最多回看的天数（成本上限：14d ≈1s）
 const AI_TREND_BUCKET_MS = 3600000;  // 1h 桶 → 14d ≈336 点/台（桶宽只影响输出分辨率，不影响扫描成本）
 const AI_PROBE_POINTS = 200;         // 单节点探针聚合的采样点数（仅 §9 T20 用；日报不做探针）

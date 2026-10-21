@@ -33,7 +33,7 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 - **No more naked credentials**: dashboard login uses a signed `HttpOnly + Secure + SameSite=Strict` cookie, so the admin token is no longer stored in plaintext on the front end (kills the XSS-theft risk); optional **TOTP two-factor authentication** requires a code on top of the token for all admin writes, so the static token alone cannot perform dangerous actions.
 
 **🌐 Cross-platform, drop-in**
-- **Linux (Docker / Go binary, stdlib-only) + Windows (native psutil) agents** report identical fields, so the server receives them with **zero changes**; the Windows agent can be registered as a "start on logon, restart on crash" scheduled task in one command. The Go binary is a ~5 MB static build using <10 MB memory — ideal for minimal systems.
+- **Linux (Docker / Go binary, stdlib-only) + Windows (native Go exe) agents** report identical fields, so the server receives them with **zero changes**; the Windows agent can be registered as a "start on logon, restart on crash" scheduled task in one command. The Go binary is a ~5 MB static build using <10 MB memory — ideal for minimal systems.
 
 **📊 Observability & alerting**
 - Standard **Prometheus `/metrics`** export (Bearer auth) for Grafana; offline / CPU·memory threshold alerts push to **QQ Mail and Telegram** in parallel (one channel failing does not affect the other), with monthly-traffic-quota and expiry-countdown reminders.
@@ -66,19 +66,10 @@ This project earned a **⭐⭐⭐⭐⭐ (5/5)** rating in two independent securi
 
 ```
 监控/
-  agent/        # Monitored side (Docker, Linux)
-    collector.py   collects CPU/memory/disk/load/traffic (incl. monthly totals)
-    agent.py       periodic reporting + backoff retry
-    Dockerfile     python:3.11-slim, stdlib only, runs as non-root
-    docker-compose.yml
-  agent/windows/ # Monitored side (native Windows, psutil; see its README)
-    win_collector.py  Windows metric collection (same protocol as Linux)
-    windows_agent.py  periodic reporting + backoff retry
-    install.ps1       install deps + register startup scheduled task
-    run.bat           convenient launcher
-  agent-go/     # Monitored side (native Go binary, Linux; zero external deps)
-    main.go / collector/ / reporter/  reads /proc, single-way HTTPS report
+  agent-go/     # Monitored side — the only agent implementation (Go, zero external deps)
+    main.go / collector/ / reporter/  reads /proc (native APIs on Windows), single-way HTTPS report
     adaptive.go  local change-rate based adaptive interval (fast/slow)
+    install.sh / install-go.ps1 / Dockerfile / docker-compose.yml
     go.mod       no require (pure stdlib) — fast cross-compilation
   server/       # Server + dashboard
     server.js            entry + routes + WebSocket + SPA fallback
@@ -347,7 +338,7 @@ docker run -d --name monitor-agent --restart unless-stopped \
 > - `-v /:/host:ro` + `-e DISK_PATH=/host`: read-only mount of the host root so disk usage is computed for the VPS root disk, not the container overlay.
 > - If running the agent directly on bare metal (no Docker), keep `DISK_PATH` at its default `/`.
 
-> The `host-monitor-agent` image must be built on the monitored host first: `cd agent/ && docker build -t host-monitor-agent .`, or push it to a private/public registry and `docker pull`.
+> The `host-monitor-agent` image must be built on the monitored host first: `cd agent-go/ && docker build -t host-monitor-agent .`, or push it to a private/public registry and `docker pull`.
 
 **Option B — Go binary (minimal, no Docker)**
 
@@ -364,9 +355,9 @@ DISK_PATH=/ \
 ./diting-agent-go
 ```
 
-- The Go binary reads `/proc` directly and is **identical in data format and security model** to the Python agent (outbound HTTPS only, zero inbound, no command channel). It defaults to `ADAPTIVE=on`, switching between `FAST_INTERVAL` (10s, on significant change) and `SLOW_INTERVAL` (60s, when steady) locally — it never parses any server response.
+- The binary reads `/proc` directly (native APIs on Windows) and is **outbound HTTPS only, zero inbound, no command channel**. It defaults to `ADAPTIVE=on`, switching between `FAST_INTERVAL` (10s, on significant change) and `SLOW_INTERVAL` (60s, when steady) locally — it never parses any server response.
 - **Server requirement**: with adaptive mode on, set `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) on the server, or steady-state reports will be flagged offline.
-- Do **not** reuse the same `AGENT_ID` across the Python and Go agents (their `last_seen`/metrics would overwrite each other); register a separate client.
+- Do **not** reuse the same `AGENT_ID` for two different machines (their `last_seen`/metrics would overwrite each other); register a separate client.
 - The official Docker image and one-click script for the Go agent are pending; for now it is distributed as source / binary.
 
 3. The client card appears on the dashboard, live-refreshing CPU/memory/disk/traffic/load, and you can edit **merchant, note, expiry date, monthly traffic quota**.
@@ -442,7 +433,7 @@ admin UI under Settings -> Database Backup, without rebuilding the cron entries.
 
 **Public data boundary (`public_show_business`)**: `/api/public/agents` and `/api/v1/nodes` expose business fields (provider, expiry, note, monthly quota, plan) by default, because the public home page ("providers / expiring soon") and the node detail page ("note / plan") render them. Turn the switch off in Dashboard → Settings → "Expose business fields on public API" when your public page faces outside visitors; the fields then disappear from the response entirely. This is independent of "Enable public page" (`public_enabled`): when the public page is disabled, both API families return 403.
 
-**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds; native systemd installs default 20 for both the Python and Go agents, while Docker images and Windows default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `MONTH_ROTATE` (traffic reset day; `0`=cumulative, `1–31`=monthly reset day; alias `AGENT_MONTH_ROTATE`; monthly totals are accumulated server-side from the `net_rx`/`net_tx` absolute counters, the agent keeps no local state), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
+**Monitored side**: `SERVER_URL`, `AGENT_ID`, `AGENT_TOKEN`, `INTERVAL` (seconds; native systemd installs default 20, while Docker images and Windows default 15), `DISK_PATH` (default `/`), `PROBE_TARGETS` (network-quality self-test targets; default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS servers reject TCP outright, so `CM` probes the China Mobile web portal; empty to disable; format `label:host[:port]`, comma-separated). The Go binary adds: `MONTH_ROTATE` (traffic reset day; `0`=cumulative, `1–31`=monthly reset day; alias `AGENT_MONTH_ROTATE`; monthly totals are accumulated server-side from the `net_rx`/`net_tx` absolute counters, the agent keeps no local state), `ADAPTIVE` (default on; auto switches `FAST_INTERVAL`=10s ↔ `SLOW_INTERVAL`=60s by local change-rate), `DEBUG` (verbose logs, never prints the token). With `ADAPTIVE` on, set the server `OFFLINE_THRESHOLD_SEC=120` (or above the slow interval) so steady-state agents are not flagged offline.
 
 ## Dashboard features
 
@@ -517,12 +508,12 @@ curl -H 'Authorization: Bearer <your ADMIN_TOKEN>' https://your-server/metrics
 
 ## Windows monitored side
 
-Besides the Linux Docker agent, this project ships a **native Windows agent** (see the `agent/windows/` directory) for monitoring Windows servers:
+The same Go codebase also builds a **native Windows agent** (`agent-go/install-go.ps1`):
 
-- Built on `psutil`, it collects CPU / memory / disk / network rate & monthly totals / uptime, and reports **exactly the same fields as the Linux agent**, so the server receives it with zero changes.
+- Collects CPU / memory / disk / network rate / uptime through native Win32 APIs and PDH performance counters (no third-party dependency), and reports **exactly the same fields as the Linux agent**, so the server receives it with zero changes.
 - Windows has no load average, so `load1/load5/load15` are fixed placeholders `0.0` (the dashboard shows 0, as expected).
-- Install: run `agent/windows/install.ps1` to auto `pip install psutil` and register a "start on logon, restart on crash" scheduled task (auto-start); `run.bat` offers a convenient temporary launcher. See `agent/windows/README.md` for details.
-- Security follows the main project: the agent is outbound-only with no remote-execution interface, using `HTTPS + Token` end to end; monthly traffic totals persist to `state.json` and survive restarts.
+- Install: run `agent-go/install-go.ps1` to register a "start on logon, restart on crash" scheduled task.
+- Security follows the main project: outbound-only with no remote-execution interface, `HTTPS + Token` end to end; monthly traffic totals are computed server-side, the agent keeps no local state.
 
 ## Security review checklist
 
@@ -535,7 +526,7 @@ A security review was performed; all high/medium items are addressed. Summary (�
 | P2 | Hardening (④⑤⑥⑦) | ✅ | Fixed in earlier session |
 | P3 ⑩ | Prometheus `/metrics` | ✅ | `GET /metrics` with Bearer / read-only token auth |
 | P3 ⑪ | Read-only account (RBAC basis) | ✅ | `READONLY_TOKEN`: read-only GET, no writes |
-| P3 ⑨ | Windows agent | ✅ | `agent/windows/` on psutil, protocol-compatible with Linux, zero server changes |
+| P3 ⑨ | Windows agent | ✅ | Go build for Windows (`agent-go/`), protocol-compatible with Linux, zero server changes |
 | P3 ⑧ | Admin TOTP 2FA | ✅ | Signed session-cookie login (no plaintext token on front end) + TOTP on writes |
 | P3 ⑧ | WebAuthn / hardware key | ⬜ | Optional left: TOTP already removes the plaintext-token exposure; WebAuthn adds limited value and needs browser + third-party lib verification |
 

@@ -161,10 +161,11 @@ router.post('/setup/generate', setupRateLimit, requireProto, (req, res) => {
 });
 
 // ---- 一键安装命令生成（Nezha 风格：服务端把地址 + 每客户端令牌预填进命令）----
-// 三条接入路径：① 原生版（Linux systemd + Python，diting.sh 自举下载配套文件）；
+// 三条接入路径（2026-10 起全部为 Go 受控端，Python 版 agent/ 已下线）：
+// ① 原生版（Linux systemd，diting.sh 自举下载 agent-go 载荷）；
 // ② Docker 版（现场从源码 git 构建镜像并运行，无需任何仓库账号）；
-// ③ Windows 版（PowerShell 一键：下载 install.ps1 → 自举拉取 agent 载荷 → 注册计划任务）。
-// 仓库 raw 基址（diting.sh 位于根，agent 载荷位于 <base>/agent/）；可用 AGENT_RAW_REPO 覆盖。
+// ③ Windows 版（PowerShell 一键：下载 install.ps1 → 自举拉取 agent-go 载荷 → 注册计划任务）。
+// 仓库 raw 基址（diting.sh 位于根，受控端载荷位于 <base>/agent-go/）；可用 AGENT_RAW_REPO 覆盖。
 const REPO_BASE = (process.env.AGENT_RAW_REPO || 'https://raw.githubusercontent.com/fengzone85/diting/master').replace(/\/+$/, '');
 const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent-go';
 const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 20);
@@ -242,16 +243,16 @@ Environment="PROBE_TARGETS=${pt}"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart diting-agent`;
-  // 无 PROBE_TARGETS 行时插入到「启动行（python/exe）之前」——旧实现 Add-Content
-  // 追到文件末尾（启动行之后），该 set 永远不会生效。Go/Python 安装器都保证该行
-  // 存在，此处仅作存量/手改 bat 的兜底。
+  // 无 PROBE_TARGETS 行时插入到「启动行（exe）之前」——旧实现 Add-Content
+  // 追到文件末尾（启动行之后），该 set 永远不会生效。Go 安装器保证该行存在，
+  // 此处仅作存量/手改 bat 的兜底。
   const win = `$id=${psQuote(agentId)}; $pt=${psQuote(pt)}
 $bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"
 $lines=@(Get-Content $bat)
 if ($lines -match '^set PROBE_TARGETS=') {
   ($lines -replace '^set PROBE_TARGETS=.*', "set PROBE_TARGETS=$pt") | Set-Content $bat
 } else {
-  $idx=[array]::FindIndex($lines, [Predicate[string]]{param($l) $l -match 'windows_agent\\.py|diting-agent(-windows-amd64)?\\.exe'})
+  $idx=[array]::FindIndex($lines, [Predicate[string]]{param($l) $l -match 'diting-agent(-windows-amd64)?\\.exe'})
   if ($idx -gt 0) { $out=@($lines[0..($idx-1)]) + @("set PROBE_TARGETS=$pt") + @($lines[$idx..($lines.Count-1)]) }
   elseif ($idx -eq 0) { $out=@("set PROBE_TARGETS=$pt") + @($lines) }
   else { $out=@($lines) + @("set PROBE_TARGETS=$pt") }
@@ -287,7 +288,7 @@ router.post('/report', agentAuth, (req, res) => {
   // P1：先用服务端累加器按 month_rotate 口径覆盖 m.net_*_month，再落 metrics。
   db.accumulateTraffic(req.agent.id, m, ts);
   db.insertMetric(req.agent.id, Object.assign({ ts }, m));
-  // 受控端版本从 User-Agent 解析（Go: diting-agent-go/1.0.9，Python: diting-agent/1.0）；
+  // 受控端版本从 User-Agent 解析（diting-agent-go/1.0.9）；
   // 解析不到就传空，db 层用 COALESCE(NULLIF()) 保留库中已有值。
   const uaVer = (() => {
     const ua = String(req.header('User-Agent') || '');

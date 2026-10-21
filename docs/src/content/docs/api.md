@@ -63,7 +63,7 @@ Content-Type: application/json
 }
 ```
 
-> 字段以 `agent/collector.py` / `agent-go/collector/` 实际输出为准；响应体仅用于错误日志，Agent **从不解析、从不执行**。
+> 字段以 `agent-go/collector/` 实际输出为准；响应体仅用于错误日志，Agent **从不解析、从不执行**。
 
 ## 管理接口
 

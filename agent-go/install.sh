@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Diting Agent (Go) - systemd installation script.
-# Compatible with agent/install.sh parameters; downloads a single binary
+# Compatible with the legacy (removed) Python installer's parameters; downloads a single binary
 # from GitHub Release (with .sha256 verification). --setup-token response
 # parsing needs python3 (only that flag; plain --id/--token has zero deps).
 set -euo pipefail

@@ -4,7 +4,7 @@
 // 1. PROMPT_VERSION 与每条 ai_reports 记录一同落库，保证历史报告【可复现】——
 //    即便后续改了 prompt，旧报告仍能溯源到当时的版本。
 // 2. prompt 明确约束 AI 的边界：只解释、不决策、不输出任何「执行命令」类建议，
-//    配合系统层「无指令通道」的安全底线（见 agent/collector.py:265-299 的设计）。
+//    配合系统层「无指令通道」的安全底线（见 agent-go/collector 的采集设计）。
 // 3. 强制 JSON 输出，便于 report.js 结构化渲染，避免自由文本难以解析。
 
 const PROMPT_VERSION = '1.4';

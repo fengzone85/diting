@@ -35,8 +35,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "`$p=Join-Path `$env:TEMP
 - `-ProbeTargets`：可选，网络质量自测目标（`label:host[:port]` 逗号分隔）
 - `-MonthRotate`：可选，流量重置日（`0`=累计口径，`1–31`；默认 0，越界回落 0）
 
-> 旧版 Python 受控端（`agent/windows/`）已冻结，新装一律走上述 Go 版；
-> 存量 Python 节点的卸载见文末「旧版（Python）受控端卸载」。
+> 旧版 Python 受控端（原 `agent/windows/`）已于 2026-10 下线并从仓库移除；
+> 存量机器请按上文重新安装 Go 版，随后用 `uninstall.ps1` 或「删除计划任务 + 安装目录」清理旧实例。
 
 ## 采集支持
 
@@ -109,55 +109,3 @@ Test-Path "$env:ProgramData\diting-agent"                                       
 
 服务端不会因卸载自动删除节点记录，卡片会在超过上报阈值后转为离线；
 如需彻底移除，请在后台删除该 Agent。
-
-### 旧版（Python）受控端卸载
-
-「旧版」指 `agent/windows/` 的 Python 受控端（已冻结）。它的安装痕迹共三处：
-计划任务、安装目录、全局 `psutil` 依赖。以**管理员**身份运行 PowerShell：
-
-```powershell
-# 1) 停掉正在运行的 Python 实例（进程占用会导致目录删除失败）
-Get-ScheduledTask -TaskName "HostMonitorAgent-*" | Stop-ScheduledTask
-Get-CimInstance Win32_Process -Filter "Name like 'python%'" |
-  Where-Object { $_.CommandLine -like '*windows_agent.py*' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-
-# 2) 删除计划任务（任务名含 AgentId，用通配符可一次清理）
-Get-ScheduledTask -TaskName "HostMonitorAgent-*" | Unregister-ScheduledTask -Confirm:$false
-
-# 3) 删除安装目录
-Remove-Item -Recurse -Force "$env:ProgramData\diting-agent"
-
-# 4) 可选：卸载全局依赖（机器上没有其他 Python 程序使用 psutil 时）
-python -m pip uninstall -y psutil
-```
-
-安装目录有两种可能：经一键命令（自举下载）安装时为 `%ProgramData%\diting-agent`；
-若在仓库克隆目录内直接执行 `install.ps1`，则为该克隆目录（如 `C:\diting\agent\windows`，
-脚本以自身所在目录作为安装目录）。
-
-> **注意**：Go 版安装器刻意复用同一安装目录与任务名 `HostMonitorAgent-<AgentId>`
-> （以便服务端「修改探测目标」命令在 Python → Go 升级后继续生效）。若该机已升级到
-> Go 版，上述第 2 步的删任务会**一并删除 Go 版受控端**；只想清理 Python 残留文件时，
-> 只删除 `windows_agent.py` / `win_collector.py` / `requirements.txt` / `__pycache__`。
-
-### 旧版已知问题（仅历史记录，Python 端已冻结）
-
-**症状**：重启后月流量从 0 重新累计，日志里没有任何线索。
-
-**原因**：旧 Python 端的 `_load_state()` 把「文件读不出来」与「首次运行」都当成空状态，
-随后按「新月」写盘，把原月累计覆盖掉；`_save_state()` 又是直接覆写（非原子），
-失败只打 `debug` 日志（默认级别 WARNING，等于不可见）。真机复盘出现过连续 28 天
-写入失败、每次重启静默归零的情况。
-
-**排查**：查看 `%ProgramData%\diting-agent\state.json` 是否存在、是否为合法 JSON、
-当前运行账户（计划任务默认 `LocalService`）是否有该目录的写权限：
-
-```powershell
-$f = "$env:ProgramData\diting-agent\state.json"
-Test-Path $f; Get-Content $f -Raw | ConvertFrom-Json
-icacls "$env:ProgramData\diting-agent"
-```
-
-> Go 版不受此问题影响：月累计由**服务端** `traffic_state` 计算，受控端不再持久化本地状态；
-> 该修复分支（`fix/win-agent-state-persistence`）验证有效但因目标模块冻结未并入主分支。
