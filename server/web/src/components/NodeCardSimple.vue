@@ -433,7 +433,7 @@ const tags = computed(() => {
 <style scoped>
 .node-card-simple {
   width: 100%;
-  max-width: 330px;
+  max-width: var(--card-max, 330px);   /* 由 HomeView 按 card_size 档位下发 */
   border-radius: 12px;
   position: relative;
   overflow: hidden;

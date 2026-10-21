@@ -41,6 +41,42 @@
   --glass-border: #ffffff2e;
   --glass-shadow: 0 8px 30px #0000007a;
 }
+/* 柔和：更低的卡片不透明度 + 更弱饱和 + 更大模糊，整体雾化、阴影更轻 */
+[data-glass="soft"] {
+  --glass-tint: #0d1421a6;                            /* 65% 不透明，背景透出更多 */
+  --glass-tint-hover: #0d1421bf;                      /* 75% */
+  --glass-saturate: 110%;
+  --glass-blur: 20px;
+  --glass-border: #ffffff1f;
+  --glass-shadow: 0 6px 20px #00000059;
+  --glass-inner-tint: rgb(255 255 255 / 0.04);
+  --glass-inner-border: rgb(255 255 255 / 0.09);
+}
+
+/* 高对比：接近实心的深底 + 明显描边 + 无模糊 + 紧致阴影，优先可读性 */
+[data-glass="high-contrast"] {
+  --glass-tint: #05070bf2;                            /* 95% 不透明 */
+  --glass-tint-hover: #05070bf7;
+  --glass-saturate: 100%;
+  --glass-blur: 0px;
+  --glass-border: #ffffff66;
+  --glass-shadow: 0 4px 12px #000000cc;
+  --glass-inner-tint: rgb(255 255 255 / 0.10);
+  --glass-inner-border: rgb(255 255 255 / 0.28);
+}
+
+/* 午夜：偏深蓝底色 + 蓝调描边与光晕 */
+[data-glass="midnight"] {
+  --glass-tint: #060b1ad9;                            /* 85% 不透明 */
+  --glass-tint-hover: #060b1aeb;
+  --glass-saturate: 130%;
+  --glass-blur: 18px;
+  --glass-border: #4c6fff40;
+  --glass-shadow: 0 12px 40px #00031aa6;
+  --glass-inner-tint: rgb(76 111 255 / 0.08);
+  --glass-inner-border: rgb(76 111 255 / 0.22);
+}
+
 [data-glass="custom"] {
   /* --glass-tint 等由 useTheme 内联覆盖 */
 }
@@ -67,6 +103,35 @@
   /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透，对齐 komari --card 68%） */
   --glass-inner-tint: rgb(255 255 255 / 0.55);
   --glass-inner-border: rgb(100 116 139 / 0.30);
+}
+
+/* 毛玻璃预设在亮色主题下的覆盖：亮色块定义于预设之后且特异性相同，
+   必须用双属性选择器才能让 soft / high-contrast / midnight 在亮色下同样生效 */
+[data-theme="light"][data-glass="soft"] {
+  --glass-tint: #ffffff94;                            /* 58% 不透明，比默认更透 */
+  --glass-tint-hover: #ffffffbf;
+  --glass-border: #e2e8f080;
+  --glass-shadow: 0 4px 16px #0f172a1f;
+  --glass-inner-tint: rgb(255 255 255 / 0.45);
+  --glass-inner-border: rgb(100 116 139 / 0.22);
+}
+
+[data-theme="light"][data-glass="high-contrast"] {
+  --glass-tint: #ffffffff;                            /* 实白底，彻底消除背景干扰 */
+  --glass-tint-hover: #ffffffff;
+  --glass-border: #94a3b880;
+  --glass-shadow: 0 2px 8px #0f172a33;
+  --glass-inner-tint: rgb(241 245 249 / 0.85);
+  --glass-inner-border: rgb(71 85 105 / 0.45);
+}
+
+[data-theme="light"][data-glass="midnight"] {
+  --glass-tint: #e8edf7e6;                            /* 亮色下的冷灰蓝（午夜色的亮色对应） */
+  --glass-tint-hover: #eef2f9f2;
+  --glass-border: #4c6fff3d;
+  --glass-shadow: 0 10px 32px #1e293b38;
+  --glass-inner-tint: rgb(76 111 255 / 0.06);
+  --glass-inner-border: rgb(76 111 255 / 0.18);
 }
 
 [data-theme="light"] body {
@@ -329,7 +394,7 @@ body {
 }
 
 /* ====== 旧版卡片内部组件（对齐 admin.js cardHtml） ====== */
-.node-card { width: 100%; max-width: 360px; }
+.node-card { width: 100%; max-width: var(--card-max, 360px); }
 .card-top { display: flex; align-items: center; gap: 6px; padding: 13px 15px 9px; border-bottom: 1px solid var(--border-divider); }
 .card-top h3 { font-size: 14px; }
 .flag-icon { width: 22px; height: 15px; border-radius: 2px; flex-shrink: 0; }

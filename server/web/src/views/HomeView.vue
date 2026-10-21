@@ -71,15 +71,23 @@ function groupOrder(groups: Record<string, Agent[]>) {
   return Object.keys(groups).sort((a, b) => a.localeCompare(b));
 }
 
-// 卡片尺寸 → 网格列数
+// 卡片尺寸 → 网格列数（2026-10-21：档位此前在 ≥1280px 下 3/4 名同列数，现改为 3/4/5/6 递进）
 const cardSizeClass = computed(() => {
   const size = (state.meta?.card_size as string) || 'comfortable';
   return {
-    'grid-cols-1 md:grid-cols-3 lg:grid-cols-4': size === 'large',
-    'grid-cols-1 md:grid-cols-2 xl:grid-cols-4': size === 'comfortable',
-    'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4': size === 'compact',
+    'grid-cols-1 md:grid-cols-2 lg:grid-cols-3': size === 'large',
+    'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4': size === 'comfortable',
+    'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5': size === 'compact',
     'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6': size === 'mini',
   };
+});
+
+// 卡片单卡最大宽度也随档位变化：卡片组件里写死的 max-width:330/360px 会让
+// large 档在 ≥1280px 下只比 comfortable 宽一点点，并在单元格右侧留白。
+const cardMaxWidth = computed(() => {
+  const size = (state.meta?.card_size as string) || 'comfortable';
+  const map: Record<string, string> = { mini: '340px', compact: '380px', comfortable: '420px', large: '520px' };
+  return map[size] || map.comfortable;
 });
 
 // 总览卡片方案（对齐 komari 首页总览卡片方案）
@@ -316,7 +324,7 @@ const filteredAgents = computed(() => {
           <div v-for="group in groupOrder(groupedAgents)" :key="group" class="mb-6">
             <h3 class="mb-3 text-sm font-semibold text-slate-400">{{ group }}</h3>
             <!-- 简约卡片（默认） -->
-            <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass">
+            <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
               <NodeCardSimple
                 v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
                 :key="agent.id"
@@ -331,7 +339,7 @@ const filteredAgents = computed(() => {
               />
             </div>
             <!-- 完整卡片 -->
-            <div v-else class="grid gap-3" :class="cardSizeClass">
+            <div v-else class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
               <NodeCard
                 v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
                 :key="agent.id"
