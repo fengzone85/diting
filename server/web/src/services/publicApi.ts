@@ -29,11 +29,12 @@ export const publicApi = {
   probes: (id: string, range?: string, maxPoints?: number) =>
     api.get<Probes>(`/api/public/agents/${encodeURIComponent(id)}/probes${range ? `?range=${encodeURIComponent(range)}` : ''}${maxPoints ? `&max_points=${maxPoints}` : ''}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
-  // 版本/构建时间：匿名只回主版本号 + 构建时间，登录后才带精确版本（服务端 G5 策略）
+  // 版本/构建时间/commit hash：页脚公开展示（2026-10-21 用户指定放开匿名完整版本）
   version: () => api.get<{
     version?: string;
     build_time?: string;
-    data?: { version?: string; build_time?: string };
+    hash?: string;
+    data?: { version?: string; build_time?: string; hash?: string };
   }>('/api/version'),
   visitor: () => api.get<{ ip: string; browser: string; ua: string }>('/api/public/visitor'),
   saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),

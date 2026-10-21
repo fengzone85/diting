@@ -37,6 +37,20 @@ const APP_BUILD_TIME = (() => {
   try { return fs.readFileSync(path.join(__dirname, 'build_time.txt'), 'utf-8').trim(); } catch (e) {}
   return 'unknown';
 })();
+// 构建 commit 短 hash：env GIT_HASH → package.json._git_hash → git_hash.txt（diting.sh 生成）
+// → 本机直接 git rev-parse（非 git 环境静默降级为 '-'）
+const APP_HASH = (() => {
+  if (process.env.GIT_HASH) return process.env.GIT_HASH;
+  try {
+    const pkg = require('./package.json');
+    if (pkg._git_hash) return pkg._git_hash;
+  } catch (e) {}
+  try { return fs.readFileSync(path.join(__dirname, 'git_hash.txt'), 'utf-8').trim(); } catch (e) {}
+  try {
+    return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname, encoding: 'utf8' }).trim();
+  } catch (e) {}
+  return '-';
+})();
 
 const app = express();
 // 信任前置反代（Nginx）的 X-Forwarded-*，使 req.ip 取到真实客户端 IP，
@@ -227,11 +241,9 @@ app.use('/api', (req, res, next) => {
 // 遮蔽成为死代码（那条只回静态占位符，从不泄露真实版本，但也从未生效）。
 app.get('/api/version', (req, res) => {
   const role = resolveRole(req);
-  // 匿名只给主版本号（G5：精确版本可被用于匹配 CVE）；构建时间属部署元信息，
-  // 匿名一并下发以支持页脚「Build Time」展示，不构成版本指纹。
-  const payload = role
-    ? { version: APP_VERSION, build_time: APP_BUILD_TIME }
-    : { version: String(APP_VERSION).split('.')[0], build_time: APP_BUILD_TIME };
+  // 2026-10-21 用户指定：页脚公开显示「版本 (commit)」与构建时间，
+  // 匿名也返回完整版本号/hash（原先仅主版本号的 G5 收敛被显式放开）。
+  const payload = { version: APP_VERSION, build_time: APP_BUILD_TIME, hash: APP_HASH };
   return res.json({
     status: 'success',
     message: '',
