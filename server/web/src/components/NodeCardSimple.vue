@@ -5,6 +5,7 @@ import type { Agent } from '../services/types';
 import { formatBytes, formatBitsPerSecond } from '../utils/format';
 import { providerAlias } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
+import NodeBilling from './NodeBilling.vue';
 import { ArrowUp, ArrowDown, Upload, Download } from '@icon-park/vue-next';
 
 const { t } = useI18n();
@@ -249,9 +250,8 @@ const tags = computed(() => {
       <span class="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
         {{ t('card.uptime') }} {{ uptimeDays }}d
       </span>
-      <span v-if="agent.price" class="min-w-0 truncate text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
-        {{ agent.currency || '¥' }}{{ agent.price }}/mo
-      </span>
+      <!-- 账单入口：价格胶囊（免费时显示「免费」），点击弹出账单卡片 -->
+      <NodeBilling :agent="agent" />
     </div>
 
     <!-- Metrics: 2-col grid - 对齐 Komari wt: gap-x-4 gap-y-2.5 -->

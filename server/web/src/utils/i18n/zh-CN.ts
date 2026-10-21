@@ -687,6 +687,7 @@ export const zhCN: Record<string, string> = {
 
   // 账单
   'billing.title': '账单概览',
+  'billing.perMonth': '/ 月',
   'billing.monthlyTotal': '本月总费用',
   'billing.perGroup': '分组费用',
   'billing.expiringSoon': '即将到期',
