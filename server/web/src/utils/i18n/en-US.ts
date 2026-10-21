@@ -91,7 +91,7 @@ export const enUS: Record<string, string> = {
   'agents.noMatch': 'No matching agents',
   'agents.empty': 'No agents yet',
   'agents.colName': 'Display name',
-  'agents.colFlag': 'Flag',
+  'agents.colLocation': 'Location',
   'agents.colVersion': 'Client version',
   'agents.colGroup': 'Group',
   'agents.colNote': 'Private note',

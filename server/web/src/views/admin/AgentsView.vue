@@ -12,11 +12,22 @@ import type { InstallCommands, Agent } from '../../services/types';
 
 const { state } = useAdmin();
 const router = useRouter();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // 列表行附加信息：分组（group/grp 两种字段名兼容）、agent 版本
 const agentGroup = (a: Agent) => a.group || a.grp || '';
 const agentVersion = (a: Agent) => (a.version ? `v${String(a.version).replace(/^v/i, '')}` : '');
+
+// 「位置」列：库里只存 ISO 3166-1 alpha-2 国家码，用 Intl.DisplayNames 反查当前语言下的地区名
+const regionName = (code?: string) => {
+  const cc = (code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  try {
+    return new Intl.DisplayNames([locale.value], { type: 'region' }).of(cc) || cc;
+  } catch {
+    return cc;
+  }
+};
 
 const newName = ref('');
 const error = ref('');
@@ -342,7 +353,7 @@ async function batchRenew() {
             <tr class="border-b border-slate-700 text-left text-xs text-slate-500">
               <th class="w-10 px-4 py-3"></th>
               <th class="px-3 py-3 font-medium">{{ t('agents.colName') }}</th>
-              <th class="w-20 px-3 py-3 font-medium">{{ t('agents.colFlag') }}</th>
+              <th class="w-32 px-3 py-3 font-medium">{{ t('agents.colLocation') }}</th>
               <th class="w-28 px-3 py-3 font-medium">{{ t('agents.colVersion') }}</th>
               <th class="w-28 px-3 py-3 font-medium">{{ t('agents.colGroup') }}</th>
               <th class="px-3 py-3 font-medium">{{ t('agents.colNote') }}</th>
@@ -369,14 +380,16 @@ async function batchRenew() {
                 <p class="truncate text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
               </td>
               <td class="px-3 py-3 align-middle">
-                <img
-                  v-if="agent.country"
-                  :src="`/flags/${agent.country.toLowerCase()}.svg`"
-                  :alt="agent.country"
-                  :title="agent.country"
-                  class="h-4 w-6 rounded-sm object-cover"
-                  @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')"
-                />
+                <div v-if="agent.country" class="flex items-center gap-2">
+                  <img
+                    :src="`/flags/${agent.country.toLowerCase()}.svg`"
+                    :alt="agent.country"
+                    :title="agent.country.toUpperCase()"
+                    class="h-4 w-6 flex-shrink-0 rounded-sm object-cover"
+                    @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')"
+                  />
+                  <span class="truncate text-xs text-slate-400">{{ regionName(agent.country) }}</span>
+                </div>
                 <span v-else class="text-slate-500">—</span>
               </td>
               <td class="px-3 py-3 align-middle">
