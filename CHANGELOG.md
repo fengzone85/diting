@@ -2,6 +2,20 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-21 模板设置页配色与文案修复
+
+- **内嵌区块配色与整体不一致**：暗色/亮色「背景」与「公告」三块原用 `bg-surface`
+  （`#3a3e44`，设计系统里是 hover/accent 深灰），放进暗色 glass 卡片后明显发亮、发灰。
+  新增 `.inner-panel`（`--glass-inner-tint` + `--glass-inner-border`，随暗/亮主题切换）并替换。
+- **5 个 i18n 键漏配导致页面直接显示原始 key**：模板设置页曾渲染出
+  `settings.glassPreset` / `settings.colorVision` / `settings.cardScheme` /
+  `settings.cardSize` / `settings.announcement`。改为复用已有的
+  `theme.glassPreset` / `theme.colorVisionMode` / `theme.cardScheme` /
+  `theme.cardSize` / `theme.announcement`。
+- **新增 i18n 覆盖守卫**：`src/utils/i18n/coverage.test.ts` 扫描源码中所有静态
+  `t('key')`，断言键在中英词典均存在、且两侧键集合一致；动态拼接键（`t('x.' + y)`）自动跳过。
+  前端单测 56 → 60 项。
+
 ## 2026-10-21 后台侧栏与页面健壮性修复（代码审查）
 
 对上一版侧栏改动做逐页核验时发现并修复的 4 个缺陷：

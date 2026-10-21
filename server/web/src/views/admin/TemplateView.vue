@@ -298,7 +298,7 @@ async function save() {
       </div>
 
       <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('template.background') }}</h3>
-      <div class="rounded-lg bg-surface p-4">
+      <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" v-model="form.background_dark!.enabled" class="rounded" />
           {{ t('settings.backgroundEnabled') }}
@@ -352,7 +352,7 @@ async function save() {
       </div>
 
       <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('template.background') }}</h3>
-      <div class="rounded-lg bg-surface p-4">
+      <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" v-model="form.background_light!.enabled" class="rounded" />
           {{ t('settings.backgroundEnabled') }}
@@ -388,25 +388,25 @@ async function save() {
       <h2 class="mb-4 text-lg font-semibold text-slate-100">{{ t('template.appearance') }}</h2>
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('settings.glassPreset') }}</label>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.glassPreset') }}</label>
           <select v-model="form.glass_preset" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in presetOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('settings.colorVision') }}</label>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.colorVisionMode') }}</label>
           <select v-model="form.color_vision" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in cvOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('settings.cardScheme') }}</label>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardScheme') }}</label>
           <select v-model="form.card_scheme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in schemeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('settings.cardSize') }}</label>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardSize') }}</label>
           <select v-model="form.card_size" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in sizeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
@@ -419,8 +419,8 @@ async function save() {
       </label>
 
       <!-- 公告 -->
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('settings.announcement') }}</h3>
-      <div class="rounded-lg bg-surface p-4">
+      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('theme.announcement') }}</h3>
+      <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" v-model="form.announcement!.enabled" class="rounded" />
           {{ t('settings.announcementEnabled') }}
