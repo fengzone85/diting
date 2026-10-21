@@ -104,11 +104,11 @@ const overviewCards = computed(() => {
   const totalTxRate = sum((a) => a.net_tx_rate || 0);
   // 紧凑速率文案（无空格、单位缩写）：如 "1.2M/s"、"340K/s"、"0B/s"
   const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
-  // 实时速率卡（2026-10-21 用户指定）：下行主行 + 上行副行，双排展示。
+  // 实时速率卡（2026-10-21 用户指定）：上行主行 + 下行副行，与「流量概览」的上下顺序一致。
   // official 方案的「实时速率」与 traffic 方案的「实时速率」共用同一份数据。
   const liveTraffic = {
-    value: `↓${rateText(totalRxRate)}`,
-    sub: `↑${rateText(totalTxRate)}`,
+    value: `↑${rateText(totalTxRate)}`,
+    sub: `↓${rateText(totalRxRate)}`,
     compact: true,
     spread: true,
     variant: 'default' as const,
