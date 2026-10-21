@@ -47,11 +47,38 @@ const SESSION_REVOKED_BEFORE = 'session_revoked_before';
 // 避免单机 SQLite 损坏把管理员永久锁死；STRICT_SESSION_DB=1 切换 fail-close。
 const STRICT_SESSION_DB = process.env.STRICT_SESSION_DB === '1';
 
+// 会话校验缓存（5s）：sessions 表虽小，但每个管理请求都要查一次；缓存把重复查询压到
+// 每 sid 每 5 秒一次。吊销时必须调用 clearSessionCache 立即失效，否则被踢出的会话
+// 最多还能用 5 秒。缓存条目数有上限（单管理员场景个位数，超限整表清）。
+const SESSION_CACHE_TTL_MS = 5000;
+const SESSION_CACHE_MAX = 1000;
+const _sessionCache = new Map(); // sid → { valid: boolean, at: number }
+
+function sessionCacheGet(sid) {
+  const rec = _sessionCache.get(sid);
+  if (!rec) return null;
+  if (Date.now() - rec.at > SESSION_CACHE_TTL_MS) { _sessionCache.delete(sid); return null; }
+  return rec;
+}
+function sessionCacheSet(sid, valid) {
+  if (_sessionCache.size >= SESSION_CACHE_MAX) _sessionCache.clear();
+  _sessionCache.set(sid, { valid: !!valid, at: Date.now() });
+}
+// 吊销后立即失效缓存（sid 省略 = 清空全部）。
+function clearSessionCache(sid) {
+  if (sid) _sessionCache.delete(sid);
+  else _sessionCache.clear();
+}
+
 // 使本时刻之前签发的所有会话失效。安全状态变更（2FA 开关）与「退出所有设备」时调用。
 function revokeAllSessions() {
   db.setConfig(SESSION_REVOKED_BEFORE, String(Date.now()));
   // S2/F6：同时吊销会话表记录（水位线是兜底，表状态是权威）。
-  try { db.revokeAllSessionRows(); } catch (e) { /* 表不存在/DB 异常时由水位线兜底 */ }
+  let n = 0;
+  try { n = db.revokeAllSessionRows(); } catch (e) { /* 表不存在/DB 异常时由水位线兜底 */ }
+  // 缓存必须同步失效，否则被全局吊销的会话最多还能用 5 秒。
+  clearSessionCache();
+  return n;
 }
 
 function isRevoked(p) {
@@ -81,13 +108,20 @@ function verifySession(cookieVal) {
     if (isRevoked(p)) return null;
     // S2/F6：会话表校验（单会话踢出）。旧 Cookie 无 sid → 放行至自然过期（兼容）。
     if (p.sid) {
-      try {
-        const row = db.getSessionRow(p.sid);
-        if (!row || row.revoked) return null;
-        db.touchSession(p.sid);
-      } catch (e) {
-        if (STRICT_SESSION_DB) return null;
-        console.error('[auth] session lookup failed (fail-open):', e.message);
+      const cached = sessionCacheGet(p.sid);
+      if (cached) {
+        // 缓存命中：valid=false 表示该会话已被踢出，直接拒绝
+        if (!cached.valid) return null;
+      } else {
+        try {
+          const row = db.getSessionRow(p.sid);
+          if (!row || row.revoked) { sessionCacheSet(p.sid, false); return null; }
+          db.touchSession(p.sid);
+          sessionCacheSet(p.sid, true);
+        } catch (e) {
+          if (STRICT_SESSION_DB) return null;
+          console.error('[auth] session lookup failed (fail-open):', e.message);
+        }
       }
     }
     return p;
@@ -427,6 +461,6 @@ module.exports = {
   resolveRole, agentScope, inAgentScope,
   safeEqual, signSession, verifySession, getSession, getAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
-  revokeAllSessions, verifyTotpHeader, auditLog,
+  revokeAllSessions, verifyTotpHeader, auditLog, clearSessionCache,
   verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
 };

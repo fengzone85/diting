@@ -34,6 +34,23 @@ interface GroupEditor {
 const channelEditor = ref<ChannelEditor | null>(null);
 const groupEditor = ref<GroupEditor | null>(null);
 
+// S2/F2：旧配置迁移横幅。检测到「旧 notify_config 凭据仍在 + default 组已接管」时提示一次；
+// 关闭后记在 localStorage，避免每次进设置页都弹（判定本身幂等，无一次性状态位）。
+const migration = ref<{ banner: boolean; groups_enabled: boolean } | null>(null);
+const BANNER_KEY = 'diting.notify.migrationBannerDismissed';
+const bannerDismissed = ref(localStorage.getItem(BANNER_KEY) === '1');
+
+async function loadMigration() {
+  try {
+    migration.value = await adminApi.notifyMigrationStatus();
+  } catch { /* 迁移状态拿不到不影响通知面板主流程 */ }
+}
+
+function dismissBanner() {
+  bannerDismissed.value = true;
+  localStorage.setItem(BANNER_KEY, '1');
+}
+
 async function load() {
   try {
     const [ch, gr, ev] = await Promise.all([
@@ -47,6 +64,7 @@ async function load() {
   } catch (e) {
     message.value = (e as Error).message || t('settings.saveFailed');
   }
+  loadMigration();
 }
 
 onMounted(load);
@@ -206,6 +224,24 @@ async function removeGroup(g: NotifyGroup) {
   <div>
     <h2 class="mb-1 mt-8 text-lg font-semibold">{{ t('settings.notifyChannels') }}</h2>
     <p class="mb-3 text-xs text-slate-500">{{ t('settings.notifyChannelsHint') }}</p>
+
+    <!-- S2/F2：旧配置迁移提示（关闭后不再出现） -->
+    <div
+      v-if="migration && migration.banner && !bannerDismissed"
+      class="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <p class="leading-relaxed">{{ t('settings.notifyMigrationBanner') }}</p>
+        <button
+          type="button"
+          class="shrink-0 text-amber-300/80 hover:underline"
+          @click="dismissBanner"
+        >{{ t('settings.notifyMigrationDismiss') }}</button>
+      </div>
+      <p v-if="migration && !migration.groups_enabled" class="mt-2 leading-relaxed text-amber-300/90">
+        {{ t('settings.notifyGroupsDisabledHint') }}
+      </p>
+    </div>
 
     <div class="mb-3 flex flex-wrap items-center gap-2">
       <button

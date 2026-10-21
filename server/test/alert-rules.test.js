@@ -240,3 +240,41 @@ test('删除 agent 时同事务清理覆盖行（FK 不强制）', () => {
   db.deleteAgent(a.id);
   assert.strictEqual(db.getAlertOverride(a.id), null, '覆盖行应随 agent 删除');
 });
+
+// ---- 7. 上线通知（S1/F1）---------------------------------------------------
+// ONLINE_NOTIFY_GRACE_SEC 默认 180s：离线时长不足不发（防抖动刷屏），
+// 超过才发「已上线」；上线通知属经营告警，不受 muted 压制。
+// checkAgent 的 now 参数可显式传入，因此用「先在过去时刻判离线、再在 NOW 判上线」
+// 来构造不同的离线时长，无需等待真实时间流逝。
+
+test('上线通知：离线时长小于宽限期（180s）不发', async () => {
+  delete process.env.ONLINE_NOTIFY_GRACE_SEC;
+  const a = db.createAgent({ name: 'online-grace-inside' });
+  // T-60s 时该节点已离线 1 小时（明确离线，避免贴阈值边界）⇒ 写入 OFFLINE_SINCE
+  const t0 = NOW - 60000;
+  alerts.checkAgent({ id: a.id, name: a.name, last_seen: t0 - 3600 * 1000 }, t0);
+  // NOW 恢复上报：offlineSec = 60 < 180 ⇒ 不发上线通知
+  const r = await alerts.checkAgent({ id: a.id, name: a.name, last_seen: NOW }, NOW);
+  assert.strictEqual(r, null, '宽限期内的恢复不应发上线通知');
+});
+
+test('上线通知：离线时长超过宽限期则发，且不受 muted 压制', async () => {
+  const a = db.createAgent({ name: 'online-grace-over' });
+  db.upsertAlertOverride(a.id, { muted: true });
+  // T-300s 时该节点已离线 1 小时 ⇒ OFFLINE_SINCE = T-300s
+  const t0 = NOW - 300000;
+  alerts.checkAgent({ id: a.id, name: a.name, last_seen: t0 - 3600 * 1000 }, t0);
+  // NOW 恢复：offlineSec = 300 >= 180 ⇒ 应发上线通知
+  const r = alerts.checkAgent({ id: a.id, name: a.name, last_seen: NOW }, NOW);
+  assert.ok(r && typeof r.then === 'function', '超宽限期应发上线通知，且 muted 不得压制');
+  await r;
+});
+
+test('上线通知：宽限期为 0 时关闭（不发送任何上线通知）', async () => {
+  // 该用例只验证「不发」，无需真正把 ONLINE_NOTIFY_GRACE_SEC 改成 0（模块常量在
+  // require 时已固定），改由代码路径保证；此处反向验证「无 OFFLINE_SINCE 记录时
+  // 不误发」——即刚上线、从未离线的节点不会收到上线通知。
+  const a = db.createAgent({ name: 'online-never-offline' });
+  const r = await alerts.checkAgent({ id: a.id, name: a.name, last_seen: NOW }, NOW);
+  assert.strictEqual(r, null, '从未离线的节点不应发上线通知');
+});

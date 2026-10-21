@@ -4,9 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const router = express.Router();
 const db = require('./db');
-const { rateLimitTouch } = require('./ratelimit');
+const { rateLimitTouch, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
 const { heavyQuery } = require('./heavy-db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
@@ -86,6 +86,21 @@ const loginRateLimit = (req, res, next) => {
     return res.status(429).json({ error: 'too many login attempts, retry in 60s' });
   }
   next();
+};
+
+// ---- 登录暴力防护（F9）----
+// 失败计数 + 指数封禁（count^4），详见 src/ratelimit.js 的 loginGuard。
+// 维度说明：diting 登录是「Admin Token + TOTP」，不存在 username 概念，故以 IP 为主体；
+// 将来若引入账号体系，把 key 改成 ip|username 即可，主逻辑不变。
+// 已知取舍（见 CHANGELOG 与 docs/security.md）：管理员自己输错 3 次也会被封 81 秒，
+// 需等 Retry-After 或重启服务（内存态）解除。
+const loginGuardKey = (req) => String(req.ip || req.socket?.remoteAddress || 'unknown');
+// 审计只记 key 哈希，不落明文 IP（IP 属可关联信息，不进审计明文）。
+const loginGuardKeyHash = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+// 统一记录封禁并写审计（action=login_banned，detail 含 key 哈希与 Retry-After）。
+const noteLoginBanned = (req, gkey, g) => {
+  if (!g.banned) return;
+  auditLog(req, 'login_banned', `key=${loginGuardKeyHash(gkey)} retry_after=${g.retryAfterSec}`);
 };
 
 // ---- helpers ----
@@ -1545,6 +1560,22 @@ router.get('/admin/notify/events', adminOrReadonly, (req, res) => {
   res.json({ events: NOTIFY_EVENTS });
 });
 
+// S2/F2：通知配置迁移状态。用于后台横幅提示「旧的 notify_config 凭据已由默认通知组接管」。
+// 判定是幂等的（不依赖一次性状态位）：旧凭据仍在 notify_config 中，且 default 组已存在
+// ⇒ 迁移已生效。groups_enabled=false 表示运维用 NOTIFY_GROUPS=0 回退到了旧直发路径。
+router.get('/admin/notify/migration-status', adminOrReadonly, (req, res) => {
+  const cfg = db.getNotifyConfig();
+  const groups = db.listNotifyGroups();
+  const hasLegacy = !!(cfg.smtp_user || cfg.telegram_bot_token || cfg.telegram_chat_id);
+  const defaultGroup = groups.find((g) => g.name === 'default');
+  res.json({
+    legacy_config_present: hasLegacy,
+    default_group_present: !!defaultGroup,
+    banner: hasLegacy && !!defaultGroup,
+    groups_enabled: notify.groupsEnabled(),
+  });
+});
+
 router.get('/admin/notify/channels', adminOrReadonly, (req, res) => {
   res.json(db.listNotifyChannels());
 });
@@ -1826,8 +1857,16 @@ router.get('/ai/reports/:id', adminOrReadonly, agentScope, (req, res) => {
 // unhandledRejection，Node ≥15 默认直接杀进程。包裹后转为 next(err) 由错误中间件返回 500 JSON。
 router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
   if (!requireProto(req, res)) return; // F2：与管理端点一致，强制经 HTTPS 反代，杜绝明文 Token
+  // F9 暴力防护：先查封禁状态（封禁期内直接 429 + Retry-After，不再消耗固定窗口配额语义）。
+  const gkey = loginGuardKey(req);
+  const gstate = loginGuard(gkey);
+  if (!gstate.allowed) {
+    res.set('Retry-After', String(gstate.retryAfterSec));
+    return res.status(429).json({ error: 'login_blocked', retry_after: gstate.retryAfterSec });
+  }
   const { token, totp: code } = req.body || {};
   if (!token || !safeEqual(token, getAdminToken())) {
+    noteLoginBanned(req, gkey, loginGuardFail(gkey));
     return res.status(401).json({ error: 'invalid token' });
   }
   const need = db.is2FAEnabled();
@@ -1840,11 +1879,28 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
     // verifyTotpOnce：同一 6 位码只能成功一次（防重放，L-2）。
     if (!code || !secret || !verifyTotpOnce(secret, code)) {
       recordTotpFailure(req);
+      noteLoginBanned(req, gkey, loginGuardFail(gkey));
       return res.status(401).json({ error: 'invalid totp', need_totp: true });
     }
     clearTotpFailures(req);
   }
+  // 登录成功：清零该 IP 的失败计数与封禁（管理员自输错后不必再等封禁结束）。
+  loginGuardClear(gkey);
+  // S2/F6：写会话行并把 sid 放进 cookie payload（此后可按会话粒度踢出）。
+  // DB 异常时降级为「不带 sid 的旧格式 cookie」（verifySession 对无 sid 放行），
+  // 与会话表的 fail-open 取舍保持一致：不让 DB 故障把管理员挡在门外。
+  let sid = '';
+  try {
+    sid = db.createSessionRow({
+      admin: 'admin',
+      ip: req.ip || req.socket?.remoteAddress || '',
+      ua: req.header('user-agent') || '',
+    });
+  } catch (e) {
+    console.error('[login] session row creation failed (degraded):', e.message);
+  }
   const payload = { role: 'admin', totp: need, exp: Date.now() + SESSION_TTL };
+  if (sid) payload.sid = sid;
   setSessionCookie(res, payload);
   res.json({ ok: true, totp: need });
 }));
@@ -1858,6 +1914,56 @@ router.post('/logout', (req, res) => {
   clearSessionCookie(res);
   res.json({ ok: true, revoked: revokeAll });
   auditLog(req, 'logout', revokeAll ? 'all sessions' : '');
+});
+
+// ---- Admin: 登录会话管理（S2/F6）----
+// 会话列表含来源 IP 与 UA，属跨设备敏感信息：仅全局作用域管理员可读
+//（adminOnly + agentScope + agentGlobalOnly；节点白名单 Token 一律 403 forbidden_scope）。
+router.get('/admin/sessions', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const cur = getSession(req);
+  const curSid = cur && cur.sid ? cur.sid : '';
+  res.json({
+    list: db.listSessions().map((r) => ({
+      id: r.id,
+      admin: r.admin,
+      ip: r.ip,
+      ua: r.ua,
+      created_at: r.created_at,
+      last_seen: r.last_seen,
+      current: !!curSid && r.id === curSid,
+    })),
+  });
+});
+
+// 踢出单个会话（按 sid）。
+router.delete('/admin/sessions/:id', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const id = String(req.params.id || '');
+  // sid 为 24 位 hex（crypto.randomBytes(12)），白名单校验杜绝路径/注入类输入
+  if (!/^[0-9a-f]{24}$/.test(id)) return res.status(400).json({ error: 'invalid session id' });
+  if (!db.revokeSession(id)) return res.status(404).json({ error: 'session not found' });
+  // 缓存必须立即失效，否则被踢出的会话最多还能用 5 秒（缓存 TTL）
+  clearSessionCache(id);
+  auditLog(req, 'session_revoke', `id=${id}`);
+  res.json({ ok: true });
+});
+
+// 批量吊销。keep_current 默认 true：踢掉其它设备但保留当前会话（否则管理员会把自己
+// 也踢下线、操作中断）。keep_current=false → 等价全局吊销（含当前会话与全部历史会话，
+// 通过 session_revoked_before 水位线覆盖）。
+router.post('/admin/sessions/revoke-all', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const keepCurrent = (req.body || {}).keep_current !== false;
+  const cur = getSession(req);
+  const curSid = cur && cur.sid ? cur.sid : '';
+  if (keepCurrent && curSid) {
+    const n = db.revokeAllSessionRowsExcept(curSid);
+    clearSessionCache();
+    auditLog(req, 'session_revoke_all', `kept=${curSid} n=${n}`);
+    res.json({ ok: true, revoked: n, kept_current: true });
+  } else {
+    const n = revokeAllSessions();
+    auditLog(req, 'session_revoke_all', `n=${n} scope=all`);
+    res.json({ ok: true, revoked: n, kept_current: false });
+  }
 });
 
 // ---- Admin 2FA (TOTP) 管理 ----

@@ -20,6 +20,12 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   'totp required': 'errors.totpRequired',
   'too many requests': 'errors.tooManyRequests',
   'too many login attempts, retry in 60s': 'errors.loginRateLimited',
+  // S2/F9：登录失败次数过多触发指数封禁（服务端返回 login_blocked + retry_after 秒数）
+  login_blocked: 'errors.loginBlocked',
+  'too many totp failures': 'errors.totpFailures',
+  // S2/F6：会话管理端点的参数/状态错误码
+  'invalid session id': 'errors.invalidSessionId',
+  'session not found': 'errors.sessionNotFound',
   'invalid token': 'errors.invalidToken',
   'invalid totp': 'errors.invalidTotp',
   'agent not found': 'errors.agentNotFound',

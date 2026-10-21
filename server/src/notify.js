@@ -25,6 +25,11 @@ const ALLOW_PRIVATE = process.env.ALLOW_PRIVATE_WEBHOOK === '1';
 const CONCURRENCY = Math.max(1, Math.min(32, Number(process.env.NOTIFY_CONCURRENCY || 8)));
 const WEBHOOK_TIMEOUT_MS = 10000;
 
+// S2/F2 回退开关：NOTIFY_GROUPS=0 → 整体退回 F2 之前的「邮件 + Telegram 直发」路径
+// （忽略通知组与事件路由）。按方案 §8 的灰度要求保留一个版本用于紧急回退；
+// 默认 1 = 走通知组路由（种子化保证 default 组行为与升级前一致）。
+const NOTIFY_GROUPS_ENABLED = process.env.NOTIFY_GROUPS !== '0';
+
 // ---- IP 段判定（SSRF 防护）--------------------------------------------------
 function isBlockedIPv4(ip) {
   const p = ip.split('.').map(Number);
@@ -320,7 +325,35 @@ function buildVars(event, ctx) {
   };
 }
 
+// 旧路径（F2 之前的 sendAlert 行为）：按 notify_config 里的凭据直发邮件与 Telegram，
+// 完全不看通知组、渠道表与事件匹配。任一通道成功即返回 true（供调用方回滚 alert state）。
+// 仅在 NOTIFY_GROUPS=0 时启用，作为通知组路由的紧急回退。
+async function deliverLegacy(event, ctx) {
+  const vars = buildVars(event, ctx);
+  const text = { subject: ctx.subject || '', message: ctx.text || '', vars };
+  let ok = false;
+  if (mailTransport()) {
+    try {
+      await sendMail(text);
+      ok = true;
+    } catch (e) {
+      console.error('[notify] legacy mail error:', e.message);
+    }
+  }
+  const c = db.getNotifyConfig();
+  if (c.telegram_bot_token && c.telegram_chat_id) {
+    try {
+      await sendTelegram(text);
+      ok = true;
+    } catch (e) {
+      console.error('[notify] legacy telegram error:', e.message);
+    }
+  }
+  return ok;
+}
+
 async function deliverAll(event, ctx) {
+  if (!NOTIFY_GROUPS_ENABLED) return deliverLegacy(event, ctx);
   const channels = db.listEnabledChannelsForEvent(event);
   if (!channels.length) return false;
   const vars = buildVars(event, ctx);
@@ -387,6 +420,8 @@ module.exports = {
   sendEvent,
   notifyStatus,
   testChannel,
+  // 通知组路由是否启用（NOTIFY_GROUPS=0 时为 false，走旧直发路径）
+  groupsEnabled: () => NOTIFY_GROUPS_ENABLED,
   // 供测试与审计使用
   _internal: {
     isBlockedIP, resolveHost, selectResolvedAddress, render, buildRequestBody, parseTarget, pinnedLookup,

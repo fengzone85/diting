@@ -486,6 +486,9 @@ const stmts = {
   touchSession: db.prepare('UPDATE sessions SET last_seen=? WHERE id=?'),
   revokeSession: db.prepare('UPDATE sessions SET revoked=1 WHERE id=?'),
   revokeAllSessionRows: db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0'),
+  // 保留指定会话的批量吊销（后台「踢出其它设备」但保留当前操作的那台）。
+  // 与 revokeAllSessionRows 的区别：不设全局水位线，只按表逐行标记。
+  revokeAllSessionRowsExcept: db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0 AND id<>?'),
   pruneSessions: db.prepare('DELETE FROM sessions WHERE last_seen < ?'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
@@ -1000,6 +1003,8 @@ const getSessionRow = (id) => stmts.getSessionRow.get(id) || null;
 const listSessions = () => stmts.listSessions.all();
 const revokeSession = (id) => stmts.revokeSession.run(id).changes > 0;
 const revokeAllSessionRows = () => stmts.revokeAllSessionRows.run().changes;
+// 批量吊销但保留指定会话（后台「踢出其它设备」）：只标记表内行，不动全局水位线。
+const revokeAllSessionRowsExcept = (keepId) => stmts.revokeAllSessionRowsExcept.run(String(keepId || '')).changes;
 const pruneSessions = (before) => stmts.pruneSessions.run(Number(before) || 0).changes;
 
 // last_seen 节流：每会话 60s 写一次，避免每次 API 请求都写库。
@@ -1536,7 +1541,7 @@ module.exports = {
   listNotifyGroups, getNotifyGroup, createNotifyGroup, updateNotifyGroup, deleteNotifyGroup,
   listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
   createApiToken, findApiTokenByHash, getApiToken, listApiTokens, revokeApiToken, touchApiToken,
-  createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, pruneSessions, touchSession,
+  createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, revokeAllSessionRowsExcept, pruneSessions, touchSession,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   resolveAlertThresholds, observedIntervalSec,

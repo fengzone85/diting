@@ -25,6 +25,7 @@ const routes = [
       { path: 'template', component: () => import('../views/admin/TemplateView.vue') },
       { path: 'audit-logs', component: () => import('../views/admin/AuditLogView.vue') },
       { path: 'api-tokens', component: () => import('../views/admin/ApiTokensView.vue') },
+      { path: 'sessions', component: () => import('../views/admin/SessionsView.vue') },
     ],
   },
   // catch-all 必须放在最后：服务端 SPA fallback 对未知路径返回 200 + index.html，

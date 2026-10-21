@@ -5,7 +5,7 @@ import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import {
   DashboardOne, Monitor, Wallet, Robot, Log, Key, SettingTwo, LayoutTwo,
-  Home, Logout, MenuFold, MenuUnfold,
+  Home, Logout, MenuFold, MenuUnfold, User,
 } from '@icon-park/vue-next';
 import { useI18n } from '../../composables/useI18n';
 
@@ -53,6 +53,7 @@ const groups = computed(() => [
     title: t('nav.group.system'),
     items: [
       { to: '/admin/api-tokens', label: t('nav.apiTokens'), icon: Key },
+      { to: '/admin/sessions', label: t('nav.sessions'), icon: User },
       { to: '/admin/settings', label: t('nav.settings'), icon: SettingTwo },
       { to: '/admin/template', label: t('nav.template'), icon: LayoutTwo },
     ],

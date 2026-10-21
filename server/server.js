@@ -12,7 +12,7 @@ const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
-const { safeEqual, ipWhitelist, resolveRole } = require('./src/auth');
+const { safeEqual, ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
 const { getAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
@@ -528,6 +528,10 @@ function runPrune() {
     const auditDays = Math.max(7, Number(process.env.AUDIT_RETENTION_DAYS || 90));
     const nAud = db.pruneAudit(auditDays);
     if (nAud > 0) console.log(`[prune] removed ${nAud} old audit_logs (retention ${auditDays}d)`);
+    // S2/F6：过期会话行清理。SESSION_TTL 12h，倍率 2 容错时钟抖动；
+    // revoked 行一并清（其 last_seen 停留在最后活动时刻，同样会被 TTL 覆盖）。
+    const nSess = db.pruneSessions(Date.now() - SESSION_TTL * 2);
+    if (nSess > 0) console.log(`[prune] removed ${nSess} expired sessions`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);
