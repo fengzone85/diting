@@ -351,6 +351,8 @@ export const enUS: Record<string, string> = {
   'public.simple': 'Simple',
   'public.visual': 'Visual',
   'public.highLoad': 'High load',
+  'public.avgLoad': 'Avg load',
+  'public.free': 'Free',
   'public.expiring': 'Expiring',
   'public.favorites': 'Favorites',
   'public.avgMem': 'Avg memory',
