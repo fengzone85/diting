@@ -177,6 +177,19 @@
 [data-theme="light"] [class*="border-slate-700"] { border-color: rgb(100 116 139 / 0.30) !important; }
 [data-theme="light"] [class*="border-slate-600"] { border-color: rgb(100 116 139 / 0.35) !important; }
 [data-theme="light"] [class*="bg-slate-900"] { background-color: rgb(15 23 42 / 0.06) !important; }
+/* 亮色下 slate-800/700/600 也要一起提亮：后台的「平均 CPU Top3」「离线节点」等内部区块
+   用的是 bg-slate-800/40、按钮用 bg-slate-700 / hover:bg-slate-800，未覆盖时会在浅色卡片里
+   出现一块块深灰，看起来与整体底色不一致。 */
+[data-theme="light"] [class*="bg-slate-800"] { background-color: rgb(15 23 42 / 0.05) !important; }
+[data-theme="light"] [class*="bg-slate-700"] { background-color: rgb(15 23 42 / 0.08) !important; }
+[data-theme="light"] [class*="bg-slate-600"] { background-color: rgb(15 23 42 / 0.10) !important; }
+[data-theme="light"] [class*="hover:bg-slate-800"]:hover,
+[data-theme="light"] [class*="hover:bg-slate-700"]:hover,
+[data-theme="light"] [class*="hover:bg-slate-600"]:hover { background-color: rgb(15 23 42 / 0.10) !important; }
+[data-theme="light"] [class*="border-slate-800"] { border-color: rgb(100 116 139 / 0.24) !important; }
+[data-theme="light"] [class*="text-slate-100"] { color: var(--text-primary) !important; }
+[data-theme="light"] [class*="text-slate-600"] { color: #334155 !important; }
+[data-theme="light"] [class*="text-slate-700"] { color: #1f2937 !important; }
 [data-theme="light"] [class*="text-sky-300"] { color: #0284c7 !important; }
 [data-theme="light"] [class*="bg-sky-500"] { background-color: rgb(2 132 199 / 0.15) !important; }
 [data-theme="light"] [class*="border-sky-500"] { border-color: #0284c7 !important; }
@@ -198,6 +211,25 @@
 [data-theme="light"] [class*="text-emerald-300"] { color: #047857 !important; }
 [data-theme="light"] [class*="text-amber-300"] { color: #b45309 !important; }
 [data-theme="light"] [class*="text-rose-300"] { color: #be123c !important; }
+/* 亮色下 -400 系强调色（后台图标按钮/数值常用）对比度不足，统一加深一档 */
+[data-theme="light"] [class*="text-sky-400"] { color: #0369a1 !important; }
+[data-theme="light"] [class*="text-emerald-400"] { color: #047857 !important; }
+[data-theme="light"] [class*="text-amber-400"] { color: #b45309 !important; }
+[data-theme="light"] [class*="text-orange-300"],
+[data-theme="light"] [class*="text-orange-400"] { color: #c2410c !important; }
+[data-theme="light"] [class*="text-rose-400"],
+[data-theme="light"] [class*="text-red-400"] { color: #be123c !important; }
+[data-theme="light"] [class*="text-violet-400"],
+[data-theme="light"] [class*="text-purple-400"] { color: #6d28d9 !important; }
+[data-theme="light"] [class*="text-indigo-400"] { color: #4338ca !important; }
+[data-theme="light"] [class*="text-cyan-400"] { color: #0e7490 !important; }
+/* 亮色下 -200 系（提示块文字，如 bg-amber-500/10 上的 text-amber-200）几乎不可见 */
+[data-theme="light"] [class*="text-amber-200"] { color: #92400e !important; }
+[data-theme="light"] [class*="text-rose-200"],
+[data-theme="light"] [class*="text-red-200"] { color: #9f1239 !important; }
+[data-theme="light"] [class*="text-emerald-200"] { color: #065f46 !important; }
+[data-theme="light"] [class*="text-sky-200"] { color: #075985 !important; }
+[data-theme="light"] [class*="text-violet-200"] { color: #5b21b6 !important; }
 [data-theme="light"] [class*="bg-sky-400"] { background-color: rgb(2 132 199 / 0.14) !important; }
 [data-theme="light"] [class*="bg-emerald-400"] { background-color: rgb(16 185 129 / 0.14) !important; }
 [data-theme="light"] [class*="bg-amber-400"] { background-color: rgb(245 158 11 / 0.16) !important; }
