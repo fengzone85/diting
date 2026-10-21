@@ -635,6 +635,8 @@ export const zhCN: Record<string, string> = {
   'agent.currency.thb': '泰铢',
   'agent.billingCycle': '计费周期',
   'agent.expireDate': '到期日',
+  'agent.longTerm': '长期',
+  'agent.longTermHint': '不设到期时间，视为长期有效（不参与到期提醒与自动续费）',
   'agent.monthlyQuota': '月流量配额 (GB)',
   'agent.monthRotate': '流量重置日',
   'agent.monthRotateHint': '0=不限（累计口径），1–31=每月重置日；仅 Go 受控端生效，保存后下一条上报生效。留空表示采纳受控端上报值。',

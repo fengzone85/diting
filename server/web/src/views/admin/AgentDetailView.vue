@@ -26,6 +26,8 @@ const message = ref('');
 const error = ref('');
 
 const form = ref<Partial<Agent>>({});
+// 到期时间「长期」：勾选即清空到期日（对齐 Komari，长期 = 不设过期时间）
+const longTerm = ref(false);
 const commands = ref<{ install?: InstallCommands; modify?: ModifyCommands }>({});
 const commandProbeTargets = ref('');
 const newToken = ref('');
@@ -67,6 +69,7 @@ function resetForm(src?: Agent) {
         probe_targets: src.probe_targets || '',
       };
       commandProbeTargets.value = src.probe_targets || '';
+      longTerm.value = !(src.expire_at || '');
     }
     formDirty.value = false; // 回填后视为"未编辑"
   } finally {
@@ -109,7 +112,11 @@ async function save() {
   message.value = '';
   error.value = '';
   try {
-    await adminApi.updateAgent(agentId.value, form.value);
+    await adminApi.updateAgent(agentId.value, {
+      ...form.value,
+      // 长期 = 无到期日；否则用表单里的日期
+      expire_at: longTerm.value ? '' : (form.value.expire_at || ''),
+    });
     message.value = t('agent.saved');
     await loadAdmin();
     await fetchCommands();
@@ -274,7 +281,22 @@ function formatDate(ts?: number) {
                 <option v-for="opt in billingCycles" :key="opt.value" :value="opt.value">{{ t('agent.cycle.' + opt.key) }}</option>
               </select>
             </div>
-            <FormInput v-model="form.expire_at" :label="t('agent.expireDate')" placeholder="YYYY-MM-DD" />
+            <div>
+              <div class="mb-1 flex items-center justify-between">
+                <label class="block text-sm text-slate-400">{{ t('agent.expireDate') }}</label>
+                <label class="flex cursor-pointer items-center gap-1 text-xs text-slate-300">
+                  <input v-model="longTerm" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900/50 text-sky-500" />
+                  {{ t('agent.longTerm') }}
+                </label>
+              </div>
+              <input
+                v-model="form.expire_at"
+                type="date"
+                :disabled="longTerm"
+                class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+              />
+              <span v-if="longTerm" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
+            </div>
             <FormInput v-model="form.monthly_quota_gb" :label="t('agent.monthlyQuota')" type="number" />
             <FormInput
               v-if="agent?.has_counter"

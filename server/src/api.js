@@ -287,7 +287,14 @@ router.post('/report', agentAuth, (req, res) => {
   // P1：先用服务端累加器按 month_rotate 口径覆盖 m.net_*_month，再落 metrics。
   db.accumulateTraffic(req.agent.id, m, ts);
   db.insertMetric(req.agent.id, Object.assign({ ts }, m));
-  db.touchAgent(req.agent.id, m.os, m.hostname);
+  // 受控端版本从 User-Agent 解析（Go: diting-agent-go/1.0.9，Python: diting-agent/1.0）；
+  // 解析不到就传空，db 层用 COALESCE(NULLIF()) 保留库中已有值。
+  const uaVer = (() => {
+    const ua = String(req.header('User-Agent') || '');
+    const hit = ua.match(/diting-agent(?:-go)?\/([0-9A-Za-z.\-+]+)/i);
+    return hit ? hit[1] : '';
+  })();
+  db.touchAgent(req.agent.id, m.os, m.hostname, uaVer);
   // CPU 核数（§9 T18）：老 agent 不带该字段 → m.cores = 0 → 不写，库中保持 0 = 未知
   if (m.cores > 0) db.setAgentCores(req.agent.id, m.cores);
   maybeAutoRenew(req.agent);
