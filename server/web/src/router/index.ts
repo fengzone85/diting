@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { getAuthStatus } from '../services/auth';
+import { makeAuthGuard } from './guard';
 // 首页保留 eager（首屏必经，省一次请求）；其余视图全部路由懒加载。
 // 修复（2026-10-12 主页性能）：此前全量静态 import 使 NodeDetailView 进入入口
 // 依赖链，其依赖的 echarts(504KB) 被 modulepreload 强制首屏加载（主页并不
@@ -37,13 +37,6 @@ const router = createRouter({
   routes,
 });
 
-router.beforeEach(async (to) => {
-  if (to.meta.requiresAuth) {
-    const status = await getAuthStatus();
-    if (!status.logged_in) {
-      return { path: '/login', query: { redirect: to.fullPath } };
-    }
-  }
-});
+router.beforeEach(makeAuthGuard());
 
 export default router;

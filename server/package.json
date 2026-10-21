@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.js src/ai/*.test.js",
     "e2e:tokens": "node test/e2e/api-tokens.e2e.mjs",
     "e2e:menu": "node test/e2e/admin-sidebar.e2e.mjs",
+    "e2e:pages": "node test/e2e/admin-pages.e2e.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
