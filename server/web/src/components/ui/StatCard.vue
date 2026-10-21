@@ -12,6 +12,8 @@ interface Props {
   size?: 'sm' | 'md';
   /** 双行上下分布：主值贴标题、副行贴卡底（用于「上行/下行」这类成对指标） */
   spread?: boolean;
+  /** spread 专用：副行数值更大时为 true——副行加粗、主行常规（两行字号始终一致） */
+  boldSub?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), { variant: 'default', size: 'md' });
@@ -27,16 +29,19 @@ const isSm = props.size === 'sm';
 const padClass = isSm ? 'p-4' : 'p-5';
 // 前台总览：标题加粗、数值常规字重（后台卡片维持原样式）
 const labelClass = isSm ? 'text-xs font-semibold' : 'text-sm';
-// sm 档所有卡片主值统一 16px（此前紧凑卡降到 12px，和相邻卡片明显不一致）；
-// 只有「subBig」这一个历史场景保留一档差异。
-const valueClass = isSm
-  ? (props.subBig ? 'text-sm' : 'text-base')
-  : (props.compact ? (props.subBig ? 'text-xs' : 'text-base') : 'text-2xl font-semibold');
-// sm 档数值不加粗，用 align 后的常规字重保证「↓1.2M/s ↑340K/s」这类横排不被撑满
-const valueWeight = isSm ? 'font-normal' : '';
-const subClass = isSm
-  ? (props.subBig ? 'text-sm' : 'text-xs')
-  : (props.subBig ? 'text-base' : 'text-xs');
+// spread（上行/下行成对指标）：两行字号一致，数值大的一行加粗、小的一行常规；
+// 非 spread 时 sm 档主值统一 16px（此前紧凑卡降到 12px，和相邻卡片明显不一致）。
+const spreadOn = props.spread === true;
+const valueClass = spreadOn
+  ? 'text-base'
+  : isSm
+    ? 'text-base'
+    : (props.compact ? (props.subBig ? 'text-xs' : 'text-base') : 'text-2xl font-semibold');
+const valueWeight = spreadOn
+  ? (props.boldSub ? 'font-normal' : 'font-semibold')
+  : (isSm ? 'font-normal' : '');
+const subClass = spreadOn ? 'text-base' : (isSm ? 'text-xs' : (props.subBig ? 'text-base' : 'text-xs'));
+const subWeight = spreadOn ? (props.boldSub ? 'font-semibold' : 'font-normal') : '';
 </script>
 
 <template>
@@ -47,7 +52,7 @@ const subClass = isSm
     <p
       v-if="sub"
       class="text-secondary"
-      :class="[subClass, spread ? 'mt-auto pt-1.5' : 'mt-1']"
+      :class="[subClass, subWeight, spread ? 'mt-auto pt-1.5' : 'mt-1']"
     >{{ sub }}</p>
   </div>
 </template>
