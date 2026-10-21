@@ -110,6 +110,11 @@ function resetLocal() {
       backup_hour: 3,
       backup_keep_days: 14,
       backup_compress: true,
+      // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）。
+      // 必须在这里给默认值：模板 v-model="local.ui.alert!.cpu_pct" 会被立即求值，
+      // 若 settings 尚未到达（冷加载）或拉取失败（429/5xx），alert 为 undefined
+      // 会让整个设置页渲染抛 TypeError、只剩残缺 DOM。
+      alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 },
     },
     notify: {},
   };

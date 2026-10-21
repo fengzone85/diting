@@ -90,7 +90,7 @@ function isActive(to: string) {
   >
     <!-- 品牌 + 收起/展开 -->
     <div class="mb-4 flex items-center gap-2 px-1">
-      <RouterLink to="/admin" class="brand flex min-w-0 items-center gap-2" :title="t('nav.admin')">
+      <RouterLink to="/admin" class="brand flex min-w-0 items-center gap-2" :title="t('nav.admin')" @click="emit('close')">
         <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sm font-bold text-sky-300">D</span>
         <span class="label truncate text-lg font-bold text-sky-400">Diting</span>
       </RouterLink>
@@ -123,6 +123,7 @@ function isActive(to: string) {
             :key="item.to"
             :to="item.to"
             :title="item.label"
+            :aria-label="item.label"
             class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
             :class="isActive(item.to)
               ? 'bg-sky-500/20 text-sky-300'
@@ -141,7 +142,7 @@ function isActive(to: string) {
       <RouterLink
         to="/"
         :title="t('nav.home')"
-        class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-700/30 hover:text-white"
+        class="footer-item flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-700/30 hover:text-white"
         @click="emit('close')"
       >
         <Home :size="18" class="flex-shrink-0" />
@@ -149,7 +150,7 @@ function isActive(to: string) {
       </RouterLink>
       <button
         :title="t('nav.logout')"
-        class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
+        class="footer-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
         @click="logout"
       >
         <Logout :size="18" class="flex-shrink-0" />
@@ -173,19 +174,20 @@ function isActive(to: string) {
 .sidebar-open {
   transform: translateX(0);
 }
-/* 收起态：图标居中、隐藏文案与分组标题 */
-.sidebar.is-collapsed .label,
-.sidebar.is-collapsed .group-title {
-  display: none;
-}
-.sidebar.is-collapsed nav a,
-.sidebar.is-collapsed .mt-4 a,
-.sidebar.is-collapsed .mt-4 button {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
-}
 @media (min-width: 1024px) {
+  /* 收起态：隐藏文案与分组标题、图标居中。
+     必须只写在桌面端媒体查询内——否则「桌面收起后窗口变窄/手机打开同一浏览器」时，
+     移动端抽屉会继承居中与零内边距（图标与文字浮在行中间）。 */
+  .sidebar.is-collapsed .label,
+  .sidebar.is-collapsed .group-title {
+    display: none;
+  }
+  .sidebar.is-collapsed nav a,
+  .sidebar.is-collapsed .footer-item {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
   /* 桌面端改为 sticky 满高：页面很长时「返回主页/退出」仍固定在视口底部，
      中间菜单区自己滚动（此前 position: static 会让 footer 掉到长页面最下面）。 */
   .sidebar {
@@ -212,13 +214,6 @@ function isActive(to: string) {
   .sidebar.is-collapsed .collapse-toggle {
     margin-left: auto;
     margin-right: auto;
-  }
-}
-/* 移动端抽屉始终全宽显示文案，忽略收起态 */
-@media (max-width: 1023px) {
-  .sidebar.is-collapsed .label,
-  .sidebar.is-collapsed .group-title {
-    display: revert;
   }
 }
 </style>

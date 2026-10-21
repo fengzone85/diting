@@ -42,7 +42,12 @@ export default [
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
-      globals: { ...globals.node, navigator: 'readonly', document: 'readonly', window: 'readonly' }
+      // page.evaluate / addInitScript 的回调在浏览器里执行，需声明用到的浏览器全局
+      globals: {
+        ...globals.node,
+        navigator: 'readonly', document: 'readonly', window: 'readonly',
+        localStorage: 'readonly', getComputedStyle: 'readonly'
+      }
     },
     rules: {
       'no-console': 'off',

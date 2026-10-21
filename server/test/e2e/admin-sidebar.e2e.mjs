@@ -140,6 +140,24 @@ try {
   await shot(mp, 'menu-mobile.png');
   await mctx.close();
 
+  // 回归：桌面端收起过（localStorage=1）后打开移动端抽屉，
+  // 菜单仍必须左对齐、有内边距——收起态的「居中 + 零内边距」规则只能作用于桌面。
+  const cctx = await browser.newContext({ ignoreHTTPSErrors: true, locale: 'zh-CN', viewport: { width: 390, height: 844 } });
+  await cctx.addInitScript(() => localStorage.setItem('diting.admin.sidebar.collapsed', '1'));
+  const cp = await cctx.newPage();
+  await login(cp);
+  await cp.locator('main button.lg\\:hidden').first().click();
+  await cp.waitForTimeout(400);
+  const linkStyle = await cp.locator('aside a[href="/admin/agents"]').evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { justify: cs.justifyContent, paddingLeft: cs.paddingLeft, labelVisible: !!el.querySelector('.label')?.getBoundingClientRect().width };
+  });
+  assert(linkStyle.justify !== 'center', '移动端抽屉不应继承收起态居中，实际 ' + linkStyle.justify);
+  assert(linkStyle.paddingLeft !== '0px', '移动端抽屉不应继承零内边距，实际 ' + linkStyle.paddingLeft);
+  assert(linkStyle.labelVisible > 0, '移动端抽屉应显示菜单文案');
+  await shot(cp, 'menu-mobile-collapsed-flag.png');
+  await cctx.close();
+
   assert(errs.length === 0, '页面报错: ' + errs.join(' | '));
   console.log('\nE2E MENU PASS');
 } catch (e) {
