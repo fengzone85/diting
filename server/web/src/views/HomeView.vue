@@ -111,6 +111,8 @@ const overviewCards = computed(() => {
     sub: `↓${rateText(totalRxRate)}`,
     compact: true,
     spread: true,
+    // 数值大的一行加粗：下行速率更大时副行加粗
+    boldSub: totalRxRate > totalTxRate,
     variant: 'default' as const,
   };
   // 流量配额（finance 方案）：各节点月配额汇总 vs 本月已用流量（下行+上行）
@@ -133,7 +135,7 @@ const overviewCards = computed(() => {
   // 平均系统负载（ops 方案）：仅统计有 load1 上报的节点
   const loadValues = ags.map((a) => a.load1).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const avgLoad = loadValues.length ? loadValues.reduce((s, v) => s + v, 0) / loadValues.length : null;
-  const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; subBig?: boolean; spread?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
+  const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; subBig?: boolean; spread?: boolean; boldSub?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
     warn: { label: t('public.highLoad'), value: String(highLoad), variant: 'warning' },
@@ -164,6 +166,8 @@ const overviewCards = computed(() => {
       sub: `↓ ${fmtTraffic(totalRx)}`,
       compact: true,
       spread: true,
+      // 数值大的一行加粗：下行累计更大时副行加粗
+      boldSub: totalRx > totalTx,
       variant: 'default',
     },
     traffic_total: { label: t('public.trafficTotal'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
@@ -290,6 +294,7 @@ const filteredAgents = computed(() => {
           :compact="c.compact"
           :sub-big="c.subBig"
           :spread="c.spread"
+          :bold-sub="c.boldSub"
           :variant="c.variant"
         />
       </div>
