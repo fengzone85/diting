@@ -386,7 +386,7 @@ export const enUS: Record<string, string> = {
   'public.disk': 'Disk',
   'public.network': 'Network',
   'public.uptime': 'Uptime',
-  'public.instantTraffic': 'Live Traffic',
+  'public.instantTraffic': 'Live rate',
   'public.listCols': 'Columns',
   'public.cols1': '1 col',
   'public.cols2': '2 cols',

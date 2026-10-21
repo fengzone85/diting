@@ -33,7 +33,7 @@ const valueClass = isSm
 // sm 档数值不加粗，用 align 后的常规字重保证「↓1.2M/s ↑340K/s」这类横排不被撑满
 const valueWeight = isSm ? 'font-normal' : '';
 const subClass = isSm
-  ? (props.subBig ? 'text-sm' : 'text-[11px]')
+  ? (props.subBig ? 'text-sm' : 'text-xs')
   : (props.subBig ? 'text-base' : 'text-xs');
 </script>
 

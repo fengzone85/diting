@@ -104,10 +104,11 @@ const overviewCards = computed(() => {
   const totalTxRate = sum((a) => a.net_tx_rate || 0);
   // 紧凑速率文案（无空格、单位缩写）：如 "1.2M/s"、"340K/s"、"0B/s"
   const rateText = (n: number) => `${fmtRateCompact(n)}/s`;
-  // 实时流量卡（2026-10-21 用户指定）：下行与上行改为同一行横排，不再上下两行。
-  // official 方案的「实时流量」与 traffic 方案的「实时速率」共用同一份数据。
+  // 实时速率卡（2026-10-21 用户指定）：下行主行 + 上行副行，双排展示。
+  // official 方案的「实时速率」与 traffic 方案的「实时速率」共用同一份数据。
   const liveTraffic = {
-    value: `↓${rateText(totalRxRate)}　↑${rateText(totalTxRate)}`,
+    value: `↓${rateText(totalRxRate)}`,
+    sub: `↑${rateText(totalTxRate)}`,
     compact: true,
     variant: 'default' as const,
   };
@@ -154,10 +155,11 @@ const overviewCards = computed(() => {
       value: `${o?.online ?? '-'} / ${o?.total ?? '-'}`,
       variant: 'success',
     },
-    // 流量概览（2026-10-21 用户指定）：原「TFC」卡改为显示本月上行/下行
+    // 流量概览（2026-10-21 用户指定）：原「TFC」卡改为双排显示本月上行/下行
     traffic: {
       label: t('public.trafficOverview'),
-      value: `↑ ${fmtTraffic(totalTx)} / ↓ ${fmtTraffic(totalRx)}`,
+      value: `↑ ${fmtTraffic(totalTx)}`,
+      sub: `↓ ${fmtTraffic(totalRx)}`,
       compact: true,
       variant: 'default',
     },
