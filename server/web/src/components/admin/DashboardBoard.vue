@@ -1,29 +1,25 @@
 <script setup lang="ts">
 // 后台仪表盘看板（对齐 Komari 的仪表盘布局编辑器）：
-// - 浏览态：一排卡片 + 右上「自定义」
+// - 浏览态：「自定义」入口，卡片按保存的布局渲染
 // - 编辑态：每张卡带工具条（拖拽手柄、卡名、宽度三档、高度三档、隐藏），
 //   顶部工具条提供「恢复默认布局 / 选择卡片 / 取消 / 保存」
 // - 选择卡片：弹窗内勾选全部可选卡片
 // - 布局写入服务端 ui.admin_dashboard_layout，全局生效
+// 卡片本体由父组件以「id + label + 组件」注入，本组件只管布局与交互。
 import { computed, ref, watch } from 'vue';
 import { GridFour, Refresh } from '@icon-park/vue-next';
-import StatCard from '../ui/StatCard.vue';
 import { adminApi } from '../../services/adminApi';
 import { useI18n } from '../../composables/useI18n';
+import type { DashboardWidgetDef } from './dashboard/widgets';
 import type { DashboardLayoutItem, DashboardWidgetHeight, DashboardWidgetWidth } from '../../services/types';
 
-interface DashboardCard {
-  id: string;
-  label: string;
-  value: string | number;
-  variant?: 'default' | 'success' | 'warning' | 'danger';
-}
-
 const props = defineProps<{
-  /** 全部可选卡片（含标签与数值） */
-  cards: DashboardCard[];
+  /** 全部可选卡片 */
+  widgets: DashboardWidgetDef[];
   /** 服务端已保存的布局；null / undefined = 从未配置 → 默认布局 */
   model: DashboardLayoutItem[] | null;
+  /** 默认布局包含的卡片（缺省为全部卡片） */
+  defaultIds?: string[];
 }>();
 
 const emit = defineEmits<{ (e: 'saved', layout: DashboardLayoutItem[]): void }>();
@@ -50,26 +46,31 @@ const WIDTH_CLASS: Record<DashboardWidgetWidth, string> = {
 const HEIGHT_CLASS: Record<DashboardWidgetHeight, string> = {
   short: 'min-h-[92px]',
   normal: 'min-h-[132px]',
-  tall: 'min-h-[184px]',
+  tall: 'min-h-[196px]',
 };
 
-const cardMap = computed(() => new Map(props.cards.map((c) => [c.id, c])));
-const labelOf = (id: string) => cardMap.value.get(id)?.label ?? id;
+const widgetMap = computed(() => new Map(props.widgets.map((w) => [w.id, w])));
+const labelOf = (id: string) => widgetMap.value.get(id)?.label ?? id;
 
 function defaultLayout(): DashboardLayoutItem[] {
-  return props.cards.map((c) => ({ id: c.id, width: 'compact', height: 'short' }));
+  const byId = widgetMap.value;
+  const ids = (props.defaultIds?.length ? props.defaultIds : props.widgets.map((w) => w.id))
+    .filter((id) => byId.has(id));
+  return ids.map((id) => {
+    const w = byId.get(id)!;
+    return { id, width: w.defaultWidth ?? 'compact', height: w.defaultHeight ?? 'short' };
+  });
 }
 
 /** 清洗服务端布局：丢未知 id / 重复 id，非法档位回退默认档；null → 默认布局 */
 function normalize(raw: DashboardLayoutItem[] | null | undefined): DashboardLayoutItem[] {
   if (!Array.isArray(raw)) return defaultLayout();
-  const ids = new Set(props.cards.map((c) => c.id));
   const seen = new Set<string>();
   const out: DashboardLayoutItem[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const id = (item as DashboardLayoutItem).id;
-    if (typeof id !== 'string' || !ids.has(id) || seen.has(id)) continue;
+    if (typeof id !== 'string' || !widgetMap.value.has(id) || seen.has(id)) continue;
     seen.add(id);
     out.push({
       id,
@@ -125,7 +126,12 @@ function toggleCard(id: string) {
   if (has(id)) {
     draft.value = draft.value.filter((w) => w.id !== id);
   } else {
-    draft.value = [...draft.value, { id, width: 'compact', height: 'short' }];
+    const w = widgetMap.value.get(id);
+    draft.value = [...draft.value, {
+      id,
+      width: w?.defaultWidth ?? 'compact',
+      height: w?.defaultHeight ?? 'short',
+    }];
   }
 }
 
@@ -193,7 +199,7 @@ async function save() {
           {{ editing ? t('dashboard.editing') : t('dashboard.workspace') }}
         </span>
         <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] tabular-nums text-slate-400">
-          {{ draft.length }} / {{ cards.length }}
+          {{ draft.length }} / {{ widgets.length }}
         </span>
         <span v-if="savedMsg" class="text-xs text-emerald-400">{{ savedMsg }}</span>
         <span v-if="errMsg" class="text-xs text-rose-300">{{ errMsg }}</span>
@@ -242,7 +248,7 @@ async function save() {
     </div>
 
     <!-- 看板网格 -->
-    <div v-if="draft.length" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div v-if="draft.length" class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <section
         v-for="(w, i) in draft"
         :key="w.id"
@@ -295,11 +301,10 @@ async function save() {
           </div>
 
           <div class="flex-1" :class="HEIGHT_CLASS[w.height]">
-            <StatCard
-              class="h-full"
-              :label="cardMap.get(w.id)?.label ?? w.id"
-              :value="cardMap.get(w.id)?.value ?? '-'"
-              :variant="cardMap.get(w.id)?.variant"
+            <component
+              :is="widgetMap.get(w.id)?.component"
+              v-if="widgetMap.get(w.id)"
+              v-bind="widgetMap.get(w.id)?.props"
             />
           </div>
         </div>
@@ -332,17 +337,17 @@ async function save() {
         <p class="mt-1 text-xs text-slate-500">{{ t('dashboard.selectedCards', { n: draft.length }) }}</p>
         <div class="mt-3 max-h-[55vh] overflow-y-auto">
           <label
-            v-for="c in cards"
-            :key="c.id"
+            v-for="w in widgets"
+            :key="w.id"
             class="flex cursor-pointer items-center gap-3 border-b border-slate-800 px-1.5 py-2.5 last:border-0"
           >
             <input
               type="checkbox"
               class="h-4 w-4 accent-sky-500"
-              :checked="has(c.id)"
-              @change="toggleCard(c.id)"
+              :checked="has(w.id)"
+              @change="toggleCard(w.id)"
             />
-            <span class="text-sm text-slate-300">{{ c.label }}</span>
+            <span class="text-sm text-slate-300">{{ w.label }}</span>
           </label>
         </div>
         <div class="mt-4 flex justify-end">
