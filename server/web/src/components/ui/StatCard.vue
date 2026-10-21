@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 interface Props {
   label: string;
   value: string | number;
@@ -37,11 +39,13 @@ const valueClass = spreadOn
   : isSm
     ? 'text-base'
     : (props.compact ? (props.subBig ? 'text-xs' : 'text-base') : 'text-2xl font-semibold');
-const valueWeight = spreadOn
-  ? (props.boldSub ? 'font-normal' : 'font-semibold')
-  : (isSm ? 'font-normal' : '');
+// 字重必须响应式：boldSub 随每次轮询数据变化（哪边数值大哪边加粗），
+// 用普通常量只会在组件创建时求值一次，之后永不更新——这就是「加粗方向不变」的原因。
+const valueWeight = computed(() =>
+  spreadOn ? (props.boldSub ? 'font-normal' : 'font-semibold') : (isSm ? 'font-normal' : ''));
 const subClass = spreadOn ? 'text-base' : (isSm ? 'text-xs' : (props.subBig ? 'text-base' : 'text-xs'));
-const subWeight = spreadOn ? (props.boldSub ? 'font-semibold' : 'font-normal') : '';
+const subWeight = computed(() =>
+  spreadOn ? (props.boldSub ? 'font-semibold' : 'font-normal') : '');
 </script>
 
 <template>
