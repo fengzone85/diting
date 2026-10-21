@@ -1284,6 +1284,11 @@ router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
     // M-1：自定义 CSS 在落库前清洗，杜绝 @import/url()/外链字体/脚本注入。
     if (typeof b.ui.custom_css === 'string') b.ui.custom_css = sanitizeCss(b.ui.custom_css);
     sanitizeBackupSettings(b.ui);
+    // setUiSettings 是整体覆盖写：仪表盘卡片键由专用接口 PUT /admin/dashboard/cards 管理，
+    // 设置表单未携带该字段时沿用旧值，避免在设置页保存后把卡片选择清空。
+    if (!Object.prototype.hasOwnProperty.call(b.ui, 'admin_card_keys')) {
+      b.ui.admin_card_keys = uiBefore.admin_card_keys || [];
+    }
     db.setUiSettings(b.ui);
   }
   if (b.notify && typeof b.notify === 'object') db.setNotifyConfig(b.notify);
@@ -1294,6 +1299,16 @@ router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   if (b.ui) changed.push(`ui:${diffKeys(uiBefore, db.getUiSettings())}`);
   if (b.notify) changed.push(`notify:${diffKeys(notifyBefore, db.getNotifyConfig())}`);
   auditLog(req, 'update_settings', (tags + changed.join(' ')).trim());
+});
+
+// 后台仪表盘可选卡片：只写 ui.admin_card_keys 一个字段。
+// 独立接口而非复用 PUT /settings——后者是整体覆盖写库，若前端只带这一项会把其他设置抹掉。
+router.put('/admin/dashboard/cards', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const v = validators.validateDashboardCardKeys(req.body && req.body.keys);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  db.setUiSettings(Object.assign({}, db.getUiSettings(), { admin_card_keys: v.value }));
+  auditLog(req, 'update_dashboard_cards', `keys=${v.value.join(',')}`);
+  res.json({ ok: true, keys: v.value });
 });
 
 
