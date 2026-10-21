@@ -91,7 +91,7 @@ export const zhCN: Record<string, string> = {
   'agents.noMatch': '无匹配的受控端',
   'agents.empty': '暂无受控端',
   'agents.colName': '显示名称',
-  'agents.colFlag': '国旗',
+  'agents.colLocation': '位置',
   'agents.colVersion': '客户端版本',
   'agents.colGroup': '分组',
   'agents.colNote': '私有备注',
