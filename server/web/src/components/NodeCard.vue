@@ -122,8 +122,9 @@ const trafficPct = computed(() => {
       <img v-if="agent.country"
         :src="`/flags/${(agent.country || '').toLowerCase()}.svg`"
         class="flag-icon" :alt="agent.country" />
-      <span v-if="agent.group && !merchantName" class="badge">{{ agent.group }}</span>
-      <span v-if="merchantName" class="badge">{{ merchantName }}</span>
+      <span v-if="agent.group && !merchantName && !tag" class="badge">{{ agent.group }}</span>
+      <span v-if="tag" class="badge badge-tag">{{ tag }}</span>
+      <span v-if="merchantName && !tag" class="badge">{{ merchantName }}</span>
     </div>
 
     <!-- ===== 旧版 .meta：hostname · os ===== -->
