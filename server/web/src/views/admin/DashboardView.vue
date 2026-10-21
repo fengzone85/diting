@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import StatCard from '../../components/ui/StatCard.vue';
 import ChartLatency from '../../components/ChartLatency.vue';
-import CardPicker from '../../components/admin/CardPicker.vue';
+import DashboardBoard from '../../components/admin/DashboardBoard.vue';
 import { useAdmin } from '../../composables/useAdmin';
 import { useApp } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 import { adminApi } from '../../services/adminApi';
-import type { Billing, ChartPoint } from '../../services/types';
+import type { Billing, ChartPoint, DashboardLayoutItem } from '../../services/types';
 import { formatBytes, formatDuration, formatPercent } from '../../utils/format';
 
 const admin = useAdmin();
@@ -27,9 +26,9 @@ const avgMem = computed(() => {
   return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : undefined;
 });
 
-// ---- 仪表盘卡片（可选择多卡片）------------------------------------------
-// 对齐 Komari 后台仪表盘：卡片集合与顺序由管理员勾选（全局配置 ui.admin_card_keys），
-// 未配置时回退到全量默认顺序（与历史布局一致）。
+// ---- 仪表盘卡片（可可视化调整，对齐 Komari）------------------------------
+// 卡片内容在这里算好，布局（顺序 / 宽度 / 高度 / 显隐）由 DashboardBoard 管理，
+// 并写入服务端 ui.admin_dashboard_layout（全局生效）。
 const CARD_KEYS = ['total', 'online', 'offline', 'monthly_cost', 'avg_cpu', 'avg_mem', 'db_size', 'public_nodes'] as const;
 type CardKey = typeof CARD_KEYS[number];
 
@@ -48,37 +47,16 @@ const cardMeta = computed<Record<CardKey, { label: string; value: string | numbe
   public_nodes: { label: t('public.nodes'), value: app.state.meta?.public_enabled ? 'ON' : 'OFF' },
 }));
 
-const cardOptions = computed(() => CARD_KEYS.map((k) => ({ key: k as string, label: cardMeta.value[k].label })));
+const dashboardCards = computed(() => CARD_KEYS.map((k) => ({ id: k as string, ...cardMeta.value[k] })));
 
-// 服务端已保存的选择：过滤掉白名单外的脏值；空数组 = 未配置 → 全量默认
-const savedCardKeys = computed<string[]>(() => {
-  const raw = (admin.state.settings?.ui as Record<string, unknown> | undefined)?.admin_card_keys;
-  const list = Array.isArray(raw)
-    ? raw.filter((k): k is string => typeof k === 'string' && (CARD_KEYS as readonly string[]).includes(k))
-    : [];
-  return list.length ? list : [...CARD_KEYS];
+// null = 服务端从未配置过布局 → 看板用默认布局（全量卡片，标准宽/精简高）
+const dashboardLayout = computed<DashboardLayoutItem[] | null>(() => {
+  const raw = (admin.state.settings?.ui as Record<string, unknown> | undefined)?.admin_dashboard_layout;
+  return Array.isArray(raw) ? (raw as DashboardLayoutItem[]) : null;
 });
 
-const visibleCards = computed(() => savedCardKeys.value.map((k) => ({ key: k, ...cardMeta.value[k as CardKey] })));
-
-const savingCards = ref(false);
-const cardsError = ref('');
-const cardsSaved = ref(false);
-
-async function applyCards(keys: string[]) {
-  savingCards.value = true;
-  cardsError.value = '';
-  cardsSaved.value = false;
-  try {
-    await adminApi.saveDashboardCards(keys);
-    await admin.refresh();
-    cardsSaved.value = true;
-    setTimeout(() => { cardsSaved.value = false; }, 2000);
-  } catch (e) {
-    cardsError.value = t('dashboard.cardsFailed', { msg: (e as Error).message || t('common.unknownError') });
-  } finally {
-    savingCards.value = false;
-  }
+function onLayoutSaved() {
+  admin.refresh().catch(() => {});
 }
 
 // B5: 集群平均 CPU/内存趋势（聚合所有受控端时序）
@@ -131,26 +109,11 @@ async function testAlert() {
 
 <template>
   <div>
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-2xl font-bold">{{ t('dashboard.title') }}</h1>
-      <div class="flex items-center gap-2">
-        <span v-if="cardsSaved" class="text-xs text-emerald-400">{{ t('dashboard.cardsSaved') }}</span>
-        <span v-if="cardsError" class="text-xs text-rose-300">{{ cardsError }}</span>
-        <CardPicker :model="savedCardKeys" :options="cardOptions" :saving="savingCards" @apply="applyCards" />
-      </div>
-    </div>
+    <h1 class="mb-5 text-2xl font-bold">{{ t('dashboard.title') }}</h1>
     <div v-if="admin.state.error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
       {{ admin.state.error }}
     </div>
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <StatCard
-        v-for="c in visibleCards"
-        :key="c.key"
-        :label="c.label"
-        :value="c.value"
-        :variant="c.variant"
-      />
-    </div>
+    <DashboardBoard :cards="dashboardCards" :model="dashboardLayout" @saved="onLayoutSaved" />
     <div class="mt-6">
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-lg font-semibold">{{ t('dashboard.avgCpu') }} / {{ t('dashboard.avgMem') }} {{ t('dashboard.trend') }}</h2>

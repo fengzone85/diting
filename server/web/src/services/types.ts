@@ -278,6 +278,15 @@ export interface Billing {
   expiring_soon: { id: string; name: string; days_left: number }[];
 }
 
+// 后台仪表盘布局（对齐 Komari）：宽度三档、高度三档，数组顺序即渲染顺序
+export type DashboardWidgetWidth = 'compact' | 'wide' | 'full';
+export type DashboardWidgetHeight = 'short' | 'normal' | 'tall';
+export interface DashboardLayoutItem {
+  id: string;
+  width: DashboardWidgetWidth;
+  height: DashboardWidgetHeight;
+}
+
 export interface AiConfig {
   enabled: boolean;
   provider?: string;

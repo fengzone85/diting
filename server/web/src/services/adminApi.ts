@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated } from './types';
+import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -97,9 +97,9 @@ export const adminApi = {
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
   getSettings: () => api.get<Settings>('/api/settings'),
   saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
-  // 后台仪表盘可选卡片（只写 ui.admin_card_keys，不影响其他设置）
-  saveDashboardCards: (keys: string[]) =>
-    api.put<{ ok: boolean; keys: string[] }>('/api/admin/dashboard/cards', { keys }),
+  // 后台仪表盘布局（只写 ui.admin_dashboard_layout，不影响其他设置）
+  saveDashboardLayout: (layout: DashboardLayoutItem[]) =>
+    api.put<{ ok: boolean; layout: DashboardLayoutItem[] }>('/api/admin/dashboard/layout', { layout }),
 
   // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
   getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),

@@ -221,27 +221,40 @@ function validateNotifyGroupInput(body) {
   return { ok: true, value: { name, events, enabled: b.enabled !== false, channel_ids: channelIds } };
 }
 
-// ---- 后台仪表盘可选卡片 --------------------------------------------------
-// 卡片键白名单是唯一事实来源：前端只能提交这些键，顺序即渲染顺序。
-// 数组为空视为「未配置」→ 由前端回退到默认全量，避免误清空后仪表盘一片空白。
-const DASHBOARD_CARD_KEYS = [
+// ---- 后台仪表盘布局（对齐 Komari 仪表盘布局模型）---------------------------
+// 布局是有序数组，元素 = { id, width, height }：
+//   id     卡片唯一键（白名单，顺序即渲染顺序）
+//   width  compact | wide | full（标准 / 加宽 / 整行）
+//   height short | normal | tall（精简 / 标准 / 加高）
+// 空数组合法（用户把卡片全部移除，前端显示「暂无卡片」引导）；
+// 非法元素整条丢弃而不报 400，避免历史脏数据把整份布局卡死。
+const DASHBOARD_WIDGET_IDS = [
   'total', 'online', 'offline', 'monthly_cost',
   'avg_cpu', 'avg_mem', 'db_size', 'public_nodes',
 ];
+const DASHBOARD_WIDTHS = ['compact', 'wide', 'full'];
+const DASHBOARD_HEIGHTS = ['short', 'normal', 'tall'];
 
-function validateDashboardCardKeys(input) {
-  if (!Array.isArray(input)) return { ok: false, error: 'card_keys_invalid' };
-  const out = [];
-  for (const raw of input) {
-    if (typeof raw !== 'string') continue;
-    if (!DASHBOARD_CARD_KEYS.includes(raw)) continue;
-    if (!out.includes(raw)) out.push(raw);
+function validateDashboardLayout(input) {
+  if (!Array.isArray(input)) return { ok: false, error: 'layout_invalid' };
+  const seen = new Set();
+  const value = [];
+  for (const item of input) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const id = item.id;
+    if (typeof id !== 'string' || !DASHBOARD_WIDGET_IDS.includes(id) || seen.has(id)) continue;
+    seen.add(id);
+    value.push({
+      id,
+      width: DASHBOARD_WIDTHS.includes(item.width) ? item.width : 'compact',
+      height: DASHBOARD_HEIGHTS.includes(item.height) ? item.height : 'short',
+    });
   }
-  return { ok: true, value: out };
+  return { ok: true, value };
 }
 
 module.exports = {
   num, str, validateReport, sanitizeCss,
   NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput,
-  DASHBOARD_CARD_KEYS, validateDashboardCardKeys
+  DASHBOARD_WIDGET_IDS, DASHBOARD_WIDTHS, DASHBOARD_HEIGHTS, validateDashboardLayout
 };
