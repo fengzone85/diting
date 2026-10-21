@@ -24,8 +24,17 @@ process.on('uncaughtException', (e) => {
   console.error('[uncaughtException]', e && e.stack ? e.stack : e);
 });
 
-// 读取版本号与构建时间（diting.sh 部署时写入 _build_time，版本来自 package.json）
+// 读取版本号与构建时间。
+// 版本号：优先取 git tag（v1.6.0 → 1.6.0，发版时打 tag 即生效），无匹配 tag 回退 package.json。
+// 只匹配 v+数字 开头的 tag，避免误取 agent-go-v* 这类 agent 标签。
 const APP_VERSION = (() => {
+  try {
+    const tag = require('child_process').execSync(
+      "git describe --tags --match 'v[0-9]*' --abbrev=0",
+      { cwd: __dirname, encoding: 'utf8' },
+    ).trim();
+    if (tag) return tag.replace(/^v/, '');
+  } catch (e) {}
   try { return require('./package.json').version || '1.0.0'; } catch (e) { return '1.0.0'; }
 })();
 const APP_BUILD_TIME = (() => {
