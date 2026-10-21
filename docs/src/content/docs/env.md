@@ -82,7 +82,7 @@ description: 服务端与受控端环境变量参考
 
 ⚠️ 2026-09-10 起默认从 `trust proxy = true`（信任任意来源）收紧为 `loopback`：只要 `8081` 能被直连，客户端就能自造 `X-Forwarded-For` 绕过 IP 白名单与限流，或自造 `X-Forwarded-Proto: https` 让管理接口走明文 HTTP。**反代与服务端不同机的部署升级后必须显式设置 `TRUST_PROXY`**，否则 `req.ip` 会变成反代 IP，配了白名单的站会全部被 403。
 
-## 受控端（Python 与 Go 共用）
+## 受控端
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
@@ -90,7 +90,7 @@ description: 服务端与受控端环境变量参考
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
 | `INTERVAL` | 否 | `20`（Docker 镜像与 Windows 为 `15`） | 上报间隔（秒），最小 5 |
-| `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。**仅 Go 受控端生效**，Python legacy 节点由服务端透传其本地自然月累计 |
+| `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。由服务端按此口径累计月流量（受控端不保存本地状态） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
@@ -99,7 +99,7 @@ description: 服务端与受控端环境变量参考
 ### PROBE_TARGETS 说明
 
 - 多个目标用逗号分隔，格式 `label:host[:port]`（如 `CM:www.10086.cn:443`）
-- Go 受控端为**纯 TCP** 握手探测（端口序：目标端口 → 443 → 80），`loss` 仅 `0` / `100` 二值、不伪造中间值；Linux Python 版为 ICMP 优先、失败自动回退 TCP
+- Go 受控端为**纯 TCP** 握手探测（端口序：目标端口 → 443 → 80），`loss` 仅 `0` / `100` 二值、不伪造中间值
 - **运行期无下发通道**：目标只在安装时由一键命令写入本地一次，之后只能在本机改——服务端没有任何 API 能在运行期推送探测目标
 - `label` 建议用 ≤2 字符缩写（`CM`=移动门户 / `CT`=电信 / `CU`=联通 / `GG`=公共谷歌 DNS），状态卡片空间有限；默认 `PROBE_TARGETS=CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`（运营商 DNS 对 TCP 全拒，CM 用移动自家门户测"移动入口可达性"）
 

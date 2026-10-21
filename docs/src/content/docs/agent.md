@@ -5,7 +5,8 @@ description: Agent 部署指南
 
 # 受控端部署
 
-DiTing 受控端支持三种部署形态，数据格式与上报契约完全相同。**M3 起三种形态均已切换到 Go 实现**，Python 版（`agent/`）冻结，仅存量节点使用。
+DiTing 受控端支持三种部署形态，数据格式与上报契约完全相同，**全部基于 Go 实现**（`agent-go/`）。
+Python 版受控端（原 `agent/` 目录）已于 2026-10 下线并从仓库移除，存量节点请重新以 Go 版接入。
 
 ## 形态对比
 
@@ -61,8 +62,7 @@ sudo bash diting.sh --install-agent --server https://your-server --id <id> --tok
 4. 注册 systemd 服务（只读系统加固 + 状态目录可写）
 5. 启动并设置开机自启
 
-> **历史路径（Python 版，已冻结）**：`curl .../agent/install.sh | bash` 仍可用于存量机器，但不再更新；
-> 新装与 `--update-agent` 均走 Go。Go 与 Python 的 unit 文件不同，见下。
+> Python 版安装器（`agent/install.sh`）已随 `agent/` 目录一并下线；新装与 `--update-agent` 均只走 `agent-go/install.sh`。
 
 ### systemd 安全加固项
 
@@ -76,23 +76,17 @@ sudo bash diting.sh --install-agent --server https://your-server --id <id> --tok
 | `ReadWritePaths=/var/lib/diting` | 仅放行状态目录可写（月流量累计） |
 | `PrivateTmp=true` | 隔离 /tmp |
 
-> Python 版 unit（`agent/diting-agent.service`）另有 `ProtectKernelTunables` / `ProtectKernelLogs` /
-> `ProtectClock` / `ProtectHostname` / `ProtectControlGroups` / `LockPersonality` /
-> `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` / `SystemCallFilter=@system-service`，
-> 以及 ICMP 探测所需的 `AmbientCapabilities=CAP_NET_RAW` + `CapabilityBoundingSet=CAP_NET_RAW`
-> （L-12：`NoNewPrivileges=true` 下文件 capabilities 被忽略，必须用 Ambient 传递）。
-> Go 版纯 TCP 探测不需要 NET_RAW，故未保留这些项。
-> `RestrictAddressFamilies` 使用 `AF_` 前缀短名是刻意的：短形式 `inet/inet6/unix`
-> 仅在 systemd ≥ 254 可用，在更旧版本上会被静默忽略（并丢弃整条限制）。
+> Go 版为纯 TCP 探测，不需要 `CAP_NET_RAW`，因此未启用 `AmbientCapabilities` 之类的 ICMP 权限。
+> 如需进一步收紧，可自行追加 `RestrictAddressFamilies`（注意用 `AF_` 前缀短名：`inet/inet6/unix`
+> 仅在 systemd ≥ 254 可用，在更旧版本上会被静默忽略并丢弃整条限制）。
 
 ## Go 受控端（唯一受控端）
 
-Go 受控端是 Python 版的**等价原生重写**：数据格式、上报契约、安全模型完全一致（直读 `/proc`、零外部依赖、强制 HTTPS、单向上报、零入站端口、无指令通道）。体积 ~5MB 静态二进制、内存 <10MB。
+Go 受控端直读 `/proc`、零外部依赖、强制 HTTPS、单向上报、零入站端口、无指令通道；体积 ~5MB 静态二进制、内存 <10MB。
 
-> **自 M3（2026-09）起 Go 是默认且唯一受控端**：`diting.sh --install-agent`、Windows 一键命令、
-> Docker 一键命令（`docker build ...#master:agent-go`，Go scratch 镜像）均已切换为 Go 版；
-> Python 端（`agent/`）已挂 deprecation 公告，将在观察期后（M4）移除。
-> 存量 Python 节点执行 `--update-agent` 即迁移到 Go（身份与月流量状态保留）。
+> **自 2026-10 起 Go 是唯一受控端**：`diting.sh --install-agent`、Windows 一键命令、
+> Docker 一键命令（`docker build ...#master:agent-go`，Go scratch 镜像）均为 Go 版；
+> 原 Python 实现（`agent/`）已从仓库移除。
 > 以下为从源码构建（一般在开发时使用；生产部署走上面的安装脚本）。
 
 ### 构建
@@ -117,11 +111,11 @@ DISK_PATH=/ \
 
 > **安全说明（容器挂载面，审查 B1）**：`-v /:/host:ro` 是宿主磁盘监控的架构依赖（`disk_list` 依赖 mount 命名空间中的 `/host` 前缀条目统计多盘），但它使 agent 进程可读宿主任一 uid≤1000 可读的文件。缓解：容器已 `cap_drop: ALL` + `no-new-privileges` + uid 1000 运行，agent 无指令通道、仅 `statvfs`/读 `/proc`，利用前提是 agent 自身被攻破（纵深防御缺口而非直接利用面）。如需进一步收窄：保留 `-v /proc:/hostproc:ro`，按 `/hostproc/mounts` 中的条目逐盘 bind（如 `-v /data:/host/data:ro`）并去掉 `/:/host:ro`——`disk_list` 在 `DISK_PATH=/host` 时优先读 `/hostproc/mounts`，各 `/host/...` 路径 bind 可达即可正常统计；**不要改用 `/proc/1/mounts`**（compose 无 `pid: host`，容器内 `/proc/1` 是容器自己的 init，读不到宿主挂载表）。
 
-> **探测口径差异（审查 E7）**：Go 版为纯 TCP 探测，`loss` 只有二值（握手成功 0 / 预算内全失败 100），不代表链路丢包率；Python 版优先 ICMP，可统计真实丢包率（如 33%）。同一看板混合两种 agent 时，丢包列语义不同——跨版本对比丢包率请以 agent 类型区分，不要直接横向比较。
+> **探测口径（审查 E7）**：受控端为纯 TCP 探测，`loss` 只有二值（握手成功 0 / 预算内全失败 100），不代表链路丢包率，请勿据此判断丢包比例。
 
 > **告警阈值（审查 C-1/E2）**：`offline_sec`/`cpu_pct`/`mem_pct`/`disk_pct`/`temp_c` 按「节点覆盖 > 分组覆盖 > 后台显式设置 > 环境变量 > 默认」解析（S1/F1，覆盖表为空时行为与旧版一致），告警、看板、AI 摘要三端同源；`DISK_ALERT_PCT`（默认 90）与 `TEMP_ALERT_C`（默认 80）为磁盘/温度告警阈值。触发判定采用采样窗口：默认 `ALERT_WINDOW_SAMPLES=5` 内超限占比 ≥ `ALERT_TRIGGER_RATIO=0.7`；显式设置 `ALERT_SUSTAIN_SAMPLES=N` 退回旧的「连续 N 次全超限」。`ALERT_COOLDOWN_SEC`（默认 1800）为同类告警冷却，`ONLINE_NOTIFY_GRACE_SEC`（默认 180）为上线通知宽限期。
 
-> **供应链完整性（审查 B3/B4）**：安装脚本以 root 执行，Python 版安装器**缺省强制 SHA256 校验**——未提供 `SP_AGENT_SHA256S`（按 `agent.py,collector.py,uninstall.sh` 顺序的哈希逗号串）将拒绝下载；Go 版从 GitHub Release 下载二进制并默认校验 `.sha256`（可用 `SP_AGENT_GO_SKIP_SHA256=1` 跳过，**生产切勿设置**）。更強的推荐：发布物附 cosign 或 gpg 签名，安装时先验签。敏感参数（`AGENT_TOKEN`/`SETUP_TOKEN`）建议用 `--token-file`/`--setup-token-file` 从文件读取，或经环境变量/临时文件传递——避免出现在 `ps` 输出与 shell history 中。
+> **供应链完整性（审查 B3/B4）**：安装脚本以 root 执行，从 GitHub Release 下载二进制并默认校验 `.sha256`（可用 `SP_AGENT_GO_SKIP_SHA256=1` 跳过，**生产切勿设置**）。更強的推荐：发布物附 cosign 或 gpg 签名，安装时先验签。敏感参数（`AGENT_TOKEN`/`SETUP_TOKEN`）建议用 `--token-file`/`--setup-token-file` 从文件读取，或经环境变量/临时文件传递——避免出现在 `ps` 输出与 shell history 中。
 
 ### 环境变量
 
@@ -147,11 +141,11 @@ Go 受控端默认根据**本地指标变化率**自动切换快慢档：CPU / �
 
 **配套服务端配置（必须）**：慢档 60s 会撞服务端默认 `OFFLINE_THRESHOLD_SEC=60`，需将服务端 `.env` 设为 `OFFLINE_THRESHOLD_SEC=120`（或大于慢档），否则平稳期会因 `last_seen` 间隔过大被误判离线。该改动不涉及 agent 侧。
 
-### 与 Python 版的关系（迁移中）
+### 迁移提示
 
 - **不得共用同一 `AGENT_ID`**（否则 `last_seen` / 指标互相覆盖）；如需并行对比，注册两个独立 agent。
-- 数据格式、服务端契约、安全模型完全一致；本机 22.6h 双端并行实测：速率序列中位数比值 0.999/1.001、Pearson r=0.91。
-- Python 版已弃用（deprecation），`--update-agent` 迁移到 Go 后身份与月流量状态保留；观察期后（M4）`agent/` 目录整体移除。
+- 原 Python 节点迁移：在 Go 版安装时沿用原 `AGENT_ID` 与 Token 即可保留历史归属，随后删除旧 Python 服务/容器（Linux 见 `agent-go/uninstall.sh`，Windows 见《Windows 受控端》）。
+- 已下线的 Python 实现（`agent/`）不再接受问题反馈与安全修复。
 
 ## 连接地址（SERVER_URL / Agent 专用连接地址）选型
 
@@ -203,22 +197,19 @@ SERVER_URL=https://1.2.3.4:4443
 
 | 指标 | Linux 来源 | Windows 来源 |
 |---|---|---|
-| CPU 使用率 | `/proc/stat` | psutil |
-| 内存使用率 | `/proc/meminfo` | psutil |
-| 磁盘使用率 | `os.statvfs` | psutil |
+| CPU 使用率 | `/proc/stat` | Windows API（GetSystemTimes） |
+| 内存使用率 | `/proc/meminfo` | GlobalMemoryStatusEx |
+| 磁盘使用率 | `statvfs` | GetDiskFreeSpaceEx（全部固定盘求和，不含可移动盘） |
 | 系统负载 | `/proc/loadavg` | 恒为 `0.0`（Windows 无 load 概念；**不用进程数近似**——进程列表属指纹字段） |
-| 网络流量 | `/proc/net/dev` | psutil |
-| 温度 | `/sys/class/thermal/` | psutil |
-| Swap | `/proc/meminfo` | psutil |
-| 开机时长 | `/proc/uptime` | psutil |
-| 网络质量 | ICMP/TCP ping（ICMP 优先，可算真实丢包率） | 纯 TCP 握手（无 ICMP 权限依赖），loss 为 **0/100 二值** |
+| 网络流量 | `/proc/net/dev` | GetIfTable2 |
+| 温度 | `/sys/class/thermal/` | 尽力而为（部分机型无传感器时为空） |
+| Swap | `/proc/meminfo` | 页面文件统计 |
+| 开机时长 | `/proc/uptime` | GetTickCount64 |
+| 网络质量 | 纯 TCP 握手，loss 为 **0/100 二值** | 同左 |
 
-> Go 受控端当前仅支持 Linux，指标来源与 Python 版 Linux 完全一致（直读 `/proc`），两者上报数据可并排对比。Windows 暂仅由 Python 版支持。
->
-> 网络质量探测（`probes`）两版口径差异：Python 版 ICMP 优先、可算**真实丢包率**；
-> Go 版为**纯 TCP 握手**（不需 `CAP_NET_RAW`，但也没有 ICMP 丢包统计），
+> 网络质量探测（`probes`）为**纯 TCP 握手**（不需 `CAP_NET_RAW`，也没有 ICMP 丢包统计），
 > `loss` 只取 **0（握手成功）/ 100（三轮全失败）** 二值，不伪造中间值——
-> 「三轮重试中几次失败」不代表链路丢包率。两侧字段名与结构一致，服务端无需改动。
+> 「三轮重试中几次失败」不代表链路丢包率。
 
 ### 月流量清零口径
 
@@ -232,15 +223,15 @@ Go 受控端只上报绝对计数器 `net_rx` / `net_tx` 与重置日 `month_rot
 
 Windows 版 `INTERVAL` 默认 **15s**；Linux systemd 安装与 Go 配置兜底为 **20s**；**Docker 镜像为 15s**
 （`agent-go/Dockerfile` 与 `agent-go/docker-compose.yml` 的 `ENV INTERVAL=15`）。这是历史遗留差异，
-**不修复**：Windows 受控端（Python）已进入冻结期，新装走 Go 版；Docker 形态如需 20s，
+**不修复**（服务端默认离线阈值 60s，15/20s 均在安全范围）；Docker 形态如需 20s，
 显式传 `-e INTERVAL=20` 覆盖。
 
 ## 卸载
 
 ```bash
-# Go 版（当前默认）：幂等，可重复执行；保留 /etc/diting/agent.env 与 state.json
+# 幂等，可重复执行；保留 /etc/diting/agent.env 与 state.json
 curl -fsSL https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/uninstall.sh | bash
 ```
 
-> Python 版卸载脚本是 `agent/uninstall.sh`，语义不同：它会删除 `/opt/diting`、`/var/lib/diting`、
-> `/etc/diting` 并 `userdel diting`（连月流量状态一起清掉）。升级到 Go 后请用上面的脚本。
+> 需要彻底清理（含配置与月流量状态）时，在卸载脚本基础上自行删除 `/opt/diting`、`/var/lib/diting`、
+> `/etc/diting` 并 `userdel diting`。原 Python 版卸载脚本已随 `agent/` 一并下线。

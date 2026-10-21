@@ -19,7 +19,7 @@ DiTing 是一个纯状态监控方案，专注于「在线/负载/CPU/内存/硬
     受控端仅出站上报，服务端无法向 Agent 下发任何指令。从架构层面杜绝 RCE。
   </Card>
   <Card title="🪶 轻量低耗" icon="seti:rocket">
-    原生部署的服务端约 30-60MB、Go 受控端 <10MB（Python 受控端 12-25MB）；Go 版零外部依赖。
+    原生部署的服务端约 30-60MB、Go 受控端 <10MB；受控端为单文件静态二进制，零外部依赖。
   </Card>
   <Card title="🛡️ 安全优先" icon="seti:shield">
     TOTP 2FA、CSP、HTTPS 白名单、恒定时间比较、可选只读 Token（`READONLY_TOKEN`）、Prometheus `/metrics`。
