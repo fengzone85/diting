@@ -5,10 +5,15 @@ import type { PublicMeta } from '../services/types';
 
 const props = defineProps<{
   version?: string;
+  /** 构建时间：仅登录态由服务端下发（匿名只回主版本号），无值时不渲染该行 */
+  buildTime?: string;
   meta?: PublicMeta | null;
   ip?: string;
   browser?: string;
 }>();
+
+// 匿名访问只有主版本号（"1"），只有登录态才拿到 "1.0.9" 这种精确版本
+const showVersion = computed(() => /^\d+\.\d+/.test(props.version || ''));
 
 const socialItems = computed(() => {
   const m = props.meta;
@@ -37,7 +42,11 @@ const socialItems = computed(() => {
           >
             DiTing
           </a>
-          <span v-if="version" class="text-muted">v{{ version }}</span>
+          <!-- 匿名只有主版本号（如 "1"），信息量低且观感像占位，故仅在拿到精确版本时显示 -->
+          <span v-if="showVersion" class="text-muted">v{{ version }}</span>
+        </div>
+        <div v-if="buildTime" class="text-muted">
+          {{ t('footer.buildTime') }}: {{ buildTime }}
         </div>
         <div v-if="ip">
           {{ t('footer.visitorIp') }}: {{ ip }}<span v-if="browser"> · {{ browser }}</span>

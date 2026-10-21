@@ -592,6 +592,7 @@ export const zhCN: Record<string, string> = {
 
   // 页脚
   'footer.visitorIp': '您的 IP',
+  'footer.buildTime': '构建时间',
 
   // AI
   'ai.title': 'AI 运维分析',

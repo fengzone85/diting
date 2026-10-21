@@ -590,6 +590,7 @@ export const enUS: Record<string, string> = {
 
   // footer
   'footer.visitorIp': 'Your IP',
+  'footer.buildTime': 'Build time',
 
   // ai
   'ai.title': 'AI Analysis',

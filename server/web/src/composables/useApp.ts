@@ -116,17 +116,18 @@ export function customTag(agentId: string): string {
 const CARD_SCHEMES: Record<string, string[]> = {
   // uptime → instant_traffic（2026-10-12 用户指定）：原「运行时间」卡 value 一直未实现，
   // 改为「总即时流量」（所有节点实时速率之和）
-  // online_total（2026-10-21 用户指定）：原「在线」+「受控端总数」合并为「当前在线 x / y」
+  // online_total（2026-10-21 用户指定）：原「在线」+「受控端总数」合并为「当前在线 x / y」，
+  // 所有含这两张卡的方案统一改用合并卡（finance/asset 的「受控端总数」单卡保留）
   official: ['online_total', 'cpu', 'mem', 'traffic', 'instant_traffic'],
-  basic: ['online', 'total', 'cpu', 'mem'],
-  ops: ['online', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
+  basic: ['online_total', 'cpu', 'mem'],
+  ops: ['online_total', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
   resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'instant_traffic'],
   // remaining：剩余价值（Komari 资产统计口径，价格×剩余天数÷周期天数）
   finance: ['total', 'price', 'remaining', 'expire', 'quota'],
   traffic: ['traffic_total', 'rx_month', 'tx_month', 'net'],
-  gpu: ['online', 'total', 'cpu', 'mem', 'gpu'],
+  gpu: ['online_total', 'cpu', 'mem', 'gpu'],
   asset: ['total', 'groups', 'country', 'merchant'],
-  full: ['online', 'total', 'cpu', 'mem', 'disk', 'net', 'traffic', 'instant_traffic', 'price', 'expire', 'quota'],
+  full: ['online_total', 'cpu', 'mem', 'disk', 'net', 'traffic', 'instant_traffic', 'price', 'expire', 'quota'],
 };
 export function cardSchemeKeys(): string[] {
   const scheme = (state.meta?.card_scheme as string) || 'official';
