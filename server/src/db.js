@@ -1128,7 +1128,8 @@ const setConfig = (k, v) => _setCfg.run(k, String(v));
 // 仅当 key 不存在时写入（依赖 key 主键唯一性）。返回 true 表示本次写入成功。
 // 用于 /api/setup/generate 防并发竞态：多个请求同时到达时只有一个能落库，其余返回 false。
 const setConfigIfAbsent = (k, v) => _setCfgIfAbsent.run(k, String(v)).changes > 0;
-// 删除配置项。返回 true 表示确实删了一行。用于安装向导回滚初始化锁、清理历史残留。
+// 删除配置项。返回 true 表示确实删了一行。用于安装向导 complete 失败时回滚初始化状态、
+// 清理历史残留（旧 admin_initialized 锁、明文 admin_token_raw）。
 const deleteConfig = (k) => _delCfg.run(k).changes > 0;
 
 // ---- 管理员 Token：只存 sha256 哈希，库文件泄露不等于拿到 Token ----
@@ -1136,7 +1137,7 @@ const deleteConfig = (k) => _delCfg.run(k).changes > 0;
 const ADMIN_TOKEN_HASH = 'admin_token_hash';
 const getAdminTokenHash = () => getConfig(ADMIN_TOKEN_HASH) || '';
 const setAdminTokenHash = (h) => setConfig(ADMIN_TOKEN_HASH, String(h || ''));
-// 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（对齐旧 admin_initialized 的防重语义）。
+// 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（即"已安装"，防重装）。
 const setAdminTokenHashIfAbsent = (h) => setConfigIfAbsent(ADMIN_TOKEN_HASH, String(h || ''));
 const clearAdminTokenHash = () => deleteConfig(ADMIN_TOKEN_HASH);
 const get2FASecret = () => getConfig(TWOFA_SECRET);
@@ -1149,7 +1150,7 @@ const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 const BACKUP_STATE_KEY = 'backup_state';
 function getUiSettings() {
-  const def = { site_title: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
+  const def = { site_title: '', site_description: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
     // 公开接口（/api/public/agents、/api/v1/nodes）是否透出业务字段：
     // 商家 merchant、到期 expire_at、备注 note、月流量配额 monthly_quota_gb、套餐 price/billing_cycle/currency。
     // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；

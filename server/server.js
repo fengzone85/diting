@@ -10,6 +10,7 @@ const api = require('./src/api');
 const compat = require('./src/compat');
 const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
+const install = require('./src/install');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
 const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
@@ -259,6 +260,26 @@ function _metricsHandler(req, res) {
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8').send(lines.join('\n') + '\n');
 }
 
+// ---- 安装向导 API（复刻 komari /api/install/*：status 探测 + complete 单步安装）----
+// 挂载在拦截闸之前，未安装时也要保证可达；complete 自带三层防重装（409/410）。
+app.use('/api/install', install.router);
+
+// ---- 安装向导拦截（复刻 komari guideNoRoute：未安装时管理面 API 形同不存在）----
+// 未安装（无可用 Admin Token）时，管理面端点直接 403，把访客引导到 /install；
+// 安装向导自身、旧 setup 兼容端点不受影响；agent 上报面（/api/v1/*、/api/report 等）
+// 与 SETUP_TOKEN 自助注册（/api/setup/register）同样放行——它们在「未安装」状态下
+// 也是合法入口。其余 admin 端点自带鉴权（未安装时无凭据必 401），无需在此穷举。
+app.use('/api', (req, res, next) => {
+  if (!install.needsInstall()) return next();
+  if (req.path === '/install' || req.path.startsWith('/install/')) return next();
+  if (req.path === '/setup' || req.path.startsWith('/setup/')) return next();
+  const p = req.path;
+  if (p === '/admin' || p.startsWith('/admin/') || p === '/login' || p === '/logout') {
+    return res.status(403).json({ error: 'installation_required', message: '系统尚未完成安装，请先访问 /install 完成初始化' });
+  }
+  next();
+});
+
 // IP 白名单：保护管理 API（公开只读接口除外）
 app.use('/api', (req, res, next) => {
   if (req.path.startsWith('/public/') || req.path === '/report' ||
@@ -405,18 +426,17 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   return res.sendFile(indexPath);
 });
 
-// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
-app.get('/setup.html', (req, res) => {
-  if (hasAdminToken()) {
-    return res.redirect(302, '/admin');
-  }
-  res.sendFile(path.join(__dirname, 'public', 'setup.html'));
-});
-app.get('/setup', (req, res) => res.redirect(302, '/setup.html'));
+// 旧初始化页（/setup.html）已由 SPA 内安装向导 /install 取代（复刻 komari 安装向导：
+// 未安装时全站页面 307 进向导，安装完成后向导 API 永久禁用）。保留路径做 302 兼容跳转，
+// 旧书签、文档链接与脚本输出提示仍然可达。判断依据是库中有无 Token 哈希（P0 起）。
+app.get('/setup.html', (req, res) => res.redirect(302, '/install'));
+app.get('/setup', (req, res) => res.redirect(302, '/install'));
 
 // admin 路由由 SPA 接管：网络层 IP 白名单闸 + 显式返回 SPA 入口
 // 正则覆盖裸 /admin 与 /admin/*（Express 4 中 /admin/* 不匹配裸 /admin）
 app.get(/^\/admin(\/.*)?$/, ipWhitelist, (req, res) => {
+  // 未安装：复刻 komari guideNoRoute——任何页面一律 307 进安装向导
+  if (install.needsInstall()) return res.redirect(307, '/install');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 // 旧书签 / 外链兼容：/admin.html 301 到 /admin
@@ -436,8 +456,15 @@ app.get('*', (req, res, next) => {
   // API 与显式路由已注册在前，不会落到此处
   if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
 
+  // 未安装（复刻 komari guideNoRoute）：除向导页 /install 外，任何页面 GET 一律
+  // 307 到 /install——访客首次打开任何地址都会被引导进安装向导。静态资源（带后缀）
+  // 不受影响，向导页面自身可正常加载；/install 落到下方 SPA_PREFIXES 返回 Vue 入口。
+  if (install.needsInstall() && req.path !== '/install' && !path.extname(req.path)) {
+    return res.redirect(307, '/install');
+  }
+
   // Vue SPA 内部路由前缀优先：这些路径不应被第三方主题吞掉
-  const SPA_PREFIXES = ['/admin', '/login', '/node'];
+  const SPA_PREFIXES = ['/admin', '/login', '/node', '/install'];
   const isSpaRoute = SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + '/'));
 
   // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）
