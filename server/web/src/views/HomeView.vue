@@ -283,6 +283,7 @@ const filteredAgents = computed(() => {
         <StatCard
           v-for="(c, i) in overviewCards.items"
           :key="i"
+          size="sm"
           :label="c.label"
           :value="c.value"
           :sub="c.sub"
