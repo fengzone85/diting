@@ -122,6 +122,9 @@ const overviewCards = computed(() => {
   const quotaBytes = totalQuotaGb * 1024 ** 3;
   const quotaPct = quotaBytes > 0 ? (trafficUsed / quotaBytes) * 100 : 0;
   const usedText = trafficUsed > 0 ? fmtBytes(trafficUsed) : '0B';
+  // 平均系统负载（ops 方案）：仅统计有 load1 上报的节点
+  const loadValues = ags.map((a) => a.load1).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const avgLoad = loadValues.length ? loadValues.reduce((s, v) => s + v, 0) / loadValues.length : null;
   const map: Record<string, { label: string; value: string; sub?: string; compact?: boolean; subBig?: boolean; variant: 'default' | 'success' | 'danger' | 'warning' }> = {
     online: { label: t('public.online'), value: String(o?.online ?? '-'), variant: 'success' },
     offline: { label: t('public.offline'), value: String(o?.offline ?? '-'), variant: 'danger' },
@@ -129,7 +132,10 @@ const overviewCards = computed(() => {
     total: { label: t('public.totalAgents'), value: String(o?.total ?? '-'), variant: 'default' },
     cpu: { label: t('public.avgCpu'), value: o?.cpu_avg != null ? `${o.cpu_avg.toFixed(1)}%` : '-', variant: 'warning' },
     mem: { label: t('public.avgMem'), value: o?.mem_avg != null ? `${o.mem_avg.toFixed(1)}%` : '-', variant: 'default' },
-    load: { label: t('public.highLoad'), value: String(highLoad), variant: 'warning' },
+    // 「系统负载」≠「高负载节点数」：原先与 warn 共用 highLoad 计数和同一个
+    // i18n 文案，导致 ops 方案里出现两张一模一样的「高负载」卡。
+    // 这里改为各节点 load1 的均值。
+    load: { label: t('public.avgLoad'), value: avgLoad != null ? avgLoad.toFixed(2) : '-', variant: 'default' },
     disk: { label: t('public.diskUsage'), value: '-', variant: 'default' },
     net: { label: t('public.netRate'), ...liveTraffic },
     swap: { label: t('public.swap'), value: '-', variant: 'default' },
@@ -178,7 +184,9 @@ function fmtRateCompact(n: number): string {
   return `${n.toFixed(1)}${u[i]}`;
 }
 function fmtPrice(n: number): string {
-  return n ? `${state.agents[0]?.currency || '¥'}${n.toFixed(2)}` : '-';
+  // 合计为 0 时显示「免费」而不是 '-'：原先的 '-' 会被读成「无数据」，
+  // 但 price 未填与 0 元在数据层无法区分，统一按免费呈现。
+  return n ? `${state.agents[0]?.currency || '¥'}${n.toFixed(2)}` : t('public.free');
 }
 
 // 快捷统计条（对齐 komari 快捷控制条）

@@ -340,6 +340,8 @@ export const zhCN: Record<string, string> = {
   'public.simple': '简约',
   'public.visual': '完整',
   'public.highLoad': '高负载',
+  'public.avgLoad': '平均负载',
+  'public.free': '免费',
   'public.expiring': '即将到期',
   'public.favorites': '收藏',
   'public.avgMem': '平均内存',
