@@ -101,6 +101,16 @@ try {
   const wCollapsed = await width();
   assert(wCollapsed < 120, '收起后应为图标轨，实际 ' + wCollapsed);
   assert(!(await aside.locator('.label').first().isVisible()), '收起后文案应隐藏');
+
+  // 收起后：「D」字标与站名隐藏，收起/展开按钮顶替其位置并水平居中（对齐 Komari），
+  // 二者不得同时出现（此前会与 D 字重叠）。
+  assert(!(await aside.locator('.brand').isVisible()), '收起后品牌区应隐藏');
+  const toggle = aside.locator('.collapse-toggle');
+  assert(await toggle.isVisible(), '收起后展开按钮应可见');
+  const ab = await aside.boundingBox();
+  const tb = await toggle.boundingBox();
+  assert(tb && ab && Math.abs((tb.x + tb.width / 2) - (ab.x + ab.width / 2)) <= 4,
+    `收起态按钮应居中于侧栏（侧栏 ${Math.round(ab.width)}px，按钮中心偏移 ${tb ? Math.round(tb.x + tb.width / 2 - (ab.x + ab.width / 2)) : 'n/a'}px）`);
   await shot(page, 'menu-collapsed.png');
 
   // 刷新后保持收起
