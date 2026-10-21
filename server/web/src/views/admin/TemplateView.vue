@@ -269,7 +269,7 @@ async function save() {
 <template>
   <div>
     <h1 class="mb-2 text-2xl font-bold">{{ t('template.title') }}</h1>
-    <p class="mb-6 text-sm text-slate-400">{{ t('template.desc') }}</p>
+    <p class="mb-6 text-sm text-muted">{{ t('template.desc') }}</p>
 
     <div v-if="message" class="mb-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200">
       {{ message }}
@@ -277,52 +277,52 @@ async function save() {
 
     <!-- 暗色配色 -->
     <div class="glass mb-6 p-6">
-      <h2 class="mb-4 text-lg font-semibold text-slate-100">{{ t('template.darkSection') }}</h2>
+      <h2 class="mb-4 text-lg font-semibold text-content">{{ t('template.darkSection') }}</h2>
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('template.cardColor') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('template.cardColor') }}</label>
           <div class="flex items-center gap-2">
             <input type="color" v-model="darkTintHex" class="h-9 w-12 rounded border border-slate-700 bg-transparent" />
             <input type="range" min="0" max="100" v-model.number="darkAlpha" class="flex-1" />
-            <span class="w-12 text-right text-xs text-slate-400">{{ darkAlpha }}%</span>
+            <span class="w-12 text-right text-xs text-muted">{{ darkAlpha }}%</span>
           </div>
-          <p class="mt-1 text-xs text-slate-500">{{ t('template.alphaHint') }}</p>
+          <p class="mt-1 text-xs text-muted">{{ t('template.alphaHint') }}</p>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('template.blur') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('template.blur') }}</label>
           <div class="flex items-center gap-2">
             <input type="range" min="0" max="30" :value="parseInt(form.glass_custom?.dark?.[2] || '14')" @input="(e:any)=>form.glass_custom!.dark![2] = e.target.value + 'px'" class="flex-1" />
-            <span class="w-12 text-right text-xs text-slate-400">{{ form.glass_custom?.dark?.[2] }}</span>
+            <span class="w-12 text-right text-xs text-muted">{{ form.glass_custom?.dark?.[2] }}</span>
           </div>
         </div>
       </div>
 
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('template.background') }}</h3>
+      <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('template.background') }}</h3>
       <div class="inner-panel p-4">
-        <label class="flex items-center gap-2 text-sm text-slate-300">
+        <label class="flex items-center gap-2 text-sm text-secondary">
           <input type="checkbox" v-model="form.background_dark!.enabled" class="rounded" />
           {{ t('settings.backgroundEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.type') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.type') }}</label>
             <select v-model="form.background_dark!.type" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
               <option value="image">{{ t('settings.image') }}</option>
               <option value="video">{{ t('settings.video') }}</option>
             </select>
           </div>
           <div class="sm:col-span-2">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.url') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.url') }}</label>
             <input v-model="form.background_dark!.url" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" placeholder="https://..." />
           </div>
         </div>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.blur', { n: form.background_dark!.blur }) }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.blur', { n: form.background_dark!.blur }) }}</label>
             <input type="range" min="0" max="30" v-model.number="form.background_dark!.blur" class="w-full" />
           </div>
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.overlay', { n: form.background_dark!.overlay }) }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.overlay', { n: form.background_dark!.overlay }) }}</label>
             <input type="range" min="0" max="100" v-model.number="form.background_dark!.overlay" class="w-full" />
           </div>
         </div>
@@ -331,52 +331,52 @@ async function save() {
 
     <!-- 亮色配色 -->
     <div class="glass mb-6 p-6">
-      <h2 class="mb-4 text-lg font-semibold text-slate-100">{{ t('template.lightSection') }}</h2>
+      <h2 class="mb-4 text-lg font-semibold text-content">{{ t('template.lightSection') }}</h2>
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('template.cardColor') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('template.cardColor') }}</label>
           <div class="flex items-center gap-2">
             <input type="color" v-model="lightTintHex" class="h-9 w-12 rounded border border-slate-700 bg-transparent" />
             <input type="range" min="0" max="100" v-model.number="lightAlpha" class="flex-1" />
-            <span class="w-12 text-right text-xs text-slate-400">{{ lightAlpha }}%</span>
+            <span class="w-12 text-right text-xs text-muted">{{ lightAlpha }}%</span>
           </div>
-          <p class="mt-1 text-xs text-slate-500">{{ t('template.alphaHint') }}</p>
+          <p class="mt-1 text-xs text-muted">{{ t('template.alphaHint') }}</p>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('template.blur') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('template.blur') }}</label>
           <div class="flex items-center gap-2">
             <input type="range" min="0" max="30" :value="parseInt(form.glass_custom?.light?.[2] || '14')" @input="(e:any)=>form.glass_custom!.light![2] = e.target.value + 'px'" class="flex-1" />
-            <span class="w-12 text-right text-xs text-slate-400">{{ form.glass_custom?.light?.[2] }}</span>
+            <span class="w-12 text-right text-xs text-muted">{{ form.glass_custom?.light?.[2] }}</span>
           </div>
         </div>
       </div>
 
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('template.background') }}</h3>
+      <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('template.background') }}</h3>
       <div class="inner-panel p-4">
-        <label class="flex items-center gap-2 text-sm text-slate-300">
+        <label class="flex items-center gap-2 text-sm text-secondary">
           <input type="checkbox" v-model="form.background_light!.enabled" class="rounded" />
           {{ t('settings.backgroundEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.type') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.type') }}</label>
             <select v-model="form.background_light!.type" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
               <option value="image">{{ t('settings.image') }}</option>
               <option value="video">{{ t('settings.video') }}</option>
             </select>
           </div>
           <div class="sm:col-span-2">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.url') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.url') }}</label>
             <input v-model="form.background_light!.url" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" placeholder="https://..." />
           </div>
         </div>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.blur', { n: form.background_light!.blur }) }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.blur', { n: form.background_light!.blur }) }}</label>
             <input type="range" min="0" max="30" v-model.number="form.background_light!.blur" class="w-full" />
           </div>
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.overlay', { n: form.background_light!.overlay }) }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.overlay', { n: form.background_light!.overlay }) }}</label>
             <input type="range" min="0" max="100" v-model.number="form.background_light!.overlay" class="w-full" />
           </div>
         </div>
@@ -385,63 +385,63 @@ async function save() {
 
     <!-- 外观与展示 -->
     <div class="glass mb-6 p-6">
-      <h2 class="mb-4 text-lg font-semibold text-slate-100">{{ t('template.appearance') }}</h2>
+      <h2 class="mb-4 text-lg font-semibold text-content">{{ t('template.appearance') }}</h2>
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.glassPreset') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('theme.glassPreset') }}</label>
           <select v-model="form.glass_preset" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in presetOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.colorVisionMode') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('theme.colorVisionMode') }}</label>
           <select v-model="form.color_vision" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in cvOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardScheme') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('theme.cardScheme') }}</label>
           <select v-model="form.card_scheme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in schemeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-sm text-slate-400">{{ t('theme.cardSize') }}</label>
+          <label class="mb-1 block text-sm text-muted">{{ t('theme.cardSize') }}</label>
           <select v-model="form.card_size" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
             <option v-for="o in sizeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
       </div>
 
-      <label class="mt-4 flex items-center gap-2 text-sm text-slate-300">
+      <label class="mt-4 flex items-center gap-2 text-sm text-secondary">
         <input type="checkbox" v-model="form.visitor_info" class="rounded" />
         {{ t('settings.visitorInfo') }}
       </label>
 
       <!-- 公告 -->
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('theme.announcement') }}</h3>
+      <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('theme.announcement') }}</h3>
       <div class="inner-panel p-4">
-        <label class="flex items-center gap-2 text-sm text-slate-300">
+        <label class="flex items-center gap-2 text-sm text-secondary">
           <input type="checkbox" v-model="form.announcement!.enabled" class="rounded" />
           {{ t('settings.announcementEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.announcementTitle') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.announcementTitle') }}</label>
             <input v-model="form.announcement!.title" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" />
           </div>
           <div>
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.announcementContent') }}</label>
+            <label class="mb-1 block text-sm text-muted">{{ t('settings.announcementContent') }}</label>
             <input v-model="form.announcement!.content" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" />
           </div>
         </div>
       </div>
 
       <!-- 厂商别名 / 自定义标签 -->
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('settings.providerAliases') }}</h3>
+      <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('settings.providerAliases') }}</h3>
       <textarea v-model="aliasesText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500"></textarea>
 
-      <h3 class="mb-3 mt-6 text-sm font-medium text-slate-300">{{ t('settings.customTags') }}</h3>
+      <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('settings.customTags') }}</h3>
       <textarea v-model="tagsText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500"></textarea>
     </div>
 
