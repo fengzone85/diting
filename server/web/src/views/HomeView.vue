@@ -122,6 +122,13 @@ const overviewCards = computed(() => {
   const quotaBytes = totalQuotaGb * 1024 ** 3;
   const quotaPct = quotaBytes > 0 ? (trafficUsed / quotaBytes) * 100 : 0;
   const usedText = trafficUsed > 0 ? fmtBytes(trafficUsed) : '0B';
+  // 月度费用（价格口径对齐 Komari）：>0 求和显示；全为 -1（免费）显示「免费」；
+  // 全为 0（未填写，不显示）则显示 '—'。
+  const priced = ags.filter((a) => typeof a.price === 'number');
+  const paidTotal = priced.reduce((s, a) => s + (a.price! > 0 ? a.price! : 0), 0);
+  const anyFree = priced.some((a) => a.price! < 0);
+  const costCurrency = priced.find((a) => a.price! > 0)?.currency || '¥';
+  const monthlyCostText = paidTotal > 0 ? `${costCurrency}${paidTotal.toFixed(2)}` : (anyFree ? t('public.free') : '—');
   // 平均系统负载（ops 方案）：仅统计有 load1 上报的节点
   const loadValues = ags.map((a) => a.load1).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const avgLoad = loadValues.length ? loadValues.reduce((s, v) => s + v, 0) / loadValues.length : null;
@@ -146,7 +153,7 @@ const overviewCards = computed(() => {
     traffic_total: { label: t('public.trafficTotal'), value: fmtBytes(totalRx + totalTx), variant: 'default' },
     rx_month: { label: t('public.rxMonth'), value: fmtBytes(totalRx), variant: 'default' },
     tx_month: { label: t('public.txMonth'), value: fmtBytes(totalTx), variant: 'default' },
-    price: { label: t('public.monthlyCost'), value: fmtPrice(sum((a) => a.price || 0)), variant: 'default' },
+    price: { label: t('public.monthlyCost'), value: monthlyCostText, variant: 'default' },
     expire: { label: t('public.expiring'), value: String(expiring), variant: 'warning' },
     // 流量配额（2026-10-21）：原为写死 '-'。有配额时主值显示使用率、
     // 副行显示「已用 / 配额」；未配置配额（全为 0）时显示已用量 + ∞。
@@ -183,11 +190,7 @@ function fmtRateCompact(n: number): string {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(1)}${u[i]}`;
 }
-function fmtPrice(n: number): string {
-  // 合计为 0 时显示「免费」而不是 '-'：原先的 '-' 会被读成「无数据」，
-  // 但 price 未填与 0 元在数据层无法区分，统一按免费呈现。
-  return n ? `${state.agents[0]?.currency || '¥'}${n.toFixed(2)}` : t('public.free');
-}
+
 
 // 快捷统计条（对齐 komari 快捷控制条）
 const quickFilters = computed(() => {

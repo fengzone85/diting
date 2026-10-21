@@ -5,7 +5,6 @@ import type { Agent } from '../services/types';
 import { formatBytes, formatBitsPerSecond } from '../utils/format';
 import { providerAlias } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
-import NodeBilling from './NodeBilling.vue';
 import { ArrowUp, ArrowDown, Upload, Download } from '@icon-park/vue-next';
 
 const { t } = useI18n();
@@ -24,6 +23,13 @@ const emit = defineEmits<{
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent ?? 0);
 const memPct = computed(() => props.agent.mem_pct ?? 0);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
+// 价格胶囊：0/未填 → 不显示；-1 → 免费；>0 → 货币 + 金额（对齐 Komari 后台口径）
+const priceLabel = computed(() => {
+  const p = props.agent.price;
+  if (typeof p !== 'number' || p === 0) return '';
+  if (p < 0) return t('public.free');
+  return `${props.agent.currency || '¥'}${p}/mo`;
+});
 // Windows 无 Unix load（load1/5/15 恒 0）：卡片相应位置改显示进程总数
 const isWindows = computed(() => (props.agent.os || '').toLowerCase().includes('windows'));
 
@@ -250,8 +256,10 @@ const tags = computed(() => {
       <span class="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
         {{ t('card.uptime') }} {{ uptimeDays }}d
       </span>
-      <!-- 账单入口：价格胶囊（免费时显示「免费」），点击弹出账单卡片 -->
-      <NodeBilling :agent="agent" />
+      <!-- 价格口径对齐 Komari：0 = 不显示、-1 = 免费、>0 = 实际金额 -->
+      <span v-if="priceLabel" class="min-w-0 truncate text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
+        {{ priceLabel }}
+      </span>
     </div>
 
     <!-- Metrics: 2-col grid - 对齐 Komari wt: gap-x-4 gap-y-2.5 -->

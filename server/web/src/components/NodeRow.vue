@@ -5,7 +5,6 @@ import type { Agent } from '../services/types';
 import { formatDuration, formatBitsPerSecond, formatBytes } from '../utils/format';
 import { providerAlias, customTag } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
-import NodeBilling from './NodeBilling.vue';
 
 const { t } = useI18n();
 const props = defineProps<{
@@ -187,7 +186,6 @@ const columns = computed(() => props.dense
         <span class="text-[13px] font-semibold text-foreground truncate">{{ agent.name }}</span>
         <span v-if="merchantName" class="text-[11px] font-medium text-foreground/60 truncate shrink-0">{{ merchantName }}</span>
         <span v-if="tag" class="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-300 shrink-0">{{ tag }}</span>
-        <NodeBilling :agent="agent" compact class="shrink-0" />
       </div>
 
       <!-- 信息：uptime + 群组/系统副标题（dense 形态隐藏） -->

@@ -5,7 +5,6 @@ import type { Agent, Sparklines, SparklinePoint } from '../services/types';
 import { formatBytes, formatDuration, formatPercent, formatBitsPerSecond, formatNumber } from '../utils/format';
 import { providerAlias } from '../composables/useApp';
 import { useI18n } from '../composables/useI18n';
-import NodeBilling from './NodeBilling.vue';
 
 const { t } = useI18n();
 
@@ -126,7 +125,6 @@ const trafficPct = computed(() => {
       <span v-if="agent.group && !merchantName && !tag" class="badge">{{ agent.group }}</span>
       <span v-if="tag" class="badge badge-tag">{{ tag }}</span>
       <span v-if="merchantName && !tag" class="badge">{{ merchantName }}</span>
-      <NodeBilling :agent="agent" compact />
     </div>
 
     <!-- ===== 旧版 .meta：hostname · os ===== -->

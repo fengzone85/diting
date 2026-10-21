@@ -70,7 +70,8 @@ export interface Agent {
   has_counter?: boolean;
   price?: number;
   billing_cycle?: number;
-  currency?: '¥' | '$' | '€' | '£';
+  // 对齐 Komari：¥ 人民币 / $ 美元 / € 欧元 / £ 英镑 / ₽ 卢布 / ₣ 法郎 / ₹ 卢比 / ₫ 越南盾 / ฿ 泰铢
+  currency?: '¥' | '$' | '€' | '£' | '₽' | '₣' | '₹' | '₫' | '฿';
   auto_renewal?: boolean;
   probe_targets?: string;
   created_at?: string;
