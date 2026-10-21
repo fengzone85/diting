@@ -6,7 +6,7 @@
 // - 选择卡片：弹窗内勾选全部可选卡片
 // - 布局写入服务端 ui.admin_dashboard_layout，全局生效
 // 卡片本体由父组件以「id + label + 组件」注入，本组件只管布局与交互。
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { GridFour, Refresh } from '@icon-park/vue-next';
 import { adminApi } from '../../services/adminApi';
 import { useI18n } from '../../composables/useI18n';
@@ -37,16 +37,18 @@ const HEIGHT_OPTIONS: { value: DashboardWidgetHeight; label: string }[] = [
   { value: 'tall', label: 'dashboard.heightTall' },
 ];
 
-// 列跨度与最小高度：compact/wide/full 对应 1/2/4 列（sm 下 1/2/2）
+// 列跨度：compact/wide/full 对应 1/2/4 列（sm 下 1/2/2）
 const WIDTH_CLASS: Record<DashboardWidgetWidth, string> = {
   compact: 'col-span-1',
   wide: 'sm:col-span-2',
   full: 'sm:col-span-2 lg:col-span-4',
 };
+// 高度档位 = 内容区最小高度；网格行内卡片会被拉伸到同高（grid 默认 stretch），
+// 因此同一行的卡片严格等高，不同档位之间才有高矮差异。内容超出时卡片内部滚动。
 const HEIGHT_CLASS: Record<DashboardWidgetHeight, string> = {
-  short: 'min-h-[92px]',
-  normal: 'min-h-[132px]',
-  tall: 'min-h-[196px]',
+  short: 'min-h-[112px]',
+  normal: 'min-h-[196px]',
+  tall: 'min-h-[288px]',
 };
 
 const widgetMap = computed(() => new Map(props.widgets.map((w) => [w.id, w])));
@@ -139,37 +141,61 @@ function removeCard(id: string) {
   draft.value = draft.value.filter((w) => w.id !== id);
 }
 
-// ---- 拖拽排序（HTML5 DnD：仅编辑态、由手柄发起）----
-function onDragStart(i: number, e: DragEvent) {
+// ---- 拖拽排序（Pointer Events：鼠标 + 触屏统一，编辑态可用）----
+// 不用 HTML5 DnD：其拖影样式不可控、触屏基本不可用，且拖动整卡时会被文本选择干扰。
+// 这里按下即进入拖拽态，指针移过哪张卡就把哪张卡高亮为目标，松开即把卡片插到该位置。
+let pointerId: number | null = null;
+
+function onCardPointerDown(e: PointerEvent, i: number) {
+  if (!editing.value || saving.value) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  // 工具条上的下拉框/按钮/删除不触发拖拽
+  const target = e.target as HTMLElement | null;
+  if (target?.closest('select,button:not([data-drag-handle]),input,a,label,textarea')) return;
+  // 触屏只允许从抓手开始拖，避免和页面滚动冲突
+  if (e.pointerType !== 'mouse' && !target?.closest('[data-drag-handle]')) return;
+
+  e.preventDefault();
+  pointerId = e.pointerId;
   dragIndex.value = i;
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(i));
-    // 拖影用整张卡片，而不是那个小手柄
-    const section = (e.currentTarget as HTMLElement | null)?.closest('section');
-    if (section) e.dataTransfer.setDragImage(section, 24, 16);
-  }
-}
-function onDragOver(i: number) {
-  if (dragIndex.value === null) return;
   overIndex.value = i;
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp, { once: true });
+  window.addEventListener('pointercancel', onPointerUp, { once: true });
 }
-function onDragLeave(i: number) {
-  if (overIndex.value === i) overIndex.value = null;
+
+function onPointerMove(e: PointerEvent) {
+  if (dragIndex.value === null || (pointerId !== null && e.pointerId !== pointerId)) return;
+  // 指针位置下的卡片（elementFromPoint 不受 pointer capture 影响）
+  const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+  const section = el?.closest('[data-card-index]') as HTMLElement | null;
+  if (!section) return;
+  const idx = Number(section.dataset.cardIndex);
+  if (Number.isInteger(idx) && idx >= 0) overIndex.value = idx;
 }
-function onDrop(i: number) {
+
+function onPointerUp() {
   const from = dragIndex.value;
-  if (from === null || from === i) return;
-  const next = [...draft.value];
-  const [moved] = next.splice(from, 1);
-  next.splice(i, 0, moved);
-  draft.value = next;
-  onDragEnd();
-}
-function onDragEnd() {
+  const to = overIndex.value;
+  if (from !== null && to !== null && from !== to) {
+    const next = [...draft.value];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    draft.value = next;
+  }
   dragIndex.value = null;
   overIndex.value = null;
+  pointerId = null;
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
 }
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onPointerMove);
+  window.removeEventListener('pointerup', onPointerUp);
+  window.removeEventListener('pointercancel', onPointerUp);
+});
 
 async function save() {
   saving.value = true;
@@ -248,36 +274,44 @@ async function save() {
     </div>
 
     <!-- 看板网格 -->
-    <div v-if="draft.length" class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div
+      v-if="draft.length"
+      class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      :class="dragIndex !== null ? 'select-none' : ''"
+    >
       <section
         v-for="(w, i) in draft"
         :key="w.id"
+        :data-card-index="i"
         class="min-w-0"
         :class="[
           WIDTH_CLASS[w.width],
-          dragIndex !== null && dragIndex === i ? 'opacity-40' : '',
-          overIndex === i && dragIndex !== i ? 'rounded-xl ring-2 ring-sky-500/60' : '',
+          dragIndex === i ? 'opacity-60 ring-2 ring-sky-500' : '',
+          overIndex === i && dragIndex !== null && dragIndex !== i ? 'rounded-xl ring-2 ring-sky-400' : '',
         ]"
-        @dragover.prevent="onDragOver(i)"
-        @dragleave="onDragLeave(i)"
-        @drop.prevent="onDrop(i)"
+        @pointerdown="onCardPointerDown($event, i)"
       >
         <div
-          class="flex h-full flex-col rounded-xl"
+          class="flex h-full flex-col overflow-hidden rounded-xl"
           :class="editing ? 'ring-1 ring-sky-500/25' : ''"
         >
           <!-- 编辑态：每卡工具条 -->
           <div
             v-if="editing"
-            class="flex items-center gap-1.5 rounded-t-xl border-b border-slate-700/60 bg-slate-800/50 px-2 py-1.5"
+            class="flex shrink-0 select-none items-center gap-1.5 border-b border-slate-700/60 bg-slate-800/50 px-2 py-1.5"
           >
-            <span
-              class="cursor-grab select-none text-sm leading-none text-slate-500 active:cursor-grabbing"
-              draggable="true"
+            <button
+              type="button"
+              data-drag-handle
+              class="cursor-grab touch-none rounded p-0.5 text-slate-400 hover:text-slate-100 active:cursor-grabbing"
               :title="t('dashboard.moveCard', { name: labelOf(w.id) })"
-              @dragstart="onDragStart(i, $event)"
-              @dragend="onDragEnd"
-            >⠿</span>
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+                <circle cx="3" cy="2.5" r="1.1" /><circle cx="9" cy="2.5" r="1.1" />
+                <circle cx="3" cy="6" r="1.1" /><circle cx="9" cy="6" r="1.1" />
+                <circle cx="3" cy="9.5" r="1.1" /><circle cx="9" cy="9.5" r="1.1" />
+              </svg>
+            </button>
             <span class="min-w-0 flex-1 truncate text-[11px] text-slate-300">{{ labelOf(w.id) }}</span>
             <select
               v-model="w.width"
@@ -300,7 +334,7 @@ async function save() {
             >×</button>
           </div>
 
-          <div class="flex-1" :class="HEIGHT_CLASS[w.height]">
+          <div class="min-h-0 flex-1 overflow-hidden" :class="HEIGHT_CLASS[w.height]">
             <component
               :is="widgetMap.get(w.id)?.component"
               v-if="widgetMap.get(w.id)"

@@ -81,7 +81,14 @@ const widgets = computed<DashboardWidgetDef[]>(() => {
     id,
     label,
     component: markRaw(StatCard),
-    props: { label, value, variant: extra.variant ?? 'default', sub: extra.sub, class: 'h-full' },
+    props: {
+      label,
+      value,
+      variant: extra.variant ?? 'default',
+      sub: extra.sub,
+      // 固定高度里内容垂直居中，避免单指标卡上下留白不均
+      class: 'h-full flex flex-col justify-center',
+    },
   });
 
   // 资源容量
