@@ -2,6 +2,34 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-21 S5：主题市场
+
+主题从「只能把目录拷进镜像」升级为可安装、可配置、可回滚的市场体系（插件市场暂不做）。
+
+- **目录策略**：新增 `THEMES_DIR`（默认 `<DB_PATH 同级>/data/themes`）作为安装目录，随数据卷持久；
+  `public/themes` 降级为只读内置目录。资源查找改为「安装目录 → 内置目录」两级，
+  同名安装版覆盖内置版，Docker 重建镜像不再丢失已装主题。
+- **manifest 三级兼容**：`diting-theme.json` → `komari-theme.json` → `manifest.json`；
+  新增 `short` / `version` / `diting.compatibility` / `diting.needsRelaxedCsp` /
+  `configuration`（仅 `managed`）。`name`/`description` 支持 i18n map 归一化；
+  旧 `manifest.json` 仍可用且豁免版本/兼容性校验。
+- **CSP nonce 动态化**：`THEME_NEEDS_NONCE` 不再硬编码主题名，由 manifest 声明后
+  `src/theme.js` 原地重建同一个 Set（server.js 持有引用）。
+- **主题市场后端**：新增 `theme_market_sources` 表与源 CRUD、catalog 缓存（10 分钟）、
+  ZIP 安装/URL 导入/GitHub 仓库导入/更新/备份回滚。下载复用通知模块的 SSRF 防护
+  （钉 IP、禁 3xx、默认拒绝私网与明文 http），ZIP 解压做路径穿越/绝对路径/符号链接/
+  声明大小/文件数/总量校验。
+- **配置值与只读接口**：`theme_config_<short>` 持久化；新增
+  `GET /themes/<short>/config`（受 `public_enabled` 门控，注册在静态资源正则之前）。
+- **后台 UI**：「设置 → 主题市场」面板，含已安装（内置只读标识/启用/配置/更新/备份/删除）、
+  市场目录安装、来源管理、URL/GitHub 导入。
+- **测试**：新增 `theme-manifest` / `theme-market` / `theme-regression` / `theme-zip-security` /
+  `theme-ssrf` / `theme-server` 六个后端测试文件；前端 i18n 覆盖守卫同步通过。
+- **错误码映射**：新增 `web/src/utils/themeError.ts`，把 `insecure_scheme` / `blocked_target` /
+  `http_404` 等 60+ 个服务端码翻译成可操作提示（来源卡片与操作报错统一使用）。
+- **DNS 伪答案**：`resolveHost` 忽略 `::` / `0.0.0.0` 这类不可路由的 AAAA/A 伪答案，
+  不再因单条伪答案误判 `blocked_target`；真实私网地址仍按"任一受限即拒绝"处理。
+
 ## 2026-10-21 模板设置页配色与文案修复
 
 - **内嵌区块配色与整体不一致**：暗色/亮色「背景」与「公告」三块原用 `bg-surface`

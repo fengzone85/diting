@@ -221,6 +221,145 @@ function validateNotifyGroupInput(body) {
   return { ok: true, value: { name, events, enabled: b.enabled !== false, channel_ids: channelIds } };
 }
 
+// ---- S5/F10 主题：源 / short / manifest / 配置值 ---------------------------
+const THEME_SHORT_RE = /^[A-Za-z0-9_-]+$/;
+const THEME_CONFIG_TYPES = ['text', 'textarea', 'number', 'select', 'boolean', 'color'];
+
+function validateThemeShort(short) {
+  if (typeof short !== 'string' || !THEME_SHORT_RE.test(short) || short === 'default') {
+    return { ok: false, error: 'short_invalid' };
+  }
+  return { ok: true, value: short };
+}
+
+function validateThemeMarketSource(input) {
+  const b = input || {};
+  const name = typeof b.name === 'string' ? b.name.trim().slice(0, 64) : '';
+  if (!name) return { ok: false, error: 'name_required' };
+  if (typeof b.url !== 'string' || b.url.length > 2048) return { ok: false, error: 'url_invalid' };
+  let u;
+  try { u = new URL(b.url); } catch (e) { return { ok: false, error: 'url_invalid' }; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'url_scheme_invalid' };
+  if (u.username || u.password) return { ok: false, error: 'url_userinfo_forbidden' };
+  if (!u.hostname) return { ok: false, error: 'url_invalid' };
+  return { ok: true, value: { name, url: u.toString(), enabled: b.enabled !== false } };
+}
+
+const themeText = (v) => {
+  if (typeof v === 'string') return v.trim();
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    for (const k of ['zh_CN', 'zh', 'en', 'en_US']) {
+      if (typeof v[k] === 'string' && v[k].trim()) return v[k].trim();
+    }
+    for (const x of Object.values(v)) if (typeof x === 'string' && x.trim()) return x.trim();
+  }
+  return '';
+};
+
+/**
+ * 严格校验 manifest（安装/导入时使用）。列表场景用 theme.readManifest 的容错解析。
+ * 返回值中的 configuration 已做结构清洗，供 validateThemeConfig 使用。
+ */
+function validateManifest(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'manifest_invalid' };
+  const short = String(raw.short || raw.id || '');
+  const vs = validateThemeShort(short);
+  if (!vs.ok) return { ok: false, error: 'short_invalid' };
+  if (!themeText(raw.name)) return { ok: false, error: 'name_required' };
+
+  const version = typeof raw.version === 'string' ? raw.version.slice(0, 64) : '';
+  const diting = raw.diting && typeof raw.diting === 'object' ? raw.diting : {};
+  const compatibility = typeof diting.compatibility === 'string' ? diting.compatibility.slice(0, 64) : '';
+
+  let configuration = null;
+  if (raw.configuration !== undefined && raw.configuration !== null) {
+    const c = raw.configuration;
+    if (typeof c !== 'object' || Array.isArray(c)) return { ok: false, error: 'configuration_invalid' };
+    const type = String(c.type || 'managed');
+    // 本轮只支持 managed：raw（主题自带 HTML）与 redirect 需要额外的渲染沙箱/站内路径校验。
+    if (type !== 'managed') return { ok: false, error: 'configuration_type_unsupported' };
+    const data = Array.isArray(c.data) ? c.data : [];
+    if (data.length > 50) return { ok: false, error: 'configuration_too_many_fields' };
+    const fields = [];
+    for (const item of data) {
+      if (!item || typeof item !== 'object') return { ok: false, error: 'configuration_field_invalid' };
+      const key = typeof item.key === 'string' ? item.key.trim() : '';
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) return { ok: false, error: 'configuration_field_key_invalid' };
+      const ftype = THEME_CONFIG_TYPES.includes(item.type) ? item.type : 'text';
+      const options = ftype === 'select'
+        ? (Array.isArray(item.options) ? item.options : String(item.options || '').split(/[|,]/))
+          .map((x) => String(x).trim()).filter(Boolean).slice(0, 50)
+        : [];
+      if (ftype === 'select' && !options.length) return { ok: false, error: 'configuration_field_options_required' };
+      fields.push({
+        key,
+        name: themeText(item.name) || key,
+        type: ftype,
+        options,
+        default: item.default !== undefined ? item.default : '',
+        required: item.required === true,
+        help: typeof item.help === 'string' ? item.help.slice(0, 500) : ''
+      });
+    }
+    configuration = { type: 'managed', fields };
+  }
+
+  return {
+    ok: true,
+    value: {
+      short,
+      version,
+      compatibility,
+      needsRelaxedCsp: diting.needsRelaxedCsp === true,
+      configuration
+    }
+  };
+}
+
+/** 把存储值与默认值合并成完整配置（GET 返回 / POST 落库都用它）。 */
+function mergeThemeConfig(fields, stored) {
+  const out = {};
+  const src = stored && typeof stored === 'object' ? stored : {};
+  for (const f of fields) {
+    out[f.key] = Object.prototype.hasOwnProperty.call(src, f.key) ? src[f.key] : f.default;
+  }
+  return out;
+}
+
+/**
+ * 服务端配置值校验：只接受 manifest 白名单内的 key，按类型收敛并限制长度。
+ * 前端校验只是即时提示，这里才是边界。
+ */
+function validateThemeConfig(configuration, body) {
+  if (!configuration || configuration.type !== 'managed') return { ok: false, error: 'not_configurable' };
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'config_invalid' };
+  const byKey = new Map(configuration.fields.map((f) => [f.key, f]));
+  const patch = {};
+  for (const [k, raw] of Object.entries(body)) {
+    const f = byKey.get(k);
+    if (!f) return { ok: false, error: 'config_key_unknown' };
+    if (f.type === 'number') {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return { ok: false, error: 'config_value_invalid' };
+      patch[k] = n;
+    } else if (f.type === 'boolean') {
+      patch[k] = raw === true || raw === 'true' || raw === 1 || raw === '1';
+    } else if (f.type === 'select') {
+      const s = String(raw);
+      if (!f.options.includes(s)) return { ok: false, error: 'config_value_invalid' };
+      patch[k] = s;
+    } else {
+      if (typeof raw !== 'string') return { ok: false, error: 'config_value_invalid' };
+      if (raw.length > 2000) return { ok: false, error: 'config_value_too_long' };
+      patch[k] = raw;
+    }
+    if (f.required && (patch[k] === '' || patch[k] === null || patch[k] === undefined)) {
+      return { ok: false, error: 'config_value_required' };
+    }
+  }
+  return { ok: true, value: patch };
+}
+
 // ---- 后台仪表盘布局（对齐 Komari 仪表盘布局模型）---------------------------
 // 布局是有序数组，元素 = { id, width, height }：
 //   id     卡片唯一键（白名单，顺序即渲染顺序）
@@ -260,5 +399,6 @@ function validateDashboardLayout(input) {
 module.exports = {
   num, str, validateReport, sanitizeCss,
   NOTIFY_EVENTS, validateWebhookConfig, validateNotifyChannelInput, validateNotifyGroupInput,
+  validateThemeShort, validateThemeMarketSource, validateManifest, mergeThemeConfig, validateThemeConfig,
   DASHBOARD_WIDGET_IDS, DASHBOARD_WIDTHS, DASHBOARD_HEIGHTS, validateDashboardLayout
 };

@@ -8,7 +8,7 @@
 // 锚定修复的行为：
 //   C3/C-3 — rateLimitTouch：表满不清表（当前 IP 计数不被清零）+ 惰性过期；
 //   C-4    — /api/setup/generate 无 HTTPS 头且未开 ADMIN_ALLOW_HTTP → 403；
-//   G5     — /api/version 匿名只回主版本号，认证后回完整；
+//   G5     — /api/version 匿名与认证均回完整版本（2026-10-21 页脚需要，显式放开收敛）；
 //   E1/E6  — 单样本 spike 不报、连续 N 个采样才报、恢复发一次并清状态、
 //            磁盘/温度纳入告警；
 //   E4     — 已过期节点独立终态 + 7 天冷却；
@@ -91,13 +91,13 @@ test('POST /api/setup/generate：无 X-Forwarded-Proto 且未开 ADMIN_ALLOW_HTT
 
 // ---- G5：版本披露收敛 ---------------------------------------------------------
 
-test('GET /api/version：匿名只回主版本号；认证后回完整版本与构建时间（审查 G5）', async () => {
+test('GET /api/version：匿名与认证均回完整版本与构建时间（2026-10-21 放开 G5 收敛）', async () => {
   const anon = await request(app).get('/api/version');
   assert.strictEqual(anon.status, 200);
-  // 匿名：信封内只回主版本号，无顶层完整版本/构建时间
-  assert.ok(/^\d+$/.test(anon.body.data.version), `匿名只回主版本号，实际 ${anon.body.data && anon.body.data.version}`);
-  assert.ok(!('version' in anon.body), '匿名不回顶层完整版本');
-  assert.ok(!('build_time' in anon.body), '匿名不回构建时间');
+  // 页脚需要在未登录时显示「版本 (commit)」，故匿名同样返回完整版本号与构建时间。
+  assert.ok(anon.body.version.includes('.'), `匿名回完整版本号，实际 ${anon.body.version}`);
+  assert.ok(anon.body.build_time, '匿名回构建时间');
+  assert.strictEqual(anon.body.data.version, anon.body.version, '信封与顶层的版本号一致');
 
   const auth = await request(app).get('/api/version').set(ADMIN);
   assert.ok(auth.body.build_time, '认证后回完整版本与构建时间');

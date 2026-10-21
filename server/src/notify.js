@@ -68,18 +68,35 @@ function isBlockedIP(ip) {
   return true;
 }
 
+// 部分 DNS 会对 AAAA 查询返回 ::（或对 A 返回 0.0.0.0）这类不可路由的伪答案。
+// 它们不是可用目标，也不应单独否决一个确实有公网地址的主机名。
+function isUnspecifiedIP(ip) {
+  return ip === '0.0.0.0' || String(ip).toLowerCase() === '::';
+}
+
+// 从 dns.lookup 的结果里选出要钉住的地址。
+// - 默认（ALLOW_PRIVATE 未开）：忽略 unspecified 伪答案后，任一剩余地址受限即拒绝，
+//   保留「多 A 记录混入私网」的严格策略；只剩伪答案时同样拒绝。
+// - ALLOW_PRIVATE=1：放行私网，但仍优先选非 unspecified 地址（否则会连到 ::）。
+function selectResolvedAddress(addrs, allowPrivate) {
+  if (!addrs || !addrs.length) throw new Error('dns_empty');
+  const usable = addrs.filter((a) => !isUnspecifiedIP(a.address));
+  if (allowPrivate) return (usable.length ? usable : addrs)[0];
+  if (!usable.length) throw new Error('blocked_target');
+  if (usable.some((a) => isBlockedIP(a.address))) throw new Error('blocked_target');
+  return usable[0];
+}
+
 function resolveHost(hostname) {
   return new Promise((resolve, reject) => {
     dns.lookup(hostname, { all: true, verbatim: true }, (err, addrs) => {
       if (err) return reject(new Error('dns_failed'));
-      if (!addrs || !addrs.length) return reject(new Error('dns_empty'));
-      // 任一解析结果受限即拒绝——防多 A 记录 / DNS 轮询绕过。
-      if (!ALLOW_PRIVATE) {
-        for (const a of addrs) {
-          if (isBlockedIP(a.address)) return reject(new Error('blocked_target'));
-        }
+      try {
+        const picked = selectResolvedAddress(addrs, ALLOW_PRIVATE);
+        resolve({ ip: picked.address, family: picked.family });
+      } catch (e) {
+        reject(e);
       }
-      resolve({ ip: addrs[0].address, family: addrs[0].family });
     });
   });
 }
@@ -97,6 +114,16 @@ function parseTarget(urlStr, cfg) {
     method: String(cfg.method || 'POST').toUpperCase(),
     headers: (cfg.headers && typeof cfg.headers === 'object') ? cfg.headers : {},
     verify_tls: cfg.verify_tls !== false
+  };
+}
+
+// 钉 IP 的 lookup：主机名仅用于 SNI/Host，DNS 重绑定无效。
+// Node 20+ 默认开启 autoSelectFamily，会以 { all: true } 调用 lookup 并期望地址数组；
+// 只返回单个字符串会触发 ERR_INVALID_IP_ADDRESS（IP 字面量不触发 lookup，故测试易漏）。
+function pinnedLookup(ip, family) {
+  return (_host, options, cb) => {
+    if (options && options.all) return cb(null, [{ address: ip, family }]);
+    return cb(null, ip, family);
   };
 }
 
@@ -118,8 +145,8 @@ function requestOnce(target, body) {
       timeout: WEBHOOK_TIMEOUT_MS,
       rejectUnauthorized: target.verify_tls !== false,
       agent: false, // 不复用连接，避免跨目标 keep-alive
-      // 钉住已校验的 IP：主机名仅用于 SNI/Host 头，DNS 重绑定无效。
-      lookup: (host, o, cb) => cb(null, target.ip, target.family)
+      // 钉 IP 的 lookup：主机名仅用于 SNI/Host，DNS 重绑定无效。
+      lookup: pinnedLookup(target.ip, target.family)
     };
     const req = mod.request(opts, (res) => {
       let data = '';
@@ -362,7 +389,7 @@ module.exports = {
   testChannel,
   // 供测试与审计使用
   _internal: {
-    isBlockedIP, render, buildRequestBody, parseTarget,
+    isBlockedIP, resolveHost, selectResolvedAddress, render, buildRequestBody, parseTarget, pinnedLookup,
     pendingChains: () => chains.size
   }
 };
