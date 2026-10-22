@@ -905,6 +905,20 @@ locate_db() {
     echo ""
 }
 
+# 只有数据库位于 Docker 命名卷时才要求 Docker。
+# 原生（systemd）部署的库是宿主机文件，db_run_js / locate_db 都有 file 分支，
+# 旧实现在 do_backup / do_restore / do_db_stats / do_clear_ip_whitelist 入口
+# 无条件 ensure_docker —— 没装 Docker 的原生用户连备份、恢复、清白名单都跑不了
+# （而这几条恰是出问题时最需要的命令）。
+ensure_docker_if_volume() {
+    local loc
+    loc="$(locate_db 2>/dev/null)"
+    if [[ "$loc" == docker:* ]]; then
+        ensure_docker || return 1
+    fi
+    return 0
+}
+
 # 备份数据库：通过 docker exec 调用 sqlite3 .backup 保证一致性（WAL 检查点 +
 # 事务合并到主库），不依赖停服；无 sqlite3 时回退到 cp（需先停容器防写坏）。
 # 用法：do_backup [输出路径] [保留天数]
@@ -934,7 +948,7 @@ do_backup() {
         fi
     fi
 
-    ensure_docker || return 1
+    ensure_docker_if_volume || return 1
     local loc; loc="$(locate_db)"
     if [[ -z "$loc" ]]; then
         echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装且卷/文件存在${NC}" >&2
@@ -1237,7 +1251,7 @@ do_restore() {
     local in_path="$1"
     [[ -z "$in_path" ]] && { echo -e "${RED}[错误] 用法: --restore <备份文件路径>${NC}" >&2; return 1; }
     [[ -f "$in_path" ]] || { echo -e "${RED}[错误] 文件不存在: $in_path${NC}" >&2; return 1; }
-    ensure_docker || return 1
+    ensure_docker_if_volume || return 1
 
     # ── 解压（备份可能是 .gz）──────────────────────────────────────────────
     # 解压到同目录临时文件，校验/替换都用解压后的路径；退出时清理。
@@ -1489,7 +1503,7 @@ do_backup_list() {
 do_db_stats() {
     echo "== 数据库统计 =="
     ensure_deps || return 1
-    ensure_docker || return 1
+    ensure_docker_if_volume || return 1
     local loc; loc="$(locate_db)"
     if [[ -z "$loc" ]]; then
         echo -e "${RED}[错误] 无法定位数据库${NC}" >&2
@@ -1829,7 +1843,7 @@ do_clear_ip_whitelist() {
         fi
     fi
 
-    ensure_docker || return 1
+    ensure_docker_if_volume || return 1
 
     local cur
     if ! cur="$(db_ui_field_get admin_allow_ips)"; then
