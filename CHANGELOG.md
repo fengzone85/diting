@@ -19,6 +19,11 @@
   表单字段：站点名称、描述、站点网址（选填）、**上报地址（必填）**、管理员 Token（自动生成 / 自定义）。
   上报地址是受控端安装命令的前置依赖（`getPublicBaseUrl` 优先级 `agent_server_url > site_url > PUBLIC_URL`），
   在向导里一次填好，装完不必再回设置页补。
+- **HTTPS 强制的本地例外**：`requireProto` 允许「本机 / 内网来源 + 零代理头」的明文请求，
+  供安装向导的 `ssh -L` 隧道使用。Docker 端口发布（`127.0.0.1:PORT->PORT`）经 DNAT 后，
+  容器里看到的来源是**网桥地址 `172.17.0.1`** 而不是 127.0.0.1，因此判据覆盖 RFC1918 私网
+  而非只认回环（只认回环会让隧道在 Docker 部署下必 403 —— 全新 Docker 验收实测）。
+  带任何 `X-Forwarded-*` / `Forwarded` 头的请求仍按原规则判定，公网来源直连仍 403。
 - **安装器不再预生成 ADMIN_TOKEN**（旧版"首装不弹引导"的直接原因），只生成 `SESSION_SECRET` / `SETUP_TOKEN`；
   新增 `--port N` 与交互式端口选择（1–65535，默认 8081），`.env` 的 `PORT` 驱动 compose 的
   `ports` / `PORT` 参数化。

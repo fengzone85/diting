@@ -160,22 +160,33 @@ function clearSessionCookie(res) {
 // 杜绝伪造该头绕过、以及误暴露 8081 端口的情况。
 // 本地开发/快速测试如需直连 http，可显式设置 ADMIN_ALLOW_HTTP=1（生产切勿设置）。
 //
-// 例外：安装向导的 SSH 隧道入口。请求**直接来自回环**且**没有任何代理头**时放行——
+// 例外：安装向导的 SSH 隧道入口。请求**来自本机或内网**且**没有任何代理头**时放行——
 // 公网流量必然经过 nginx，而 nginx 一定会写 X-Forwarded-Proto / X-Real-IP / X-Forwarded-For
-// （见 nginx/monitor.conf.example），因此"回环 + 零代理头"只可能是本机进程或 ssh -L 隧道。
-// 反向可证：带 X-Forwarded-Proto: http 的回环请求（即 nginx 转发的明文请求）仍被拒绝。
-function isDirectLoopback(req) {
-  const addr = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
-  if (addr !== '::1' && !/^127\./.test(addr)) return false;
-  const h = req.headers || {};
-  return !h['x-forwarded-for'] && !h['x-real-ip'] && !h['forwarded'] && !h['x-forwarded-proto'];
+// （见 nginx/monitor.conf.example），因此"内网来源 + 零代理头"不可能是公网直连。
+// 反向可证：带 X-Forwarded-Proto: http 的请求（即 nginx 转发的明文请求）仍被拒绝。
+//
+// 为什么不止 127.0.0.1：Docker 部署下端口发布（127.0.0.1:PORT->PORT）经 DNAT 后，
+// 容器里看到的来源是**网桥网关 172.17.0.1**，而不是 127.0.0.1。只认回环会让
+// 安装器打印的 `ssh -L PORT:127.0.0.1:PORT` 隧道在 Docker 部署下必然 403（T1.9 实测）。
+function isPrivateSource(addr) {
+  const a = String(addr || '').replace(/^::ffff:/, '');
+  if (!a) return false;
+  if (a === '::1') return true;
+  if (/^127\./.test(a)) return true;                    // 回环
+  if (/^10\./.test(a)) return true;                     // 10/8
+  if (/^192\.168\./.test(a)) return true;               // 192.168/16
+  if (/^169\.254\./.test(a)) return true;               // 链路本地
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(a)) return true; // 172.16/12（含 docker 网桥）
+  if (/^f[cd][0-9a-f]{2}:/i.test(a)) return true;       // IPv6 ULA fc00::/7
+  return false;
 }
 
 function requireProto(req, res) {
   const proto = (req.header('X-Forwarded-Proto') || '').toLowerCase();
-  if (proto === 'https' || process.env.ADMIN_ALLOW_HTTP === '1' || isDirectLoopback(req)) {
-    return true;
-  }
+  if (proto === 'https' || process.env.ADMIN_ALLOW_HTTP === '1') return true;
+  const h = req.headers || {};
+  const viaProxy = h['x-forwarded-for'] || h['x-real-ip'] || h['forwarded'] || h['x-forwarded-proto'];
+  if (!viaProxy && isPrivateSource(req.socket && req.socket.remoteAddress)) return true;
   res.status(403).json({ error: 'https required' });
   return false;
 }
