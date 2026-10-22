@@ -25,6 +25,13 @@ const db = new Database(DB_PATH);
 // 收紧数据库文件权限：仅属主可读写（默认 umask 常为 644，其他用户可读）。
 // 库内虽无指纹指标，但含全部监控数据，按最小权限原则限制暴露面。
 try { fs.chmodSync(DB_PATH, 0o600); } catch (e) { /* 某些挂载文件系统不支持 chmod，忽略 */ }
+// 增量回收（对齐方案附录 D.1）：保留策略删掉旧指标后，把空闲页归还文件系统。
+// auto_vacuum 是写在库头里的持久标志：从 NONE 改成 INCREMENTAL 需要一次完整 VACUUM 才生效，
+// 所以对存量库这里只是"置位"，真正回收发生在 `diting.sh --db-vacuum` 之后。
+// 实测教训：本机库曾 96.4% 是 freelist（1510MB 里只有 54MB 有效数据）。
+try { db.pragma('auto_vacuum = INCREMENTAL'); } catch (e) {
+  console.warn('[db] auto_vacuum 设置失败（不影响读写）:', e.message);
+}
 // NOTE: intentionally NOT using WAL mode. WAL requires a -shm shared-memory file
 // which fails on some mounted/network filesystems (SQLITE_IOERR_SHMOPEN).
 // This app is single-writer, so the default rollback-journal mode is sufficient.
@@ -1109,6 +1116,13 @@ const getMetricsLoadAll = (sinceTs, maxPoints) => stmts.metricsLoadAll(sinceTs, 
 const prune = (retentionDays) => {
   const cutoff = Date.now() - retentionDays * 86400000;
   const r = stmts.prune.run(cutoff);
+  // 删完立刻把空闲页还给文件系统（仅 auto_vacuum=INCREMENTAL 时有效；
+  // 其它模式是 no-op，不会报错）。不这么做的话文件只涨不缩。
+  if (r.changes > 0) {
+    try { db.pragma('incremental_vacuum'); } catch (e) {
+      console.warn('[db] incremental_vacuum 失败（不影响清理）:', e.message);
+    }
+  }
   return r.changes;
 };
 

@@ -192,6 +192,7 @@ show_usage() {
   sudo bash diting.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
   sudo bash diting.sh --backup-list               # 列出已有备份（含占用/时间跨度/定时状态）
   sudo bash diting.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
+  sudo bash diting.sh --db-vacuum                 # 压缩数据库并启用增量回收（回收空闲页）
 
   # 每日自动备份（cron，默认凌晨 3 点；默认保留 14 天并自动清理过期）
   sudo bash diting.sh --backup-schedule install      # 安装
@@ -229,6 +230,7 @@ show_usage() {
   --backup-schedule 动作  每日自动备份：install / uninstall / status
   --process-restore       消费后台「恢复」请求（由 cron 每 5 分钟调用，勿手动执行）
   --db-stats              查看数据库统计信息
+  --db-vacuum             压缩数据库（VACUUM）并启用增量回收，回收历史删除留下的空闲页
   --reset-admin-token     重置管理员 Token（丢失时使用，旧 Token 立即失效）
   --release [类型]        版本发布：patch/minor/major/具体版本号（默认 patch），打 tag 并推送
   --clear-ip-whitelist    清除管理端 IP 白名单（误配锁门时救援，改库即时生效）
@@ -1619,6 +1621,66 @@ SQL
     [[ -n "${tmp:-}" && -f "${tmp:-}" ]] && rm -f "$tmp"
 }
 
+# ── 数据库压缩：VACUUM + 启用增量回收 ─────────────────────────────────────────
+# 保留策略只删行，删掉的页留在 freelist 里，文件只涨不缩（本机实测：1510MB 的库
+# 里 96.4% 是空闲页，真实数据只有 54MB）。auto_vacuum 是写在库头里的持久标志，
+# 存量库必须"先改标志、再 VACUUM"才生效；之后的日常回收由服务端在 prune 后
+# 调 PRAGMA incremental_vacuum 完成（见 src/db.js）。
+do_db_vacuum() {
+    ensure_deps || return 1
+    ensure_docker_if_volume || return 1
+    local loc; loc="$(locate_db)"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 无法定位数据库${NC}" >&2
+        return 1
+    fi
+    echo "== 数据库压缩（VACUUM）=="
+    echo -e "${YELLOW}[提示] VACUUM 会重写整个库文件，期间需要独占写锁；${NC}"
+    echo -e "${YELLOW}       建议低峰执行，库很大时也可能因占用繁忙而失败（失败不会损坏数据）。${NC}"
+    if ! ui_confirm "$(msg "db_menu.header")" "确认压缩数据库？"; then
+        echo "已取消"
+        return 0
+    fi
+
+    local js; js="$(mktemp --suffix=.js)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const fs = require('fs');
+const p = process.argv[2];
+const mb = (n) => (n / 1048576).toFixed(1);
+const before = fs.statSync(p).size;
+const db = new D(p);
+db.pragma('busy_timeout = 8000');
+const pagesBefore = db.pragma('page_count', { simple: true });
+const freeBefore = db.pragma('freelist_count', { simple: true });
+const pct = pagesBefore > 0 ? (freeBefore / pagesBefore * 100).toFixed(1) : '0.0';
+try { db.pragma('auto_vacuum = INCREMENTAL'); } catch (e) { /* 老库先置位 */ }
+db.exec('VACUUM');
+const freeAfter = db.pragma('freelist_count', { simple: true });
+const mode = db.pragma('auto_vacuum', { simple: true });
+db.close();
+const after = fs.statSync(p).size;
+console.log(`压缩前: ${mb(before)} MB（空闲 ${mb(freeBefore * (before / (pagesBefore || 1)))} MB / ${pct}%）`);
+console.log(`压缩后: ${mb(after)} MB（空闲页 ${freeAfter}）`);
+console.log(`日常回收: ${mode === 2 ? '已启用（auto_vacuum=INCREMENTAL，清理后自动归还）' : '未启用（下次启动会自动置位）'}`);
+console.log(`VACUUM_OK before=${before} after=${after} free_before=${freeBefore} free_after=${freeAfter} mode=${mode}`);
+JS
+    local out rc
+    out="$(db_run_js "$js" 2>&1)"; rc=$?
+    rm -f "$js"
+    if [[ $rc -ne 0 ]]; then
+        echo -e "${RED}[错误] 压缩失败（数据库未被破坏）${NC}" >&2
+        printf '%s\n' "$out" | tail -6 | sed 's/^/       /' >&2
+        echo -e "${YELLOW}       若提示 database is locked：请先停服务再执行——${NC}" >&2
+        echo -e "         原生: sudo systemctl stop diting-server && sudo bash diting.sh --db-vacuum${NC}" >&2
+        echo -e "         Docker: cd /opt/diting-src/server && sudo docker compose stop server${NC}" >&2
+        return 1
+    fi
+    printf '%s\n' "$out" | grep -E '^(压缩前|压缩后|日常回收)' | sed 's/^/  /'
+    echo -e "${GREEN}[OK]   数据库已压缩${NC}"
+    return 0
+}
+
 # ── 数据库管理子菜单（交互模式）─────────────────────────────────────────────────
 db_manage_menu() {
     local c
@@ -2443,6 +2505,7 @@ while [[ $# -gt 0 ]]; do
         --restore)        need_val_guard "$1" "${2:-}"; A_RESTORE_PATH="${2:-}"; ACTION="restore"; shift 2 ;;
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
+        --db-vacuum)      ACTION="db-vacuum"; shift ;;
         --keep-days)      need_val_guard "$1" "${2:-}"; A_BACKUP_KEEP="${2:-}"; shift 2 ;;
         --no-compress)    DB_BACKUP_COMPRESS=0; shift ;;
         --compress)       DB_BACKUP_COMPRESS=1; shift ;;
@@ -2495,6 +2558,7 @@ if [[ -n "$ACTION" ]]; then
         restore)      do_restore "${A_RESTORE_PATH:-}" ;;
         backup-list)  do_backup_list ;;
         db-stats)     do_db_stats ;;
+        db-vacuum)    do_db_vacuum ;;
         reset-admin-token) do_reset_admin_token ;;
         clear-ip-whitelist) do_clear_ip_whitelist ;;
         release)      do_release "${A_RELEASE:-patch}" ;;
