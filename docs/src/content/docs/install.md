@@ -28,6 +28,12 @@ docker compose up -d
 # 浏览器打开 http://127.0.0.1:8081/install 完成安装（生成管理员 Token，只显示一次）
 ```
 
+用一键脚本安装时，可用 `REPO_BRANCH` 锁定源码版本（分支或 tag 均可，便于可复现部署）：
+
+```bash
+REPO_BRANCH=v1.2.0 sudo bash diting.sh --install-server --port 8081
+```
+
 ### 原生部署
 
 ```bash

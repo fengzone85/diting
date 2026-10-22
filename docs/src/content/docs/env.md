@@ -15,6 +15,7 @@ description: 服务端与受控端环境变量参考
 | `ADMIN_TOKEN` | 否 | — | **已废弃，仅存量迁移用**。管理员 Token 改由浏览器 `/install` 向导创建，**库中只存 sha256 哈希**（`admin_config.admin_token_hash`），明文只在完成页显示一次。存量部署保留此变量以便启动时把旧明文迁进库，迁移后启动日志提示「已废弃」且该值不再参与鉴权；重置用 `sudo bash diting.sh --reset-admin-token` |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥。⚠️ 生产务必设为随机长字符串（`openssl rand -hex 32`），留空则每次重启随机、所有已登录会话失效 |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
+| `APT_MIRROR` | 否 | — | **仅构建期生效**（`docker-compose.yml` 的 `build.args` 读取）。回退本地编译 better-sqlite3 时用它替换 apt 源，如 `mirrors.aliyun.com`；预编译二进制可用时根本不装编译工具链，此项无需设置 |
 | `NOTIFY_GROUPS` | 否 | `1` | 设为 `0` 时通知整体退回「邮件 + Telegram 直发」的旧路径（忽略通知组与事件路由），用于通知组上线后的紧急灰度回退 |
 | `STRICT_SESSION_DB` | 否 | `0` | 设为 `1` 时，会话表查询失败一律拒绝会话（fail-close）。默认 `0` = fail-open：签名有效且未过全局吊销水位线即放行，避免单机 SQLite 异常把管理员永久锁死。详见「安全设计 → 登录会话管理」 |
 | `READONLY_TOKEN` | 否 | — | 只读 Token（仅可调用只读 GET 接口）。建议 ≥16 位随机值；占位符 / 过短时启动告警（仍生效），因其可读全部节点指标与备份列表。⚠️ 这是**全局静态凭证**：不可吊销（改值需重启）、无审计、不能限节点——需要这些能力时改用后台签发的 API Token（`scope` + `agent_ids`，见「API 接口 → 签发 / 吊销 API Token」） |
