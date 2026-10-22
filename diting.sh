@@ -86,7 +86,14 @@ SCRIPT_VERSION="1.1.8"
 SCRIPT_DATE="2026-10-19"
 SCRIPT_NOTES="受控端安装/更新链路支持 --month-rotate（MONTH_ROTATE，0=累计，1–31=流量重置日），update_agent 会保留已存值"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+# 颜色：仅当 **stdout 是终端** 时着色；管道 / CI / 重定向下一律置空。
+# （附录 B 建议按 stderr 判定，但本脚本大量面向人的输出走 stdout——按 stderr 判会让
+#   `diting.sh --status | cat` 里混进 ANSI 转义，因此这里按 stdout 判。）
+if [[ -t 1 ]]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
+fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "$PWD")"
 # ── 仓库来源（L-17：REPO_BRANCH 可钉 tag，便于可复现安装）─────────────────────
 # 发布时用 `REPO_BRANCH=v1.2.0 sudo bash diting.sh --install-server` 即可锁定版本；
@@ -132,6 +139,10 @@ need_val_guard() {
 ACTION=""
 A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; A_INTERVAL=""; A_PROBE_TARGETS=""; A_MONTH_ROTATE=""
 A_BACKUP_PATH=""; A_BACKUP_KEEP=""; A_BACKUP_SCHEDULE=""
+# 服务端监听端口（安装时确定，写入 .env 的 PORT；空 = 交互询问 / 沿用现值）
+A_SERVER_PORT=""
+# 跳过保护性检查（当前用于：升级前备份失败仍继续）。默认 0 = 严格模式。
+A_FORCE=0
 
 show_usage() {
     cat <<EOF
@@ -189,9 +200,11 @@ show_usage() {
 
 选项：
   --install-server        安装服务端（Docker）
+  --port N                服务端监听端口（1-65535，默认 8081；配合 --install-server）
   --install-agent         安装受控端（systemd）
   --update-script         更新本安装脚本为最新版
-  --update-server         更新服务端（git pull + 重建容器）
+  --update-server         更新服务端（git pull + 重建容器；升级前自动备份数据库）
+  --force                 跳过保护性检查（升级前备份失败时仍继续，谨慎使用）
   --update-agent          更新受控端（systemd，保留原连接配置）
   --status                查看服务端/受控端状态
   --uninstall             卸载服务端与受控端
@@ -432,6 +445,35 @@ ensure_docker() {
     return 1
 }
 
+# ── 服务端监听端口 ─────────────────────────────────────────────────────────────
+# 端口属于"宿主侧参数"：容器按创建时的 ports: 发布，容器内换端口后宿主没有对应发布，
+# 外部连不上。因此端口只能由安装器决定（对齐 komari 把端口写进 systemd ExecStart），
+# 而网页向导只做只读展示。
+#   --port N        显式指定（CI/批量部署）
+#   已有 .env     沿用现值，避免重跑安装把端口改回 8081
+#   交互 TTY       提示输入，回车取 8081
+#   非交互         回落 8081
+resolve_server_port() {
+    local input="${A_SERVER_PORT:-}"
+    if [[ -z "$input" && -f "$SRC_DIR/server/.env" ]]; then
+        input="$(sed -n 's/^PORT=//p' "$SRC_DIR/server/.env" 2>/dev/null | tr -d '\r\n')"
+        [[ -n "$input" ]] && { echo "$input"; return 0; }
+    fi
+    if [[ -z "$input" ]]; then
+        if [[ -t 0 ]]; then
+            read -r -p "监听端口 [8081]: " input || true
+            input="${input:-8081}"
+        else
+            input=8081
+        fi
+    fi
+    if ! [[ "$input" =~ ^[0-9]+$ ]] || (( input < 1 || input > 65535 )); then
+        echo -e "${RED}[错误] 端口需为 1-65535 的整数，收到：${input}${NC}" >&2
+        return 1
+    fi
+    echo "$input"
+}
+
 # ── 服务端安装 ─────────────────────────────────────────────────────────────────
 install_server() {
     ensure_deps || exit 1
@@ -466,22 +508,35 @@ install_server() {
 
     cd "$SRC_DIR/server"
 
+    local port
+    port="$(resolve_server_port)" || return 1
+    echo -e "${GREEN}[OK]   监听端口：${port}${NC}"
+
     if [[ ! -f .env ]]; then
         cp .env.example .env
-        local admin sess setup
-        admin="$(openssl rand -hex 32)"
+        local sess setup
         sess="$(openssl rand -hex 32)"
         setup="$(openssl rand -hex 16)"
-        sed -i "s#^ADMIN_TOKEN=.*#ADMIN_TOKEN=${admin}#" .env
+        sed -i "s#^PORT=.*#PORT=${port}#" .env
         sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=${sess}#" .env
         sed -i "s#^SETUP_TOKEN=.*#SETUP_TOKEN=${setup}#" .env
-        echo -e "${GREEN}[OK]   已生成随机 ADMIN_TOKEN / SESSION_SECRET / SETUP_TOKEN${NC}"
+        # 管理员凭据不预生成：由浏览器 /install 向导创建（对齐 komari），库中只存 sha256 哈希，
+        # 明文只在向导完成页显示一次。预生成会让"未安装"判据恒为 false，
+        # 安装向导永远不会出现 —— 这正是旧版首装不弹引导的原因。
+        sed -i "s#^ADMIN_TOKEN=.*#ADMIN_TOKEN=#" .env
+        echo -e "${GREEN}[OK]   已生成 SESSION_SECRET / SETUP_TOKEN${NC}"
         echo -e "${YELLOW}[重要] SETUP_TOKEN = ${setup}${NC}"
         echo -e "${YELLOW}        受控端一键注册请用: --setup-token ${setup}${NC}"
-        echo -e "${YELLOW}        ADMIN_TOKEN 已写入 .env，请妥善保存${NC}"
-        echo -e "${YELLOW}        查看: grep '^ADMIN_TOKEN=' $SRC_DIR/server/.env${NC}"
+        echo -e "${YELLOW}        管理员 Token 不预生成：请在浏览器打开安装向导创建（只显示一次）${NC}"
     else
-        echo -e "${GREEN}[OK]   已存在 .env，跳过生成${NC}"
+        # 存量部署：既有凭据一律保留（可能已有可用的 ADMIN_TOKEN），
+        # 仅在 --port 显式指定或缺失 PORT 时同步端口，绝不覆盖凭据。
+        if grep -q '^PORT=' .env; then
+            sed -i "s#^PORT=.*#PORT=${port}#" .env
+        else
+            printf 'PORT=%s\n' "$port" >> .env
+        fi
+        echo -e "${GREEN}[OK]   已存在 .env：凭据保持不变，PORT=${port}${NC}"
     fi
 
     echo -e "${YELLOW}[信息] 构建并启动服务端（首次需编译 better-sqlite3，约 1-2 分钟）…${NC}"
@@ -489,7 +544,7 @@ install_server() {
     date +"%Y-%m-%d %H:%M:%S (%Z)" > build_time.txt
     git rev-parse --short HEAD > git_hash.txt 2>/dev/null || echo "-" > git_hash.txt
     echo -e "${GREEN}[OK]   构建时间已写入 build_time.txt${NC}"
-    # 先清理本项目旧实例，避免重跑/升级时端口或容器冲突（如 8081 已被占用）
+    # 先清理本项目旧实例，避免重跑/升级时端口或容器冲突（端口可能已被旧容器占用）
     docker compose down 2>/dev/null || true
     docker compose up -d --build
 
@@ -521,8 +576,15 @@ HOSTENV
 
     echo ""
     echo -e "${GREEN}✅ 服务端已启动${NC}"
-    echo -e "   仪表盘: http://localhost:8081  （当前为明文测试端口）"
-    echo -e "   生产请将 Nginx + TLS 反代到 127.0.0.1:8081（见 README 部署章节）"
+    echo -e "   本机端口: 127.0.0.1:${port}（仅回环，明文测试用）"
+    echo -e ""
+    echo -e "${YELLOW}   ▸ 下一步：在浏览器完成安装向导${NC}"
+    echo -e "     已配反代:  https://<你的域名>/install"
+    echo -e "     未配反代:  ssh -L ${port}:127.0.0.1:${port} <user>@<本机>  然后打开 http://127.0.0.1:${port}/install"
+    echo -e "     （向导里填写站点名称/描述/上报地址，并生成管理员 Token —— 只显示一次）"
+    echo -e ""
+    echo -e "   生产请将 Nginx + TLS 反代到 127.0.0.1:${port}（见 README 部署章节）"
+    echo -e "   Nginx upstream 需与端口一致：proxy_pass http://127.0.0.1:${port};"
 }
 
 # ── 更新：本安装脚本自身 ──────────────────────────────────────────────────────
@@ -581,6 +643,20 @@ update_script() {
 }
 
 # ── 更新：服务端（拉取最新源码并重建容器）─────────────────────────────────────
+# 升级失败（构建失败 / 容器起不来）时的回滚提示：代码与数据分别给一条可复制命令。
+_upgrade_rollback_hint() {
+    local old="$1" bak="$2"
+    echo -e "${YELLOW}       回滚建议：${NC}" >&2
+    if [[ -n "$bak" && -f "$bak" ]]; then
+        echo -e "       数据: sudo bash diting.sh --restore ${bak}" >&2
+    fi
+    if [[ -n "$old" ]]; then
+        echo -e "       代码: git -C ${SRC_DIR} reset --hard ${old} && cd ${SRC_DIR}/server && docker compose up -d --build" >&2
+    else
+        echo -e "       代码: 重新运行 sudo bash diting.sh --install-server（或用 --release 指定上一版本）" >&2
+    fi
+}
+
 update_server() {
     ensure_docker || return 1
     if ! command -v git >/dev/null 2>&1; then
@@ -632,25 +708,71 @@ update_server() {
     # 避免「拉了新代码却跑着旧脚本」导致端口冲突等问题。用 SP_REEXECED 防自循环。
     if [[ -z "${SP_REEXECED:-}" && -f "$SRC_DIR/diting.sh" ]]; then
         echo -e "${YELLOW}[信息] 重新加载磁盘上的最新 diting.sh 以应用更新…${NC}"
-        SP_REEXECED=1 exec bash "$SRC_DIR/diting.sh" --update-server
+        # --force 必须一并传下去：新进程若丢掉该开关，备份失败时又会中止，形成"跳过不了"的怪圈
+        if [[ "${A_FORCE:-0}" == "1" ]]; then
+            SP_REEXECED=1 exec bash "$SRC_DIR/diting.sh" --update-server --force
+        else
+            SP_REEXECED=1 exec bash "$SRC_DIR/diting.sh" --update-server
+        fi
     fi
 
     cd "$SRC_DIR/server"
+
+    # ── 升级前备份数据库（A5）──────────────────────────────────────────────
+    # 必须在 `compose down` 之前：locate_db 的 docker 分支要靠 `docker ps` 找到携带
+    # server-data 卷的容器，容器停了就定位不到库，备份会直接失败。
+    # 备份失败默认中止升级（源码已 reset 但容器未重建，旧容器仍在跑，损失最小）；
+    # --force 可跳过。
+    local _bak=""
+    _bak="${DB_BACKUP_DIR}/monitor_$(date +%Y%m%d_%H%M%S)_pre-upgrade.db"
+    echo -e "${YELLOW}[信息] 升级前备份数据库 → ${_bak}${NC}"
+    if do_backup "$_bak" 0; then
+        echo -e "${GREEN}[OK]   数据库已备份${NC}"
+    else
+        if [[ "${A_FORCE:-0}" == "1" ]]; then
+            echo -e "${YELLOW}[警告] 升级前备份失败，已按 --force 继续（风险自负）${NC}"
+            _bak=""
+        else
+            echo -e "${RED}[错误] 升级前备份失败，已中止升级（当前容器仍在运行旧版本）${NC}" >&2
+            echo -e "       排查磁盘/权限后重试；确认无需备份可加 --force 跳过" >&2
+            return 1
+        fi
+    fi
+
     # 先停掉旧容器并释放端口，避免「端口已被占用」导致新容器起不来
     echo -e "${YELLOW}[信息] 停止旧容器并释放端口…${NC}"
     docker compose down --remove-orphans 2>/dev/null || true
-    # 兜底：若 8081 仍被任意容器占用（孤儿容器 / 其它 compose 项目），强制移除
-    local _cid
-    _cid="$(docker ps -q --filter "publish=8081" 2>/dev/null | head -n1)"
+    # 兜底：端口仍被任意容器占用（孤儿容器 / 其它 compose 项目）时强制移除。
+    # 端口从 .env 的 PORT 读，避免安装时选了非 8081 导致这里漏清理。
+    local port _cid
+    port="$(sed -n 's/^PORT=//p' .env 2>/dev/null | tr -d '\r\n')"
+    port="${port:-8081}"
+    _cid="$(docker ps -q --filter "publish=${port}" 2>/dev/null | head -n1)"
     if [[ -n "$_cid" ]]; then
-        echo -e "${YELLOW}[信息] 检测到 8081 仍被容器 $_cid 占用，强制移除…${NC}"
+        echo -e "${YELLOW}[信息] 检测到 ${port} 仍被容器 $_cid 占用，强制移除…${NC}"
         docker rm -f "$_cid" 2>/dev/null || true
     fi
     echo -e "${YELLOW}[信息] 重建并重启服务端…${NC}"
     date +"%Y-%m-%d %H:%M:%S (%Z)" > build_time.txt
     git rev-parse --short HEAD > git_hash.txt 2>/dev/null || echo "-" > git_hash.txt
-    docker compose up -d --build
+    if ! docker compose up -d --build; then
+        echo -e "${RED}[错误] 重建失败，服务端可能未启动${NC}" >&2
+        _upgrade_rollback_hint "${_old:-}" "$_bak"
+        return 1
+    fi
+    # 对齐 komari 的 active 校验：`up -d` 返回 0 只代表容器创建成功，
+    # 构建失败/启动即崩溃常在几秒后才暴露，必须再确认容器真的在运行。
+    local _cid2=""
+    _cid2="$(docker compose ps -q server 2>/dev/null | head -n1)"
+    sleep 2
+    if [[ -z "$_cid2" || "$(docker inspect -f '{{.State.Running}}' "$_cid2" 2>/dev/null)" != "true" ]]; then
+        echo -e "${RED}[错误] 容器未处于运行状态，升级失败${NC}" >&2
+        docker compose logs --tail 30 server 2>/dev/null | sed 's/^/       /' >&2 || true
+        _upgrade_rollback_hint "${_old:-}" "$_bak"
+        return 1
+    fi
     echo -e "${GREEN}[OK]   服务端已更新并重启${NC}"
+    [[ -n "$_bak" && -f "$_bak" ]] && echo -e "       升级前备份：${_bak}"
 }
 
 # ── 更新：受控端（保留已注册身份，拉取最新 agent 代码）──────────────────────────
@@ -804,9 +926,9 @@ do_backup() {
         # 读到配置时，用后台的保留天数/压缩开关覆盖本地默认
         if [[ "$decision" == "yes" ]]; then
             local cfg_keep cfg_comp
-            cfg_keep="$(db_ui_field_get backup_keep_days 2>/dev/null || true)"
+            cfg_keep="$(db_ui_field_get_soft backup_keep_days || true)"
             [[ "$cfg_keep" =~ ^[0-9]+$ ]] && keep_days="$cfg_keep"
-            cfg_comp="$(db_ui_field_get backup_compress 2>/dev/null || true)"
+            cfg_comp="$(db_ui_field_get_soft backup_compress || true)"
             [[ "$cfg_comp" == "false" ]] && DB_BACKUP_COMPRESS=0
             [[ "$cfg_comp" == "true" ]] && DB_BACKUP_COMPRESS=1
         fi
@@ -1434,7 +1556,7 @@ db_manage_menu() {
         "3" "$(msg "db_menu.list")" \
         "4" "$(msg "db_menu.stats")" \
         "5" "$(msg "db_menu.schedule")" \
-        "0" "$(msg "db_menu.back")" )"
+        "0" "$(msg "db_menu.back")" )" || return
     [[ -z "$c" ]] && return
     case "$c" in
         1) do_backup "" "" ;;
@@ -1456,7 +1578,7 @@ db_manage_schedule_menu() {
         "1" "$(msg "db_menu.schedule_install")" \
         "2" "$(msg "db_menu.schedule_remove")" \
         "3" "$(msg "db_menu.schedule_status")" \
-        "0" "$(msg "db_menu.back")" )"
+        "0" "$(msg "db_menu.back")" )" || return
     [[ -z "$c" ]] && return
     case "$c" in
         1) do_backup_schedule install ;;
@@ -1466,11 +1588,29 @@ db_manage_schedule_menu() {
     esac
 }
 
+# 定位服务端 node_modules 目录（原生部署执行数据库脚本时用）。
+# node 的模块解析以「脚本所在目录」为根：脚本若放在 /tmp（mktemp），require('better-sqlite3')
+# 会 MODULE_NOT_FOUND —— 必须用 NODE_PATH 显式指向服务端依赖目录。
+server_node_modules() {
+    local cand selfdir
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    for cand in "$SRC_DIR/server/node_modules" "$selfdir/server/node_modules" "./server/node_modules"; do
+        [[ -n "$cand" && -d "$cand/better-sqlite3" ]] && { echo "$cand"; return 0; }
+    done
+    echo ""
+    return 1
+}
+
 # 在服务端数据库上执行一段 Node 脚本。
 # 参数约定：脚本内用 process.argv[2] 取库路径（node 的 argv[1] 是脚本自身路径），
 # 其余入参依次为 argv[3..]。
 # 三种部署形态通用：运行中容器 / 仅卷存在 / 宿主机文件。
 # 依赖服务端镜像自带的 better-sqlite3（无额外依赖）；原生部署需宿主机 node 可用。
+#
+# 落点约束（T0.0 / M1）：node 的模块解析根 = 脚本所在目录。
+#   - 运行中容器：脚本必须落在 /app（镜像 WORKDIR，依赖在 /app/node_modules）；
+#   - 仅卷存在：脚本挂在 /host_js（只读挂载），解析根是 /host_js → 必须给容器补 NODE_PATH；
+#   - 宿主机文件：脚本在 mktemp 目录 → 必须给 node 补 NODE_PATH 指向服务端 node_modules。
 db_run_js() {
     local js="$1"; shift
     local loc; loc="$(locate_db)"
@@ -1478,16 +1618,22 @@ db_run_js() {
         echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装${NC}" >&2
         return 1
     fi
+    # 容器内 node 以非 root 用户（Dockerfile: USER node）运行，而 mktemp 文件是 0600：
+    # docker cp 会连同权限复制，volume 分支更是只读挂载 → 容器内读不到脚本会 EACCES。
+    # 这里放开读权限（脚本内不含凭据，库路径等参数走 argv 传入）。
+    [[ -f "$js" ]] && chmod 644 "$js" 2>/dev/null || true
     if [[ "$loc" == docker:* ]]; then
-        local cid cpath
+        local cid cpath js_dst
         cid="$(echo "$loc" | cut -d: -f2)"
         cpath="$(echo "$loc" | cut -d: -f4)"
-        timeout 180 docker cp "$js" "${cid}:/tmp/diting_db.js" >/dev/null 2>&1 || return 1
-        timeout 180 docker exec "$cid" node /tmp/diting_db.js "$cpath" "$@" || {
-            timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+        js_dst="/app/diting_db.js"
+        timeout 180 docker cp "$js" "${cid}:${js_dst}" >/dev/null 2>&1 || return 1
+        timeout 180 docker exec "$cid" node "$js_dst" "$cpath" "$@" || {
+            timeout 180 docker exec "$cid" rm -f "$js_dst" >/dev/null 2>&1 || true
+            echo -e "${RED}[错误] 在容器 ${cid} 内执行数据库脚本失败（若报 Cannot find module 'better-sqlite3'，说明镜像布局与预期不符）${NC}" >&2
             return 1
         }
-        timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+        timeout 180 docker exec "$cid" rm -f "$js_dst" >/dev/null 2>&1 || true
     elif [[ "$loc" == volume:* ]]; then
         local vol simg jsdir jsname
         vol="$(echo "$loc" | cut -d: -f2)"
@@ -1497,15 +1643,22 @@ db_run_js() {
             echo -e "${RED}[错误] 未找到服务端镜像，无法启动临时容器${NC}" >&2
             return 1
         fi
-        timeout 180 docker run --rm -v "$vol":/data -v "$jsdir":/host_js:ro \
+        # 脚本只读挂载在 /host_js，解析根不是 /app → 用 NODE_PATH 指向镜像内依赖目录
+        timeout 180 docker run --rm -e NODE_PATH=/app/node_modules \
+            -v "$vol":/data -v "$jsdir":/host_js:ro \
             "$simg" node "/host_js/$jsname" /data/monitor.db "$@" || return 1
     else
-        local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
+        local fpath nm
+        fpath="$(echo "$loc" | cut -d: -f2)"
         if ! command -v node >/dev/null 2>&1; then
             echo -e "${RED}[错误] 原生部署需要宿主机 node（且能 require better-sqlite3）${NC}" >&2
             return 1
         fi
-        node "$js" "$fpath" "$@" || return 1
+        if ! nm="$(server_node_modules)"; then
+            echo -e "${RED}[错误] 未找到服务端依赖目录（server/node_modules），无法执行数据库脚本${NC}" >&2
+            return 1
+        fi
+        NODE_PATH="$nm" node "$js" "$fpath" "$@" || return 1
     fi
 }
 
@@ -1525,6 +1678,20 @@ JS
     local rc=$?
     rm -f "$js"
     return $rc
+}
+
+# 读取后台配置字段：读库失败时打印**可见**告警并返回空值。
+# 背景（T0.0 / M8）：调用点原本一律 `2>/dev/null || true`，读库失败与"配置为空"完全无法区分；
+# db_run_js 修好后这些读取会首次真实生效，此处把失败显式化，避免又回到静默失败。
+# 用法：db_ui_field_get_soft <字段名>（值输出到 stdout，告警输出到 stderr）
+db_ui_field_get_soft() {
+    local field="$1" val
+    if val="$(db_ui_field_get "$field" 2>/dev/null)"; then
+        printf '%s' "$val"
+        return 0
+    fi
+    echo -e "${YELLOW}[信息] 未能读取后台配置「${field}」（数据库不可达或权限不足），本次按默认值处理${NC}" >&2
+    return 1
 }
 
 # 回写备份状态到 admin_config.backup_state（后台「备份监控」读它）。
@@ -1563,7 +1730,7 @@ JS
 # 输出：yes（该跑）/ no（跳过，并打印原因）/ unknown（读不到配置，按本地策略跑）
 backup_should_run() {
     local sched
-    sched="$(db_ui_field_get backup_schedule 2>/dev/null || true)"
+    sched="$(db_ui_field_get_soft backup_schedule || true)"
     case "$sched" in
         off)    echo "skipped"; echo "（后台备份周期=关闭）" >&2; return 1 ;;
         daily|"")  # 未配置时按每日（与 db.js 默认 off 不同：未配置视为未接管，保持可用）
@@ -1708,7 +1875,48 @@ JS
     echo -e "${YELLOW}$(msg "wl.hint")${NC}"
 }
 
-# 重置管理员 Token：仅通过 SSH 在服务器上运行，生成新 Token 并立即使旧 Token 失效
+# 计算字符串的 sha256（与 server 端 db.hashToken 同口径：小写 hex、无换行）。
+sha256_hex() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | cut -d' ' -f1
+    else
+        printf '%s' "$1" | openssl dgst -sha256 -r | cut -d' ' -f1
+    fi
+}
+
+# 定位真实 server/.env（与 locate_db 同思路的多候选；找不到返回非零）。
+locate_server_env() {
+    local cand selfdir
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    for cand in "$SRC_DIR/server/.env" "$selfdir/server/.env" "./server/.env"; do
+        [[ -n "$cand" && -f "$cand" ]] && { echo "$cand"; return 0; }
+    done
+    echo ""
+    return 1
+}
+
+# 服务端实际对外端口：Docker 取 docker port 的发布端口，原生取 .env 的 PORT，兜底 8081。
+# 注意：P0 阶段 compose 仍把 PORT 写成字面量，所以 docker 部署必须以实际发布端口为准。
+server_port() {
+    local loc; loc="$(locate_db)"
+    if [[ "$loc" == docker:* ]]; then
+        local cid hp
+        cid="$(echo "$loc" | cut -d: -f2)"
+        hp="$(docker port "$cid" 2>/dev/null | awk -F: 'NR==1{print $NF}' | tr -d '\r')"
+        [[ "$hp" =~ ^[0-9]+$ ]] && { echo "$hp"; return 0; }
+    fi
+    local envf p
+    if envf="$(locate_server_env)"; then
+        p="$(sed -n 's/^PORT=//p' "$envf" | tr -d '\r' | tail -n1)"
+        [[ "$p" =~ ^[0-9]+$ ]] && { echo "$p"; return 0; }
+    fi
+    echo 8081
+}
+
+# 重置管理员 Token：仅通过 SSH 在服务器上运行。
+# P0：Token 以「数据库哈希」为唯一权威来源 —— 直接写库、立即生效，**不重启、不重建容器**。
+# 旧实现改宿主 .env 后发 `docker compose restart`：restart 不会重建容器 → 容器内 env 仍是
+# 旧 Token；非标准部署路径下连 .env 都找不到，却照样打印"新 Token"（已失效路径，全部移除）。
 do_reset_admin_token() {
     echo "$(msg "reset.header")"
     echo ""
@@ -1718,48 +1926,66 @@ do_reset_admin_token() {
     fi
 
     ensure_deps || return 1
-    ensure_docker || return 1
 
-    local new_token
+    local new_token new_hash
     new_token="adm_$(openssl rand -hex 24)"
-
-    # ① 若 .env 已配置 ADMIN_TOKEN，必须同步更新 .env：getAdminToken() 是 env 优先，
-    # 否则只写 DB 会被 .env 覆盖，reset 后旧 .env token 仍有效、新 token 无效。
-    local env_file="${SRC_DIR:-}/server/.env"
-    if [[ -f "$env_file" ]] && grep -q '^ADMIN_TOKEN=' "$env_file"; then
-        if grep -q '^ADMIN_TOKEN=.\+' "$env_file"; then
-            sed -i -E "s|^ADMIN_TOKEN=.*|ADMIN_TOKEN=$new_token|" "$env_file"
-        else
-            printf 'ADMIN_TOKEN=%s\n' "$new_token" >> "$env_file"
-        fi
-        echo -e "${YELLOW}[信息] 已同步更新 .env 的 ADMIN_TOKEN（env 优先于 DB）${NC}"
+    new_hash="$(sha256_hex "$new_token")"
+    if [[ ! "$new_hash" =~ ^[0-9a-f]{64}$ ]]; then
+        echo -e "${RED}[错误] sha256 计算失败，已中止（未做任何修改）${NC}" >&2
+        return 1
     fi
 
-    # ② 清理 DB 中的残留 admin_token_raw（旧版遗留，统一到 .env 后废弃）
     local loc; loc="$(locate_db)"
-    if [[ -n "$loc" ]]; then
-        if [[ "$loc" == docker:* ]]; then
-            local cid cpath
-            cid="$(echo "$loc" | cut -d: -f2)"
-            cpath="$(echo "$loc" | cut -d: -f4)"
-            docker exec "$cid" node -e "const D=require('better-sqlite3'); const db=new D('$cpath'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
-        elif [[ "$loc" == volume:* ]]; then
-            local vol; vol="$(echo "$loc" | cut -d: -f2)"
-            local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
-            if [[ -n "$simg" ]]; then
-                docker run --rm -v "$vol":/data "$simg" node -e "const D=require('better-sqlite3'); const db=new D('/data/monitor.db'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
-            fi
-        else
-            local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
-            sqlite3 "$fpath" "DELETE FROM admin_config WHERE key='admin_token_raw';" 2>/dev/null || true
-        fi
-        echo -e "${GREEN}[OK]   已清理 DB 中残留的 admin_token_raw${NC}"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 未找到服务端数据库，无法重置（未做任何修改）${NC}" >&2
+        echo -e "       请确认服务端已安装并至少启动过一次（数据库文件/卷已创建）" >&2
+        return 1
     fi
 
-    # ③ 重启服务使新 Token 生效（getAdminToken 每次读 env，重启确保干净）
-    if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-        ( cd "$SRC_DIR/server" && docker compose restart 2>/dev/null ) || true
+    # 单事务写库：水位线 → 吊销会话 → 新哈希 → 清理历史残留。
+    # 水位线必须最先写：verifySession 在 sid 缓存之前调 isRevoked，且 isRevoked 每次读库，
+    # 因此旧 Cookie 立即失效（不依赖进程内 clearSessionCache）。
+    local js out
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.pragma('busy_timeout = 5000');
+const hash = process.argv[3];
+const now = String(Date.now());
+const tx = db.transaction(() => {
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
+  db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('admin_token_hash',?)").run(hash);
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized')").run();
+});
+tx();
+const got = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
+console.log('HASH_OK=' + (got && got.value === hash ? '1' : '0'));
+JS
+    if ! out="$(db_run_js "$js" "$new_hash")"; then
+        rm -f "$js"
+        echo -e "${RED}[错误] 写入数据库失败，Token 未变更${NC}" >&2
+        return 1
     fi
+    rm -f "$js"
+    if ! printf '%s\n' "$out" | grep -qx 'HASH_OK=1'; then
+        echo -e "${RED}[错误] 写入校验失败（库中哈希与预期不一致），Token 未变更${NC}" >&2
+        return 1
+    fi
+
+    # 自检：用新 Token 打管理面只读端点（adminOrReadonly，不受 2FA 影响、不吃 loginGuard）。
+    # 不用 /api/login：2FA 开启时它必返 401 need_totp，且 3 次失败会封 IP 81s。
+    local port code i
+    port="$(server_port)"
+    code=""
+    for i in 1 2 3; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+            -H 'X-Forwarded-Proto: https' -H "X-Admin-Token: ${new_token}" \
+            "http://127.0.0.1:${port}/api/admin/alert-rules" 2>/dev/null || echo 000)"
+        [[ "$code" == "200" ]] && break
+        sleep 2
+    done
 
     echo ""
     echo -e "${GREEN}$(msg "reset.ok")${NC}"
@@ -1767,6 +1993,21 @@ do_reset_admin_token() {
     echo "  $new_token"
     echo ""
     echo -e "${YELLOW}$(msg "reset.save")${NC}"
+
+    if [[ "$code" == "200" ]]; then
+        echo -e "${GREEN}[OK]   自检通过：立即生效，无需重启${NC}"
+        return 0
+    fi
+
+    # 哈希已落库（上面校验过），自检失败只可能是访问面问题；Token 仍然有效，必须照常给用户。
+    echo -e "${RED}[警告] 自检未通过（HTTP ${code}）：Token 已写入数据库，但服务端未能确认${NC}" >&2
+    case "$code" in
+        401) echo -e "       服务端未读到新哈希：确认服务端版本已包含 P0 改动（未重启不生效）" >&2 ;;
+        403) echo -e "       被 IP 白名单或 HTTPS 口径拦截：检查后台 admin_allow_ips" >&2 ;;
+        000) echo -e "       服务端未监听 127.0.0.1:${port}：确认容器/服务在运行" >&2 ;;
+        *)   echo -e "       非预期状态码，请查看服务端日志" >&2 ;;
+    esac
+    return 1
 }
 
 uninstall_all() {
@@ -1814,10 +2055,6 @@ declare -A I18N_ZH=(
     [menu.exit]="退出"
     [menu.prompt]="请选择 [0-10]: "
     [menu.exit_msg]="退出"
-    [tui.title]="谛听轻量探针 一键部署"
-    [tui.available]="检测到图形终端 (whiptail/dialog)，已启用交互界面"
-    [tui.fallback]="未检测到 whiptail/dialog，使用文字菜单"
-    [tui.install_hint]="如需图形菜单: apt-get install -y whiptail（Debian/Ubuntu）或 yum install -y newt（RHEL 系）"
     [db_menu.header]="━━━ 数据库管理 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     [db_menu.backup]="备份数据库"
     [db_menu.restore]="从备份恢复"
@@ -1907,10 +2144,7 @@ declare -A I18N_EN=(
     [menu.exit]="Exit"
     [menu.prompt]="Select [0-10]: "
     [menu.exit_msg]="Exit"
-    [tui.title]="Diting Deploy"
-    [tui.available]="Graphical terminal detected (whiptail/dialog), TUI enabled"
-    [tui.fallback]="whiptail/dialog not found, using text menu"
-    [tui.install_hint]="For the graphical menu: apt-get install -y whiptail (Debian/Ubuntu) or yum install -y newt (RHEL)"
+
     [db_menu.header]="━━━ Database ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     [db_menu.backup]="Backup Database"
     [db_menu.restore]="Restore from Backup"
@@ -1977,126 +2211,81 @@ declare -A I18N_EN=(
     [wl.node_hint]="Native deployments require a host node matching better-sqlite3 ABI; Docker deployments are unaffected."
 )
 
-# ── 图形交互层（TUI）────────────────────────────────────────────────────────────
-# 优先使用 whiptail / dialog 渲染交互菜单；两者均不可用时回退到纯文本 read 菜单。
-# 设计原则：不破坏任何现有功能函数，仅在「交互菜单」与「用户输入」处叠加 TUI。
-UI_BIN=""
-# 是否处于交互式终端。**必须在顶层一次性判定**：所有 ui_* 调用点都用命令替换
-# （如 c="$(ui_menu ...)"）捕获 stdout，命令替换会把函数内 stdout 变成管道，
-# 此时在函数里再判 [ -t 1 ] 恒为假 → TUI 永远走不到，图形菜单形同虚设。
+# ── 交互层（纯文本，对齐 komari 风格）──────────────────────────────────────────
+# 菜单与输入统一走纯文本 read：装了图形库和没装，输出完全一致，
+# SSH / 容器 / 极简系统上不再存在"两套渲染路径"。
+#
+# UI_TTY 在**顶层**一次性判定：ui_* 的返回值常被命令替换捕获（c="$(ui_menu ...)"），
+# 命令替换会让函数内的 stdout 变成管道，[ -t 1 ] 恒为假——所以判据用 stdin + stderr。
 UI_TTY=0
-detect_ui() {
-    if command -v whiptail >/dev/null 2>&1; then
-        UI_BIN="whiptail"
-    elif command -v dialog >/dev/null 2>&1; then
-        UI_BIN="dialog"
-    else
-        UI_BIN=""
-    fi
-    [[ -t 0 && -t 1 ]] && UI_TTY=1
-    # 仅在交互模式下提示一次当前用的是图形还是文本界面（免得用户以为「没有可视化」）
-    if [[ "$UI_TTY" -eq 1 ]]; then
-        if [[ -n "$UI_BIN" ]]; then
-            echo -e "${GREEN}[信息] $(msg "tui.available")${NC}"
-        else
-            echo -e "${YELLOW}[信息] $(msg "tui.fallback")${NC}"
-            echo -e "        $(msg "tui.install_hint")"
-        fi
-    fi
+[[ -t 0 && -t 2 ]] && UI_TTY=1
+
+# 交互式终端下清屏重绘，避免连续操作时屏幕越滚越长；非交互（管道/CI）只画一次。
+# 调用点：菜单循环每轮开始处。
+render_screen() {
+    [[ "$UI_TTY" -eq 1 ]] && clear 2>/dev/null || true
+    echo "" >&2
+    printf "${BLUE}$(msg "menu.header")${NC}\n" "$SCRIPT_VERSION" "$SCRIPT_DATE" >&2
+    echo -e "  $(msg "menu.os") ${GREEN}$(detect_os)${NC}  $(msg "menu.arch") ${GREEN}$(detect_arch)${NC}" >&2
+    echo -e "  $(msg "menu.notes") ${SCRIPT_NOTES}" >&2
+    return 0
 }
-detect_ui
 
 # ui_menu <标题> <prompt> <"tag item" 列表...>
-# 输出所选 tag 到 stdout。无 TUI 时回退到纯文本编号菜单（与旧行为一致）。
-# 条目文本不要自带编号（whiptail/dialog 会渲染 tag），文本回退会自动补 "N)"。
-# 标题传空串可跳过标题行（主菜单的 header 已含标题信息）。
+# 输出所选 tag 到 stdout；条目按 tag 补 "N)"。EOF（管道输入耗尽）→ return 1，
+# 由调用方决定如何退出——**不能用 exit 0**，否则 `printf '' | diting.sh` 会被当成
+# "用户正常退出"，CI 里静默成功。
 ui_menu() {
     local title="$1"; shift
     local prompt="$1"; shift
-    # 剩余参数：成对的 "tag" "item"
-    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
-        # 回退：纯文本
-        echo "" >&2
-        [[ -n "$title" ]] && echo -e "${BLUE}${title}${NC}" >&2
-        # 条目文本本身不带编号（whiptail/dialog 会自动显示 tag），此处按 tag 补上 "N)"
-        local i tag
-        for ((i=1; i<=$#; i+=2)); do
-            tag="${!i}"
-            echo "  ${tag}) ${@:i+1:1}" >&2
-        done
-        echo "" >&2
-        local c
-        read -r -p "$prompt" c || exit 0
-        echo "$c"
-        return
-    fi
-    local height width menuheight=$(( ( $# + 1 ) / 2 + 1 ))
-    height=$(( menuheight + 7 )); width=70
-    if [[ "$UI_BIN" == "whiptail" ]]; then
-        whiptail --title "$title" --menu "$prompt" "$height" "$width" "$menuheight" "$@" 3>&1 1>&2 2>&3
-    else
-        dialog --clear --title "$title" --menu "$prompt" "$height" "$width" "$menuheight" "$@" 3>&1 1>&2 2>&3
-    fi
+    echo "" >&2
+    [[ -n "$title" ]] && echo -e "${BLUE}${title}${NC}" >&2
+    local i tag
+    for ((i=1; i<=$#; i+=2)); do
+        tag="${!i}"
+        echo "  ${tag}) ${@:i+1:1}" >&2
+    done
+    echo "" >&2
+    local c
+    read -r -p "$prompt" c || return 1
+    echo "$c"
 }
 
-# ui_prompt <标题> <提示> [默认值] → 输出到 stdout（回车用默认值）
+# ui_prompt <标题> <提示> [默认值] → 输出到 stdout（回车 = 默认值；EOF → return 1）
+# 标题参数保留以兼容既有调用点，纯文本模式下不再使用。
 ui_prompt() {
-    local title="$1" text="$2" def="${3:-}"
-    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
-        local v
-        read -r -p "$text${def:+ [$def]}: " v || return 1
-        echo "${v:-$def}"
-        return
-    fi
-    if [[ "$UI_BIN" == "whiptail" ]]; then
-        whiptail --title "$title" --inputbox "$text" 10 70 "$def" 3>&1 1>&2 2>&3
-    else
-        dialog --title "$title" --inputbox "$text" 10 70 "$def" 3>&1 1>&2 2>&3
-    fi
+    local _title="$1" text="$2" def="${3:-}"
+    local v
+    read -r -p "$text${def:+ [$def]}: " v || return 1
+    echo "${v:-$def}"
 }
 
-# ui_confirm <标题> <提示> → 0=yes 1=no
+# ui_confirm <标题> <提示> → 0=yes 1=no。空输入 = 取消（安全优先）。
+# 刻意**不**照搬 komari ui_yesno 的"空=是"：本脚本的调用方含 uninstall_all /
+# do_clear_ip_whitelist / --reset-admin-token，一次误回车就会卸载或使旧凭据失效。
 ui_confirm() {
-    local title="$1" text="$2"
-    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
-        local v
-        read -r -p "$text (yes/no): " v || return 1
-        [[ "$v" == "yes" || "$v" == "y" || "$v" == "Y" ]]
-        return
-    fi
-    if [[ "$UI_BIN" == "whiptail" ]]; then
-        whiptail --title "$title" --yesno "$text" 10 70
-    else
-        dialog --title "$title" --yesno "$text" 10 70
-    fi
+    local _title="$1" text="$2"
+    local v
+    read -r -p "$text (yes/no): " v || return 1
+    [[ "$v" == "yes" || "$v" == "y" || "$v" == "Y" ]]
 }
 
-# ui_msg <标题> <消息> → 展示信息框（回退时直接 echo）
+# ui_msg <标题> <消息> → 纯文本，统一走 stderr（不污染被命令替换捕获的 stdout）
 ui_msg() {
     local title="$1" text="$2"
-    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
-        echo -e "${BLUE}${title}${NC}" >&2
-        echo "$text" >&2
-        return
-    fi
-    if [[ "$UI_BIN" == "whiptail" ]]; then
-        whiptail --title "$title" --msgbox "$text" 14 70
-    else
-        dialog --title "$title" --msgbox "$text" 14 70
-    fi
+    echo -e "${BLUE}${title}${NC}" >&2
+    echo "$text" >&2
 }
 
 # ── 菜单 ───────────────────────────────────────────────────────────────────────
-# pause_return 输出型动作（如「查看状态」）执行完后的暂停：TUI 下 whiptail 菜单
-# 会立刻重绘覆盖屏幕，status_all 这类纯 echo 输出一闪而过（用户只见"秒退回菜单"），
-# 故执行后强制等一次回车；文本回退模式下同样保持一致的交互节奏。
+# pause_return 输出型动作（如「查看状态」）执行完后的暂停：菜单每轮会清屏重绘，
+# status_all 这类纯 echo 输出若不暂停会一闪而过（用户只见"秒退回菜单"）。
 pause_return() {
     echo ""
     read -rp "—— $(msg "menu.press_enter") ——"
 }
 
-# switch_lang 菜单项动作：切换界面语言并持久化（不依赖 dialog/whiptail，纯 read，
-# 保证任何环境下可用）。
+# switch_lang 菜单项动作：切换界面语言并持久化（纯 read，任何环境可用）。
 switch_lang() {
     local cur="中文"; [[ "$I18N_LANG" == "en" ]] && cur="English"
     echo ""
@@ -2111,27 +2300,18 @@ switch_lang() {
 }
 
 show_menu() {
-    # 顶部信息（TUI 下用 msgbox 会打断流程，故信息仅回退文本模式展示；TUI 标题已含版本）
-    if [[ "$UI_TTY" -eq 0 || -z "$UI_BIN" ]]; then
-        echo ""
-        printf "${BLUE}$(msg "menu.header")${NC}\n" "$SCRIPT_VERSION" "$SCRIPT_DATE"
-        echo -e "  $(msg "menu.os") ${GREEN}$(detect_os)${NC}  $(msg "menu.arch") ${GREEN}$(detect_arch)${NC}"
-        echo -e "  $(msg "menu.notes") ${SCRIPT_NOTES}"
-        local _rv; _rv="$(remote_script_version)"
-        if version_gt "$_rv" "$SCRIPT_VERSION"; then
-            # msg 只做查表，%s 需由 printf 填充（否则会原样输出 "v%s"）
-            printf "  ${YELLOW}$(msg "menu.new_version")${NC}\n" "$_rv" "$SCRIPT_VERSION"
-        elif [[ -n "$_rv" ]]; then
-            printf "  ${GREEN}$(msg "menu.up_to_date")${NC}\n" "$SCRIPT_VERSION"
-        fi
+    # 顶部信息：纯文本一套，始终打印（交互终端下先 clear 重绘）
+    render_screen
+    local _rv; _rv="$(remote_script_version)"
+    if version_gt "$_rv" "$SCRIPT_VERSION"; then
+        # msg 只做查表，%s 需由 printf 填充（否则会原样输出 "v%s"）
+        printf "  ${YELLOW}$(msg "menu.new_version")${NC}\n" "$_rv" "$SCRIPT_VERSION" >&2
+    elif [[ -n "$_rv" ]]; then
+        printf "  ${GREEN}$(msg "menu.up_to_date")${NC}\n" "$SCRIPT_VERSION" >&2
     fi
-    # 文本模式下标题已由上方 header 打印，此处留空避免重复；TUI 下标题进窗口标题栏。
-    local title=""
-    if [[ "$UI_TTY" -eq 1 && -n "$UI_BIN" ]]; then
-        title="$(msg "tui.title") v${SCRIPT_VERSION}"
-    fi
+    # 标题已由 render_screen 打印，菜单本身不再重复。
     local c
-    c="$(ui_menu "$title" "$(msg "menu.prompt")" \
+    c="$(ui_menu "" "$(msg "menu.prompt")" \
         "1" "$(msg "menu.install_server")" \
         "2" "$(msg "menu.install_agent")" \
         "3" "$(msg "menu.update_agent")" \
@@ -2143,8 +2323,10 @@ show_menu() {
         "9" "$(msg "menu.reset_token")" \
         "10" "$(msg "menu.clear_whitelist")" \
         "11" "$(msg "menu.switch_lang")" \
-        "0" "$(msg "menu.exit")" )"
-    [[ -z "$c" ]] && exit 0
+        "0" "$(msg "menu.exit")" )" || exit 1
+    # 空回车（非 EOF）→ 重绘菜单；EOF 已在上一行以非零退出，
+    # 避免 `printf '' | diting.sh` 被当成"用户主动退出"而静默成功。
+    [[ -z "$c" ]] && return
     case "$c" in
         1) install_server ;;
         2) install_agent ;;
@@ -2165,6 +2347,11 @@ show_menu() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --install-server) ACTION="server"; shift ;;
+        # 监听端口：配合 --install-server（非交互部署用）。校验在 resolve_server_port 内做，
+        # 非法值会让安装在任何写盘动作之前中止。
+        --port)           need_val_guard "$1" "${2:-}"; A_SERVER_PORT="${2:-}"; shift 2 ;;
+        # 跳过保护性检查；当前唯一用途是"升级前备份失败仍继续"
+        --force)          A_FORCE=1; shift ;;
         --install-agent)  ACTION="agent";  shift ;;
         --update-script)  ACTION="update-script"; shift ;;
         --update-server)  ACTION="update-server"; shift ;;

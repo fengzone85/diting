@@ -11,6 +11,8 @@ const routes = [
   { path: '/', component: HomeView },
   { path: '/node/:id', component: () => import('../views/NodeDetailView.vue'), props: true },
   { path: '/login', component: () => import('../views/LoginView.vue') },
+  // 安装向导：未安装时服务端把所有页面 307 到这里（复刻 komari 安装向导入口）
+  { path: '/install', component: () => import('../views/InstallView.vue') },
   {
     path: '/admin',
     component: () => import('../views/admin/AdminLayout.vue'),

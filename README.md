@@ -203,7 +203,7 @@ diting/
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
-| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、不阻止启动，未设时走 Web 初始化向导生成） |
+| `ADMIN_TOKEN` | 否 | — | **已废弃，仅存量迁移用**：新装由浏览器 `/install` 安装向导创建管理员 Token，**库中只存 sha256 哈希**，明文只在完成页显示一次。存量部署保留此变量，启动时会把旧明文迁进库并打印「已废弃」告警；迁移后可删。重置用 `sudo bash diting.sh --reset-admin-token`（写库即时生效，无需重启） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
 | `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写；建议 ≥16 位，占位符 / 过短会启动告警）。全局静态凭证，不可吊销 / 无审计 / 不能限节点；需要这些能力请用 API Token（见下「只读账号与 API Token」） |
@@ -432,7 +432,7 @@ curl -X POST https://your-server/api/admin/api-tokens \
 ## 🛡️ 安全加固清单
 
 - [ ] 通过 Nginx + TLS 反代，源站 8081 仅绑 `127.0.0.1`
-- [ ] 设置强随机 `ADMIN_TOKEN`（≥16 位）
+- [ ] 首次访问 `/install` 完成安装向导（生成强随机管理员 Token，**只显示一次**；库中只存 sha256 哈希）
 - [ ] 设置 `SESSION_SECRET`（固定随机值，防重启失效）
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
 - [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外（误配时用 `sudo bash diting.sh --clear-ip-whitelist` 救援，改库即时生效）

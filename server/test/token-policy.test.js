@@ -1,28 +1,34 @@
 'use strict';
 // ============================================================
-// Token 强度判定（src/token-policy.js）的回归断言
+// Token 强度判定 + 哈希校验口径（src/token-policy.js）的回归断言
 //
-// 锚定：
-//   - 占位符 change-me-admin-token 与短于 16 位的值一律视为不可用；
-//   - tokenIssue 能区分 missing / placeholder / too_short / null（供启动日志分档）；
-//   - auth.js / api.js 与 server.js 共用同一实现，不再各自维护副本。
+// P0 变更：库中**只存 sha256 哈希**，旧的 getAdminToken()（读 env 返回明文）已删除。
+// 本文件锚定新口径：
+//   - 强度判定：占位符 / < 16 位不可用；
+//   - hasAdminToken()：库中存在合法 64 位 hex 哈希才算已初始化；
+//   - verifyAdminToken()：明文 → sha256 → 与库中哈希恒时比较；脏哈希一律拒绝；
+//   - auth.js / server.js / api.js 共用同一实现（防阈值漂移）。
 // ============================================================
-const { test } = require('node:test');
+process.env.DB_PATH = '/tmp/diting-token-policy-test.db';
+delete process.env.ADMIN_TOKEN;
+
+const { test, after } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+
+for (const suffix of ['', '-journal', '-wal', '-shm']) {
+  try { fs.unlinkSync(process.env.DB_PATH + suffix); } catch { /* 不存在则忽略 */ }
+}
 
 const policy = require('../src/token-policy');
 const auth = require('../src/auth');
+const db = require('../src/db');
 
-// 读取当前 env 后恢复，避免污染同进程其它测试。
-function withAdminToken(value, fn) {
-  const prev = process.env.ADMIN_TOKEN;
-  if (value === undefined) delete process.env.ADMIN_TOKEN;
-  else process.env.ADMIN_TOKEN = value;
-  try { return fn(); } finally {
-    if (prev === undefined) delete process.env.ADMIN_TOKEN;
-    else process.env.ADMIN_TOKEN = prev;
+after(() => {
+  for (const suffix of ['', '-journal', '-wal', '-shm']) {
+    try { fs.unlinkSync(process.env.DB_PATH + suffix); } catch { /* 忽略 */ }
   }
-}
+});
 
 test('token-policy: 占位符与短值不可用，≥16 位非占位符可用', () => {
   assert.equal(policy.isUsableAdminToken(undefined), false);
@@ -42,20 +48,39 @@ test('token-policy: tokenIssue 四态区分', () => {
   assert.equal(policy.tokenIssue('a'.repeat(policy.MIN_LEN)), null);
 });
 
-test('token-policy: getAdminToken 对弱值返回空串（等同未设置）', () => {
-  withAdminToken('short', () => {
-    assert.equal(policy.getAdminToken(), '');
-    assert.equal(auth.getAdminToken(), '');
-  });
-  withAdminToken('change-me-admin-token', () => {
-    assert.equal(policy.getAdminToken(), '');
-  });
-  withAdminToken('a'.repeat(policy.MIN_LEN), () => {
-    assert.equal(policy.getAdminToken(), 'a'.repeat(policy.MIN_LEN));
-  });
+test('token-policy: 未写哈希时 hasAdminToken 为 false，verify 恒 false（env 不再是来源）', () => {
+  db.clearAdminTokenHash();
+  assert.equal(policy.hasAdminToken(), false);
+  // 即使进程 env 里有强 Token，也不再生效（P0：env 仅用于一次性迁移）
+  process.env.ADMIN_TOKEN = 'a'.repeat(32);
+  try {
+    assert.equal(policy.verifyAdminToken('a'.repeat(32)), false);
+  } finally {
+    delete process.env.ADMIN_TOKEN;
+  }
+});
+
+test('token-policy: 写入哈希后 hasAdminToken/verifyAdminToken 生效', () => {
+  const tok = 'adm_' + 'f'.repeat(48);
+  db.setAdminTokenHash(policy.hashAdminToken(tok));
+  assert.equal(policy.hasAdminToken(), true);
+  assert.equal(policy.verifyAdminToken(tok), true);
+  assert.equal(policy.verifyAdminToken(tok + 'x'), false);
+  assert.equal(policy.verifyAdminToken(''), false);
+  assert.equal(policy.verifyAdminToken(undefined), false);
+  assert.equal(policy.verifyAdminToken(12345), false);
+});
+
+test('token-policy: 库中哈希非法（脏写/旧明文）时一律视为未初始化', () => {
+  for (const bad of ['', 'change-me-admin-token', 'abc', 'A'.repeat(64), 'g'.repeat(64)]) {
+    db.setAdminTokenHash(bad);
+    assert.equal(policy.hasAdminToken(), false, `脏哈希应被视为未初始化: ${bad.slice(0, 12)}`);
+    assert.equal(policy.verifyAdminToken('anything-long-enough-1234'), false);
+  }
+  db.clearAdminTokenHash();
+  assert.equal(policy.hasAdminToken(), false);
 });
 
 test('token-policy: auth.js 复用同一实现（防阈值漂移）', () => {
-  // 同一函数引用：若将来任一处改了阈值而不改另一处，此断言即失败。
-  assert.equal(auth.getAdminToken, policy.getAdminToken);
+  assert.equal(auth.verifyAdminToken, policy.verifyAdminToken);
 });
