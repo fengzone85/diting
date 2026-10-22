@@ -15,14 +15,53 @@ const loadFailed = ref(false);
 
 const sitename = ref('');
 const description = ref('');
+const siteUrl = ref('');
+const agentServerUrl = ref('');
+const listenPort = ref<number | null>(null);
 const mode = ref<'generate' | 'custom'>('generate');
 const customToken = ref('');
 const submitting = ref(false);
 const error = ref('');
 const generatedToken = ref('');
+const doneWarnings = ref<string[]>([]);
 const copied = ref(false);
 
 const MIN_TOKEN_LEN = 16;
+const URL_MAX = 200;
+
+// ---- 地址校验（与后端 install.js normalizeBaseUrl / urlWarnings 同口径）----
+// 前端只做即时反馈，最终以后端校验为准。
+function parseUrl(v: string): URL | null {
+  try { return new URL(v.trim()); } catch { return null; }
+}
+
+const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|::1|\[::1\])$/i;
+
+function urlOk(v: string, required: boolean): boolean {
+  const s = v.trim();
+  if (!s) return !required;
+  if (s.length > URL_MAX) return false;
+  const u = parseUrl(s);
+  return !!u && (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password && !!u.hostname;
+}
+
+const siteUrlOk = computed(() => urlOk(siteUrl.value, false));
+const agentServerUrlOk = computed(() => urlOk(agentServerUrl.value, true));
+
+// 软告警：回环/内网地址、显式端口与监听端口不一致 —— 都只提示不阻断
+const agentWarn = computed(() => {
+  const u = parseUrl(agentServerUrl.value);
+  if (!u) return '';
+  if (PRIVATE_HOST_RE.test(u.hostname)) return 'install.warnPrivate';
+  if (u.port && listenPort.value && Number(u.port) !== listenPort.value) return 'install.warnPortMismatch';
+  return '';
+});
+
+function warnLabel(key: string): string {
+  if (key === 'agent_server_url_private') return t('install.warnPrivate');
+  if (key === 'agent_server_url_port_mismatch') return t('install.warnPortMismatch');
+  return '';
+}
 
 // 与后端 install.js validateInstall 的 custom 分支同一口径，前端实时提示、后端最终把关
 const customTokenCheck = computed(() => {
@@ -39,6 +78,7 @@ const canSubmit = computed(() => {
   const name = sitename.value.trim();
   if (!name || name.length > 100) return false;
   if (description.value.trim().length > 1000) return false;
+  if (!siteUrlOk.value || !agentServerUrlOk.value) return false;
   if (mode.value === 'custom' && !customTokenCheck.value.ok) return false;
   return true;
 });
@@ -48,7 +88,15 @@ async function load() {
   loadFailed.value = false;
   try {
     const s: InstallStatus = await getInstallStatus();
+    listenPort.value = typeof s.port === 'number' ? s.port : null;
     phase.value = s.required ? 'form' : 'locked';
+    if (s.required) {
+      // 浏览器侧预填（管理员确认后才入库）。服务端仍不信任 Host / X-Forwarded-Host，
+      // 见 api.js getPublicBaseUrl 的纵深防御说明。
+      const origin = window.location.origin;
+      if (!siteUrl.value) siteUrl.value = origin;
+      if (!agentServerUrl.value) agentServerUrl.value = origin;
+    }
   } catch {
     loadFailed.value = true;
   }
@@ -66,10 +114,13 @@ async function submit() {
     const res = await completeInstall({
       sitename: name,
       description: description.value.trim(),
+      site_url: siteUrl.value.trim() || undefined,
+      agent_server_url: agentServerUrl.value.trim(),
       token_mode: mode.value,
       token: mode.value === 'custom' ? customToken.value.trim() : undefined,
     });
     generatedToken.value = res.token || '';
+    doneWarnings.value = Array.isArray(res.warnings) ? res.warnings : [];
     phase.value = 'done';
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
@@ -138,6 +189,25 @@ onMounted(load);
             class="w-full resize-none rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-sky-500"></textarea>
         </div>
         <div>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('install.siteUrl') }}</label>
+          <input v-model="siteUrl" type="url" maxlength="200" :placeholder="t('install.siteUrlPh')"
+            class="w-full rounded-lg border bg-slate-900/50 px-4 py-2 text-white outline-none"
+            :class="siteUrlOk ? 'border-slate-700 focus:border-sky-500' : 'border-rose-500/60 focus:border-rose-400'" />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm text-slate-400">{{ t('install.agentServerUrl') }}</label>
+          <input v-model="agentServerUrl" type="url" maxlength="200" required :placeholder="t('install.agentServerUrlPh')"
+            class="w-full rounded-lg border bg-slate-900/50 px-4 py-2 text-white outline-none"
+            :class="agentServerUrlOk ? 'border-slate-700 focus:border-sky-500' : 'border-rose-500/60 focus:border-rose-400'" />
+          <p class="mt-1 text-xs text-slate-500">{{ t('install.agentServerUrlHint') }}</p>
+          <p v-if="!agentServerUrlOk" class="mt-1 text-xs text-rose-400">{{ t('install.agentServerUrlRequired') }}</p>
+          <p v-else-if="agentWarn" class="mt-1 text-xs text-amber-400">⚠️ {{ t(agentWarn) }}</p>
+        </div>
+        <div class="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+          <span class="text-xs text-slate-400">{{ t('install.listenPort') }}</span>
+          <code class="rounded bg-black/40 px-2 py-0.5 font-mono text-xs text-slate-200">{{ listenPort ?? '—' }}</code>
+        </div>
+        <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.tokenMode') }}</label>
           <div class="grid grid-cols-2 gap-2">
             <button type="button" @click="mode = 'generate'"
@@ -189,6 +259,9 @@ onMounted(load);
       </template>
       <p v-else class="mb-2 text-sm text-slate-300">{{ t('install.doneCustomHint') }}</p>
 
+      <ul v-if="doneWarnings.length" class="mb-2 space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+        <li v-for="w in doneWarnings" :key="w">⚠️ {{ warnLabel(w) }}</li>
+      </ul>
       <p class="mb-2 text-xs text-slate-400">{{ t('install.doneWarning') }}</p>
       <p class="mb-6 text-xs text-slate-400">{{ t('install.doneNote') }}</p>
 
