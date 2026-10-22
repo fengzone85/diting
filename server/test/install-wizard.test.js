@@ -13,7 +13,11 @@
 process.env.PORT = '0';
 process.env.ADMIN_ALLOW_HTTP = '1';
 process.env.DB_PATH = '/tmp/diting-install-wizard-test.db';
-delete process.env.ADMIN_TOKEN;
+// 显式置空而不是 delete：server.js 第一行 `require('dotenv').config()` 会读工作目录下的
+// 真实 .env（在部署机/生产树里跑测试时它确实存在），delete 之后会被 dotenv 重新填回，
+// 导致启动时把 ADMIN_TOKEN 迁进临时库、实例变成"已安装"，本文件所有"未安装"前提全废。
+// dotenv 不覆盖已存在的键，故留一个空串即可保持"未设置"语义（tokenIssue('') = missing）。
+process.env.ADMIN_TOKEN = '';
 process.env.DITING_ENV_PATH = '/tmp/diting-install-wizard-test.env';
 
 const fs = require('fs');
@@ -57,7 +61,7 @@ after(async () => {
   // 测试跑完但进程挂住（其它 *.test.js 同样如此收尾）。
   try { await new Promise((r) => server.close(r)); } catch { /* 已关闭 */ }
   // 清理本测试留下的凭据与临时文件，避免泄漏进同进程后续测试或污染工作区
-  delete process.env.ADMIN_TOKEN;
+  process.env.ADMIN_TOKEN = '';
   if (createdIndex) { try { fs.unlinkSync(INDEX_HTML); } catch { /* ignore */ } }
   for (const f of [process.env.DITING_ENV_PATH, '/tmp/diting-install-e2e-custom.db']) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
