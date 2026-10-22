@@ -188,7 +188,7 @@ show_usage() {
   sudo bash diting.sh --uninstall
 
   # 数据库备份 / 恢复 / 管理
-  sudo bash diting.sh --backup [输出路径]         # 备份数据库（默认存到 $DB_BACKUP_DIR）
+  sudo bash diting.sh --backup [输出路径]         # 备份数据库（默认存到 ${DB_BACKUP_DIR:-/var/backups/diting}）
   sudo bash diting.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
   sudo bash diting.sh --backup-list               # 列出已有备份（含占用/时间跨度/定时状态）
   sudo bash diting.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
@@ -733,6 +733,7 @@ update_server() {
     # server-data 卷的容器，容器停了就定位不到库，备份会直接失败。
     # 备份失败默认中止升级（源码已 reset 但容器未重建，旧容器仍在跑，损失最小）；
     # --force 可跳过。
+    _init_backup_dir
     local _bak=""
     _bak="${DB_BACKUP_DIR}/monitor_$(date +%Y%m%d_%H%M%S)_pre-upgrade.db"
     echo -e "${YELLOW}[信息] 升级前备份数据库 → ${_bak}${NC}"
@@ -860,7 +861,10 @@ status_all() {
 # 服务端数据库路径：Docker 部署在命名卷 server-data 内（容器内 /data/monitor.db）；
 # 原生/开发态在 $SRC_DIR/server/data/monitor.db。
 # 备份原则：SQLite 单文件即全量，但必须通过 .backup 命令或停服后 cp，避免写坏。
-DB_BACKUP_DIR="/var/backups/diting"
+# 备份目录：留空表示"按部署形态自动判定"，由 _init_backup_dir 在真正用到时计算
+# （Docker → 宿主 /var/backups/diting；原生 → 与 server/.env 的 BACKUP_DIR 对齐）。
+# 显式传 DB_BACKUP_DIR=/path 时以传入值为准。
+DB_BACKUP_DIR="${DB_BACKUP_DIR:-}"
 # 备份保留天数（默认 14）。超出时「自动备份」会清理最旧的 monitor_*.db；
 # =0 关闭清理（永不自动删除）。可用 --keep-days N 覆盖，或环境变量 DB_BACKUP_KEEP_DAYS。
 DB_BACKUP_KEEP_DAYS="${DB_BACKUP_KEEP_DAYS:-14}"
@@ -915,6 +919,37 @@ locate_db() {
     echo ""
 }
 
+# 解析备份目录：脚本与服务端**必须指向同一个目录**，否则后台「备份」页看不到 CLI 产物。
+#   Docker：库在命名卷里，`.env` 的 BACKUP_DIR 是容器内路径（/data/backups），宿主侧固定用它；
+#   原生  ：服务端与本脚本同机，`.env` 的 BACKUP_DIR 就是宿主路径，两边必须一致。
+# 本机就踩过：CLI 写 /var/backups/diting，服务端读 /opt/diting-backups（目录不存在），
+# 后台接口返回 {"available":false,"files":[]}，用户以为备份丢了。
+# 需要 locate_db，故不能在脚本顶层调用，只能由各入口函数触发。
+_init_backup_dir() {
+    [[ -n "${_BACKUP_DIR_READY:-}" ]] && return 0
+    _BACKUP_DIR_READY=1
+    # 显式传入的 DB_BACKUP_DIR 优先（运维覆盖 / 测试）
+    [[ -n "${DB_BACKUP_DIR:-}" ]] && return 0
+    local loc envf="" val cand selfdir
+    loc="$(locate_db 2>/dev/null)"
+    if [[ "$loc" == docker:* ]]; then
+        DB_BACKUP_DIR="/var/backups/diting"
+        return 0
+    fi
+    # 与 locate_db 同一套候选：部署路径 → 脚本所在目录 → 当前目录
+    # （本机就是从仓库直跑脚本，$SRC_DIR 并不存在，只能靠后两者）
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    for cand in "${SRC_DIR:-}/server/.env" "${selfdir}/server/.env" "./server/.env"; do
+        [[ -n "$cand" && -f "$cand" ]] && { envf="$cand"; break; }
+    done
+    if [[ -n "$envf" ]]; then
+        val="$(sed -n 's/^BACKUP_DIR=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1)"
+        [[ -n "$val" && "$val" == /* ]] && DB_BACKUP_DIR="$val"
+    fi
+    DB_BACKUP_DIR="${DB_BACKUP_DIR:-/var/backups/diting}"
+    return 0
+}
+
 # 只有数据库位于 Docker 命名卷时才要求 Docker。
 # 原生（systemd）部署的库是宿主机文件，db_run_js / locate_db 都有 file 分支，
 # 旧实现在 do_backup / do_restore / do_db_stats / do_clear_ip_whitelist 入口
@@ -933,6 +968,7 @@ ensure_docker_if_volume() {
 # 事务合并到主库），不依赖停服；无 sqlite3 时回退到 cp（需先停容器防写坏）。
 # 用法：do_backup [输出路径] [保留天数]
 do_backup() {
+    _init_backup_dir
     local out_path="${1:-}"
     local keep_days="${2:-}"
     local started; started="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
@@ -1258,6 +1294,7 @@ sync_to_visible_dir() {
 
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
 do_restore() {
+    _init_backup_dir
     local in_path="$1"
     [[ -z "$in_path" ]] && { echo -e "${RED}[错误] 用法: --restore <备份文件路径>${NC}" >&2; return 1; }
     [[ -f "$in_path" ]] || { echo -e "${RED}[错误] 文件不存在: $in_path${NC}" >&2; return 1; }
@@ -1390,6 +1427,7 @@ do_restore() {
 #  - 备份输出到 $DB_BACKUP_DIR 并按保留天数轮转，避免占满磁盘；
 #  - 无 crontab 命令时给出清晰指引（最小化容器需 apt-get install -y cron）。
 do_backup_schedule() {
+    _init_backup_dir
     local act="${1:-status}"
     local keep="${2:-$DB_BACKUP_KEEP_DAYS}"
     local hour="${3:-3}"
@@ -1464,7 +1502,17 @@ do_backup_schedule() {
 
 # 列出已有备份（含占用总量、时间跨度与定时备份状态）
 do_backup_list() {
+    _init_backup_dir
     echo "== 数据库备份列表 =="
+    # 目录刚对齐时，历史备份可能还留在旧默认目录，提醒一句避免误以为备份丢了
+    if [[ "$DB_BACKUP_DIR" != "/var/backups/diting" && -d /var/backups/diting ]]; then
+        local _old_cnt
+        _old_cnt="$(find /var/backups/diting -maxdepth 1 -type f \( -name 'monitor_*.db' -o -name 'monitor_*.db.gz' \) 2>/dev/null | wc -l)"
+        if [[ "${_old_cnt:-0}" -gt 0 ]]; then
+            echo -e "${YELLOW}  另有 ${_old_cnt} 个旧备份位于 /var/backups/diting（不在当前目录 $DB_BACKUP_DIR）${NC}"
+            echo -e "  可执行：sudo mv /var/backups/diting/monitor_* $DB_BACKUP_DIR/"
+        fi
+    fi
     if [[ ! -d "$DB_BACKUP_DIR" ]]; then
         echo "  暂无备份（目录 $DB_BACKUP_DIR 不存在）"
         echo -e "  ${YELLOW}首次备份: sudo bash diting.sh --backup${NC}"

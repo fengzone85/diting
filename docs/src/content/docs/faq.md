@@ -48,6 +48,29 @@ git -C /opt/diting-src reset --hard FETCH_HEAD   # 丢弃所有本地改动
 | 只想临时试一下 | 更新前先 `git -C /opt/diting-src diff > /tmp/my.patch`，更新后 `git apply /tmp/my.patch` |
 | 换 apt 镜像源（构建慢） | 用构建参数 `APT_MIRROR`（写进 `.env` 或 `--build-arg`），不要改 `Dockerfile` |
 
+### Q: `--backup` 说成功了，后台「备份」页却看不到文件？
+
+多半是两边指向了不同目录（原生部署常见）：服务端读 `.env` 的 `BACKUP_DIR`，而脚本早期写死
+`/var/backups/diting`。
+
+现在脚本按部署形态解析：
+
+| 形态 | 备份目录 |
+|---|---|
+| Docker（库在命名卷） | 宿主 `/var/backups/diting`（`.env` 里是容器路径 `/data/backups`，靠挂载对齐） |
+| 原生（库是宿主文件） | **跟随 `.env` 的 `BACKUP_DIR`**（没有则回落 `/var/backups/diting`） |
+
+排查三步：
+
+```bash
+grep '^BACKUP_DIR=' server/.env        # 服务端读哪个目录
+sudo bash diting.sh --backup-list      # 脚本用哪个目录；若有旧备份在别处会给出提示
+# 后台看到什么（把 <token> 换成管理员 Token）
+curl -s -H 'X-Admin-Token: <token>' http://127.0.0.1:8081/api/admin/backups
+```
+
+历史备份还在旧目录时：`sudo mv /var/backups/diting/monitor_* "$(grep '^BACKUP_DIR=' server/.env | cut -d= -f2)/"`。
+
 ### Q: 数据库用什么？
 
 SQLite 单文件。无需额外安装数据库服务。
