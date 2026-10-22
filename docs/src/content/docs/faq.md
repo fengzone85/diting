@@ -59,6 +59,14 @@ git -C /opt/diting-src reset --hard FETCH_HEAD   # 丢弃所有本地改动
 - 上传完成后**不会自动恢复**，需要在列表里点「恢复」，由宿主侧 `diting.sh` 执行
   （先备份当前库、校验完整性、停服替换、再重启）
 
+⚠️ 若上传或下载报 `backup dir not writable` / 403：备份目录是 root 建的，而服务端常以普通用户
+运行（如 systemd 的 `User=feng`），两者权限对不上。**跑一次 `sudo bash diting.sh --backup`
+即可**——新版脚本会把目录与已有备份 `chown` 给服务端用户；手动修也行：
+
+```bash
+sudo chown -R <服务端用户> <BACKUP_DIR>
+```
+
 ### Q: 服务起不来，日志在哪看？
 
 ```bash

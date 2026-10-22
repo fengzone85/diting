@@ -956,6 +956,17 @@ _init_backup_dir() {
     return 0
 }
 
+# 原生 systemd 部署下服务端的运行用户（Docker / root 跑时返回空）。
+# 备份目录与备份文件都是 root 建的（0600），而服务端常以普通用户运行 →
+# 后台「上传」写不进、「下载」也读不了。拿到用户后脚本会 chown 目录与产物。
+server_run_user() {
+    local u
+    u="$(systemctl show diting-server -p User --value 2>/dev/null | tr -d '\r\n')"
+    if [[ -n "$u" && "$u" != "root" ]]; then
+        echo "$u"
+    fi
+}
+
 # 只有数据库位于 Docker 命名卷时才要求 Docker。
 # 原生（systemd）部署的库是宿主机文件，db_run_js / locate_db 都有 file 分支，
 # 旧实现在 do_backup / do_restore / do_db_stats / do_clear_ip_whitelist 入口
@@ -1009,6 +1020,16 @@ do_backup() {
     fi
 
     mkdir -p "$DB_BACKUP_DIR"
+    # 让服务端运行用户也能读写这个目录（后台的上传/下载走服务端进程）
+    local _svc_user; _svc_user="$(server_run_user)"
+    if [[ -n "$_svc_user" ]]; then
+        chown "$_svc_user" "$DB_BACKUP_DIR" 2>/dev/null || true
+        # 顺带修历史产物：旧版本以 root 建的文件（0600）服务端读不了，下载会失败。
+        # 只动备份命名，不碰目录里的其它文件。
+        find "$DB_BACKUP_DIR" -maxdepth 1 -type f \
+            \( -name 'monitor_*.db' -o -name 'monitor_*.db.gz' -o -name 'pre_restore_*.db*' \) \
+            -exec chown "$_svc_user" {} + 2>/dev/null || true
+    fi
     local ts; ts="$(date +%Y%m%d_%H%M%S)"
     [[ -z "$out_path" ]] && out_path="$DB_BACKUP_DIR/monitor_${ts}.db"
 
@@ -1138,6 +1159,9 @@ do_backup() {
             DB_BACKUP_DIR="$saved_dir"
         fi
     fi
+
+    # 备份文件本身也要让服务端用户可读（下载 / 上传后恢复都走它）
+    [[ -n "${_svc_user:-}" && -f "${final_path:-}" ]] && chown "$_svc_user" "$final_path" 2>/dev/null || true
 
     local ended; ended="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
     local dur=$(( ended - started ))

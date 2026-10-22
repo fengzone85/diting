@@ -99,12 +99,29 @@ function detectUploadKind(buf) {
 
 // 保存上传的备份。文件名**由服务端生成**（客户端给的名字一律丢弃），
 // 这样 NAME_RE 白名单、列表/删除/恢复全都不受影响，也彻底避开路径穿越。
+// 目录不可写时给出**可执行**的原因：服务端通常以非 root 用户跑，而备份是 root 的
+// diting.sh 创建的，默认 root:root 755 → 上传写不进、下载也读不了。
+function uploadBlockedReason() {
+  try {
+    fs.accessSync(BACKUP_DIR, fs.constants.W_OK);
+    return '';
+  } catch (e) {
+    let user = '';
+    try { user = require('node:os').userInfo().username; } catch (e2) { /* ignore */ }
+    return user
+      ? `backup dir not writable by server user "${user}"; run: sudo chown ${user} ${BACKUP_DIR}`
+      : `backup dir not writable: ${BACKUP_DIR}`;
+  }
+}
+
 function saveUploadedBackup(buf) {
+  ensureDir();                       // 先建目录，否则 accessSync 会因 ENOENT 误判为"不可写"
+  const blocked = uploadBlockedReason();
+  if (blocked) return { ok: false, code: 503, error: blocked };
   const kind = detectUploadKind(buf);
   if (!kind) {
     return { ok: false, code: 400, error: 'not a sqlite database or gzip archive' };
   }
-  ensureDir();
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;

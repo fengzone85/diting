@@ -117,6 +117,29 @@ test('重复调用不会重新解析（幂等）', () => {
   }
 });
 
+test('server_run_user：只在 systemd 且非 root 时返回用户（备份要 chown 给他）', () => {
+  const run = (unitUser) => {
+    const code = [
+      'set -u',
+      `systemctl() { printf '%s' '${unitUser}'; }`,
+      fnBody('server_run_user'),
+      'server_run_user',
+    ].join('\n');
+    return spawnSync('bash', ['-c', code], { encoding: 'utf8' }).stdout.trim();
+  };
+  assert.strictEqual(run('feng'), 'feng', '普通用户应原样返回');
+  assert.strictEqual(run('root'), '', 'root 不需要 chown');
+  assert.strictEqual(run(''), '', '非 systemd 部署返回空');
+});
+
+test('静态：备份后要把目录与产物交给服务端用户（否则后台上传/下载 EACCES）', () => {
+  const backup = fnBody('do_backup');
+  assert.match(backup, /server_run_user/, '应探测服务端运行用户');
+  assert.match(backup, /chown "\$_svc_user" "\$DB_BACKUP_DIR"/, '目录要 chown');
+  assert.match(backup, /monitor_\*\.db\.gz/, '历史产物也要修（旧版本是 root 0600）');
+  assert.match(backup, /chown "\$_svc_user" "\$final_path"/, '新产物要 chown');
+});
+
 test('静态：默认值不再硬编码，且各入口都做了初始化', () => {
   assert.match(src, /^DB_BACKUP_DIR="\$\{DB_BACKUP_DIR:-\}"$/m, '默认值应为空，交给 _init_backup_dir 解析');
   for (const fn of ['do_backup', 'do_restore', 'do_backup_schedule', 'do_backup_list', 'update_server']) {
