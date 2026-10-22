@@ -22,11 +22,12 @@ docker compose up -d
 
 > `server/.env` 被 `.gitignore` 忽略、不会随仓库分发，必须先从 `.env.example` 复制一份
 > （`docker-compose.yml` 通过 `env_file` 引用它，缺文件会直接启动失败）。复制后请把
-> `ADMIN_TOKEN` / `SESSION_SECRET` 改成随机强值。
+> `SESSION_SECRET` 改成随机强值；`ADMIN_TOKEN` 留空即可 —— 管理员 Token 由安装向导生成。
 
-访问 `http://<你的IP>:8081` 即可看到仪表盘。
+访问 `http://<你的IP>:8081`（端口跟随 `.env` 的 `PORT`）。未安装时任何页面都会 307 跳到 `/install`。
 
-首次访问时用 `ADMIN_TOKEN` 环境变量登录管理端。
+在向导里填写站点名称 / 描述 / **上报地址**，并生成管理员 Token（**只显示一次**，请立即保存）。
+Token 在库中只存 sha256 哈希，丢了只能用 `sudo bash diting.sh --reset-admin-token` 重置。
 
 ## 方式 2：原生 Node 部署
 

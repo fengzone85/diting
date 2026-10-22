@@ -2,6 +2,42 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-22 安装向导（对照 komari）+ 管理员 Token 入库哈希 + 安装器端口 / 升级备份
+
+首次部署体验向 komari 对齐：未安装时全站 307 到 `/install`，管理员 Token 由向导生成且**只存 sha256 哈希**；
+同时修掉 `--reset-admin-token` 改完 `.env` 却不生效的老问题（改库即生效，无需重启）。
+
+### 说明
+
+- **管理员 Token 入库哈希**（`admin_config.admin_token_hash`）：明文只在向导完成页显示一次，
+  库文件 / 备份泄露不再等于拿到 Token。启动时若库中无哈希而 `.env` 有可用值，会自动迁移一次，
+  之后 `.env` 的 `ADMIN_TOKEN` 仅打印「已废弃」告警、不再参与鉴权。
+- **未安装判据 = 库中无哈希**：对齐 komari 的 users 计数语义，不再依赖环境变量，也不需要
+  `admin_initialized` 之类的标志位——哈希存在性本身就是锁（多实例并发由 `INSERT OR IGNORE` 收敛）。
+- **安装向导 `/install`**：未安装时页面 GET 一律 307 进向导、管理面 API 返回 404（对齐 komari
+  `guideNoRoute`，不暴露"未安装"指纹）；agent 上报面与 `SETUP_TOKEN` 自助注册不受影响。
+  表单字段：站点名称、描述、站点网址（选填）、**上报地址（必填）**、管理员 Token（自动生成 / 自定义）。
+  上报地址是受控端安装命令的前置依赖（`getPublicBaseUrl` 优先级 `agent_server_url > site_url > PUBLIC_URL`），
+  在向导里一次填好，装完不必再回设置页补。
+- **安装器不再预生成 ADMIN_TOKEN**（旧版"首装不弹引导"的直接原因），只生成 `SESSION_SECRET` / `SETUP_TOKEN`；
+  新增 `--port N` 与交互式端口选择（1–65535，默认 8081），`.env` 的 `PORT` 驱动 compose 的
+  `ports` / `PORT` 参数化。
+- **`--reset-admin-token` 改为直接写库哈希**：不再改 `.env`、不再 `docker compose restart`
+  （`restart` 用容器创建时的配置，新值根本进不去），写库后下一个请求即生效，并吊销既有会话。
+- **`--update-server` 升级前自动备份数据库**（在 `compose down` **之前**，否则容器已停、定位不到库），
+  备份失败默认中止、`--force` 才继续；重建后再用容器运行态复核，失败给出数据 / 代码两条回滚命令。
+- **交互层改纯文本**：移除 whiptail/dialog 两套渲染路径，`UI_BIN` 退场；颜色仅在 stdout 是终端时输出
+  （`--status | cat` 不再混入 ANSI）；`ui_menu` / `ui_prompt` EOF 返回非零（管道场景不再静默成功），
+  `ui_confirm` 保持"空 = 取消"（卸载 / 重置类操作安全优先）。
+
+### 兼容性
+
+- **存量 Docker 部署**：`docker-compose.yml` 暂时保留 `- ADMIN_TOKEN=${ADMIN_TOKEN}`，让启动迁移
+  能读到旧明文；待存量迁移完成后该行可删（新装实例的 `.env` 已是空值，`docker inspect` 看不到明文）。
+- `.env` 的 `ADMIN_TOKEN` 可删；删之前请确认服务端启动日志已出现「管理员 Token 已就绪（来源：数据库哈希）」。
+- 端口参数化后，若曾手工改过 compose 的端口映射，请改用 `.env` 的 `PORT`；改完需
+  `docker compose up -d --force-recreate server`（`restart` 不会重新发布端口）。
+
 ## 2026-10-21 通知组收尾：迁移提示 + NOTIFY_GROUPS=0 回退开关（S2-F2 收尾）
 
 补齐 S1-F2 方案（§8/§9）遗留的两项与测试独立化。
