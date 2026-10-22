@@ -265,7 +265,8 @@ function _metricsHandler(req, res) {
 app.use('/api/install', install.router);
 
 // ---- 安装向导拦截（复刻 komari guideNoRoute：未安装时管理面 API 形同不存在）----
-// 未安装（无可用 Admin Token）时，管理面端点直接 403，把访客引导到 /install；
+// 未安装（库中无 Token 哈希）时，管理面端点返回 404 —— 对齐 komari 的
+// "Not found in install mode"：不暴露"这是未安装实例"这一状态信息，比 403 更少指纹。
 // 安装向导自身、旧 setup 兼容端点不受影响；agent 上报面（/api/v1/*、/api/report 等）
 // 与 SETUP_TOKEN 自助注册（/api/setup/register）同样放行——它们在「未安装」状态下
 // 也是合法入口。其余 admin 端点自带鉴权（未安装时无凭据必 401），无需在此穷举。
@@ -275,7 +276,7 @@ app.use('/api', (req, res, next) => {
   if (req.path === '/setup' || req.path.startsWith('/setup/')) return next();
   const p = req.path;
   if (p === '/admin' || p.startsWith('/admin/') || p === '/login' || p === '/logout') {
-    return res.status(403).json({ error: 'installation_required', message: '系统尚未完成安装，请先访问 /install 完成初始化' });
+    return res.status(404).json({ error: 'not_found', message: 'Not found in install mode（系统尚未安装，请访问 /install）' });
   }
   next();
 });

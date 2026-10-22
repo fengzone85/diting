@@ -159,13 +159,25 @@ function clearSessionCookie(res) {
 // 直连 :8081（无 X-Forwarded-Proto 头、或伪造为 http）一律拒绝，
 // 杜绝伪造该头绕过、以及误暴露 8081 端口的情况。
 // 本地开发/快速测试如需直连 http，可显式设置 ADMIN_ALLOW_HTTP=1（生产切勿设置）。
+//
+// 例外：安装向导的 SSH 隧道入口。请求**直接来自回环**且**没有任何代理头**时放行——
+// 公网流量必然经过 nginx，而 nginx 一定会写 X-Forwarded-Proto / X-Real-IP / X-Forwarded-For
+// （见 nginx/monitor.conf.example），因此"回环 + 零代理头"只可能是本机进程或 ssh -L 隧道。
+// 反向可证：带 X-Forwarded-Proto: http 的回环请求（即 nginx 转发的明文请求）仍被拒绝。
+function isDirectLoopback(req) {
+  const addr = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+  if (addr !== '::1' && !/^127\./.test(addr)) return false;
+  const h = req.headers || {};
+  return !h['x-forwarded-for'] && !h['x-real-ip'] && !h['forwarded'] && !h['x-forwarded-proto'];
+}
+
 function requireProto(req, res) {
   const proto = (req.header('X-Forwarded-Proto') || '').toLowerCase();
-  if (proto !== 'https' && process.env.ADMIN_ALLOW_HTTP !== '1') {
-    res.status(403).json({ error: 'https required' });
-    return false;
+  if (proto === 'https' || process.env.ADMIN_ALLOW_HTTP === '1' || isDirectLoopback(req)) {
+    return true;
   }
-  return true;
+  res.status(403).json({ error: 'https required' });
+  return false;
 }
 
 // 解析请求角色。返回 {role, totp, via, token?} 或 null。
