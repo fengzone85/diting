@@ -316,6 +316,11 @@ export const enUS: Record<string, string> = {
   'settings.backupState_unknown': 'Unknown',
   // Backup file management (requires the host backup dir mounted into the container)
   'settings.backupFiles': 'Backup Files',
+  'settings.backupUpload': 'Upload backup',
+  'settings.backupUploading': 'Uploading',
+  'settings.backupUploadHint': 'SQLite (.db) or gzip (.db.gz) only; the server generates the filename. Click "Restore" afterwards to apply.',
+  'settings.backupUploadConfirm': 'Upload backup file {name}? After upload you can apply it with "Restore".',
+  'settings.backupUploaded': 'Uploaded as {name}; restore it from the list',
   'settings.backupTime': 'Time',
   'settings.backupDownload': 'Download',
   'settings.backupRestore': 'Restore',

@@ -88,6 +88,42 @@ function inspectFile(full, name) {
   }
 }
 
+// 判断上传内容是不是"能当作备份"的东西：
+//   gzip 魔数 1f 8b（.db.gz）或 SQLite 文件头。只看头几个字节，不整文件读。
+function detectUploadKind(buf) {
+  if (!buf || buf.length < 16) return null;
+  if (buf[0] === 0x1f && buf[1] === 0x8b) return 'gz';
+  if (buf.slice(0, 15).toString('latin1') === 'SQLite format 3') return 'db';
+  return null;
+}
+
+// 保存上传的备份。文件名**由服务端生成**（客户端给的名字一律丢弃），
+// 这样 NAME_RE 白名单、列表/删除/恢复全都不受影响，也彻底避开路径穿越。
+function saveUploadedBackup(buf) {
+  const kind = detectUploadKind(buf);
+  if (!kind) {
+    return { ok: false, code: 400, error: 'not a sqlite database or gzip archive' };
+  }
+  ensureDir();
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const name = `monitor_${stamp}.db${kind === 'gz' ? '.gz' : ''}`;
+  const full = path.join(BACKUP_DIR, name);
+  if (!full.startsWith(BACKUP_DIR + path.sep)) return { ok: false, code: 400, error: 'invalid name' };
+  if (fs.existsSync(full)) return { ok: false, code: 409, error: 'name collision, retry in a second' };
+  const tmp = `${full}.upload-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(tmp, buf, { mode: 0o600 });
+    fs.renameSync(tmp, full);   // 原子落盘：列表/恢复不会看到半截文件
+    try { fs.chmodSync(full, 0o600); } catch (e) { /* 只读挂载等场景忽略 */ }
+    return { ok: true, name, size: buf.length };
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
+    return { ok: false, code: 500, error: e.message || 'write failed' };
+  }
+}
+
 function deleteBackup(name) {
   const full = resolveBackupFile(name);
   if (!full) return { ok: false, code: 400, error: 'invalid name' };
@@ -139,6 +175,8 @@ module.exports = {
   listBackups,
   backupSummary,
   inspectFile,
+  detectUploadKind,
+  saveUploadedBackup,
   deleteBackup,
   requestRestore,
   readRestoreRequest,

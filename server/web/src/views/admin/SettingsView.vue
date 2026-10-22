@@ -257,6 +257,31 @@ async function removeBackup(f: BackupFile) {
   }
 }
 
+const backupFileInput = ref<HTMLInputElement | null>(null);
+const backupUploading = ref(false);
+const backupUploadPct = ref(0);
+
+async function onPickBackup(ev: Event) {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ''; // 清空以便重复选择同一个文件
+  if (!file) return;
+  if (!confirm(t('settings.backupUploadConfirm').replace('{name}', file.name))) return;
+  backupUploading.value = true;
+  backupUploadPct.value = 0;
+  backupMsg.value = '';
+  try {
+    const r = await adminApi.uploadBackup(file, (p) => { backupUploadPct.value = p; });
+    backupMsg.value = t('settings.backupUploaded').replace('{name}', r.name);
+    await loadBackups();
+  } catch (e) {
+    backupMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    backupUploading.value = false;
+    backupUploadPct.value = 0;
+  }
+}
+
 async function restoreBackup(f: BackupFile) {
   if (!confirm(t('settings.backupRestoreConfirm').replace('{name}', f.name))) return;
   backupBusy.value = f.name;
@@ -624,6 +649,19 @@ async function resetGroupAlert() {
             >
               {{ t('common.refresh') }}
             </button>
+          </div>
+
+          <!-- 上传外部备份：服务端只认 SQLite / gzip，文件名由服务端生成 -->
+          <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <input ref="backupFileInput" type="file" accept=".db,.gz" class="hidden" @change="onPickBackup" />
+            <button
+              :disabled="backupUploading"
+              class="rounded border border-white/20 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
+              @click="backupFileInput?.click()"
+            >
+              {{ backupUploading ? `${t('settings.backupUploading')} ${backupUploadPct}%` : t('settings.backupUpload') }}
+            </button>
+            <span class="opacity-60">{{ t('settings.backupUploadHint') }}</span>
           </div>
 
           <div v-if="backupMsg" class="mb-3 rounded border border-sky-500/30 bg-sky-500/10 p-2 text-xs text-sky-200">

@@ -53,6 +53,7 @@ description: 服务端与受控端环境变量参考
 | `ALERT_CONCURRENCY` | 否 | `8` | 告警并发发送上限 |
 | `BACKUP_DIR` | 否 | `/data/backups` | 备份目录。Docker 下是**容器内路径**，需 compose 把宿主目录挂到此路径（`HOST_BACKUP_DIR` 指定宿主来源）；**原生部署下应写宿主路径**（如 `/var/backups/diting`），此时 `diting.sh --backup` 会直接跟随这里的值，后台「备份」页与 CLI 指向同一目录（否则后台会显示"目录不可用"、看不到 CLI 产物） |
 | `RESTORE_TRIGGER` | 否 | `/data/restore.request` | 后台点「恢复」时投递的请求文件。代码兜底默认在 `/data/` 下；compose 示例传 `/data/backups/restore.request`（与 `BACKUP_DIR` 同卷）。宿主侧 `diting.sh --process-restore` 读取并执行 |
+| `BACKUP_UPLOAD_MAX_MB` | 否 | `1024` | 后台「上传备份」的单文件上限（MB，1–8192）。上传内容必须是 SQLite 或 gzip，文件名由服务端生成；超限返回 413 |
 
 > AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
 

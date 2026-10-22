@@ -162,6 +162,29 @@ export const adminApi = {
     api.post<{ ok: boolean; queued: boolean }>(`/api/admin/backups/${encodeURIComponent(name)}/restore`, {}),
   // 下载走同源 GET，直接用 <a download> 触发，避免把整份备份读进内存
   backupDownloadUrl: (name: string) => `/api/admin/backups/${encodeURIComponent(name)}/download`,
+  // 上传外部备份：api 封装固定 JSON + 解析 JSON，二进制上传单独走 XHR（还能拿进度）
+  uploadBackup: (file: File, onProgress?: (pct: number) => void) =>
+    new Promise<{ ok: boolean; name: string; size_bytes: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/admin/backups/upload');
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {};
+        try { body = JSON.parse(xhr.responseText || '{}') as Record<string, unknown>; } catch { /* 非 JSON（网关错误页） */ }
+        const msg = typeof body.message === 'string' ? body.message : (typeof body.error === 'string' ? body.error : '');
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as unknown as { ok: boolean; name: string; size_bytes: number });
+        } else {
+          reject(new Error(msg || `${xhr.status}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('network error'));
+      xhr.send(file);
+    }),
 
   // alerts
   testAlert: () => api.post<{ ok: boolean; message?: string }>('/api/test-alert', {}),
