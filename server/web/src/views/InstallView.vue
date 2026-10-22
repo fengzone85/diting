@@ -5,6 +5,7 @@
 // 服务端未安装时会把所有页面 307 到这里，本页是全站唯一入口。
 import { ref, computed, onMounted } from 'vue';
 import { getInstallStatus, completeInstall, type InstallStatus } from '../services/install';
+import { isAcceptableUrl, agentUrlWarning, checkCustomToken, warnI18nKey } from '../utils/installForm';
 import { useI18n } from '../composables/useI18n';
 
 const { t } = useI18n();
@@ -26,53 +27,17 @@ const generatedToken = ref('');
 const doneWarnings = ref<string[]>([]);
 const copied = ref(false);
 
-const MIN_TOKEN_LEN = 16;
-const URL_MAX = 200;
+// 地址校验、软告警、Token 强度判定都在 utils/installForm.ts（纯函数、可单测），
+// 这里只做响应式包装与展示。
+const siteUrlOk = computed(() => isAcceptableUrl(siteUrl.value, false));
+const agentServerUrlOk = computed(() => isAcceptableUrl(agentServerUrl.value, true));
+const agentWarn = computed(() => agentUrlWarning(agentServerUrl.value, listenPort.value));
+const customTokenCheck = computed(() => checkCustomToken(customToken.value));
 
-// ---- 地址校验（与后端 install.js normalizeBaseUrl / urlWarnings 同口径）----
-// 前端只做即时反馈，最终以后端校验为准。
-function parseUrl(v: string): URL | null {
-  try { return new URL(v.trim()); } catch { return null; }
+function warnLabel(code: string): string {
+  const key = warnI18nKey(code);
+  return key ? t(key) : '';
 }
-
-const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|169\.254\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|::1|\[::1\])$/i;
-
-function urlOk(v: string, required: boolean): boolean {
-  const s = v.trim();
-  if (!s) return !required;
-  if (s.length > URL_MAX) return false;
-  const u = parseUrl(s);
-  return !!u && (u.protocol === 'http:' || u.protocol === 'https:') && !u.username && !u.password && !!u.hostname;
-}
-
-const siteUrlOk = computed(() => urlOk(siteUrl.value, false));
-const agentServerUrlOk = computed(() => urlOk(agentServerUrl.value, true));
-
-// 软告警：回环/内网地址、显式端口与监听端口不一致 —— 都只提示不阻断
-const agentWarn = computed(() => {
-  const u = parseUrl(agentServerUrl.value);
-  if (!u) return '';
-  if (PRIVATE_HOST_RE.test(u.hostname)) return 'install.warnPrivate';
-  if (u.port && listenPort.value && Number(u.port) !== listenPort.value) return 'install.warnPortMismatch';
-  return '';
-});
-
-function warnLabel(key: string): string {
-  if (key === 'agent_server_url_private') return t('install.warnPrivate');
-  if (key === 'agent_server_url_port_mismatch') return t('install.warnPortMismatch');
-  return '';
-}
-
-// 与后端 install.js validateInstall 的 custom 分支同一口径，前端实时提示、后端最终把关
-const customTokenCheck = computed(() => {
-  const v = customToken.value.trim();
-  if (!v) return { ok: false, key: 'install.tokenEmpty' };
-  if (v === 'change-me-admin-token') return { ok: false, key: 'install.tokenPlaceholder' };
-  if (v.length < MIN_TOKEN_LEN) return { ok: false, key: 'install.tokenTooShort' };
-  if (/^\d+$/.test(v) || new Set(v).size <= 4) return { ok: false, key: 'install.tokenWeak' };
-  if (/(?:0123|1234|2345|3456|4567|5678|6789|abcd|bcde|qwer|asdf)/i.test(v)) return { ok: false, key: 'install.tokenSeq' };
-  return { ok: true, key: 'install.tokenOk' };
-});
 
 const canSubmit = computed(() => {
   const name = sitename.value.trim();
