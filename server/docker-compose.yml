@@ -2,12 +2,14 @@ services:
   server:
     build: .
     restart: unless-stopped
-    # 仅绑定本机回环，配合宿主机 Nginx/宝塔 反代；外部无法直接触达 8081。
+    # 仅绑定本机回环，配合宿主机 Nginx/宝塔 反代；外部无法直接触达该端口。
     # 若 Nginx 也是独立 Docker 容器（非宿主机进程），请改用共享 Docker 网络 + 服务名互访，并删除此端口映射。
+    # 端口参数化：改 .env 的 PORT 后需 `docker compose up -d --force-recreate server`
+    # （restart 用容器创建时的配置，不会重新发布端口）。安装器 --port N 会自动写入 PORT。
     ports:
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:${PORT:-8081}:${PORT:-8081}"
     environment:
-      - PORT=8081
+      - PORT=${PORT:-8081}
       - DB_PATH=/data/monitor.db
       - ADMIN_TOKEN=${ADMIN_TOKEN}
       # 会话 Cookie 签名密钥。缺失则每次重启随机生成 → 所有登录态失效（必须持久化）。

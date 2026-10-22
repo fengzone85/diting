@@ -76,16 +76,68 @@ test('rateLimitTouch：窗口过期后重新计数（惰性过期，无整表清
 });
 
 // ---- C-4：初始化端点 HTTPS 强制 ----------------------------------------------
+// 语义演进（T1.7）：requireProto 增加"回环 + 零代理头"例外，供安装向导的 ssh -L 隧道使用；
+// 但**经反向代理**的明文请求必须继续拒绝（那正是 Token 明文回显的真实风险面）。
 
-test('POST /api/setup/generate：无 X-Forwarded-Proto 且未开 ADMIN_ALLOW_HTTP → 403（审查 C-4）', async () => {
+test('POST /api/setup/generate：经明文反代（X-Forwarded-Proto: http）→ 403（审查 C-4）', async () => {
   const backup = process.env.ADMIN_ALLOW_HTTP;
   delete process.env.ADMIN_ALLOW_HTTP;
   try {
-    const res = await request(app).post('/api/setup/generate').send({});
+    const res = await request(app).post('/api/setup/generate')
+      .set({ 'X-Forwarded-For': '203.0.113.7', 'X-Forwarded-Proto': 'http' })
+      .send({});
     assert.strictEqual(res.status, 403);
     assert.strictEqual(res.body.error, 'https required');
   } finally {
     process.env.ADMIN_ALLOW_HTTP = backup;
+  }
+});
+
+test('requireProto 判定矩阵：本机/内网例外仅在"零代理头"时成立', () => {
+  const { requireProto } = require('../src/auth');
+  const mkRes = () => ({
+    code: 0, body: null,
+    status(c) { this.code = c; return this; },
+    json(b) { this.body = b; return this; },
+  });
+  const mkReq = (addr, headers = {}) => ({
+    socket: { remoteAddress: addr },
+    headers,
+    header: (k) => headers[String(k).toLowerCase()],
+  });
+  const backup = process.env.ADMIN_ALLOW_HTTP;
+  delete process.env.ADMIN_ALLOW_HTTP;
+  try {
+    // ① 本机/内网 + 无任何代理头 → 放行（ssh -L 隧道、安装向导入口）
+    //    172.17.0.1 是 Docker 端口发布后的容器侧来源地址（T1.9 实测），必须放行，
+    //    否则安装器打印的隧道提示在 Docker 部署下必然 403。
+    for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '10.0.0.5', '192.168.1.2', '172.17.0.1', '172.31.255.254', 'fd00::1']) {
+      const res = mkRes();
+      assert.strictEqual(requireProto(mkReq(addr), res), true, `${addr} 直连应放行`);
+      assert.strictEqual(res.code, 0, '放行时不应写响应');
+    }
+    // ② 内网来源但带代理头：nginx 以 http 转发 → 拒绝（伪造/明文暴露两道防线）
+    for (const h of [
+      { 'x-forwarded-for': '203.0.113.9' },
+      { 'x-real-ip': '203.0.113.9' },
+      { forwarded: 'for=203.0.113.9' },
+      { 'x-forwarded-proto': 'http' },
+    ]) {
+      const res = mkRes();
+      assert.strictEqual(requireProto(mkReq('127.0.0.1', h), res), false, `${JSON.stringify(h)} 应拒绝`);
+      assert.strictEqual(res.code, 403);
+    }
+    // ③ 公网来源直连（无代理头）→ 拒绝，与改动前一致
+    for (const addr of ['203.0.113.9', '8.8.8.8', '2001:db8::1']) {
+      const res = mkRes();
+      assert.strictEqual(requireProto(mkReq(addr), res), false, `${addr} 应拒绝`);
+      assert.strictEqual(res.code, 403);
+    }
+    // ④ 显式 https 头 → 放行（任何来源）
+    assert.strictEqual(requireProto(mkReq('203.0.113.9', { 'x-forwarded-proto': 'https' }), mkRes()), true);
+  } finally {
+    if (backup === undefined) delete process.env.ADMIN_ALLOW_HTTP;
+    else process.env.ADMIN_ALLOW_HTTP = backup;
   }
 });
 

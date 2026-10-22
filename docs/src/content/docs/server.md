@@ -10,7 +10,7 @@ description: 服务端配置与管理
 | 变量 | 必填 | 说明 | 默认值 |
 |---|---|---|---|
 | `PORT` | 否 | 监听端口 | `8081` |
-| `ADMIN_TOKEN` | 首次 | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**，未设时走 Web 初始化向导生成） | — |
+| `ADMIN_TOKEN` | 否 | **已废弃，仅存量迁移用**。管理员 Token 由浏览器 `/install` 向导创建，库中只存 sha256 哈希；存量部署保留以便启动迁移，迁移后启动日志提示「已废弃」 | — |
 | `SETUP_TOKEN` | 否 | 受控端自助注册令牌 | — |
 | `DB_PATH` | 否 | SQLite 数据库路径 | `/data/monitor.db` |
 | `SESSION_SECRET` | 推荐 | Session 签名密钥（固定则重启不失效） | 随机生成 |
@@ -29,11 +29,12 @@ services:
   server:
     image: ghcr.io/fengzone85/diting:latest
     ports:
-      - "127.0.0.1:8081:8081"   # 仅回环，由 Nginx + TLS 反代对外
+      - "127.0.0.1:${PORT:-8081}:${PORT:-8081}"   # 仅回环，由 Nginx + TLS 反代对外；端口跟 .env 的 PORT 走
     volumes:
       - server-data:/data
     environment:
-      - ADMIN_TOKEN=your-admin-token   # 管理员 Token（≥16 位）
+      - PORT=${PORT:-8081}
+      # 管理员 Token 不在这里配：首次访问 /install 向导创建（库中只存哈希）
       - SESSION_SECRET=your-session-secret
     restart: unless-stopped
 volumes:
@@ -137,7 +138,8 @@ monitor.example.com {
 
 ## 安全加固清单
 
-- [ ] 设置强随机 `ADMIN_TOKEN`（弱口令只在启动时告警，不会拦截启动；未设时走 Web 初始化向导）
+- [ ] 首次访问 `/install` 完成安装向导：生成强随机管理员 Token（只显示一次）、填写站点名称与**上报地址**
+- [ ] 确认上手后 `ADMIN_TOKEN` 已从 `.env` 删除（库中只存哈希，环境变量里的明文已不参与鉴权）
 - [ ] 启用 TOTP 2FA
 - [ ] 配置 HTTPS（受控端强制 HTTPS）
 - [ ] 设置 CSP 头

@@ -173,6 +173,14 @@ DELETE FROM admin_config WHERE key IN ('admin_2fa_secret', 'admin_2fa_enabled');
 
 执行后重启服务（容器重建 / `systemctl restart`），即可用管理员 Token 登录，并在「设置 → 安全」重新绑定 2FA。
 
+### 管理员 Token 的存储与重置
+
+- **库中只存 sha256 哈希**（`admin_config.admin_token_hash`），明文只在安装向导完成页显示一次。
+  库文件或备份泄露**不等于**拿到 Token；`docker inspect` 里也不会再有明文。
+- 重置：`sudo bash diting.sh --reset-admin-token` —— 直接改库里的哈希，**即时生效，无需重启或重建容器**；
+  同时吊销全部既有会话、清理历史明文残留（旧 `admin_token_raw`）。`.env` 里的 `ADMIN_TOKEN` 已不参与鉴权。
+- 首次安装走 `/install` 向导（未安装时全站 307 到该页）；安装完成后向导 API 永久禁用，Web 端无法重置。
+
 ## 信任边界
 
 ```

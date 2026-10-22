@@ -1,7 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 const router = express.Router();
 const db = require('./db');
 const { rateLimitTouch, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
@@ -25,8 +24,8 @@ const CURRENCIES = ['¥', '$', '€', '£', '₽', '₣', '₹', '₫', '฿'];
 const BILLING_CYCLES = [-1, 0, 30, 60, 90, 180, 365, 730, 1095];
 const isValidCurrency = (c) => CURRENCIES.includes(c);
 const isValidCycle = (n) => BILLING_CYCLES.includes(n);
-// Admin Token 唯一来源与强度判定：统一在 ./token-policy（与 auth.js / server.js 共用）。
-const { getAdminToken } = require('./token-policy');
+// Admin Token 唯一来源（数据库哈希）与强度判定：统一在 ./token-policy（与 auth.js / server.js 共用）。
+const { hasAdminToken, verifyAdminToken, hashAdminToken } = require('./token-policy');
 
 // 展示用 hostname 脱敏：带域名时只取最左标签（二级名），隐去后续域名；
 // 纯 IP / 无点则原样，避免误截。例：pt5.521.be -> pt5；192.168.1.10 -> 原样。
@@ -117,7 +116,7 @@ const agentGlobalOnly = (req, res, next) =>
 
 // ---- 首次部署初始化向导 ----
 router.get('/setup/status', (req, res) => {
-  res.json({ needs_setup: !getAdminToken() });
+  res.json({ needs_setup: !hasAdminToken() });
 });
 // 初始化端点限流（纵深防御）：每 IP 每 60s 最多 5 次，防止未授权时暴力/竞态抢占。
 const SETUP_WINDOW = 60000, SETUP_MAX = 5;
@@ -128,54 +127,36 @@ const setupRateLimit = (req, res, next) => {
   }
   next();
 };
-// 初始化端点：仅在「无任何有效 Token」时可用。一旦生成本端点永久失效（返回 410 Gone），
+// 初始化端点：仅在「库中无 Token 哈希」时可用。一旦写入，本端点永久失效（返回 410 Gone），
 // 后续重置 Token 只能通过 SSH 运行 diting.sh --reset-admin-token，彻底杜绝 Web 重置风险。
-// 审查 C-4：初始化端点同样要求经反代的 HTTPS（此前只挂 setupRateLimit，
-// 纯 HTTP 即可触发生成，管理员若在明文网络下初始化，token 走明文回显）。
-router.post('/setup/generate', setupRateLimit, requireProto, (req, res) => {
-  // 任何有效 Token 存在一律拒绝，返回 410 Gone
-  if (getAdminToken()) {
+// 审查 C-4：初始化端点同样要求经反代的 HTTPS（纯 HTTP 下 Token 会走明文回显）。
+// P0：Token **只存 sha256 哈希**，明文仅在本次响应里回显一次；不再写 .env、
+// 不再修改进程 env（容器内 /app/.env 不持久，写过一次就会"重启即丢 Token"）。
+router.post('/setup/generate', setupRateLimit, (req, res) => {
+  // 注意：requireProto 返回 boolean、内部不调 next()，**不能**当中间件挂载
+  // （挂载会让请求永久挂起——master 上此处曾如此，端点实际不可用）。
+  if (!requireProto(req, res)) return;
+  if (hasAdminToken()) {
     return res.status(410).json({
       error: 'already initialized',
       message: '管理员 Token 已存在，本端点已永久禁用。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
     });
   }
-  // 审查 D1：用"仅当 key 不存在才写入"的配置项作初始化锁（setConfigIfAbsent 此前是
-  // 死代码）。单进程下 TOCTOU 不成立（handler 全程同步），但多实例/cluster 部署时
-  // 两个实例可能同时通过上面的空检查各自生成 token；只有抢到锁的实例能继续，
-  // 其余拿到 410。语义上强化了"一旦初始化，Web 通道永久禁用"的承诺。
-  if (!db.setConfigIfAbsent('admin_initialized', '1')) {
-    return res.status(410).json({
-      error: 'already initialized',
-      message: '另一实例已完成初始化（admin_initialized 锁已置位）。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
-    });
-  }
-  // 生成新 Token 并写入 .env（唯一来源）
   const token = 'adm_' + crypto.randomBytes(16).toString('hex');
-  const envPath = path.join(__dirname, '..', '.env');
   try {
-    let content = '';
-    try { content = fs.readFileSync(envPath, 'utf-8'); } catch { /* .env 不存在则创建 */ }
-    // 替换已有的 ADMIN_TOKEN 行，或在文件末尾追加
-    if (/^ADMIN_TOKEN=/m.test(content)) {
-      content = content.replace(/^ADMIN_TOKEN=.*/m, `ADMIN_TOKEN=${token}`);
-    } else {
-      content += (content.endsWith('\n') ? '' : '\n') + `ADMIN_TOKEN=${token}\n`;
+    // 原子抢写（INSERT OR IGNORE）：多实例并发时只有一个能落库，其余 410。
+    // 这一条同时替代了旧的 admin_initialized 抢锁——"哈希存在"本身就是初始化锁。
+    if (!db.setAdminTokenHashIfAbsent(hashAdminToken(token))) {
+      return res.status(410).json({
+        error: 'already initialized',
+        message: '另一实例已完成初始化（Token 哈希已写入）。重置 Token 请通过 SSH 运行：sudo bash diting.sh --reset-admin-token'
+      });
     }
-    // 审查 D1/G1：原子写（tmp + rename），崩溃不会留下半截 .env；显式 600 权限，
-    // 避免沿袭 umask（常为 644，同机其他用户可读密钥）。
-    const tmpPath = envPath + '.tmp';
-    fs.writeFileSync(tmpPath, content, 'utf-8');
-    try { fs.chmodSync(tmpPath, 0o600); } catch { /* 某些文件系统不支持 chmod，忽略 */ }
-    fs.renameSync(tmpPath, envPath);
-    // 同步更新进程环境变量，使本次启动后续请求即可用
-    process.env.ADMIN_TOKEN = token;
-    console.log('[setup] 管理员 Token 已生成并写入 .env，此后 /api/setup/generate 永久禁用');
+    console.log('[setup] 管理员 Token 已生成并以哈希入库（明文仅本次回显），此后 /api/setup/generate 永久禁用');
     res.json({ token });
   } catch (e) {
-    console.error('[setup] 写入 .env 失败:', e.message);
-    // 审查 G6：不回显底层错误（可能含路径/权限细节），只给可操作提示
-    res.status(500).json({ error: 'write_failed', message: '写入 .env 失败，请检查文件系统权限与磁盘空间' });
+    console.error('[setup] 写入 Token 哈希失败:', e.message);
+    res.status(500).json({ error: 'write_failed', message: '写入管理员 Token 失败，请检查数据库可写性与磁盘空间' });
   }
 });
 
@@ -1865,7 +1846,7 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
     return res.status(429).json({ error: 'login_blocked', retry_after: gstate.retryAfterSec });
   }
   const { token, totp: code } = req.body || {};
-  if (!token || !safeEqual(token, getAdminToken())) {
+  if (!token || !verifyAdminToken(token)) {
     noteLoginBanned(req, gkey, loginGuardFail(gkey));
     return res.status(401).json({ error: 'invalid token' });
   }

@@ -23,8 +23,9 @@ DiTing 支持多种部署方式，按需选择。
 git clone https://github.com/fengzone85/diting.git
 cd diting
 cp server/.env.example server/.env
-# 编辑 server/.env 设置 ADMIN_TOKEN、域名等
+# 编辑 server/.env 设置 SESSION_SECRET、PORT 等（ADMIN_TOKEN 留空，由安装向导生成）
 docker compose up -d
+# 浏览器打开 http://127.0.0.1:8081/install 完成安装（生成管理员 Token，只显示一次）
 ```
 
 ### 原生部署

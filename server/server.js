@@ -10,12 +10,13 @@ const api = require('./src/api');
 const compat = require('./src/compat');
 const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
+const install = require('./src/install');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
-const { safeEqual, ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
+const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
-const { getAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
+const { hasAdminToken, verifyAdminToken, hashAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
 // 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
 // 真正的修复是把 async 路由套 asyncHandler（见 src/util.js）；此处只是最后兜底。
@@ -117,19 +118,46 @@ app.use((req, res, next) => {
   next();
 });
 
-// 启动期安全校验：Admin Token 过弱等于把后台钥匙留在门上。
-// 判定口径见 src/token-policy（示例占位符 / 短于 16 位一律视为不可用，等同未设置）。
-// 未设置或不可用时，首次访问走 Web 初始化向导；向导生成的 Token 会写入 .env（600）。
-const ADMIN_TOKEN_ISSUE = tokenIssue(process.env.ADMIN_TOKEN);
-if (!ADMIN_TOKEN_ISSUE) {
-  console.log('[info] ADMIN_TOKEN 已从 .env 读取');
-} else if (ADMIN_TOKEN_ISSUE === 'missing') {
-  console.warn('[warn] 未设置 ADMIN_TOKEN：首次访问将走 Web 初始化向导生成。');
-} else if (ADMIN_TOKEN_ISSUE === 'placeholder') {
-  console.warn('[warn] ADMIN_TOKEN 仍是示例占位符 change-me-admin-token，已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。');
-} else {
-  console.warn(`[warn] ADMIN_TOKEN 长度不足 ${MIN_LEN} 位（当前 ${String(process.env.ADMIN_TOKEN).length} 位），已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。`);
-}
+// 启动期 Admin Token 初始化（P0：数据库哈希是唯一权威来源）。
+//   - 迁移：.env 仍有可用 ADMIN_TOKEN 且库中无哈希 → 哈希入库（存量无缝升级，Token 不变）；
+//   - 废弃：库中已有哈希时忽略 .env 的 ADMIN_TOKEN 并告警（杜绝多源不同步）；
+//   - 清理：**每次启动无条件**删除历史明文残留 admin_token_raw 与废弃锁 admin_initialized
+//     （不依赖迁移条件，覆盖"已有哈希但明文仍在"的存量）。
+// 明文 Token 永不落盘；库文件泄露不等于拿到 Token。
+(function initAdminToken() {
+  try {
+    db.deleteConfig('admin_token_raw');
+    db.deleteConfig('admin_initialized');
+
+    const envToken = process.env.ADMIN_TOKEN;
+    const issue = tokenIssue(envToken);
+
+    if (hasAdminToken()) {
+      if (issue === null) {
+        console.warn('[warn] .env 的 ADMIN_TOKEN 已废弃（库中已有 Token 哈希），本次忽略；重置请运行：sudo bash diting.sh --reset-admin-token');
+      }
+      console.log('[info] 管理员 Token 已就绪（来源：数据库哈希）');
+      return;
+    }
+
+    if (issue === null) {
+      db.setAdminTokenHash(hashAdminToken(envToken));
+      console.log('[info] ADMIN_TOKEN 已迁移至数据库（只存哈希），此后以库为准；可从 .env 删除该行');
+      return;
+    }
+
+    // 库中无哈希且 env 不可用 → 未初始化，交给 /install 安装向导
+    if (issue === 'placeholder') {
+      console.warn('[warn] .env 的 ADMIN_TOKEN 仍是示例占位符，已忽略；首次访问将进入 /install 安装向导');
+    } else if (issue === 'too_short') {
+      console.warn(`[warn] .env 的 ADMIN_TOKEN 长度不足 ${MIN_LEN} 位，已忽略；首次访问将进入 /install 安装向导`);
+    } else {
+      console.warn('[warn] 未设置管理员 Token：首次访问将进入 /install 安装向导生成');
+    }
+  } catch (e) {
+    console.error('[admin-token] 初始化失败:', e.message);
+  }
+})();
 
 // READONLY_TOKEN（可选）：鉴权侧目前接受任意非空值（auth.js 只做恒定时间比较），
 // 因此过短/占位符仍会生效。此处只告警、不阻断，避免存量部署升级后突然失去只读访问；
@@ -199,15 +227,14 @@ app.get('/metrics', (req, res) => {
   });
 });
 function _metricsHandler(req, res) {
-  // 与后台管理接口同一口径：占位符 / <16 位视为不可用，不能只在这里接受原始 env，
-  // 否则弱 ADMIN_TOKEN 仍可凭 /metrics 枚举数据（后台却已拒绝）。
-  const adminToken = getAdminToken();
-  if (!adminToken) {
+  // 与后台管理接口同一口径：库中无 Token 哈希 = 未初始化。
+  // P0：不再接受原始 env，也不存在可读出的明文（库中只有哈希）。
+  if (!hasAdminToken()) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 ADMIN_TOKEN not configured');
   }
   const auth = req.header('Authorization') || '';
   const t = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!t || !safeEqual(t, adminToken)) {
+  if (!t || !verifyAdminToken(t)) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 Unauthorized');
   }
   const agents = db.getAgents();
@@ -232,6 +259,27 @@ function _metricsHandler(req, res) {
   }
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8').send(lines.join('\n') + '\n');
 }
+
+// ---- 安装向导 API（复刻 komari /api/install/*：status 探测 + complete 单步安装）----
+// 挂载在拦截闸之前，未安装时也要保证可达；complete 自带三层防重装（409/410）。
+app.use('/api/install', install.router);
+
+// ---- 安装向导拦截（复刻 komari guideNoRoute：未安装时管理面 API 形同不存在）----
+// 未安装（库中无 Token 哈希）时，管理面端点返回 404 —— 对齐 komari 的
+// "Not found in install mode"：不暴露"这是未安装实例"这一状态信息，比 403 更少指纹。
+// 安装向导自身、旧 setup 兼容端点不受影响；agent 上报面（/api/v1/*、/api/report 等）
+// 与 SETUP_TOKEN 自助注册（/api/setup/register）同样放行——它们在「未安装」状态下
+// 也是合法入口。其余 admin 端点自带鉴权（未安装时无凭据必 401），无需在此穷举。
+app.use('/api', (req, res, next) => {
+  if (!install.needsInstall()) return next();
+  if (req.path === '/install' || req.path.startsWith('/install/')) return next();
+  if (req.path === '/setup' || req.path.startsWith('/setup/')) return next();
+  const p = req.path;
+  if (p === '/admin' || p.startsWith('/admin/') || p === '/login' || p === '/logout') {
+    return res.status(404).json({ error: 'not_found', message: 'Not found in install mode（系统尚未安装，请访问 /install）' });
+  }
+  next();
+});
 
 // IP 白名单：保护管理 API（公开只读接口除外）
 app.use('/api', (req, res, next) => {
@@ -379,18 +427,17 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   return res.sendFile(indexPath);
 });
 
-// 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
-app.get('/setup.html', (req, res) => {
-  if (getAdminToken()) {
-    return res.redirect(302, '/admin');
-  }
-  res.sendFile(path.join(__dirname, 'public', 'setup.html'));
-});
-app.get('/setup', (req, res) => res.redirect(302, '/setup.html'));
+// 旧初始化页（/setup.html）已由 SPA 内安装向导 /install 取代（复刻 komari 安装向导：
+// 未安装时全站页面 307 进向导，安装完成后向导 API 永久禁用）。保留路径做 302 兼容跳转，
+// 旧书签、文档链接与脚本输出提示仍然可达。判断依据是库中有无 Token 哈希（P0 起）。
+app.get('/setup.html', (req, res) => res.redirect(302, '/install'));
+app.get('/setup', (req, res) => res.redirect(302, '/install'));
 
 // admin 路由由 SPA 接管：网络层 IP 白名单闸 + 显式返回 SPA 入口
 // 正则覆盖裸 /admin 与 /admin/*（Express 4 中 /admin/* 不匹配裸 /admin）
 app.get(/^\/admin(\/.*)?$/, ipWhitelist, (req, res) => {
+  // 未安装：复刻 komari guideNoRoute——任何页面一律 307 进安装向导
+  if (install.needsInstall()) return res.redirect(307, '/install');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 // 旧书签 / 外链兼容：/admin.html 301 到 /admin
@@ -410,8 +457,15 @@ app.get('*', (req, res, next) => {
   // API 与显式路由已注册在前，不会落到此处
   if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
 
+  // 未安装（复刻 komari guideNoRoute）：除向导页 /install 外，任何页面 GET 一律
+  // 307 到 /install——访客首次打开任何地址都会被引导进安装向导。静态资源（带后缀）
+  // 不受影响，向导页面自身可正常加载；/install 落到下方 SPA_PREFIXES 返回 Vue 入口。
+  if (install.needsInstall() && req.path !== '/install' && !path.extname(req.path)) {
+    return res.redirect(307, '/install');
+  }
+
   // Vue SPA 内部路由前缀优先：这些路径不应被第三方主题吞掉
-  const SPA_PREFIXES = ['/admin', '/login', '/node'];
+  const SPA_PREFIXES = ['/admin', '/login', '/node', '/install'];
   const isSpaRoute = SPA_PREFIXES.some(p => req.path === p || req.path.startsWith(p + '/'));
 
   // 支持 ?theme=<id> 预览（无需改动设置，便于调试第三方皮肤）

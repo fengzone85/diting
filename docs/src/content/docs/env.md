@@ -12,7 +12,7 @@ description: 服务端与受控端环境变量参考
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
-| `ADMIN_TOKEN` | 首次 | — | 管理员 Token（≥16 位；弱口令只在启动时打印告警、**不阻止启动**——未设或过弱时首次访问走 Web 初始化向导生成） |
+| `ADMIN_TOKEN` | 否 | — | **已废弃，仅存量迁移用**。管理员 Token 改由浏览器 `/install` 向导创建，**库中只存 sha256 哈希**（`admin_config.admin_token_hash`），明文只在完成页显示一次。存量部署保留此变量以便启动时把旧明文迁进库，迁移后启动日志提示「已废弃」且该值不再参与鉴权；重置用 `sudo bash diting.sh --reset-admin-token` |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥。⚠️ 生产务必设为随机长字符串（`openssl rand -hex 32`），留空则每次重启随机、所有已登录会话失效 |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
 | `NOTIFY_GROUPS` | 否 | `1` | 设为 `0` 时通知整体退回「邮件 + Telegram 直发」的旧路径（忽略通知组与事件路由），用于通知组上线后的紧急灰度回退 |
@@ -124,11 +124,12 @@ services:
   server:
     image: ghcr.io/fengzone85/diting:latest
     ports:
-      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:${PORT:-8081}:${PORT:-8081}"   # 端口跟 .env 的 PORT 走（安装器 --port N 会自动写入）
     volumes:
       - server-data:/data
     environment:
-      - ADMIN_TOKEN=change-me-admin-token   # 务必改为强随机值
+      - PORT=${PORT:-8081}
+      # 管理员 Token 不再由环境变量提供：首次访问 /install 向导创建，库中只存 sha256 哈希
       - SESSION_SECRET=openssl-rand-hex-32  # 务必改为强随机值
       - NODE_ENV=production
     restart: unless-stopped

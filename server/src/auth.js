@@ -5,7 +5,7 @@ const totp = require('./totp');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
 // 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
-const { getAdminToken } = require('./token-policy');
+const { verifyAdminToken } = require('./token-policy');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
@@ -159,13 +159,36 @@ function clearSessionCookie(res) {
 // 直连 :8081（无 X-Forwarded-Proto 头、或伪造为 http）一律拒绝，
 // 杜绝伪造该头绕过、以及误暴露 8081 端口的情况。
 // 本地开发/快速测试如需直连 http，可显式设置 ADMIN_ALLOW_HTTP=1（生产切勿设置）。
+//
+// 例外：安装向导的 SSH 隧道入口。请求**来自本机或内网**且**没有任何代理头**时放行——
+// 公网流量必然经过 nginx，而 nginx 一定会写 X-Forwarded-Proto / X-Real-IP / X-Forwarded-For
+// （见 nginx/monitor.conf.example），因此"内网来源 + 零代理头"不可能是公网直连。
+// 反向可证：带 X-Forwarded-Proto: http 的请求（即 nginx 转发的明文请求）仍被拒绝。
+//
+// 为什么不止 127.0.0.1：Docker 部署下端口发布（127.0.0.1:PORT->PORT）经 DNAT 后，
+// 容器里看到的来源是**网桥网关 172.17.0.1**，而不是 127.0.0.1。只认回环会让
+// 安装器打印的 `ssh -L PORT:127.0.0.1:PORT` 隧道在 Docker 部署下必然 403（T1.9 实测）。
+function isPrivateSource(addr) {
+  const a = String(addr || '').replace(/^::ffff:/, '');
+  if (!a) return false;
+  if (a === '::1') return true;
+  if (/^127\./.test(a)) return true;                    // 回环
+  if (/^10\./.test(a)) return true;                     // 10/8
+  if (/^192\.168\./.test(a)) return true;               // 192.168/16
+  if (/^169\.254\./.test(a)) return true;               // 链路本地
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(a)) return true; // 172.16/12（含 docker 网桥）
+  if (/^f[cd][0-9a-f]{2}:/i.test(a)) return true;       // IPv6 ULA fc00::/7
+  return false;
+}
+
 function requireProto(req, res) {
   const proto = (req.header('X-Forwarded-Proto') || '').toLowerCase();
-  if (proto !== 'https' && process.env.ADMIN_ALLOW_HTTP !== '1') {
-    res.status(403).json({ error: 'https required' });
-    return false;
-  }
-  return true;
+  if (proto === 'https' || process.env.ADMIN_ALLOW_HTTP === '1') return true;
+  const h = req.headers || {};
+  const viaProxy = h['x-forwarded-for'] || h['x-real-ip'] || h['forwarded'] || h['x-forwarded-proto'];
+  if (!viaProxy && isPrivateSource(req.socket && req.socket.remoteAddress)) return true;
+  res.status(403).json({ error: 'https required' });
+  return false;
 }
 
 // 解析请求角色。返回 {role, totp, via, token?} 或 null。
@@ -193,7 +216,8 @@ function resolveRole(req) {
     // 未命中静默落入后续分支（不额外报错，避免 Token 枚举信号）。
   }
   const at = req.header('X-Admin-Token');
-  if (at && safeEqual(at, getAdminToken())) return { role: 'admin', totp: false, via: 'token' };
+  // P0：Token 只存哈希，校验改为「明文 → sha256 → 与库中哈希恒时比较」。
+  if (at && verifyAdminToken(at)) return { role: 'admin', totp: false, via: 'token' };
   const rt = req.header('X-Readonly-Token');
   const roTok = process.env.READONLY_TOKEN;
   if (rt && roTok && safeEqual(rt, roTok)) return { role: 'readonly', totp: false, via: 'token' };
@@ -459,7 +483,7 @@ function auditLog(req, action, detail) {
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   resolveRole, agentScope, inAgentScope,
-  safeEqual, signSession, verifySession, getSession, getAdminToken,
+  safeEqual, signSession, verifySession, getSession, verifyAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog, clearSessionCache,
   verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
