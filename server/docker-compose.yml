@@ -35,8 +35,11 @@ services:
       - PUBLIC_URL=${PUBLIC_URL:-}
       - AGENT_RAW_REPO=${AGENT_RAW_REPO:-}
       - AGENT_GIT_REPO=${AGENT_GIT_REPO:-}
-      - OFFLINE_THRESHOLD_SEC=60
-      - RETENTION_DAYS=30
+      # 以下各项原为字面量，改为「.env 可覆盖 + 保留原默认值」（§7.4 目标形态）。
+      # 注意 DB_PATH **不**参数化：它在容器内恒为 /data/monitor.db，而 .env 里的
+      # DB_PATH 是**宿主**路径（原生部署用），参数化会把宿主路径灌进容器直接起不来。
+      - OFFLINE_THRESHOLD_SEC=${OFFLINE_THRESHOLD_SEC:-60}
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
       # 备份目录与恢复请求文件（对应上面的备份卷挂载；容器内路径，一般无需改）
       - BACKUP_DIR=${BACKUP_DIR:-/data/backups}
       - RESTORE_TRIGGER=${RESTORE_TRIGGER:-/data/backups/restore.request}
@@ -48,12 +51,14 @@ services:
       - AI_KEY_FROM_ENV=${AI_KEY_FROM_ENV:-0}
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_TREND_DAYS=${AI_TREND_DAYS:-7}
-      - ALERT_CPU_PCT=90
-      - ALERT_MEM_PCT=90
-      - ALERT_COOLDOWN_SEC=1800
-      - SMTP_HOST=smtp.qq.com
-      - SMTP_PORT=465
-      - SMTP_SECURE=true
+      # 告警阈值与冷却：与后台「设置 → 告警阈值」同源，.env 只作首次默认值
+      - ALERT_CPU_PCT=${ALERT_CPU_PCT:-90}
+      - ALERT_MEM_PCT=${ALERT_MEM_PCT:-90}
+      - ALERT_COOLDOWN_SEC=${ALERT_COOLDOWN_SEC:-1800}
+      # 邮件通道默认值（后台设置里可改，落库后以库为准）
+      - SMTP_HOST=${SMTP_HOST:-smtp.qq.com}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
       - ALERT_FROM=${ALERT_FROM}

@@ -76,6 +76,21 @@ test('D7：安装器在停容器前迁移 env 明文 → 库哈希（migrate_env
   }
 });
 
+test('§7.4：compose 的环境项除 DB_PATH 外全部可被 .env 覆盖', () => {
+  const yml = fs.readFileSync(require('path').join(__dirname, '..', 'docker-compose.yml'), 'utf8');
+  const yaml = require('js-yaml');
+  const env = yaml.load(yml).services.server.environment;
+  // DB_PATH 刻意保持字面量：容器内恒为 /data/monitor.db，而 .env 里的 DB_PATH 是
+  // **宿主**路径（原生部署用），参数化会把宿主路径灌进容器直接起不来。
+  const literal = env.filter((e) => !/\$\{/.test(e));
+  assert.deepStrictEqual(literal, ['DB_PATH=/data/monitor.db'],
+    `只允许 DB_PATH 为字面量，其余应可经 .env 覆盖；实际字面量：${literal.join(', ')}`);
+  // 抽几项确认默认值仍在（不能为了可覆盖而丢掉原有行为）
+  for (const k of ['OFFLINE_THRESHOLD_SEC', 'RETENTION_DAYS', 'ALERT_CPU_PCT', 'ALERT_MEM_PCT', 'ALERT_COOLDOWN_SEC', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE']) {
+    assert.ok(env.some((e) => e.startsWith(`${k}=\${${k}:-`)), `${k} 应参数化并带默认值`);
+  }
+});
+
 // ---- D5：SETUP_TOKEN 以库为权威 ----------------------------------------------
 
 test('D5：库空且 env 有值 → 首次使用时搬入库（之后以库为准）', async () => {
