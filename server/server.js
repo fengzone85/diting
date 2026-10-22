@@ -12,10 +12,10 @@ const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
-const { safeEqual, ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
+const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
-const { getAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
+const { hasAdminToken, verifyAdminToken, hashAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
 // 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
 // 真正的修复是把 async 路由套 asyncHandler（见 src/util.js）；此处只是最后兜底。
@@ -117,19 +117,46 @@ app.use((req, res, next) => {
   next();
 });
 
-// 启动期安全校验：Admin Token 过弱等于把后台钥匙留在门上。
-// 判定口径见 src/token-policy（示例占位符 / 短于 16 位一律视为不可用，等同未设置）。
-// 未设置或不可用时，首次访问走 Web 初始化向导；向导生成的 Token 会写入 .env（600）。
-const ADMIN_TOKEN_ISSUE = tokenIssue(process.env.ADMIN_TOKEN);
-if (!ADMIN_TOKEN_ISSUE) {
-  console.log('[info] ADMIN_TOKEN 已从 .env 读取');
-} else if (ADMIN_TOKEN_ISSUE === 'missing') {
-  console.warn('[warn] 未设置 ADMIN_TOKEN：首次访问将走 Web 初始化向导生成。');
-} else if (ADMIN_TOKEN_ISSUE === 'placeholder') {
-  console.warn('[warn] ADMIN_TOKEN 仍是示例占位符 change-me-admin-token，已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。');
-} else {
-  console.warn(`[warn] ADMIN_TOKEN 长度不足 ${MIN_LEN} 位（当前 ${String(process.env.ADMIN_TOKEN).length} 位），已被忽略；首次访问将走 Web 初始化向导。请改为随机强值（openssl rand -hex 32）。`);
-}
+// 启动期 Admin Token 初始化（P0：数据库哈希是唯一权威来源）。
+//   - 迁移：.env 仍有可用 ADMIN_TOKEN 且库中无哈希 → 哈希入库（存量无缝升级，Token 不变）；
+//   - 废弃：库中已有哈希时忽略 .env 的 ADMIN_TOKEN 并告警（杜绝多源不同步）；
+//   - 清理：**每次启动无条件**删除历史明文残留 admin_token_raw 与废弃锁 admin_initialized
+//     （不依赖迁移条件，覆盖"已有哈希但明文仍在"的存量）。
+// 明文 Token 永不落盘；库文件泄露不等于拿到 Token。
+(function initAdminToken() {
+  try {
+    db.deleteConfig('admin_token_raw');
+    db.deleteConfig('admin_initialized');
+
+    const envToken = process.env.ADMIN_TOKEN;
+    const issue = tokenIssue(envToken);
+
+    if (hasAdminToken()) {
+      if (issue === null) {
+        console.warn('[warn] .env 的 ADMIN_TOKEN 已废弃（库中已有 Token 哈希），本次忽略；重置请运行：sudo bash diting.sh --reset-admin-token');
+      }
+      console.log('[info] 管理员 Token 已就绪（来源：数据库哈希）');
+      return;
+    }
+
+    if (issue === null) {
+      db.setAdminTokenHash(hashAdminToken(envToken));
+      console.log('[info] ADMIN_TOKEN 已迁移至数据库（只存哈希），此后以库为准；可从 .env 删除该行');
+      return;
+    }
+
+    // 库中无哈希且 env 不可用 → 未初始化，交给 /install 安装向导
+    if (issue === 'placeholder') {
+      console.warn('[warn] .env 的 ADMIN_TOKEN 仍是示例占位符，已忽略；首次访问将进入 /install 安装向导');
+    } else if (issue === 'too_short') {
+      console.warn(`[warn] .env 的 ADMIN_TOKEN 长度不足 ${MIN_LEN} 位，已忽略；首次访问将进入 /install 安装向导`);
+    } else {
+      console.warn('[warn] 未设置管理员 Token：首次访问将进入 /install 安装向导生成');
+    }
+  } catch (e) {
+    console.error('[admin-token] 初始化失败:', e.message);
+  }
+})();
 
 // READONLY_TOKEN（可选）：鉴权侧目前接受任意非空值（auth.js 只做恒定时间比较），
 // 因此过短/占位符仍会生效。此处只告警、不阻断，避免存量部署升级后突然失去只读访问；
@@ -199,15 +226,14 @@ app.get('/metrics', (req, res) => {
   });
 });
 function _metricsHandler(req, res) {
-  // 与后台管理接口同一口径：占位符 / <16 位视为不可用，不能只在这里接受原始 env，
-  // 否则弱 ADMIN_TOKEN 仍可凭 /metrics 枚举数据（后台却已拒绝）。
-  const adminToken = getAdminToken();
-  if (!adminToken) {
+  // 与后台管理接口同一口径：库中无 Token 哈希 = 未初始化。
+  // P0：不再接受原始 env，也不存在可读出的明文（库中只有哈希）。
+  if (!hasAdminToken()) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 ADMIN_TOKEN not configured');
   }
   const auth = req.header('Authorization') || '';
   const t = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!t || !safeEqual(t, adminToken)) {
+  if (!t || !verifyAdminToken(t)) {
     return res.status(401).set('Content-Type', 'text/plain').send('401 Unauthorized');
   }
   const agents = db.getAgents();
@@ -381,7 +407,7 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
 
 // 独立初始化页面（/setup.html）：仅在未初始化时可访问，已初始化则重定向到 /admin
 app.get('/setup.html', (req, res) => {
-  if (getAdminToken()) {
+  if (hasAdminToken()) {
     return res.redirect(302, '/admin');
   }
   res.sendFile(path.join(__dirname, 'public', 'setup.html'));

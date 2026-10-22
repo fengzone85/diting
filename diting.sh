@@ -1753,7 +1753,48 @@ JS
     echo -e "${YELLOW}$(msg "wl.hint")${NC}"
 }
 
-# 重置管理员 Token：仅通过 SSH 在服务器上运行，生成新 Token 并立即使旧 Token 失效
+# 计算字符串的 sha256（与 server 端 db.hashToken 同口径：小写 hex、无换行）。
+sha256_hex() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | cut -d' ' -f1
+    else
+        printf '%s' "$1" | openssl dgst -sha256 -r | cut -d' ' -f1
+    fi
+}
+
+# 定位真实 server/.env（与 locate_db 同思路的多候选；找不到返回非零）。
+locate_server_env() {
+    local cand selfdir
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    for cand in "$SRC_DIR/server/.env" "$selfdir/server/.env" "./server/.env"; do
+        [[ -n "$cand" && -f "$cand" ]] && { echo "$cand"; return 0; }
+    done
+    echo ""
+    return 1
+}
+
+# 服务端实际对外端口：Docker 取 docker port 的发布端口，原生取 .env 的 PORT，兜底 8081。
+# 注意：P0 阶段 compose 仍把 PORT 写成字面量，所以 docker 部署必须以实际发布端口为准。
+server_port() {
+    local loc; loc="$(locate_db)"
+    if [[ "$loc" == docker:* ]]; then
+        local cid hp
+        cid="$(echo "$loc" | cut -d: -f2)"
+        hp="$(docker port "$cid" 2>/dev/null | awk -F: 'NR==1{print $NF}' | tr -d '\r')"
+        [[ "$hp" =~ ^[0-9]+$ ]] && { echo "$hp"; return 0; }
+    fi
+    local envf p
+    if envf="$(locate_server_env)"; then
+        p="$(sed -n 's/^PORT=//p' "$envf" | tr -d '\r' | tail -n1)"
+        [[ "$p" =~ ^[0-9]+$ ]] && { echo "$p"; return 0; }
+    fi
+    echo 8081
+}
+
+# 重置管理员 Token：仅通过 SSH 在服务器上运行。
+# P0：Token 以「数据库哈希」为唯一权威来源 —— 直接写库、立即生效，**不重启、不重建容器**。
+# 旧实现改宿主 .env 后发 `docker compose restart`：restart 不会重建容器 → 容器内 env 仍是
+# 旧 Token；非标准部署路径下连 .env 都找不到，却照样打印"新 Token"（已失效路径，全部移除）。
 do_reset_admin_token() {
     echo "$(msg "reset.header")"
     echo ""
@@ -1763,48 +1804,66 @@ do_reset_admin_token() {
     fi
 
     ensure_deps || return 1
-    ensure_docker || return 1
 
-    local new_token
+    local new_token new_hash
     new_token="adm_$(openssl rand -hex 24)"
-
-    # ① 若 .env 已配置 ADMIN_TOKEN，必须同步更新 .env：getAdminToken() 是 env 优先，
-    # 否则只写 DB 会被 .env 覆盖，reset 后旧 .env token 仍有效、新 token 无效。
-    local env_file="${SRC_DIR:-}/server/.env"
-    if [[ -f "$env_file" ]] && grep -q '^ADMIN_TOKEN=' "$env_file"; then
-        if grep -q '^ADMIN_TOKEN=.\+' "$env_file"; then
-            sed -i -E "s|^ADMIN_TOKEN=.*|ADMIN_TOKEN=$new_token|" "$env_file"
-        else
-            printf 'ADMIN_TOKEN=%s\n' "$new_token" >> "$env_file"
-        fi
-        echo -e "${YELLOW}[信息] 已同步更新 .env 的 ADMIN_TOKEN（env 优先于 DB）${NC}"
+    new_hash="$(sha256_hex "$new_token")"
+    if [[ ! "$new_hash" =~ ^[0-9a-f]{64}$ ]]; then
+        echo -e "${RED}[错误] sha256 计算失败，已中止（未做任何修改）${NC}" >&2
+        return 1
     fi
 
-    # ② 清理 DB 中的残留 admin_token_raw（旧版遗留，统一到 .env 后废弃）
     local loc; loc="$(locate_db)"
-    if [[ -n "$loc" ]]; then
-        if [[ "$loc" == docker:* ]]; then
-            local cid cpath
-            cid="$(echo "$loc" | cut -d: -f2)"
-            cpath="$(echo "$loc" | cut -d: -f4)"
-            docker exec "$cid" node -e "const D=require('better-sqlite3'); const db=new D('$cpath'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
-        elif [[ "$loc" == volume:* ]]; then
-            local vol; vol="$(echo "$loc" | cut -d: -f2)"
-            local simg; simg="$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E 'diting.*server|server' | head -n1)"
-            if [[ -n "$simg" ]]; then
-                docker run --rm -v "$vol":/data "$simg" node -e "const D=require('better-sqlite3'); const db=new D('/data/monitor.db'); db.prepare('DELETE FROM admin_config WHERE key=?').run('admin_token_raw');" 2>/dev/null || true
-            fi
-        else
-            local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
-            sqlite3 "$fpath" "DELETE FROM admin_config WHERE key='admin_token_raw';" 2>/dev/null || true
-        fi
-        echo -e "${GREEN}[OK]   已清理 DB 中残留的 admin_token_raw${NC}"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 未找到服务端数据库，无法重置（未做任何修改）${NC}" >&2
+        echo -e "       请确认服务端已安装并至少启动过一次（数据库文件/卷已创建）" >&2
+        return 1
     fi
 
-    # ③ 重启服务使新 Token 生效（getAdminToken 每次读 env，重启确保干净）
-    if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-        ( cd "$SRC_DIR/server" && docker compose restart 2>/dev/null ) || true
+    # 单事务写库：水位线 → 吊销会话 → 新哈希 → 清理历史残留。
+    # 水位线必须最先写：verifySession 在 sid 缓存之前调 isRevoked，且 isRevoked 每次读库，
+    # 因此旧 Cookie 立即失效（不依赖进程内 clearSessionCache）。
+    local js out
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.pragma('busy_timeout = 5000');
+const hash = process.argv[3];
+const now = String(Date.now());
+const tx = db.transaction(() => {
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
+  db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('admin_token_hash',?)").run(hash);
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized')").run();
+});
+tx();
+const got = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
+console.log('HASH_OK=' + (got && got.value === hash ? '1' : '0'));
+JS
+    if ! out="$(db_run_js "$js" "$new_hash")"; then
+        rm -f "$js"
+        echo -e "${RED}[错误] 写入数据库失败，Token 未变更${NC}" >&2
+        return 1
     fi
+    rm -f "$js"
+    if ! printf '%s\n' "$out" | grep -qx 'HASH_OK=1'; then
+        echo -e "${RED}[错误] 写入校验失败（库中哈希与预期不一致），Token 未变更${NC}" >&2
+        return 1
+    fi
+
+    # 自检：用新 Token 打管理面只读端点（adminOrReadonly，不受 2FA 影响、不吃 loginGuard）。
+    # 不用 /api/login：2FA 开启时它必返 401 need_totp，且 3 次失败会封 IP 81s。
+    local port code i
+    port="$(server_port)"
+    code=""
+    for i in 1 2 3; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+            -H 'X-Forwarded-Proto: https' -H "X-Admin-Token: ${new_token}" \
+            "http://127.0.0.1:${port}/api/admin/alert-rules" 2>/dev/null || echo 000)"
+        [[ "$code" == "200" ]] && break
+        sleep 2
+    done
 
     echo ""
     echo -e "${GREEN}$(msg "reset.ok")${NC}"
@@ -1812,6 +1871,21 @@ do_reset_admin_token() {
     echo "  $new_token"
     echo ""
     echo -e "${YELLOW}$(msg "reset.save")${NC}"
+
+    if [[ "$code" == "200" ]]; then
+        echo -e "${GREEN}[OK]   自检通过：立即生效，无需重启${NC}"
+        return 0
+    fi
+
+    # 哈希已落库（上面校验过），自检失败只可能是访问面问题；Token 仍然有效，必须照常给用户。
+    echo -e "${RED}[警告] 自检未通过（HTTP ${code}）：Token 已写入数据库，但服务端未能确认${NC}" >&2
+    case "$code" in
+        401) echo -e "       服务端未读到新哈希：确认服务端版本已包含 P0 改动（未重启不生效）" >&2 ;;
+        403) echo -e "       被 IP 白名单或 HTTPS 口径拦截：检查后台 admin_allow_ips" >&2 ;;
+        000) echo -e "       服务端未监听 127.0.0.1:${port}：确认容器/服务在运行" >&2 ;;
+        *)   echo -e "       非预期状态码，请查看服务端日志" >&2 ;;
+    esac
+    return 1
 }
 
 uninstall_all() {

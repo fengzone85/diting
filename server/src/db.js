@@ -1120,6 +1120,7 @@ const clearAlertState = (agent_id, type) => stmts.clearAlertState.run(agent_id, 
 const _getCfg = db.prepare('SELECT value FROM admin_config WHERE key = ?');
 const _setCfg = db.prepare('INSERT OR REPLACE INTO admin_config (key, value) VALUES (?, ?)');
 const _setCfgIfAbsent = db.prepare('INSERT OR IGNORE INTO admin_config (key, value) VALUES (?, ?)');
+const _delCfg = db.prepare('DELETE FROM admin_config WHERE key = ?');
 const TWOFA_SECRET = 'admin_2fa_secret';
 const TWOFA_ENABLED = 'admin_2fa_enabled';
 const getConfig = (k) => { const r = _getCfg.get(k); return r ? r.value : null; };
@@ -1127,6 +1128,17 @@ const setConfig = (k, v) => _setCfg.run(k, String(v));
 // 仅当 key 不存在时写入（依赖 key 主键唯一性）。返回 true 表示本次写入成功。
 // 用于 /api/setup/generate 防并发竞态：多个请求同时到达时只有一个能落库，其余返回 false。
 const setConfigIfAbsent = (k, v) => _setCfgIfAbsent.run(k, String(v)).changes > 0;
+// 删除配置项。返回 true 表示确实删了一行。用于安装向导回滚初始化锁、清理历史残留。
+const deleteConfig = (k) => _delCfg.run(k).changes > 0;
+
+// ---- 管理员 Token：只存 sha256 哈希，库文件泄露不等于拿到 Token ----
+// 明文只存在于用户手里（向导一次性展示 / reset 脚本一次性打印），永不落盘。
+const ADMIN_TOKEN_HASH = 'admin_token_hash';
+const getAdminTokenHash = () => getConfig(ADMIN_TOKEN_HASH) || '';
+const setAdminTokenHash = (h) => setConfig(ADMIN_TOKEN_HASH, String(h || ''));
+// 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（对齐旧 admin_initialized 的防重语义）。
+const setAdminTokenHashIfAbsent = (h) => setConfigIfAbsent(ADMIN_TOKEN_HASH, String(h || ''));
+const clearAdminTokenHash = () => deleteConfig(ADMIN_TOKEN_HASH);
 const get2FASecret = () => getConfig(TWOFA_SECRET);
 const is2FAEnabled = () => getConfig(TWOFA_ENABLED) === '1';
 const set2FASecret = (s) => setConfig(TWOFA_SECRET, s);
@@ -1543,7 +1555,8 @@ module.exports = {
   createApiToken, findApiTokenByHash, getApiToken, listApiTokens, revokeApiToken, touchApiToken,
   createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, revokeAllSessionRowsExcept, pruneSessions, touchSession,
   heavyQuerySync,
-  getConfig, setConfig, setConfigIfAbsent, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
+  getConfig, setConfig, setConfigIfAbsent, deleteConfig, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
+  getAdminTokenHash, setAdminTokenHash, setAdminTokenHashIfAbsent, clearAdminTokenHash,
   resolveAlertThresholds, observedIntervalSec,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,

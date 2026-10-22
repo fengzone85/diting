@@ -5,7 +5,7 @@ const totp = require('./totp');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
 // 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
-const { getAdminToken } = require('./token-policy');
+const { verifyAdminToken } = require('./token-policy');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
@@ -193,7 +193,8 @@ function resolveRole(req) {
     // 未命中静默落入后续分支（不额外报错，避免 Token 枚举信号）。
   }
   const at = req.header('X-Admin-Token');
-  if (at && safeEqual(at, getAdminToken())) return { role: 'admin', totp: false, via: 'token' };
+  // P0：Token 只存哈希，校验改为「明文 → sha256 → 与库中哈希恒时比较」。
+  if (at && verifyAdminToken(at)) return { role: 'admin', totp: false, via: 'token' };
   const rt = req.header('X-Readonly-Token');
   const roTok = process.env.READONLY_TOKEN;
   if (rt && roTok && safeEqual(rt, roTok)) return { role: 'readonly', totp: false, via: 'token' };
@@ -459,7 +460,7 @@ function auditLog(req, action, detail) {
 module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   resolveRole, agentScope, inAgentScope,
-  safeEqual, signSession, verifySession, getSession, getAdminToken,
+  safeEqual, signSession, verifySession, getSession, verifyAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
   revokeAllSessions, verifyTotpHeader, auditLog, clearSessionCache,
   verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
