@@ -154,6 +154,8 @@ A_SERVER=""; A_ID=""; A_TOKEN=""; A_TOKEN_FILE=""; A_SETUP=""; A_SETUP_NAME=""; 
 A_BACKUP_PATH=""; A_BACKUP_KEEP=""; A_BACKUP_SCHEDULE=""
 # 服务端监听端口（安装时确定，写入 .env 的 PORT；空 = 交互询问 / 沿用现值）
 A_SERVER_PORT=""
+# --logs 的可选参数：行数或 follow
+A_LOG_ARG=""
 # 跳过保护性检查（当前用于：升级前备份失败仍继续）。默认 0 = 严格模式。
 A_FORCE=0
 
@@ -193,6 +195,7 @@ show_usage() {
   sudo bash diting.sh --backup-list               # 列出已有备份（含占用/时间跨度/定时状态）
   sudo bash diting.sh --db-stats                  # 查看数据库统计（大小/记录数/时间范围）
   sudo bash diting.sh --db-vacuum                 # 压缩数据库并启用增量回收（回收空闲页）
+  sudo bash diting.sh --logs 200                  # 查看服务端最近 200 行日志（follow=持续跟踪）
 
   # 每日自动备份（cron，默认凌晨 3 点；默认保留 14 天并自动清理过期）
   sudo bash diting.sh --backup-schedule install      # 安装
@@ -221,6 +224,7 @@ show_usage() {
   --force                 跳过保护性检查（升级前备份失败时仍继续，谨慎使用）
   --update-agent          更新受控端（systemd，保留原连接配置）
   --status                查看服务端/受控端状态
+  --logs [行数|follow]    查看服务端日志（自动识别 systemd / Docker，默认最近 100 行）
   --uninstall             卸载服务端与受控端
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
   --keep-days N           备份保留天数（默认 14，超出自动清理；0=不清理）
@@ -1681,6 +1685,39 @@ JS
     return 0
 }
 
+# ── 查看服务端日志 ───────────────────────────────────────────────────────────
+# 统一入口，省得排障时还要自己判断形态：
+#   原生（systemd）→ journalctl -u diting-server
+#   Docker        → docker compose logs --tail N server
+# 用法：--logs [行数|follow]
+do_logs() {
+    local arg="${1:-}" n=100 follow=""
+    [[ "$arg" =~ ^[0-9]+$ ]] && n="$arg"
+    [[ "$arg" == "follow" || "$arg" == "-f" ]] && follow=1
+
+    if systemctl cat diting-server.service >/dev/null 2>&1; then
+        echo "== 服务端日志（systemd，最近 ${n} 行）=="
+        local -a jargs=(-u diting-server -n "$n" --no-pager)
+        [[ -n "$follow" ]] && jargs+=(-f)
+        journalctl "${jargs[@]}"
+        return $?
+    fi
+
+    if [[ -d "${SRC_DIR}/server" ]] && ( cd "${SRC_DIR}/server" && docker compose ps -q 2>/dev/null | grep -q . ); then
+        echo "== 服务端日志（Docker，最近 ${n} 行）=="
+        if [[ -n "$follow" ]]; then
+            ( cd "${SRC_DIR}/server" && docker compose logs --tail "$n" -f server )
+        else
+            ( cd "${SRC_DIR}/server" && docker compose logs --tail "$n" server )
+        fi
+        return $?
+    fi
+
+    echo -e "${RED}[错误] 未找到运行中的服务端（既无 diting-server.service，也无 compose 容器）${NC}" >&2
+    echo -e "       原生部署请确认 systemd 单元存在；Docker 部署请确认 $SRC_DIR/server 下的容器在跑" >&2
+    return 1
+}
+
 # ── 数据库管理子菜单（交互模式）─────────────────────────────────────────────────
 db_manage_menu() {
     local c
@@ -2506,6 +2543,13 @@ while [[ $# -gt 0 ]]; do
         --backup-list)    ACTION="backup-list"; shift ;;
         --db-stats)       ACTION="db-stats"; shift ;;
         --db-vacuum)      ACTION="db-vacuum"; shift ;;
+        # 可选值：行数 / follow。只有长得像才吞掉下一个参数，避免把 --status 之类误当行数。
+        --logs)
+            ACTION="logs"; shift
+            if [[ -n "${1:-}" && ( "$1" =~ ^[0-9]+$ || "$1" == "follow" || "$1" == "-f" ) ]]; then
+                A_LOG_ARG="$1"; shift
+            fi
+            ;;
         --keep-days)      need_val_guard "$1" "${2:-}"; A_BACKUP_KEEP="${2:-}"; shift 2 ;;
         --no-compress)    DB_BACKUP_COMPRESS=0; shift ;;
         --compress)       DB_BACKUP_COMPRESS=1; shift ;;
@@ -2559,6 +2603,7 @@ if [[ -n "$ACTION" ]]; then
         backup-list)  do_backup_list ;;
         db-stats)     do_db_stats ;;
         db-vacuum)    do_db_vacuum ;;
+        logs)         do_logs "${A_LOG_ARG:-}" ;;
         reset-admin-token) do_reset_admin_token ;;
         clear-ip-whitelist) do_clear_ip_whitelist ;;
         release)      do_release "${A_RELEASE:-patch}" ;;

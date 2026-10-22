@@ -48,6 +48,17 @@ git -C /opt/diting-src reset --hard FETCH_HEAD   # 丢弃所有本地改动
 | 只想临时试一下 | 更新前先 `git -C /opt/diting-src diff > /tmp/my.patch`，更新后 `git apply /tmp/my.patch` |
 | 换 apt 镜像源（构建慢） | 用构建参数 `APT_MIRROR`（写进 `.env` 或 `--build-arg`），不要改 `Dockerfile` |
 
+### Q: 服务起不来，日志在哪看？
+
+```bash
+sudo bash diting.sh --logs          # 最近 100 行
+sudo bash diting.sh --logs 500      # 最近 500 行
+sudo bash diting.sh --logs follow   # 持续跟踪（Ctrl+C 退出）
+```
+
+脚本会自动识别形态：systemd 部署走 `journalctl -u diting-server`，Docker 部署走
+`docker compose logs --tail N server`。两者都没有时直接报错，不会静默返回。
+
 ### Q: `--backup` 说成功了，后台「备份」页却看不到文件？
 
 多半是两边指向了不同目录（原生部署常见）：服务端读 `.env` 的 `BACKUP_DIR`，而脚本早期写死
