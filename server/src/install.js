@@ -23,7 +23,8 @@ const crypto = require('crypto');
 const db = require('./db');
 const { rateLimitTouch } = require('./ratelimit');
 const { hasAdminToken, hashAdminToken, MIN_LEN, PLACEHOLDER } = require('./token-policy');
-const { requireProto } = require('./auth');
+const { requireProto, safeEqual } = require('./auth');
+const { resolveSetupToken } = require('./setup-token');
 
 const router = express.Router();
 
@@ -54,7 +55,15 @@ function listenPort() {
 
 // GET /api/install/status：前端向导探测。required=false 时前端显示「已初始化」锁定视图。
 router.get('/status', (req, res) => {
-  res.json({ state: getState(), required: needsInstall(), port: listenPort() });
+  // install_token_required：远程来源完成安装时是否需要口令（前端据此决定
+  // 是否渲染口令输入框）。注意这是"来源判定"，不是"是否已配置口令"——
+  // 口令未配置时远程来源同样需要（然后会拿到 install_token_required 提示）。
+  res.json({
+    state: getState(),
+    required: needsInstall(),
+    port: listenPort(),
+    install_token_required: !isTrustedInstallSource(req),
+  });
 });
 
 // ---- 地址归一化 ----
@@ -86,6 +95,31 @@ function urlWarnings(url) {
   if (u.port && Number(u.port) !== listenPort()) warnings.push('agent_server_url_port_mismatch');
   return warnings;
 }
+
+// ---- 安装期访问口径（§6.7 / G6：规则必须显式）---------------------------------
+// 未安装实例的 `complete` 会**设定管理员 Token**，等于把实例交给调用者。因此不能
+// 只靠"来源是内网"就放行——同网段任何主机、或 Docker 网桥内的其它容器都能连到
+// 8081。显式规则：
+//   hasProxyHeader = 带 X-Forwarded-For / X-Real-IP / Forwarded
+//   isPrivate      = remoteAddress ∈ 127/8、::1、RFC1918、ULA（含 Docker 网桥）
+//   可信来源       = isPrivate && !hasProxyHeader   // 本机直连 / SSH 隧道
+//   其余一律视为远程 ⇒ 必须提供 install_token（= SETUP_TOKEN，安装器打印的那个）
+// 反向可证：经 Nginx 反代的请求一定带 X-Forwarded-For/X-Real-IP，即使反代在本机
+// 也不会被误判为可信——那正是"内网页面被外人打开"的真实场景。
+function hasProxyHeader(req) {
+  const h = req.headers || {};
+  return !!(h['x-forwarded-for'] || h['x-real-ip'] || h['forwarded']);
+}
+function isPrivateSource(req) {
+  const addr = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+  if (!addr) return false;
+  if (addr === '::1' || /^127\./.test(addr)) return true;
+  if (/^10\./.test(addr) || /^192\.168\./.test(addr)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(addr)) return true;
+  if (/^f[cd][0-9a-f]{2}:/i.test(addr)) return true;   // fc00::/7 ULA
+  return false;
+}
+const isTrustedInstallSource = (req) => isPrivateSource(req) && !hasProxyHeader(req);
 
 // ---- 请求校验（对应 komari completeRequest：sitename 1~100、description ≤1000）----
 function validateInstall(body) {
@@ -149,6 +183,22 @@ router.post('/complete', installRateLimit, (req, res) => {
   // 管理类凭证与 /api/setup/generate 同口径：必须经 HTTPS 反代；
   // 例外是 SSH 隧道直连回环（requireProto 内部判定，见 auth.js）。
   if (!requireProto(req, res)) return;
+  // 抢占防护（§6.7 / G6）：远程来源必须带 install_token（= SETUP_TOKEN）。
+  // 判据只看"私网 + 零代理头"，不看 Token 本身强弱——口令由安装器生成，
+  // 即使被设成弱值也只是一次性安装门槛，不影响后续 SETUP_TOKEN 的注册强度校验。
+  if (!isTrustedInstallSource(req)) {
+    const { token } = resolveSetupToken();
+    const provided = String((req.body && req.body.install_token) || req.header('X-Install-Token') || '').trim();
+    if (!token) {
+      return res.status(403).json({
+        error: 'install_token_required',
+        message: '远程访问安装向导需提供安装口令：服务端未配置 SETUP_TOKEN，请在服务器上执行 sudo bash diting.sh --install-server 生成，或通过 ssh -L 隧道从本机访问',
+      });
+    }
+    if (!provided || !safeEqual(provided, token)) {
+      return res.status(403).json({ error: 'invalid_install_token', message: '安装口令不正确（install_token 应为安装结束时打印的 SETUP_TOKEN）' });
+    }
+  }
   // 三层防重装之 ①：内存状态机。completed 状态一律 409。
   if (state !== 'ready') {
     return res.status(409).json({ error: 'already_completed', message: '安装已完成或正在进行中' });

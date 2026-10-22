@@ -6,6 +6,9 @@ export interface InstallStatus {
   required: boolean;
   // 内网监听端口（宿主侧参数，由安装器写入 .env；向导只读展示）
   port?: number;
+  // 抢占防护（§6.7）：当前来源不是"私网 + 零代理头"时为 true，
+  // 前端据此渲染 install_token 输入框（口令 = 安装器打印的 SETUP_TOKEN）
+  install_token_required?: boolean;
 }
 
 export interface InstallPayload {
@@ -17,6 +20,8 @@ export interface InstallPayload {
   agent_server_url: string;
   token_mode: 'generate' | 'custom';
   token?: string;
+  // 远程来源完成安装所需的口令（install_token_required=true 时必填）
+  install_token?: string;
 }
 
 export interface InstallResult {
