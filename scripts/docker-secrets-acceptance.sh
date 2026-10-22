@@ -13,8 +13,12 @@
 #        --base-url https://panel.example.com \
 #        --admin-token adm_xxxxxxxx \
 #        [--src-dir /opt/diting-src] [--container diting-server-1] \
-#        [--db /var/lib/docker/volumes/diting_server-data/_data/monitor.db] \
+#        [--db /var/lib/docker/volumes/<项目>_server-data/_data/monitor.db] \
 #        [--allow-mutations]
+#
+# Docker 主机上请用 root 跑（`sudo bash …`）：docker 套接字通常不在 feng 组里，
+# 非 root 时容器内查库与 docker inspect 会被跳过；宿主无 node 的纯 Docker 主机
+# （如 j4125）会自动改走容器内查询，此时 --db 可省略。
 #
 # 退出码：0 = 全部通过的断言通过；1 = 有失败；2 = 用法/前置错误。
 # ============================================================
@@ -82,14 +86,17 @@ else
 fi
 
 if [[ -n "$CONTAINER" ]] && command -v docker >/dev/null 2>&1; then
-  if docker inspect "$CONTAINER" >/dev/null 2>&1; then
-    if docker inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -q '^ADMIN_TOKEN='; then
+  # 纯 Docker 主机上 feng 不在 docker 组：先用普通用户，失败再用 sudo -n
+  DIN="docker"
+  docker info >/dev/null 2>&1 || { sudo -n docker info >/dev/null 2>&1 && DIN="sudo -n docker"; }
+  if $DIN inspect "$CONTAINER" >/dev/null 2>&1; then
+    if $DIN inspect "$CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep -q '^ADMIN_TOKEN='; then
       bad "docker inspect 仍可见 ADMIN_TOKEN（D7 未生效）"
     else
       ok "docker inspect 无 ADMIN_TOKEN"
     fi
   else
-    skip "docker inspect" "容器 $CONTAINER 不存在"
+    skip "docker inspect" "容器 $CONTAINER 不存在（或无权限）"
   fi
 else
   skip "docker inspect" "未提供 --container 或无 docker"
@@ -142,8 +149,23 @@ if [[ -n "$DB_PATH" && -f "$DB_PATH" && -x "$(command -v node || true)" ]]; then
     raw="$(NODE_PATH="$NM" node -e "const D=require('better-sqlite3');const db=new D(process.argv[1],{readonly:true});const r=db.prepare(\"SELECT value FROM admin_config WHERE key='admin_token_raw'\").get();process.stdout.write(r?'present':'absent')" "$DB_PATH" 2>/dev/null || true)"
     [[ "$raw" == "absent" ]] && ok "无 admin_token_raw 明文残留" || bad "存在 admin_token_raw 明文残留"
   fi
+elif [[ -n "$CONTAINER" ]] && command -v docker >/dev/null 2>&1; then
+  # 纯 Docker 主机（如 j4125）没有宿主 node：改在容器内查。
+  # 必须 -w /app —— node 的模块解析根是 cwd，/tmp 下找不到 /app/node_modules。
+  DIN="docker"
+  docker info >/dev/null 2>&1 || { sudo -n docker info >/dev/null 2>&1 && DIN="sudo -n docker"; }
+  QS="SELECT value FROM admin_config WHERE key='admin_token_hash'"
+  RS="SELECT value FROM admin_config WHERE key='admin_token_raw'"
+  h="$($DIN exec -w /app "$CONTAINER" node -e "const D=require('better-sqlite3');const db=new D('/data/monitor.db',{readonly:true});const r=db.prepare(process.argv[1]).get();process.stdout.write(r&&r.value?r.value:'')" "$QS" 2>/dev/null || true)"
+  raw="$($DIN exec -w /app "$CONTAINER" node -e "const D=require('better-sqlite3');const db=new D('/data/monitor.db',{readonly:true});const r=db.prepare(process.argv[1]).get();process.stdout.write(r?'present':'absent')" "$RS" 2>/dev/null || true)"
+  if [[ ${#h} -eq 64 ]]; then
+    ok "库中 admin_token_hash 为 64 位十六进制（容器内查询）"
+  else
+    bad "库中无 admin_token_hash（长度 ${#h}）——凭据未落库"
+  fi
+  [[ "$raw" == "absent" ]] && ok "无 admin_token_raw 明文残留（容器内查询）" || bad "存在 admin_token_raw 明文残留"
 else
-  skip "库内哈希检查" "未提供可读的 --db 或无 node"
+  skip "库内哈希检查" "未提供可读的 --db 或无 node / --container"
 fi
 
 # ============================================================
