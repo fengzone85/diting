@@ -804,9 +804,9 @@ do_backup() {
         # 读到配置时，用后台的保留天数/压缩开关覆盖本地默认
         if [[ "$decision" == "yes" ]]; then
             local cfg_keep cfg_comp
-            cfg_keep="$(db_ui_field_get backup_keep_days 2>/dev/null || true)"
+            cfg_keep="$(db_ui_field_get_soft backup_keep_days || true)"
             [[ "$cfg_keep" =~ ^[0-9]+$ ]] && keep_days="$cfg_keep"
-            cfg_comp="$(db_ui_field_get backup_compress 2>/dev/null || true)"
+            cfg_comp="$(db_ui_field_get_soft backup_compress || true)"
             [[ "$cfg_comp" == "false" ]] && DB_BACKUP_COMPRESS=0
             [[ "$cfg_comp" == "true" ]] && DB_BACKUP_COMPRESS=1
         fi
@@ -1466,11 +1466,29 @@ db_manage_schedule_menu() {
     esac
 }
 
+# 定位服务端 node_modules 目录（原生部署执行数据库脚本时用）。
+# node 的模块解析以「脚本所在目录」为根：脚本若放在 /tmp（mktemp），require('better-sqlite3')
+# 会 MODULE_NOT_FOUND —— 必须用 NODE_PATH 显式指向服务端依赖目录。
+server_node_modules() {
+    local cand selfdir
+    selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+    for cand in "$SRC_DIR/server/node_modules" "$selfdir/server/node_modules" "./server/node_modules"; do
+        [[ -n "$cand" && -d "$cand/better-sqlite3" ]] && { echo "$cand"; return 0; }
+    done
+    echo ""
+    return 1
+}
+
 # 在服务端数据库上执行一段 Node 脚本。
 # 参数约定：脚本内用 process.argv[2] 取库路径（node 的 argv[1] 是脚本自身路径），
 # 其余入参依次为 argv[3..]。
 # 三种部署形态通用：运行中容器 / 仅卷存在 / 宿主机文件。
 # 依赖服务端镜像自带的 better-sqlite3（无额外依赖）；原生部署需宿主机 node 可用。
+#
+# 落点约束（T0.0 / M1）：node 的模块解析根 = 脚本所在目录。
+#   - 运行中容器：脚本必须落在 /app（镜像 WORKDIR，依赖在 /app/node_modules）；
+#   - 仅卷存在：脚本挂在 /host_js（只读挂载），解析根是 /host_js → 必须给容器补 NODE_PATH；
+#   - 宿主机文件：脚本在 mktemp 目录 → 必须给 node 补 NODE_PATH 指向服务端 node_modules。
 db_run_js() {
     local js="$1"; shift
     local loc; loc="$(locate_db)"
@@ -1478,16 +1496,22 @@ db_run_js() {
         echo -e "${RED}[错误] 无法定位数据库，确认服务端已安装${NC}" >&2
         return 1
     fi
+    # 容器内 node 以非 root 用户（Dockerfile: USER node）运行，而 mktemp 文件是 0600：
+    # docker cp 会连同权限复制，volume 分支更是只读挂载 → 容器内读不到脚本会 EACCES。
+    # 这里放开读权限（脚本内不含凭据，库路径等参数走 argv 传入）。
+    [[ -f "$js" ]] && chmod 644 "$js" 2>/dev/null || true
     if [[ "$loc" == docker:* ]]; then
-        local cid cpath
+        local cid cpath js_dst
         cid="$(echo "$loc" | cut -d: -f2)"
         cpath="$(echo "$loc" | cut -d: -f4)"
-        timeout 180 docker cp "$js" "${cid}:/tmp/diting_db.js" >/dev/null 2>&1 || return 1
-        timeout 180 docker exec "$cid" node /tmp/diting_db.js "$cpath" "$@" || {
-            timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+        js_dst="/app/diting_db.js"
+        timeout 180 docker cp "$js" "${cid}:${js_dst}" >/dev/null 2>&1 || return 1
+        timeout 180 docker exec "$cid" node "$js_dst" "$cpath" "$@" || {
+            timeout 180 docker exec "$cid" rm -f "$js_dst" >/dev/null 2>&1 || true
+            echo -e "${RED}[错误] 在容器 ${cid} 内执行数据库脚本失败（若报 Cannot find module 'better-sqlite3'，说明镜像布局与预期不符）${NC}" >&2
             return 1
         }
-        timeout 180 docker exec "$cid" rm -f /tmp/diting_db.js >/dev/null 2>&1 || true
+        timeout 180 docker exec "$cid" rm -f "$js_dst" >/dev/null 2>&1 || true
     elif [[ "$loc" == volume:* ]]; then
         local vol simg jsdir jsname
         vol="$(echo "$loc" | cut -d: -f2)"
@@ -1497,15 +1521,22 @@ db_run_js() {
             echo -e "${RED}[错误] 未找到服务端镜像，无法启动临时容器${NC}" >&2
             return 1
         fi
-        timeout 180 docker run --rm -v "$vol":/data -v "$jsdir":/host_js:ro \
+        # 脚本只读挂载在 /host_js，解析根不是 /app → 用 NODE_PATH 指向镜像内依赖目录
+        timeout 180 docker run --rm -e NODE_PATH=/app/node_modules \
+            -v "$vol":/data -v "$jsdir":/host_js:ro \
             "$simg" node "/host_js/$jsname" /data/monitor.db "$@" || return 1
     else
-        local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
+        local fpath nm
+        fpath="$(echo "$loc" | cut -d: -f2)"
         if ! command -v node >/dev/null 2>&1; then
             echo -e "${RED}[错误] 原生部署需要宿主机 node（且能 require better-sqlite3）${NC}" >&2
             return 1
         fi
-        node "$js" "$fpath" "$@" || return 1
+        if ! nm="$(server_node_modules)"; then
+            echo -e "${RED}[错误] 未找到服务端依赖目录（server/node_modules），无法执行数据库脚本${NC}" >&2
+            return 1
+        fi
+        NODE_PATH="$nm" node "$js" "$fpath" "$@" || return 1
     fi
 }
 
@@ -1525,6 +1556,20 @@ JS
     local rc=$?
     rm -f "$js"
     return $rc
+}
+
+# 读取后台配置字段：读库失败时打印**可见**告警并返回空值。
+# 背景（T0.0 / M8）：调用点原本一律 `2>/dev/null || true`，读库失败与"配置为空"完全无法区分；
+# db_run_js 修好后这些读取会首次真实生效，此处把失败显式化，避免又回到静默失败。
+# 用法：db_ui_field_get_soft <字段名>（值输出到 stdout，告警输出到 stderr）
+db_ui_field_get_soft() {
+    local field="$1" val
+    if val="$(db_ui_field_get "$field" 2>/dev/null)"; then
+        printf '%s' "$val"
+        return 0
+    fi
+    echo -e "${YELLOW}[信息] 未能读取后台配置「${field}」（数据库不可达或权限不足），本次按默认值处理${NC}" >&2
+    return 1
 }
 
 # 回写备份状态到 admin_config.backup_state（后台「备份监控」读它）。
@@ -1563,7 +1608,7 @@ JS
 # 输出：yes（该跑）/ no（跳过，并打印原因）/ unknown（读不到配置，按本地策略跑）
 backup_should_run() {
     local sched
-    sched="$(db_ui_field_get backup_schedule 2>/dev/null || true)"
+    sched="$(db_ui_field_get_soft backup_schedule || true)"
     case "$sched" in
         off)    echo "skipped"; echo "（后台备份周期=关闭）" >&2; return 1 ;;
         daily|"")  # 未配置时按每日（与 db.js 默认 off 不同：未配置视为未接管，保持可用）
