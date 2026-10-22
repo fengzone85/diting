@@ -1,6 +1,11 @@
 services:
   server:
-    build: .
+    build:
+      context: .
+      # 编译期 APT 镜像源（可选）：国内网络下回退编译时会用到。
+      # 在 .env 里写 APT_MIRROR=mirrors.aliyun.com 即可，无需改 Dockerfile。
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
     restart: unless-stopped
     # 仅绑定本机回环，配合宿主机 Nginx/宝塔 反代；外部无法直接触达该端口。
     # 若 Nginx 也是独立 Docker 容器（非宿主机进程），请改用共享 Docker 网络 + 服务名互访，并删除此端口映射。
