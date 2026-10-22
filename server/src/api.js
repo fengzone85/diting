@@ -310,20 +310,8 @@ router.post('/report', agentAuth, (req, res) => {
 // 防暴力枚举 agent 名称 / 资源耗尽。全局 rateLimit 已做兜底，此处更严格。
 const REGISTER_WINDOW = 60000, REGISTER_MAX = 10;
 const registerHits = new Map();
-// SETUP_TOKEN 解析：库为权威，env 仅作一次性迁移源。库空且 env 有值时把明文搬进库
-// （此后改令牌不必登机器改 .env 再重启容器）；管理面显式清除后会记住该状态，
-// 否则残留的 env 值会被反复搬回来，"清除"形同无效。
-// 弱令牌**不搬库**：那是配置错误，留在 env 里让每次请求都给出同一条"过弱"提示，
-// 而不是把一个不可用的值冻进库（此后改 .env 也不再生效）。
-function resolveSetupToken() {
-  if (db.isSetupTokenCleared()) return { token: '', source: 'cleared' };
-  const inDb = db.getSetupToken();
-  if (inDb) return { token: inDb, source: 'db' };
-  const env = process.env.SETUP_TOKEN;
-  if (env && !isWeakSetupToken(env)) { db.setSetupToken(env); return { token: env, source: 'env-migrated' }; }
-  if (env) return { token: env, source: 'env-weak' };
-  return { token: '', source: 'none' };
-}
+// SETUP_TOKEN 解析口径见 src/setup-token.js（注册端点与安装口令共用同一份判定）
+const { resolveSetupToken, isWeakSetupToken } = require('./setup-token');
 const registerRateLimit = (req, res, next) => {
   if (!rateLimitTouch(registerHits, req.ip || req.socket.remoteAddress, REGISTER_WINDOW, REGISTER_MAX)) {
     return res.status(429).json({ error: 'too many requests' });
@@ -332,14 +320,7 @@ const registerRateLimit = (req, res, next) => {
 };
 // SETUP_TOKEN 弱模式拒绝（审查 G4）：长度之外再查熵——纯数字、字符种类过少、
 // 含连续序列（1234/abcd/qwer）的"够长但可猜"令牌一律停用注册。
-function isWeakSetupToken(t) {
-  const s = String(t || '').trim();
-  if (s.length < 16) return true;
-  if (/^\d+$/.test(s)) return true;                              // 纯数字
-  if (new Set(s).size <= 4) return true;                         // 字符种类过少
-  if (/(?:0123|1234|2345|3456|4567|5678|6789|abcd|bcde|qwer|asdf)/i.test(s)) return true; // 连续序列
-  return false;
-}
+// 判定函数现由 src/setup-token.js 提供（与安装口令共用同一口径）。
 router.post('/setup/register', registerRateLimit, (req, res) => {
   const { token: setupToken } = resolveSetupToken();
   if (!setupToken) {

@@ -19,6 +19,9 @@ const description = ref('');
 const siteUrl = ref('');
 const agentServerUrl = ref('');
 const listenPort = ref<number | null>(null);
+// 抢占防护（§6.7）：远程来源（经反代/非同网段直连）需提供安装口令
+const installTokenRequired = ref(false);
+const installToken = ref('');
 const mode = ref<'generate' | 'custom'>('generate');
 const customToken = ref('');
 const submitting = ref(false);
@@ -44,6 +47,8 @@ const canSubmit = computed(() => {
   if (!name || name.length > 100) return false;
   if (description.value.trim().length > 1000) return false;
   if (!siteUrlOk.value || !agentServerUrlOk.value) return false;
+  // 远程来源必须填安装口令（§6.7 抢占防护）
+  if (installTokenRequired.value && !installToken.value.trim()) return false;
   if (mode.value === 'custom' && !customTokenCheck.value.ok) return false;
   return true;
 });
@@ -54,6 +59,7 @@ async function load() {
   try {
     const s: InstallStatus = await getInstallStatus();
     listenPort.value = typeof s.port === 'number' ? s.port : null;
+    installTokenRequired.value = s.install_token_required === true;
     phase.value = s.required ? 'form' : 'locked';
     if (s.required) {
       // 浏览器侧预填（管理员确认后才入库）。服务端仍不信任 Host / X-Forwarded-Host，
@@ -83,6 +89,7 @@ async function submit() {
       agent_server_url: agentServerUrl.value.trim(),
       token_mode: mode.value,
       token: mode.value === 'custom' ? customToken.value.trim() : undefined,
+      install_token: installTokenRequired.value ? installToken.value.trim() : undefined,
     });
     generatedToken.value = res.token || '';
     doneWarnings.value = Array.isArray(res.warnings) ? res.warnings : [];
@@ -143,6 +150,12 @@ onMounted(load);
       </div>
 
       <div class="space-y-4">
+        <div v-if="installTokenRequired" class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+          <label class="mb-1 block text-sm text-amber-200">{{ t('install.installToken') }}</label>
+          <input v-model="installToken" type="password" autocomplete="off" :placeholder="t('install.installTokenPh')"
+            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 font-mono text-white outline-none focus:border-amber-400" />
+          <p class="mt-1 text-xs text-amber-200/80">{{ t('install.installTokenHint') }}</p>
+        </div>
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.sitename') }}</label>
           <input v-model="sitename" type="text" maxlength="100" :placeholder="t('install.sitenamePh')" required

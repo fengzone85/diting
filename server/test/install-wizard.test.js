@@ -52,8 +52,14 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // complete 端点有 60s/5 次的 IP 限流；测试进程同源同 IP，逐用例轮换 X-Forwarded-For
 // （TRUST_PROXY 默认采信 loopback 代理的 XFF）避免配额串扰。
+// 注意：带 XFF 即"经反代的远程来源"，按 §6.7 抢占防护必须附带 install_token。
 let xffSeq = 100;
 const XFF = () => ({ ...PROTO, 'X-Forwarded-For': `203.0.113.${xffSeq++}` });
+const INSTALL_TOKEN = 'install-token-7Kq2Xz9Rp4Wm';
+process.env.SETUP_TOKEN = INSTALL_TOKEN;
+// 远程来源的 complete 助手：带 XFF（= 不可信来源）+ 正确 install_token
+const remoteComplete = (body) =>
+  request(app).post('/api/install/complete').set(XFF()).send({ install_token: INSTALL_TOKEN, ...body });
 
 after(async () => {
   try { server.closeAllConnections?.(); } catch { /* 旧版 Node 无此 API */ }
@@ -122,40 +128,34 @@ test('未安装时 agent 面 / SETUP_TOKEN 注册 / 旧 setup 端点不受拦截
 // ---- complete 请求校验（对应 komari completeRequest 校验）----
 
 test('complete：sitename 缺失/超长 → 400 invalid_sitename', async () => {
-  const missing = await request(app).post('/api/install/complete').set(XFF())
-    .send({ token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+  const missing = await remoteComplete({ token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
   assert.strictEqual(missing.status, 400);
   assert.strictEqual(missing.body.error, 'invalid_sitename');
-  const tooLong = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: 'x'.repeat(101), token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+  const tooLong = await remoteComplete({ sitename: 'x'.repeat(101), token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
   assert.strictEqual(tooLong.status, 400);
   assert.strictEqual(tooLong.body.error, 'invalid_sitename');
 });
 
 test('complete：description 超长 → 400 invalid_description', async () => {
-  const res = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: 'ok', description: 'x'.repeat(1001), token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+  const res = await remoteComplete({ sitename: 'ok', description: 'x'.repeat(1001), token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
   assert.strictEqual(res.status, 400);
   assert.strictEqual(res.body.error, 'invalid_description');
 });
 
 test('complete：上报地址必填且须为 http(s)（getPublicBaseUrl 的前置依赖）', async () => {
-  const missing = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: 'ok', token_mode: 'generate' });
+  const missing = await remoteComplete({ sitename: 'ok', token_mode: 'generate' });
   assert.strictEqual(missing.status, 400);
   assert.strictEqual(missing.body.error, 'missing_agent_server_url');
 
   for (const bad of ['ftp://pt.example.com', 'pt.example.com', 'https://user:pass@pt.example.com', 'https://pt.example.com/' + 'x'.repeat(200)]) {
-    const res = await request(app).post('/api/install/complete').set(XFF())
-      .send({ sitename: 'ok', token_mode: 'generate', agent_server_url: bad });
+    const res = await remoteComplete({ sitename: 'ok', token_mode: 'generate', agent_server_url: bad });
     assert.strictEqual(res.status, 400, `agent_server_url=${JSON.stringify(bad).slice(0, 40)} 应被拒绝`);
     assert.strictEqual(res.body.error, 'invalid_agent_server_url');
   }
 });
 
 test('complete：站点网址可选，但非空时须合法', async () => {
-  const bad = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: 'ok', token_mode: 'generate', agent_server_url: 'https://pt.example.com', site_url: 'javascript:alert(1)' });
+  const bad = await remoteComplete({ sitename: 'ok', token_mode: 'generate', agent_server_url: 'https://pt.example.com', site_url: 'javascript:alert(1)' });
   assert.strictEqual(bad.status, 400);
   assert.strictEqual(bad.body.error, 'invalid_site_url');
 });
@@ -170,8 +170,7 @@ test('complete：自定义弱 Token 一律 400 weak_token', async () => {
     'passwordpasswordabcd1234',      // 含连续序列
   ];
   for (const token of cases) {
-    const res = await request(app).post('/api/install/complete').set(XFF())
-      .send({ sitename: 'ok', token_mode: 'custom', token, agent_server_url: 'https://pt.example.com' });
+    const res = await remoteComplete({ sitename: 'ok', token_mode: 'custom', token, agent_server_url: 'https://pt.example.com' });
     assert.strictEqual(res.status, 400, `token=${JSON.stringify(token)} 应被拒绝`);
     assert.strictEqual(res.body.error, 'weak_token');
   }
@@ -195,6 +194,61 @@ test('requireProto：回环 + 带 X-Forwarded-Proto: http 仍 403（nginx 明文
   } finally {
     process.env.ADMIN_ALLOW_HTTP = prev;
   }
+});
+
+// ---- 抢占防护（§6.7 / G6）：远程来源必须带 install_token ----------------------
+
+test('status：远程来源报 install_token_required=true，回环直连报 false', async () => {
+  const remote = await request(app).get('/api/install/status').set(XFF());
+  assert.strictEqual(remote.status, 200);
+  assert.strictEqual(remote.body.install_token_required, true, '经反代的远程来源应要求口令');
+  const local = await request(app).get('/api/install/status');
+  assert.strictEqual(local.body.install_token_required, false, '回环直连（ssh -L）不应要求口令');
+});
+
+test('抢占防护：远程来源无口令 → 403 install_token_required', async () => {
+  const bak = process.env.SETUP_TOKEN;
+  delete process.env.SETUP_TOKEN;
+  db.clearSetupToken(); db.markSetupTokenCleared();
+  try {
+    const res = await request(app).post('/api/install/complete').set(XFF())
+      .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(res.body.error, 'install_token_required');
+  } finally {
+    db.unmarkSetupTokenCleared();
+    process.env.SETUP_TOKEN = bak;
+  }
+});
+
+test('抢占防护：远程来源口令错误 → 403 invalid_install_token', async () => {
+  const res = await request(app).post('/api/install/complete').set(XFF())
+    .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com', install_token: 'wrong-token-0123456789' });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.body.error, 'invalid_install_token');
+});
+
+test('抢占防护：远程来源口令正确 → 越过门槛进入业务校验（400 而非 403）', async () => {
+  // 用非法 body：证明口令关卡已过、被后续 validateInstall 拦下，
+  // 同时不会把这次安装真的消耗掉（后面还有成功安装用例）。
+  const res = await remoteComplete({ sitename: 'x', token_mode: 'generate' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'missing_agent_server_url');
+});
+
+test('抢占防护：口令也可经 X-Install-Token 头传递', async () => {
+  const res = await request(app).post('/api/install/complete').set(XFF())
+    .set({ 'X-Install-Token': INSTALL_TOKEN })
+    .send({ sitename: 'x', token_mode: 'generate' });
+  assert.strictEqual(res.status, 400, '头形式的口令同样应被接受');
+});
+
+test('抢占防护：带代理头的回环请求（nginx 在本机转发）不算可信来源', async () => {
+  const res = await request(app).post('/api/install/complete')
+    .set({ 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '203.0.113.77' })
+    .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.body.error, 'invalid_install_token');
 });
 
 // ---- 成功安装（本用例同时验证：回环直连无需 https 头、Token 只存哈希、不写 .env）----
@@ -238,8 +292,7 @@ test('complete：回环直连完成安装 → 哈希入库、站点信息落库�
 });
 
 test('安装完成后：complete → 409（内存状态机）、status 翻转、旧锁键不被写入', async () => {
-  const again = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: '再装一次', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
+  const again = await remoteComplete({ sitename: '再装一次', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
   assert.strictEqual(again.status, 409);
   assert.strictEqual(again.body.error, 'already_completed');
 
