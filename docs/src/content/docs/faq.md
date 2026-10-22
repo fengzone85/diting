@@ -27,6 +27,27 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 详见 [原生 Linux 部署](/native/)。
 
+### Q: 手动改了 `/opt/diting-src` 里的文件，`--update-server` 之后全被覆盖了？
+
+✅ 这是设计行为，不是 bug。
+
+安装/更新会把源码目录**硬同步**到远端分支（见 `sync_source_ref`）：
+
+```bash
+git -C /opt/diting-src fetch origin <REPO_BRANCH>
+git -C /opt/diting-src reset --hard FETCH_HEAD   # 丢弃所有本地改动
+```
+
+`/opt/diting-src` 由脚本接管，不要在里面直接改代码。按目的选正确做法：
+
+| 想改什么 | 正确做法 |
+|---|---|
+| 端口 / 密钥 / 开关 | 改 `server/.env`（`.gitignore` 覆盖，不会被同步） |
+| 数据库位置 | 改 `DB_PATH`，库文件本身在 `/data` 或 `server/data`，不在覆盖范围 |
+| 真的要改代码 | 在仓库里改并推到自己的分支，再用 `REPO_BRANCH=your-branch sudo bash diting.sh --install-server` 安装 |
+| 只想临时试一下 | 更新前先 `git -C /opt/diting-src diff > /tmp/my.patch`，更新后 `git apply /tmp/my.patch` |
+| 换 apt 镜像源（构建慢） | 用构建参数 `APT_MIRROR`（写进 `.env` 或 `--build-arg`），不要改 `Dockerfile` |
+
 ### Q: 数据库用什么？
 
 SQLite 单文件。无需额外安装数据库服务。
