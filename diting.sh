@@ -82,9 +82,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.2.0"
-SCRIPT_DATE="2026-10-22"
-SCRIPT_NOTES="安装不再预生成管理员 Token（改由 /install 向导创建，库中只存哈希）；--port N 可选端口；--update-server 升级前自动备份；数据类命令不再要求 Docker；交互层改纯文本"
+SCRIPT_VERSION="1.1.8"
+SCRIPT_DATE="2026-10-19"
+SCRIPT_NOTES="受控端安装/更新链路支持 --month-rotate（MONTH_ROTATE，0=累计，1–31=流量重置日），update_agent 会保留已存值"
 
 # 颜色：仅当 **stdout 是终端** 时着色；管道 / CI / 重定向下一律置空。
 # （附录 B 建议按 stderr 判定，但本脚本大量面向人的输出走 stdout——按 stderr 判会让
