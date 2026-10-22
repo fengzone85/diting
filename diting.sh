@@ -907,8 +907,19 @@ locate_db() {
         fi
     done
     # 其次：Docker 命名卷（server-data）
-    local vol="server-data"
-    docker volume inspect "$vol" >/dev/null 2>&1 || vol=""
+    # compose v2 会把卷命名为「<项目名>_server-data」（项目名默认取 compose 文件所在目录名，
+    # 本仓库的 compose 在 server/ 下 → server_server-data）。只认裸名 server-data 会让
+    # **所有 Docker 形态的库操作**（升级前备份、Token 迁移、重置、备份保留天数）全部落空，
+    # 且调用点多带 `2>/dev/null || true`，故障是静默的。因此这里做三级解析：
+    #   ① 裸名（早期手工 docker volume create 的部署）
+    #   ② 任意项目前缀：<任意>_server-data
+    local vol=""
+    for cand in "server-data" "server_server-data"; do
+        docker volume inspect "$cand" >/dev/null 2>&1 && { vol="$cand"; break; }
+    done
+    if [[ -z "$vol" ]]; then
+        vol="$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E '(^|_)server-data$' | head -n1)"
+    fi
     if [[ -n "$vol" ]]; then
         # 找挂载该卷且当前运行中的容器（compose 项目名不确定，按卷反查容器）
         local cid
