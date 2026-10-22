@@ -85,13 +85,16 @@ test('resolveAlertThresholds：UI 显式设置优先于 env（含"显式设为�
 // ---- G4：SETUP_TOKEN 熵校验 + 待确认流程 ------------------------------------
 
 test('POST /api/setup/register：弱 SETUP_TOKEN（16 位纯数字）→ 403 停用', async () => {
+  db.clearSetupToken(); db.unmarkSetupTokenCleared();
   process.env.SETUP_TOKEN = '1234567890123456';
   const res = await request(app).post('/api/setup/register').send({ setup_token: '1234567890123456' });
   assert.strictEqual(res.status, 403);
   assert.match(res.body.error, /过弱/);
+  assert.equal(db.getSetupToken(), '', '弱令牌不得被搬进库（否则之后改 .env 也不再生效）');
 });
 
 test('POST /api/setup/register：强令牌 → 200 待确认；上报 403；管理员批准后放行', async () => {
+  db.clearSetupToken(); db.unmarkSetupTokenCleared();
   const STRONG = 'Str0ng-Setup-Token-9f2a7c41';
   process.env.SETUP_TOKEN = STRONG;
   const reg = await request(app).post('/api/setup/register').send({ setup_token: STRONG, name: 'pending-node' });

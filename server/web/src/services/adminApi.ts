@@ -27,6 +27,12 @@ export const adminApi = {
   generateAgent: (name: string) =>
     api.post<{ id: string; token: string }>('/api/setup/generate', { name }),
 
+  // 受控端自助注册令牌（SETUP_TOKEN，存库；明文只在生成/设置时回显一次）
+  setupTokenStatus: () =>
+    api.get<{ configured: boolean; source: 'db' | 'env-migrated' | 'cleared' | 'none'; weak: boolean }>('/api/admin/setup-token'),
+  setupTokenRotate: (action: 'generate' | 'set' | 'clear', token?: string) =>
+    api.post<{ ok: boolean; configured: boolean; token?: string }>('/api/admin/setup-token', { action, token }),
+
   // agents
   listAgents: () => api.get<Agent[]>('/api/agents'),
   getAgent: (id: string) => api.get<Agent>(`/api/agents/${encodeURIComponent(id)}`),

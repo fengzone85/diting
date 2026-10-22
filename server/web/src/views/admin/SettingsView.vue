@@ -123,6 +123,39 @@ function resetLocal() {
 resetLocal();
 const themes = ref<ThemeOption[]>([{ id: 'default', name: t('settings.builtinTheme') }]);
 
+// ---- 受控端自助注册令牌（SETUP_TOKEN）：以库为权威，明文只在生成/设置时回显一次 ----
+interface SetupTokenState { configured: boolean; source: string; weak: boolean }
+const setupToken = ref<SetupTokenState>({ configured: false, source: 'none', weak: false });
+const setupTokenPlain = ref('');          // 生成/设置后的明文（仅一次，刷新即消失）
+const setupTokenBusy = ref(false);
+const setupTokenError = ref('');
+async function loadSetupToken() {
+  try { setupToken.value = await adminApi.setupTokenStatus(); } catch { /* 忽略：区块仍可用 */ }
+}
+async function rotateSetupToken(action: 'generate' | 'set' | 'clear') {
+  setupTokenBusy.value = true;
+  setupTokenError.value = '';
+  try {
+    const r = await adminApi.setupTokenRotate(action);
+    setupTokenPlain.value = r.token || '';
+    await loadSetupToken();
+  } catch (e) {
+    setupTokenError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    setupTokenBusy.value = false;
+  }
+}
+const setupTokenSourceLabel = computed(() => {
+  const map: Record<string, string> = {
+    db: t('settings.setupTokenSourceDb'),
+    'env-migrated': t('settings.setupTokenSourceEnv'),
+    'env-weak': t('settings.setupTokenSourceEnvWeak'),
+    cleared: t('settings.setupTokenSourceCleared'),
+    none: t('settings.setupTokenSourceNone'),
+  };
+  return map[setupToken.value.source] || setupToken.value.source;
+});
+
 // 服务端实际识别到的客户端来源 IP（配合 IP 白名单 / TRUST_PROXY 排障）
 const clientIp = ref<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string } | null>(null);
 const isLoopbackTrust = computed(() => String(clientIp.value?.trust_proxy) === 'loopback');
@@ -148,6 +181,7 @@ onMounted(async () => {
   // S1/F1：分组告警覆盖（失败静默，不阻塞其余设置项）
   loadAlertRules();
   void loadThemes();
+  void loadSetupToken();
   try {
     clientIp.value = await adminApi.clientIp();
   } catch {
@@ -548,6 +582,35 @@ async function resetGroupAlert() {
         <FormInput v-model="local.notify.alert_to" :label="t('settings.alertTo')" />
         <FormInput v-model="local.notify.telegram_bot_token" label="Telegram Bot Token" />
         <FormInput v-model="local.notify.telegram_chat_id" label="Telegram Chat ID" />
+
+        <!-- 受控端自助注册令牌：库为权威（SETUP_TOKEN），明文只在生成/设置时回显一次 -->
+        <div class="mt-8 rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 lg:col-span-2">
+          <div class="mb-1 flex items-center justify-between">
+            <h3 class="font-semibold">{{ t('settings.setupToken') }}</h3>
+            <span class="rounded-full px-2 py-0.5 text-xs"
+              :class="setupToken.configured ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-500/15 text-slate-400'">
+              {{ setupToken.configured ? t('settings.setupTokenConfigured') : t('settings.setupTokenNotConfigured') }}
+            </span>
+          </div>
+          <p class="mb-3 text-xs text-slate-400">{{ t('settings.setupTokenHint') }}</p>
+          <div class="mb-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+            <span>{{ t('settings.setupTokenSource') }}：<code class="text-slate-300">{{ setupTokenSourceLabel }}</code></span>
+            <span v-if="setupToken.weak" class="text-amber-300">⚠️ {{ t('settings.setupTokenWeak') }}</span>
+          </div>
+          <div v-if="setupTokenPlain" class="mb-3">
+            <div class="mb-1 text-xs text-amber-300">{{ t('settings.setupTokenOnce') }}</div>
+            <code class="block break-all rounded-lg bg-black/40 p-2 font-mono text-xs text-slate-200">{{ setupTokenPlain }}</code>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" class="btn-secondary text-sm" :disabled="setupTokenBusy" @click="rotateSetupToken('generate')">
+              {{ t('settings.setupTokenGenerate') }}
+            </button>
+            <button type="button" class="btn-secondary text-sm" :disabled="setupTokenBusy" @click="rotateSetupToken('clear')">
+              {{ t('settings.setupTokenClear') }}
+            </button>
+          </div>
+          <p v-if="setupTokenError" class="mt-2 text-xs text-rose-400">{{ setupTokenError }}</p>
+        </div>
 
         <!-- S1/F2：通知渠道（Webhook）与通知组 -->
         <NotifyPanel />
