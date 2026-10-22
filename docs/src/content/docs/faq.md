@@ -48,6 +48,17 @@ git -C /opt/diting-src reset --hard FETCH_HEAD   # 丢弃所有本地改动
 | 只想临时试一下 | 更新前先 `git -C /opt/diting-src diff > /tmp/my.patch`，更新后 `git apply /tmp/my.patch` |
 | 换 apt 镜像源（构建慢） | 用构建参数 `APT_MIRROR`（写进 `.env` 或 `--build-arg`），不要改 `Dockerfile` |
 
+### Q: 能把别处的备份传上来恢复吗？
+
+可以。后台「设置 → 备份文件」里有「上传备份」：
+
+- 只接受 **SQLite（`.db`）或 gzip（`.db.gz`）**，其它内容直接 400（服务不充当文件暂存盘）
+- **文件名由服务端生成**（`monitor_YYYYMMDD_HHMMSS.db[.gz]`），客户端给的名字整个丢弃 ——
+  既避免路径穿越，也保证后续列表 / 删除 / 恢复的白名单不被破坏
+- 单文件上限 `BACKUP_UPLOAD_MAX_MB`（默认 1024 MB），超限 413
+- 上传完成后**不会自动恢复**，需要在列表里点「恢复」，由宿主侧 `diting.sh` 执行
+  （先备份当前库、校验完整性、停服替换、再重启）
+
 ### Q: 服务起不来，日志在哪看？
 
 ```bash

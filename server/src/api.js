@@ -1455,6 +1455,35 @@ router.get('/admin/backups', adminOrReadonly, (req, res) => {
   });
 });
 
+// 上传备份：把外部备份放进 BACKUP_DIR，之后可像本地备份一样"恢复"。
+// 安全约束：
+//   ① 只认 SQLite 头 / gzip 魔数，其它内容一律 400（不当文件暂存盘用）；
+//   ② **文件名由服务端生成**，客户端给的名字整个丢弃 —— NAME_RE 白名单、列表/删除/恢复
+//      都不受影响，也就不存在路径穿越面；
+//   ③ 大小上限 BACKUP_UPLOAD_MAX_MB（默认 1024），超限 413；
+//   ④ 仍要求管理端凭据 + HTTPS 反代（adminOnly 内含 requireProto）。
+const BACKUP_UPLOAD_MAX_MB = Math.max(1, Math.min(8192, Number(process.env.BACKUP_UPLOAD_MAX_MB) || 1024));
+const backupRawParser = (req, res, next) => {
+  express.raw({ type: () => true, limit: BACKUP_UPLOAD_MAX_MB * 1024 * 1024 })(req, res, (err) => {
+    if (!err) return next();
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({
+        error: 'too_large',
+        message: `备份文件超过上限 ${BACKUP_UPLOAD_MAX_MB} MB（可用环境变量 BACKUP_UPLOAD_MAX_MB 调整）`
+      });
+    }
+    return res.status(400).json({ error: 'invalid_body', message: err.message || 'bad request body' });
+  });
+};
+router.post('/admin/backups/upload', adminOnly, agentScope, agentGlobalOnly, backupRawParser, (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  if (!buf || buf.length === 0) return res.status(400).json({ error: 'empty_body', message: '请求体为空' });
+  const r = backups.saveUploadedBackup(buf);
+  if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
+  res.json({ ok: true, name: r.name, size_bytes: r.size });
+  auditLog(req, 'upload_backup', `name=${r.name} size=${r.size}`);
+});
+
 // 下载：流式返回，支持大文件；文件名经白名单校验，杜绝任意文件读取
 router.get('/admin/backups/:name/download', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const full = backups.resolveBackupFile(req.params.name);

@@ -318,6 +318,11 @@ export const zhCN: Record<string, string> = {
   'settings.backupState_unknown': '未知',
   // 备份文件管理（需宿主备份目录已挂进容器）
   'settings.backupFiles': '备份文件',
+  'settings.backupUpload': '上传备份',
+  'settings.backupUploading': '上传中',
+  'settings.backupUploadHint': '仅接受 SQLite（.db）或 gzip（.db.gz），文件名由服务端生成；上传后可点「恢复」',
+  'settings.backupUploadConfirm': '上传备份文件 {name}？上传后可在列表里点「恢复」应用它。',
+  'settings.backupUploaded': '已上传为 {name}，可在列表中恢复',
   'settings.backupTime': '时间',
   'settings.backupDownload': '下载',
   'settings.backupRestore': '恢复',
