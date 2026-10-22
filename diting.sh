@@ -748,7 +748,10 @@ update_server() {
     _bak="${DB_BACKUP_DIR}/monitor_$(date +%Y%m%d_%H%M%S)_pre-upgrade.db"
     echo -e "${YELLOW}[信息] 升级前备份数据库 → ${_bak}${NC}"
     if do_backup "$_bak" 0; then
-        echo -e "${GREEN}[OK]   数据库已备份${NC}"
+        # do_backup 压缩成功后会把 <path> 换成 <path>.gz 并删除原文件，
+        # 此处必须回读真实产物名，否则后面的提示与回滚命令都指向一个不存在的路径。
+        [[ -f "${_bak}.gz" && ! -f "$_bak" ]] && _bak="${_bak}.gz"
+        echo -e "${GREEN}[OK]   数据库已备份 → ${_bak}${NC}"
     else
         if [[ "${A_FORCE:-0}" == "1" ]]; then
             echo -e "${YELLOW}[警告] 升级前备份失败，已按 --force 继续（风险自负）${NC}"

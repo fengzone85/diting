@@ -39,6 +39,19 @@ test('update_server：备份发生在 compose down 之前', () => {
     'do_backup 必须在 compose down 之前：容器停掉后 locate_db 找不到数据库，备份必然失败');
 });
 
+test('update_server：备份成功后回读真实产物名（压缩会把 .db 换成 .db.gz）', () => {
+  // do_backup 压缩成功后删除原文件、只留 <path>.gz。若不回读，后面的
+  // 「升级前备份」提示与 _upgrade_rollback_hint 的 --restore 命令都指向
+  // 一个不存在的路径，用户照抄会失败（j4125 真机验收实测踩中）。
+  assert.match(UPDATE, /\[\[ -f "\$\{_bak\}\.gz" && ! -f "\$_bak" \]\] && _bak="\$\{_bak\}\.gz"/,
+    '应在备份成功后把 _bak 改写成真实的 .gz 产物名');
+  // 回滚提示与收尾提示必须用同一个 _bak（改写后的值）
+  const iRewrite = UPDATE.indexOf('_bak="${_bak}.gz"');
+  const iHint = UPDATE.indexOf('_upgrade_rollback_hint "${_old:-}" "$_bak"');
+  assert.ok(iRewrite !== -1 && iHint !== -1 && iRewrite < iHint,
+    '回滚提示必须发生在路径改写之后，才能拿到真实文件名');
+});
+
 test('update_server：备份失败默认中止，只有 --force 才继续', () => {
   assert.match(UPDATE, /if do_backup "\$_bak" 0; then/);
   assert.match(UPDATE, /\[\[ "\$\{A_FORCE:-0\}" == "1" \]\]/, '应以 A_FORCE 判定是否放行');
