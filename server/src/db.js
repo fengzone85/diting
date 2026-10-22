@@ -1154,6 +1154,19 @@ const setAdminTokenHash = (h) => setConfig(ADMIN_TOKEN_HASH, String(h || ''));
 // 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（即"已安装"，防重装）。
 const setAdminTokenHashIfAbsent = (h) => setConfigIfAbsent(ADMIN_TOKEN_HASH, String(h || ''));
 const clearAdminTokenHash = () => deleteConfig(ADMIN_TOKEN_HASH);
+// ---- 受控端自助注册令牌（SETUP_TOKEN）：库为权威，env 仅作一次性迁移源 ----
+// 与 AI Key / SMTP 密码同口径：明文存 SQLite（库 600，DB 无加密），
+// 好处是可在管理面直接改，不必登机器改 .env 再重启容器。
+// 回退逻辑在 api.js resolveSetupToken()：库有值用库，库空才读 env。
+const SETUP_TOKEN_KEY = 'setup_token';
+const SETUP_TOKEN_CLEARED_KEY = 'setup_token_cleared';
+const getSetupToken = () => getConfig(SETUP_TOKEN_KEY) || '';
+const setSetupToken = (v) => setConfig(SETUP_TOKEN_KEY, String(v || ''));
+const clearSetupToken = () => deleteConfig(SETUP_TOKEN_KEY);
+// 管理面显式清除后的"墓碑"：否则 resolveSetupToken 会把 .env 的残留值反复搬回库。
+const isSetupTokenCleared = () => getConfig(SETUP_TOKEN_CLEARED_KEY) === '1';
+const markSetupTokenCleared = () => setConfig(SETUP_TOKEN_CLEARED_KEY, '1');
+const unmarkSetupTokenCleared = () => deleteConfig(SETUP_TOKEN_CLEARED_KEY);
 const get2FASecret = () => getConfig(TWOFA_SECRET);
 const is2FAEnabled = () => getConfig(TWOFA_ENABLED) === '1';
 const set2FASecret = (s) => setConfig(TWOFA_SECRET, s);
@@ -1572,6 +1585,8 @@ module.exports = {
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, deleteConfig, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getAdminTokenHash, setAdminTokenHash, setAdminTokenHashIfAbsent, clearAdminTokenHash,
+  getSetupToken, setSetupToken, clearSetupToken,
+  isSetupTokenCleared, markSetupTokenCleared, unmarkSetupTokenCleared,
   resolveAlertThresholds, observedIntervalSec,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,

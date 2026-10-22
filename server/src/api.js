@@ -310,6 +310,20 @@ router.post('/report', agentAuth, (req, res) => {
 // 防暴力枚举 agent 名称 / 资源耗尽。全局 rateLimit 已做兜底，此处更严格。
 const REGISTER_WINDOW = 60000, REGISTER_MAX = 10;
 const registerHits = new Map();
+// SETUP_TOKEN 解析：库为权威，env 仅作一次性迁移源。库空且 env 有值时把明文搬进库
+// （此后改令牌不必登机器改 .env 再重启容器）；管理面显式清除后会记住该状态，
+// 否则残留的 env 值会被反复搬回来，"清除"形同无效。
+// 弱令牌**不搬库**：那是配置错误，留在 env 里让每次请求都给出同一条"过弱"提示，
+// 而不是把一个不可用的值冻进库（此后改 .env 也不再生效）。
+function resolveSetupToken() {
+  if (db.isSetupTokenCleared()) return { token: '', source: 'cleared' };
+  const inDb = db.getSetupToken();
+  if (inDb) return { token: inDb, source: 'db' };
+  const env = process.env.SETUP_TOKEN;
+  if (env && !isWeakSetupToken(env)) { db.setSetupToken(env); return { token: env, source: 'env-migrated' }; }
+  if (env) return { token: env, source: 'env-weak' };
+  return { token: '', source: 'none' };
+}
 const registerRateLimit = (req, res, next) => {
   if (!rateLimitTouch(registerHits, req.ip || req.socket.remoteAddress, REGISTER_WINDOW, REGISTER_MAX)) {
     return res.status(429).json({ error: 'too many requests' });
@@ -327,7 +341,7 @@ function isWeakSetupToken(t) {
   return false;
 }
 router.post('/setup/register', registerRateLimit, (req, res) => {
-  const setupToken = process.env.SETUP_TOKEN;
+  const { token: setupToken } = resolveSetupToken();
   if (!setupToken) {
     return res.status(403).json({ error: '服务端未启用一键注册（未配置 SETUP_TOKEN）' });
   }
@@ -1766,6 +1780,42 @@ router.put('/ai/config', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   // 记录变更字段名（api_key 等敏感键打码为 k=*），并保留 enabled 显式标签
   const enabledTag = allowed.enabled != null ? `enabled=${allowed.enabled} ` : '';
   auditLog(req, 'update_ai_config', (enabledTag + `fields=${diffKeys(aiBefore, db.getAiConfig())}`).trim());
+});
+// ---- 受控端自助注册令牌（SETUP_TOKEN）：库为权威，管理面可直接维护 ----
+// 不回显明文：GET 只报"是否已配置 + 来源"；生成/设置时**一次性**回显明文
+// （与安装向导 Token 同口径，库里不存可逆形式之外的副本）。
+router.get('/setup-token', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const { token, source } = resolveSetupToken();
+  res.json({ configured: !!token, source, weak: !!token && isWeakSetupToken(token) });
+});
+
+// action=generate｜set｜clear。generate 用 crypto 随机 16 字节（32 hex）；
+// set 需传 token（≥16 且不能过弱）；clear 删除库中令牌并阻止 env 残留回灌。
+router.post('/setup-token', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const action = (req.body && req.body.action) || '';
+  if (action === 'clear') {
+    db.clearSetupToken();
+    db.markSetupTokenCleared();
+    auditLog(req, 'update_setup_token', 'cleared');
+    return res.json({ ok: true, configured: false });
+  }
+  let token;
+  if (action === 'generate') {
+    // 随机十六进制有极小概率落入"含连续序列"的弱模式（如 0123），重抽直到够强
+    do { token = crypto.randomBytes(16).toString('hex'); } while (isWeakSetupToken(token));
+  } else if (action === 'set') {
+    token = String((req.body && req.body.token) || '').trim();
+    if (token.length < 16) return res.status(400).json({ error: '令牌长度至少 16 位' });
+  } else {
+    return res.status(400).json({ error: 'action 需为 generate / set / clear' });
+  }
+  if (isWeakSetupToken(token)) {
+    return res.status(400).json({ error: 'SETUP_TOKEN 过弱（禁用纯数字/极少字符种类/连续序列，建议 openssl rand -hex 16）' });
+  }
+  db.unmarkSetupTokenCleared();
+  db.setSetupToken(token);
+  auditLog(req, 'update_setup_token', action === 'generate' ? 'generated' : 'set');
+  res.json({ ok: true, configured: true, token });   // 明文仅此一次
 });
 // 手动触发一次日报生成（不等调度时刻）：【异步任务】—— 立即返回，任务在后台跑。
 // 状态码：202 已受理 / 400 未启用 / 409 已有任务在执行 / 429 冷却中（带 Retry-After）。

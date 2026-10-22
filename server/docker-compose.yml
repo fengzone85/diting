@@ -16,7 +16,9 @@ services:
     environment:
       - PORT=${PORT:-8081}
       - DB_PATH=/data/monitor.db
-      - ADMIN_TOKEN=${ADMIN_TOKEN}
+      # 管理员 Token 由库中的 sha256 哈希承载（P0），**不再经 env 注入**：
+      # 明文一旦出现在 `docker inspect` 输出里，等同泄露。存量实例升级时由
+      # diting.sh 的 migrate_env_admin_token 在停容器前把 .env 明文转成哈希入库。
       # 会话 Cookie 签名密钥。缺失则每次重启随机生成 → 所有登录态失效（必须持久化）。
       - SESSION_SECRET=${SESSION_SECRET:-}
       # 登录会话有效期（毫秒），默认 12 小时

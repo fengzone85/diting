@@ -526,6 +526,10 @@ install_server() {
 
     cd "$SRC_DIR/server"
 
+    # 存量重装/升级路径：compose 已不注入 ADMIN_TOKEN，停容器前把 .env 明文迁成哈希入库。
+    # 全新安装没有库，函数自行跳过。
+    migrate_env_admin_token
+
     local port
     port="$(resolve_server_port)" || return 1
     echo -e "${GREEN}[OK]   监听端口：${port}${NC}"
@@ -756,6 +760,10 @@ update_server() {
         fi
     fi
 
+    # 密钥迁移（D7）：compose 已不再注入 ADMIN_TOKEN，停容器前先把 .env 明文转哈希入库，
+    # 否则升级后服务端读不到凭据，会误判为"未安装"。
+    migrate_env_admin_token
+
     # 先停掉旧容器并释放端口，避免「端口已被占用」导致新容器起不来
     echo -e "${YELLOW}[信息] 停止旧容器并释放端口…${NC}"
     docker compose down --remove-orphans 2>/dev/null || true
@@ -965,6 +973,37 @@ server_run_user() {
     if [[ -n "$u" && "$u" != "root" ]]; then
         echo "$u"
     fi
+}
+
+# 把 .env 里的明文 ADMIN_TOKEN 迁进库（只存哈希）。
+# 为什么安装器要做：compose 不再注入 ADMIN_TOKEN 之后，服务端启动读不到 env，
+# 存量实例升级时会直接掉进"未安装"态（全站 307 到 /install）。所以在停容器之前，
+# 先把明文转成哈希写库；库里已有哈希则原样跳过（幂等）。
+# 明文不上命令行：哈希在 bash 侧算好，传给 node 的只有摘要。
+migrate_env_admin_token() {
+    local envf="$SRC_DIR/server/.env" admin hash js out
+    [[ -f "$envf" ]] || return 0
+    admin="$(sed -n 's/^ADMIN_TOKEN=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1)"
+    [[ -n "$admin" ]] || return 0
+    (( ${#admin} >= 16 )) || return 0            # 占位符/过短不迁，交给 /install 生成
+    [[ -n "$(locate_db 2>/dev/null)" ]] || return 0
+    hash="$(printf '%s' "$admin" | sha256sum | cut -d' ' -f1)"
+    js="$(mktemp --suffix=.js)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+const hash = process.argv[3];
+const cur = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
+if (cur && cur.value) { console.log('SKIP_HAS_HASH'); db.close(); process.exit(0); }
+db.prepare("INSERT OR REPLACE INTO admin_config (key,value) VALUES ('admin_token_hash', ?)").run(hash);
+db.close();
+console.log('MIGRATED');
+JS
+    out="$(db_run_js "$js" "$hash" 2>&1)"; rm -f "$js"
+    if [[ "$out" == *MIGRATED* ]]; then
+        echo -e "${GREEN}[OK]   已把 .env 的管理员 Token 迁入数据库（只存哈希）${NC}"
+    fi
+    return 0
 }
 
 # 只有数据库位于 Docker 命名卷时才要求 Docker。
