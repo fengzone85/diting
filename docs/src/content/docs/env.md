@@ -51,7 +51,7 @@ description: 服务端与受控端环境变量参考
 | `AGENT_RAW_REPO` | 否 | `https://raw.githubusercontent.com/fengzone85/diting/master` | 一键命令中 `diting.sh` / 安装脚本的 raw 基址（可钉 tag） |
 | `AGENT_GIT_REPO` | 否 | `https://github.com/fengzone85/diting.git#master:agent-go` | Docker 受控端一键命令的构建源（M3 起为 Go） |
 | `ALERT_CONCURRENCY` | 否 | `8` | 告警并发发送上限 |
-| `BACKUP_DIR` | 否 | `/data/backups` | 备份目录（**容器内路径**）。后台「备份文件」列表/下载/删除读它；默认需 compose 把宿主目录挂到此路径，且用 `HOST_BACKUP_DIR` 指定宿主侧来源 |
+| `BACKUP_DIR` | 否 | `/data/backups` | 备份目录。Docker 下是**容器内路径**，需 compose 把宿主目录挂到此路径（`HOST_BACKUP_DIR` 指定宿主来源）；**原生部署下应写宿主路径**（如 `/var/backups/diting`），此时 `diting.sh --backup` 会直接跟随这里的值，后台「备份」页与 CLI 指向同一目录（否则后台会显示"目录不可用"、看不到 CLI 产物） |
 | `RESTORE_TRIGGER` | 否 | `/data/restore.request` | 后台点「恢复」时投递的请求文件。代码兜底默认在 `/data/` 下；compose 示例传 `/data/backups/restore.request`（与 `BACKUP_DIR` 同卷）。宿主侧 `diting.sh --process-restore` 读取并执行 |
 
 > AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
