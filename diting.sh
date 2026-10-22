@@ -103,6 +103,19 @@ REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/fengzone85/diting/${REPO
 REPO_GIT="${REPO_GIT:-https://github.com/fengzone85/diting.git}"
 SRC_DIR="/opt/diting-src"
 
+# 把 $SRC_DIR 的工作树同步到 $REPO_BRANCH（分支或 tag 均可）。
+# 旧实现把 `fetch origin master` / `reset --hard origin/master` 写死，导致
+# `REPO_BRANCH=v1.2.0` 只改到 raw 下载（脚本/载荷），源码仍是 master —— 与
+# 注释里"可钉 tag 便于可复现安装"的承诺不符。
+# `fetch <ref>` 对分支和 tag 都成立，FETCH_HEAD 指向它；仅分支能设上游。
+sync_source_ref() {
+    local ref="${1:-$REPO_BRANCH}"
+    git -C "$SRC_DIR" fetch origin "$ref" -q || return 1
+    git -C "$SRC_DIR" reset --hard FETCH_HEAD || return 1
+    git -C "$SRC_DIR" branch -u "origin/$ref" 2>/dev/null || true
+    return 0
+}
+
 # ── 宿主侧环境（可选）────────────────────────────────────────────────────────
 # /etc/diting/host.env 里配置后台可见备份目录与恢复请求路径：
 #   BACKUP_VISIBLE_DIR=/opt/diting-backups
@@ -497,13 +510,12 @@ install_server() {
     fi
 
     if [[ -d "$SRC_DIR/.git" ]]; then
-        echo -e "${YELLOW}[信息] 更新已有源码…${NC}"
-        git -C "$SRC_DIR" fetch origin master -q
-        git -C "$SRC_DIR" reset --hard origin/master
-        git -C "$SRC_DIR" branch -u origin/master master 2>/dev/null || true
+        echo -e "${YELLOW}[信息] 更新已有源码到 ${REPO_BRANCH}…${NC}"
+        sync_source_ref || { echo -e "${RED}[错误] 同步源码失败（分支/tag 不存在或无网络？）: ${REPO_BRANCH}${NC}" >&2; return 1; }
     else
-        echo -e "${YELLOW}[信息] 克隆服务端源码到 $SRC_DIR …${NC}"
-        git clone --depth 1 "$REPO_GIT" "$SRC_DIR"
+        echo -e "${YELLOW}[信息] 克隆服务端源码（${REPO_BRANCH}）到 $SRC_DIR …${NC}"
+        git clone --depth 1 -b "$REPO_BRANCH" "$REPO_GIT" "$SRC_DIR" \
+            || { echo -e "${RED}[错误] 克隆失败：分支/tag ${REPO_BRANCH} 不存在或无网络${NC}" >&2; return 1; }
     fi
 
     cd "$SRC_DIR/server"
@@ -677,12 +689,10 @@ update_server() {
     fi
 
     if [[ -d "$SRC_DIR/.git" ]]; then
-        echo -e "${YELLOW}[信息] 拉取最新源码并同步到 master（丢弃本地对源码的改动）…${NC}"
+        echo -e "${YELLOW}[信息] 拉取最新源码并同步到 ${REPO_BRANCH}（丢弃本地对源码的改动）…${NC}"
         local _old _new
         _old="$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null || echo '')"
-        git -C "$SRC_DIR" fetch origin master -q
-        git -C "$SRC_DIR" reset --hard origin/master
-        git -C "$SRC_DIR" branch -u origin/master master 2>/dev/null || true
+        sync_source_ref || { echo -e "${RED}[错误] 同步源码失败（分支/tag 不存在或无网络？）: ${REPO_BRANCH}${NC}" >&2; return 1; }
         _new="$(git -C "$SRC_DIR" rev-parse --short HEAD 2>/dev/null || echo '')"
         # 直观展示本次拉取了哪些提交（更新内容一目了然）
         if [[ -n "$_old" && "$_old" != "$_new" ]]; then
@@ -698,9 +708,9 @@ update_server() {
         git -C "$SRC_DIR" init -q
         git -C "$SRC_DIR" remote add origin "$REPO_GIT" 2>/dev/null \
           || git -C "$SRC_DIR" remote set-url origin "$REPO_GIT"
-        git -C "$SRC_DIR" fetch origin master -q
-        git -C "$SRC_DIR" checkout -B master -f origin/master
-        git -C "$SRC_DIR" branch --set-upstream-to=origin/master master
+        git -C "$SRC_DIR" fetch origin "$REPO_BRANCH" -q
+        git -C "$SRC_DIR" checkout -B "$REPO_BRANCH" -f FETCH_HEAD
+        git -C "$SRC_DIR" branch --set-upstream-to="origin/$REPO_BRANCH" "$REPO_BRANCH" 2>/dev/null || true
     fi
 
     # 关键：源码已同步到最新，但当前进程仍是「旧脚本」的内存逻辑。
