@@ -530,6 +530,16 @@ install_server() {
     # 全新安装没有库，函数自行跳过。
     migrate_env_admin_token
 
+    # 卸载重装防坑提示：数据卷/.env 残留凭据时，本次启动即为「已安装」态，
+    # 安装向导不会再出现。存量升级本就依赖该行为，但卸载重装的用户预期是
+    # 全新安装——把状态显式讲出来，并给出走向导 / 换 Token 两条出路。
+    if db_admin_token_exists; then
+        echo -e "${YELLOW}[提示] 检测到既有管理员凭据（数据库哈希，可能来自上次部署残留或 .env 迁移）。${NC}"
+        echo -e "       本次为「复用/升级」模式：安装向导不会出现，请用原 Token 登录。"
+        echo -e "       需要全新安装（重新走向导）：sudo bash diting.sh --uninstall，卸载时选择清除凭据。"
+        echo -e "       仅更换 Token：sudo bash diting.sh --reset-admin-token"
+    fi
+
     local port
     port="$(resolve_server_port)" || return 1
     echo -e "${GREEN}[OK]   监听端口：${port}${NC}"
@@ -1002,6 +1012,55 @@ server_run_user() {
 # 存量实例升级时会直接掉进"未安装"态（全站 307 到 /install）。所以在停容器之前，
 # 先把明文转成哈希写库；库里已有哈希则原样跳过（幂等）。
 # 明文不上命令行：哈希在 bash 侧算好，传给 node 的只有摘要。
+# ── 管理员凭据残留检测/清除（卸载重装防坑）────────────────────────────────
+# 坑的成因：安装向导的触发判据是「库中无 admin_token_hash」。卸载只删容器，
+# 数据卷与 .env 都会保留；重装时 migrate_env_admin_token 又把 .env 明文迁回库，
+# 结果「已安装」判据恒为真 → 安装向导永远不会出现（用户预期却是全新安装）。
+# 这两个助手供 uninstall_all / do_install 显式检测与清除，把状态讲给用户。
+
+# 库中是否存在管理员凭据哈希。任何失败（无库/无表/无 node/无 Docker/无镜像）
+# 都视为「无凭据」返回 1——检测只是提示性信息，绝不能反过来阻塞卸载/安装流程。
+db_admin_token_exists() {
+    local js out
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const db = new (require('better-sqlite3'))(process.argv[2]);
+const r = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
+console.log(r && r.value ? 'ADMIN_TOKEN_HASH_PRESENT' : 'ADMIN_TOKEN_HASH_ABSENT');
+db.close();
+JS
+    out="$(db_run_js "$js" 2>/dev/null)" || { rm -f "$js"; return 1; }
+    rm -f "$js"
+    [[ "$out" == *ADMIN_TOKEN_HASH_PRESENT* ]]
+}
+
+# 只清除「管理员凭据」（库哈希 + 历史明文键 + .env 的 ADMIN_TOKEN 行），
+# 刻意不动节点指标/配置与 SESSION_SECRET/SETUP_TOKEN——
+# 清凭据 ≠ 清数据，受控端一键注册等其余凭据保持有效。
+purge_admin_credentials() {
+    local js out rc=0
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const db = new (require('better-sqlite3'))(process.argv[2]);
+const n = db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw')").run().changes;
+console.log('PURGED_ROWS=' + n);
+db.close();
+JS
+    out="$(db_run_js "$js")" || rc=1
+    rm -f "$js"
+    if [[ $rc -eq 0 ]]; then
+        echo -e "${GREEN}[OK]   已清除库中的管理员凭据（节点数据保留）${NC}"
+    else
+        echo -e "${RED}[错误] 清除库中凭据失败，请按上方错误信息排查${NC}" >&2
+    fi
+    # .env 明文一并清空：否则下次启动 initAdminToken 又会把它迁回库
+    if [[ -f "$SRC_DIR/server/.env" ]]; then
+        sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN=/' "$SRC_DIR/server/.env"
+        echo -e "${GREEN}[OK]   已清空 .env 的 ADMIN_TOKEN 行${NC}"
+    fi
+    return $rc
+}
+
 migrate_env_admin_token() {
     local envf="$SRC_DIR/server/.env" admin hash js out
     [[ -f "$envf" ]] || return 0
@@ -2278,12 +2337,35 @@ uninstall_all() {
         echo "  受控端未安装"
     fi
     echo "== 卸载服务端 (Docker) =="
-    if [[ -d "$SRC_DIR/server" ]]; then
-        ( cd "$SRC_DIR/server" && docker compose down ) || true
-        echo -e "${YELLOW}[提示] 源码仍在 $SRC_DIR，数据库在 Docker 卷中；如需彻底清除请手动删除。${NC}"
-    else
+    if [[ ! -d "$SRC_DIR/server" ]]; then
         echo "  服务端未安装"
+        return 0
     fi
+    ( cd "$SRC_DIR/server" && docker compose down ) || true
+
+    # 残留凭据检测：卸载只删容器，数据卷与 .env 都保留；若其中有管理员凭据，
+    # 重装后会判定「已安装」，安装向导不会再出现（见 db_admin_token_exists 注释）。
+    # 这里显式告知后果，并给出一键清除（只清凭据，节点数据保留）。
+    local envtok="" has_db_cred=0 ans=""
+    [[ -f "$SRC_DIR/server/.env" ]] && envtok="$(sed -n 's/^ADMIN_TOKEN=..*/p' "$SRC_DIR/server/.env" | head -n1)"
+    db_admin_token_exists && has_db_cred=1
+    if [[ $has_db_cred -eq 0 && -z "$envtok" ]]; then
+        echo -e "${GREEN}[OK]   无管理员凭据残留，重装后将正常进入安装向导。${NC}"
+    else
+        echo -e "${YELLOW}[警告] 检测到管理员凭据残留（$([[ $has_db_cred -eq 1 ]] && echo -n '数据库哈希 ')$([[ -n "$envtok" ]] && echo -n '.env 明文')）。${NC}"
+        echo -e "       不清除的话，重装后会判定为「已安装」，安装向导不会再出现（沿用旧 Token 登录）。"
+        if [[ -t 0 ]]; then
+            read -r -p "彻底清除管理员凭据，让下次安装重新走向导？(y/N): " ans
+            if [[ "$ans" =~ ^[Yy]$ ]]; then
+                purge_admin_credentials || true
+            else
+                echo "  已保留凭据。之后可随时用 --uninstall（卸载时选清除）或 --reset-admin-token 处理。"
+            fi
+        else
+            echo -e "       非交互环境，已保留。手动清除请运行: sudo bash diting.sh --reset-admin-token"
+        fi
+    fi
+    echo -e "${YELLOW}[提示] 源码仍在 $SRC_DIR，数据库在 Docker 卷中；如需彻底清除请手动删除。${NC}"
 }
 
 # ── i18n 语言表（在 show_menu 之前定义，供 msg() 使用）─────────────────────────
