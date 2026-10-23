@@ -1007,39 +1007,48 @@ server_run_user() {
     fi
 }
 
-# 把 .env 里的明文 ADMIN_TOKEN 迁进库（只存哈希）。
-# 为什么安装器要做：compose 不再注入 ADMIN_TOKEN 之后，服务端启动读不到 env，
-# 存量实例升级时会直接掉进"未安装"态（全站 307 到 /install）。所以在停容器之前，
-# 先把明文转成哈希写库；库里已有哈希则原样跳过（幂等）。
-# 明文不上命令行：哈希在 bash 侧算好，传给 node 的只有摘要。
 # ── 管理员凭据残留检测/清除（卸载重装防坑）────────────────────────────────
 # 坑的成因：安装向导的触发判据是「库中无 admin_token_hash」。卸载只删容器，
 # 数据卷与 .env 都会保留；重装时 migrate_env_admin_token 又把 .env 明文迁回库，
 # 结果「已安装」判据恒为真 → 安装向导永远不会出现（用户预期却是全新安装）。
-# 这两个助手供 uninstall_all / do_install 显式检测与清除，把状态讲给用户。
+# 这两个助手供 uninstall_all / install_server 显式检测与清除，把状态讲给用户。
 
-# 库中是否存在管理员凭据哈希。任何失败（无库/无表/无 node/无 Docker/无镜像）
-# 都视为「无凭据」返回 1——检测只是提示性信息，绝不能反过来阻塞卸载/安装流程。
-db_admin_token_exists() {
+# 库中管理员凭据哈希的三态探测：输出 HAS / ABSENT / UNKNOWN。
+# 为什么不是布尔：检测本身可能失败（无库、无表、无镜像、无 node），此时既不能
+# 断言"有"、也不能断言"无"——卸载场景若误报"无残留"，恰好会给用户一个与实际
+# 相反的安全承诺。只把 HAS/ABSENT 当作可信结论，UNKNOWN 降级为"请手动确认"。
+# 判据与服务端 hasAdminToken 对齐：只认 64 位 hex 哈希，脏值/历史明文不算
+# （库中若是脏值，服务端仍判定未安装并出现向导，脚本不能谎称"已安装"）。
+db_admin_token_probe() {
     local js out
     js="$(mktemp)"
     cat > "$js" <<'JS'
 const db = new (require('better-sqlite3'))(process.argv[2]);
 const r = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
-console.log(r && r.value ? 'ADMIN_TOKEN_HASH_PRESENT' : 'ADMIN_TOKEN_HASH_ABSENT');
+const ok = !!(r && r.value && /^[0-9a-f]{64}$/.test(String(r.value)));
+console.log(ok ? 'ADMIN_TOKEN_HASH_PRESENT' : 'ADMIN_TOKEN_HASH_ABSENT');
 db.close();
 JS
-    out="$(db_run_js "$js" 2>/dev/null)" || { rm -f "$js"; return 1; }
+    if ! out="$(db_run_js "$js" 2>/dev/null)"; then
+        rm -f "$js"
+        echo 'UNKNOWN'
+        return 0
+    fi
     rm -f "$js"
-    [[ "$out" == *ADMIN_TOKEN_HASH_PRESENT* ]]
+    if [[ "$out" == *ADMIN_TOKEN_HASH_PRESENT* ]]; then echo 'HAS'; else echo 'ABSENT'; fi
 }
 
-# 只清除「管理员凭据」（库哈希 + 历史明文键 + .env 的 ADMIN_TOKEN 行）并吊销
+# 布尔封装（供 install_server 的提示分支使用）：HAS 才为真，ABSENT/UNKNOWN 皆假。
+db_admin_token_exists() {
+    [[ "$(db_admin_token_probe)" == 'HAS' ]]
+}
+
+# 只清除「管理员凭据」（库哈希 + 历史残留键 + .env 的 ADMIN_TOKEN 行）并吊销
 # 全部旧会话（与 --reset-admin-token 同口径：水位线最先写，旧 Cookie 立即失效），
 # 刻意不动节点指标/配置与 SESSION_SECRET/SETUP_TOKEN——
 # 清凭据 ≠ 清数据，受控端一键注册等其余凭据保持有效。
 purge_admin_credentials() {
-    local js out rc=0
+    local js out rc=0 envc
     # 无库（如用户已手动 docker compose down -v）时只清 .env，不算失败：
     # "清凭据"的目标状态是「库无哈希 + .env 无明文」，没有库时后者即达成。
     if [[ -n "$(locate_db 2>/dev/null)" ]]; then
@@ -1054,34 +1063,45 @@ const tx = db.transaction(() => {
   // 每次读库，因此旧 Cookie 立即失效（不依赖进程内 clearSessionCache）。
   db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
   db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
-  const n = db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw')").run().changes;
-  console.log('PURGED_ROWS=' + n);
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw','admin_initialized')").run();
 });
 tx();
+// 写后校验（对齐 --reset-admin-token 的 HASH_OK 自检）：哈希必须已消失
+const left = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
+console.log('PURGED_OK=' + (left && left.value ? '0' : '1'));
 db.close();
 JS
         out="$(db_run_js "$js")" || rc=1
         rm -f "$js"
-        if [[ $rc -eq 0 ]]; then
+        if [[ $rc -eq 0 && "$out" == *'PURGED_OK=1'* ]]; then
             echo -e "${GREEN}[OK]   已清除库中的管理员凭据并吊销旧会话（节点数据保留）${NC}"
         else
-            echo -e "${RED}[错误] 清除库中凭据失败，请按上方错误信息排查${NC}" >&2
+            rc=1
+            echo -e "${RED}[错误] 清除库中凭据失败或校验未通过，请按上方错误信息排查${NC}" >&2
         fi
     else
         echo "  未定位到数据库（可能已被手动清除），跳过库操作"
     fi
-    # .env 明文一并清空：否则下次启动 initAdminToken 又会把它迁回库
-    if [[ -f "$SRC_DIR/server/.env" ]]; then
-        sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN=/' "$SRC_DIR/server/.env"
-        echo -e "${GREEN}[OK]   已清空 .env 的 ADMIN_TOKEN 行${NC}"
+    # .env 明文一并清空：否则下次启动 initAdminToken 又会把它迁回库。
+    # 路径复用 locate_server_env 的三候选口径（与 locate_db 一致），
+    # 避免从仓库内直接跑脚本（selfdir/./server/.env）时漏清。
+    envc="$(locate_server_env 2>/dev/null || true)"
+    if [[ -n "$envc" ]]; then
+        sed -i 's/^ADMIN_TOKEN=.*/ADMIN_TOKEN=/' "$envc"
+        echo -e "${GREEN}[OK]   已清空 .env 的 ADMIN_TOKEN 行（$envc）${NC}"
     fi
     return $rc
 }
 
+# 把 .env 里的明文 ADMIN_TOKEN 迁进库（只存哈希）。
+# 为什么安装器要做：compose 不再注入 ADMIN_TOKEN 之后，服务端启动读不到 env，
+# 存量实例升级时会直接掉进"未安装"态（全站 307 到 /install）。所以在停容器之前，
+# 先把明文转成哈希写库；库里已有哈希则原样跳过（幂等）。
+# 明文不上命令行：哈希在 bash 侧算好，传给 node 的只有摘要。
 migrate_env_admin_token() {
     local envf="$SRC_DIR/server/.env" admin hash js out
     [[ -f "$envf" ]] || return 0
-    admin="$(sed -n 's/^ADMIN_TOKEN=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1)"
+    admin="$(sed -n 's/^ADMIN_TOKEN=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1 || true)"
     [[ -n "$admin" ]] || return 0
     (( ${#admin} >= 16 )) || return 0            # 占位符/过短不迁，交给 /install 生成
     [[ -n "$(locate_db 2>/dev/null)" ]] || return 0
@@ -2361,15 +2381,20 @@ uninstall_all() {
     ( cd "$SRC_DIR/server" && docker compose down ) || true
 
     # 残留凭据检测：卸载只删容器，数据卷与 .env 都保留；若其中有管理员凭据，
-    # 重装后会判定「已安装」，安装向导不会再出现（见 db_admin_token_exists 注释）。
+    # 重装后会判定「已安装」，安装向导不会再出现（见 db_admin_token_probe 注释）。
     # 这里显式告知后果，并给出一键清除（只清凭据，节点数据保留）。
-    local envtok="" has_db_cred=0 ans=""
-    [[ -f "$SRC_DIR/server/.env" ]] && envtok="$(sed -n 's/^ADMIN_TOKEN=..*/p' "$SRC_DIR/server/.env" | head -n1)"
-    if db_admin_token_exists; then has_db_cred=1; fi
-    if [[ $has_db_cred -eq 0 && -z "$envtok" ]]; then
+    # 注意区分"确认无残留"与"检测失败"——后者不能给用户"重装会进向导"的保证。
+    local envtok="" probe="" ans="" envc
+    envc="$(locate_server_env 2>/dev/null || true)"
+    [[ -n "$envc" ]] && envtok="$(sed -n 's/^ADMIN_TOKEN=..*/p' "$envc" | head -n1 || true)"
+    probe="$(db_admin_token_probe)"
+    if [[ "$probe" == 'UNKNOWN' ]]; then
+        echo -e "${YELLOW}[提示] 无法完成凭据残留检测（服务端镜像/宿主 node 不可用，或数据库不可达）。${NC}"
+        echo -e "       请手动确认库中是否存在 admin_token_hash：有则重装不会出现安装向导。"
+    elif [[ "$probe" == 'ABSENT' && -z "$envtok" ]]; then
         echo -e "${GREEN}[OK]   无管理员凭据残留，重装后将正常进入安装向导。${NC}"
     else
-        echo -e "${YELLOW}[警告] 检测到管理员凭据残留（$([[ $has_db_cred -eq 1 ]] && echo -n '数据库哈希 ')$([[ -n "$envtok" ]] && echo -n '.env 明文')）。${NC}"
+        echo -e "${YELLOW}[警告] 检测到管理员凭据残留（$([[ "$probe" == 'HAS' ]] && echo -n '数据库哈希 ')$([[ -n "$envtok" ]] && echo -n '.env 明文')）。${NC}"
         echo -e "       不清除的话，重装后会判定为「已安装」，安装向导不会再出现（沿用旧 Token 登录）。"
         if [[ -t 0 ]]; then
             # read EOF（Ctrl-D）返回非零，set -e 下会杀掉脚本：兜底置空走「保留」分支
@@ -2377,10 +2402,13 @@ uninstall_all() {
             if [[ "$ans" =~ ^[Yy]$ ]]; then
                 purge_admin_credentials || true
             else
-                echo "  已保留凭据。之后可随时用 --uninstall（卸载时选清除）或 --reset-admin-token 处理。"
+                # 注意：--reset-admin-token 是"换新 Token 继续已安装态"，不是回到向导的手段
+                echo "  已保留凭据。之后可运行 --reset-admin-token 更换 Token（仍为已安装态），"
+                echo "  或重跑卸载并选清除，回到安装向导。"
             fi
         else
-            echo -e "       非交互环境，已保留。手动清除请运行: sudo bash diting.sh --reset-admin-token"
+            echo -e "       非交互环境，已保留。要回到安装向导：重跑卸载并选清除，"
+            echo -e "       或手动删除库中的 admin_token_hash 键（--reset-admin-token 只会换 Token，不会回到向导）。"
         fi
     fi
     echo -e "${YELLOW}[提示] 源码仍在 $SRC_DIR，数据库在 Docker 卷中；如需彻底清除请手动删除。${NC}"
