@@ -310,7 +310,7 @@ router.post('/report', agentAuth, (req, res) => {
 // 防暴力枚举 agent 名称 / 资源耗尽。全局 rateLimit 已做兜底，此处更严格。
 const REGISTER_WINDOW = 60000, REGISTER_MAX = 10;
 const registerHits = new Map();
-// SETUP_TOKEN 解析口径见 src/setup-token.js（注册端点与安装口令共用同一份判定）
+// SETUP_TOKEN 解析口径见 src/setup-token.js（注册端点专用；安装口令 install_token 已移除）
 const { resolveSetupToken, isWeakSetupToken } = require('./setup-token');
 const registerRateLimit = (req, res, next) => {
   if (!rateLimitTouch(registerHits, req.ip || req.socket.remoteAddress, REGISTER_WINDOW, REGISTER_MAX)) {
@@ -320,7 +320,7 @@ const registerRateLimit = (req, res, next) => {
 };
 // SETUP_TOKEN 弱模式拒绝（审查 G4）：长度之外再查熵——纯数字、字符种类过少、
 // 含连续序列（1234/abcd/qwer）的"够长但可猜"令牌一律停用注册。
-// 判定函数现由 src/setup-token.js 提供（与安装口令共用同一口径）。
+// 判定函数现由 src/setup-token.js 提供。
 router.post('/setup/register', registerRateLimit, (req, res) => {
   const { token: setupToken } = resolveSetupToken();
   if (!setupToken) {
