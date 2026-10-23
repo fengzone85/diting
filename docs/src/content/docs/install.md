@@ -26,8 +26,8 @@ cp server/.env.example server/.env
 # 编辑 server/.env 设置 SESSION_SECRET、PORT 等（ADMIN_TOKEN 留空，由安装向导生成）
 docker compose up -d
 # 浏览器打开 http://127.0.0.1:8081/install 完成安装（生成管理员 Token，只显示一次）
-# 注意：安装向导只接受「本机直连 / SSH 隧道」来源，经反代或公网访问提交时会 403；
-# 在服务器上可用隧道：ssh -L 8081:127.0.0.1:8081 <user>@<服务器>
+# 来源限制：本机直连 / SSH 隧道 / 局域网内网地址（含内网 Nginx 反代）可直接安装；
+# 公网来源提交时会 403，请用隧道：ssh -L 8081:127.0.0.1:8081 <user>@<服务器>
 # 然后本地浏览器打开 http://127.0.0.1:8081/install 即可。
 ```
 

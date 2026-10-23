@@ -26,9 +26,10 @@ docker compose up -d
 
 访问 `http://<你的IP>:8081`（端口跟随 `.env` 的 `PORT`）。未安装时任何页面都会 307 跳到 `/install`。
 
-> **安装来源限制**：提交安装（`POST /api/install/complete`）只接受「本机直连 / SSH 隧道」来源
-> （内网地址且不带代理头）。经 Nginx 反代或公网来源会被 403（`install_source_not_trusted`）——
-> 请在服务器上执行 `ssh -L 8081:127.0.0.1:8081 <user>@<服务器>`，再本地打开
+> **安装来源限制**：提交安装（`POST /api/install/complete`）只接受**内网来源**——本机直连、
+> SSH 隧道、局域网 IP（含局域网 Nginx 反代，按解析后的客户端 IP 判定）。公网来源会被 403
+> （`install_source_not_trusted`），请在服务器上执行
+> `ssh -L 8081:127.0.0.1:8081 <user>@<服务器>`，再本地打开
 > `http://127.0.0.1:8081/install` 完成安装。
 
 在向导里填写站点名称 / 描述 / **上报地址**，并生成管理员 Token（**只显示一次**，请立即保存）。
