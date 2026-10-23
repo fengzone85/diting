@@ -1034,24 +1034,41 @@ JS
     [[ "$out" == *ADMIN_TOKEN_HASH_PRESENT* ]]
 }
 
-# 只清除「管理员凭据」（库哈希 + 历史明文键 + .env 的 ADMIN_TOKEN 行），
+# 只清除「管理员凭据」（库哈希 + 历史明文键 + .env 的 ADMIN_TOKEN 行）并吊销
+# 全部旧会话（与 --reset-admin-token 同口径：水位线最先写，旧 Cookie 立即失效），
 # 刻意不动节点指标/配置与 SESSION_SECRET/SETUP_TOKEN——
 # 清凭据 ≠ 清数据，受控端一键注册等其余凭据保持有效。
 purge_admin_credentials() {
     local js out rc=0
-    js="$(mktemp)"
-    cat > "$js" <<'JS'
-const db = new (require('better-sqlite3'))(process.argv[2]);
-const n = db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw')").run().changes;
-console.log('PURGED_ROWS=' + n);
+    # 无库（如用户已手动 docker compose down -v）时只清 .env，不算失败：
+    # "清凭据"的目标状态是「库无哈希 + .env 无明文」，没有库时后者即达成。
+    if [[ -n "$(locate_db 2>/dev/null)" ]]; then
+        js="$(mktemp)"
+        cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.pragma('busy_timeout = 5000');
+const now = String(Date.now());
+const tx = db.transaction(() => {
+  // 水位线必须最先写：verifySession 在 sid 缓存之前调 isRevoked，且 isRevoked
+  // 每次读库，因此旧 Cookie 立即失效（不依赖进程内 clearSessionCache）。
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
+  db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
+  const n = db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw')").run().changes;
+  console.log('PURGED_ROWS=' + n);
+});
+tx();
 db.close();
 JS
-    out="$(db_run_js "$js")" || rc=1
-    rm -f "$js"
-    if [[ $rc -eq 0 ]]; then
-        echo -e "${GREEN}[OK]   已清除库中的管理员凭据（节点数据保留）${NC}"
+        out="$(db_run_js "$js")" || rc=1
+        rm -f "$js"
+        if [[ $rc -eq 0 ]]; then
+            echo -e "${GREEN}[OK]   已清除库中的管理员凭据并吊销旧会话（节点数据保留）${NC}"
+        else
+            echo -e "${RED}[错误] 清除库中凭据失败，请按上方错误信息排查${NC}" >&2
+        fi
     else
-        echo -e "${RED}[错误] 清除库中凭据失败，请按上方错误信息排查${NC}" >&2
+        echo "  未定位到数据库（可能已被手动清除），跳过库操作"
     fi
     # .env 明文一并清空：否则下次启动 initAdminToken 又会把它迁回库
     if [[ -f "$SRC_DIR/server/.env" ]]; then
@@ -2348,14 +2365,15 @@ uninstall_all() {
     # 这里显式告知后果，并给出一键清除（只清凭据，节点数据保留）。
     local envtok="" has_db_cred=0 ans=""
     [[ -f "$SRC_DIR/server/.env" ]] && envtok="$(sed -n 's/^ADMIN_TOKEN=..*/p' "$SRC_DIR/server/.env" | head -n1)"
-    db_admin_token_exists && has_db_cred=1
+    if db_admin_token_exists; then has_db_cred=1; fi
     if [[ $has_db_cred -eq 0 && -z "$envtok" ]]; then
         echo -e "${GREEN}[OK]   无管理员凭据残留，重装后将正常进入安装向导。${NC}"
     else
         echo -e "${YELLOW}[警告] 检测到管理员凭据残留（$([[ $has_db_cred -eq 1 ]] && echo -n '数据库哈希 ')$([[ -n "$envtok" ]] && echo -n '.env 明文')）。${NC}"
         echo -e "       不清除的话，重装后会判定为「已安装」，安装向导不会再出现（沿用旧 Token 登录）。"
         if [[ -t 0 ]]; then
-            read -r -p "彻底清除管理员凭据，让下次安装重新走向导？(y/N): " ans
+            # read EOF（Ctrl-D）返回非零，set -e 下会杀掉脚本：兜底置空走「保留」分支
+            read -r -p "彻底清除管理员凭据，让下次安装重新走向导？(y/N): " ans || ans=""
             if [[ "$ans" =~ ^[Yy]$ ]]; then
                 purge_admin_credentials || true
             else
