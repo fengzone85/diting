@@ -2,9 +2,10 @@
 // ============================================================
 // SETUP_TOKEN 解析（D5）：库为权威，env 仅作一次性迁移源。
 //
-// 两个消费方共用同一份判定，避免"注册端点"和"安装口令"各读一遍、口径漂移：
+// 消费方：
 //   - api.js  /api/setup/register（受控端自助注册）
-//   - install.js /api/install/complete 的 install_token 抢占防护（§6.7 / G6）
+//   - api.js  /api/setup-token（管理面查看/轮换）
+// （install.js 的 install_token 抢占防护已于 D8 决策移除，不再消费此模块）
 // ============================================================
 const db = require('./db');
 

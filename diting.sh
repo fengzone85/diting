@@ -603,15 +603,6 @@ HOSTENV
     echo -e "${YELLOW}   ▸ 下一步：在浏览器完成安装向导${NC}"
     echo -e "     未配反代:  ssh -L ${port}:127.0.0.1:${port} <user>@<本机>  然后打开 http://127.0.0.1:${port}/install"
     echo -e "     （向导里填写站点名称/描述/上报地址，并生成管理员 Token —— 只显示一次）"
-    # 抢占防护（§6.7）：经反代/非本机访问 /install 属于"远程来源"，必须带 install_token。
-    # 口令就是 SETUP_TOKEN——从本机或 ssh -L 隧道访问则不需要（来源判定为可信）。
-    local _st=""
-    [[ -f .env ]] && _st="$(sed -n 's/^SETUP_TOKEN=//p' .env 2>/dev/null | tr -d '\r\n' | head -1)"
-    if [[ -n "$_st" ]]; then
-        echo -e ""
-        echo -e "${YELLOW}   ▸ 若经反代/非本机访问 https://<你的域名>/install${NC}"
-        echo -e "     需要输入安装口令（防止同网段他人抢先安装）: ${_st}"
-    fi
     echo -e ""
     echo -e "   生产请将 Nginx + TLS 反代到 127.0.0.1:${port}（见 README 部署章节）"
     echo -e "   Nginx upstream 需与端口一致：proxy_pass http://127.0.0.1:${port};"
