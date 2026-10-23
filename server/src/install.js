@@ -93,20 +93,26 @@ function urlWarnings(url) {
 
 // ---- 安装期访问口径（§6.7：规则必须显式）---------------------------------
 // 未安装实例的 `complete` 会**设定管理员 Token**，等于把实例交给调用者。
-// 只允许「本机直连 / SSH 隧道」来源完成安装——经反代的远程来源一律 403：
-//   hasProxyHeader = 带 X-Forwarded-For / X-Real-IP / Forwarded
-//   isPrivate      = remoteAddress ∈ 127/8、::1、RFC1918、ULA（含 Docker 网桥）
-//   可信来源       = isPrivate && !hasProxyHeader
-// 反向可证：经 Nginx 反代的请求一定带 X-Forwarded-For/X-Real-IP，即使反代在本机
-// 也不会被误判为可信——那正是"内网页面被外人打开"的真实场景。
+// 允许来源 = 「解析后的客户端 IP 属于内网」（loopback / RFC1918 / ULA）：
+//   - 本机直连、SSH 隧道：req.ip = 127.0.0.1 → 允许；
+//   - 局域网经内网反代（Nginx 在 192.168.0.6，访问 https://192.168.0.6）：req.ip
+//     经信任代理链（trust proxy，默认只信任 loopback 代理）解析为访问者内网地址
+//     → 允许。此前"带代理头一律 403"把这种正常的内网部署误判为远程，实测被卡；
+//   - 公网来源：req.ip 为公网地址 → 403。伪造 X-Forwarded-For 直连不生效——
+//     TRUST_PROXY 默认只采信 loopback 代理附带的头，非可信来源的 XFF 被忽略，
+//     req.ip 仍是真实公网地址（server.js 的 trust proxy 收紧逻辑）。
+//   - 代理头存在但 req.ip 仍解析为回环（如反代只设了 X-Real-IP、没给 XFF）：
+//     无法确定真实来源 → 保守拒绝，避免不规范反代把公网用户放进来。
+// 安全前提：TRUST_PROXY 必须保持默认（loopback）或正确配置；配成 true 等于
+// 信任任意来源的 XFF，公网伪造内网 IP 即可绕过本闸（server.js 启动期已告警）。
 // 设计取舍（D8）：不引入 install_token 口令机制——compose 默认只发布到 127.0.0.1，
 // 公网触达不到未安装实例；未安装窗口仅几分钟；被抢装可 --reset-admin-token 重置。
 function hasProxyHeader(req) {
   const h = req.headers || {};
   return !!(h['x-forwarded-for'] || h['x-real-ip'] || h['forwarded']);
 }
-function isPrivateSource(req) {
-  const addr = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+function isPrivateIp(raw) {
+  const addr = String(raw || '').replace(/^::ffff:/, '');
   if (!addr) return false;
   if (addr === '::1' || /^127\./.test(addr)) return true;
   if (/^10\./.test(addr) || /^192\.168\./.test(addr)) return true;
@@ -114,7 +120,14 @@ function isPrivateSource(req) {
   if (/^f[cd][0-9a-f]{2}:/i.test(addr)) return true;   // fc00::/7 ULA
   return false;
 }
-const isTrustedInstallSource = (req) => isPrivateSource(req) && !hasProxyHeader(req);
+function isTrustedInstallSource(req) {
+  const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+  if (!isPrivateIp(ip)) return false;                  // 公网来源：拒绝
+  // 解析结果仍是回环：本机直连/隧道（无代理头）可信；反代未提供可解析的
+  // 客户端地址（有代理头却仍回环）→ 无法判定，保守拒绝。
+  if (ip === '::1' || /^127\./.test(ip)) return !hasProxyHeader(req);
+  return true;                                         // 内网地址（含内网反代解析结果）：允许
+}
 
 // ---- 请求校验（对应 komari completeRequest：sitename 1~100、description ≤1000）----
 function validateInstall(body) {
