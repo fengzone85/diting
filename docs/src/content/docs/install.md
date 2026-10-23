@@ -25,10 +25,10 @@ cd diting
 cp server/.env.example server/.env
 # 编辑 server/.env 设置 SESSION_SECRET、PORT 等（ADMIN_TOKEN 留空，由安装向导生成）
 docker compose up -d
-# 浏览器打开 http://127.0.0.1:8081/install 完成安装（生成管理员 Token，只显示一次）
-# 来源限制：本机直连 / SSH 隧道 / 局域网内网地址（含内网 Nginx 反代）可直接安装；
-# 公网来源提交时会 403，请用隧道：ssh -L 8081:127.0.0.1:8081 <user>@<服务器>
-# 然后本地浏览器打开 http://127.0.0.1:8081/install 即可。
+# 浏览器打开 https://<你的域名>/install 完成安装（生成管理员 Token，只显示一次）
+# 安装向导不限制来源 IP：公网域名 / 局域网 / 本机均可，装完立即锁定（409/410）；
+# 如需限制安装页可达性，在 Nginx 层对 /install 与 /api/install 加 IP 白名单或 Basic Auth。
+# 提交安装要求 HTTPS；本机操作可用隧道：ssh -L 8081:127.0.0.1:8081 <user>@<服务器>
 ```
 
 用一键脚本安装时，可用 `REPO_BRANCH` 锁定源码版本（分支或 tag 均可，便于可复现部署）：

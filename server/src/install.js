@@ -91,43 +91,18 @@ function urlWarnings(url) {
   return warnings;
 }
 
-// ---- 安装期访问口径（§6.7：规则必须显式）---------------------------------
-// 未安装实例的 `complete` 会**设定管理员 Token**，等于把实例交给调用者。
-// 允许来源 = 「解析后的客户端 IP 属于内网」（loopback / RFC1918 / ULA）：
-//   - 本机直连、SSH 隧道：req.ip = 127.0.0.1 → 允许；
-//   - 局域网经内网反代（Nginx 在 192.168.0.6，访问 https://192.168.0.6）：req.ip
-//     经信任代理链（trust proxy，默认只信任 loopback 代理）解析为访问者内网地址
-//     → 允许。此前"带代理头一律 403"把这种正常的内网部署误判为远程，实测被卡；
-//   - 公网来源：req.ip 为公网地址 → 403。伪造 X-Forwarded-For 直连不生效——
-//     TRUST_PROXY 默认只采信 loopback 代理附带的头，非可信来源的 XFF 被忽略，
-//     req.ip 仍是真实公网地址（server.js 的 trust proxy 收紧逻辑）。
-//   - 代理头存在但 req.ip 仍解析为回环（如反代只设了 X-Real-IP、没给 XFF）：
-//     无法确定真实来源 → 保守拒绝，避免不规范反代把公网用户放进来。
-// 安全前提：TRUST_PROXY 必须保持默认（loopback）或正确配置；配成 true 等于
-// 信任任意来源的 XFF，公网伪造内网 IP 即可绕过本闸（server.js 启动期已告警）。
-// 设计取舍（D8）：不引入 install_token 口令机制——compose 默认只发布到 127.0.0.1，
-// 公网触达不到未安装实例；未安装窗口仅几分钟；被抢装可 --reset-admin-token 重置。
-function hasProxyHeader(req) {
-  const h = req.headers || {};
-  return !!(h['x-forwarded-for'] || h['x-real-ip'] || h['forwarded']);
-}
-function isPrivateIp(raw) {
-  const addr = String(raw || '').replace(/^::ffff:/, '');
-  if (!addr) return false;
-  if (addr === '::1' || /^127\./.test(addr)) return true;
-  if (/^10\./.test(addr) || /^192\.168\./.test(addr)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(addr)) return true;
-  if (/^f[cd][0-9a-f]{2}:/i.test(addr)) return true;   // fc00::/7 ULA
-  return false;
-}
-function isTrustedInstallSource(req) {
-  const ip = String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
-  if (!isPrivateIp(ip)) return false;                  // 公网来源：拒绝
-  // 解析结果仍是回环：本机直连/隧道（无代理头）可信；反代未提供可解析的
-  // 客户端地址（有代理头却仍回环）→ 无法判定，保守拒绝。
-  if (ip === '::1' || /^127\./.test(ip)) return !hasProxyHeader(req);
-  return true;                                         // 内网地址（含内网反代解析结果）：允许
-}
+// ---- 安装期访问口径：不限制来源 IP（与 komari 对齐）-------------------------
+// 参照 komari web/install + internal/server/guide_server.go：未安装时以最小路由集
+// 监听正常监听地址（默认 0.0.0.0），**不校验来源 IP、不设 install_token**，公网
+// 域名（Nginx 反代）可直达安装页；初始化的排他性由三层状态机保证——
+//   ① 内存 state（ready → completing → completed）；
+//   ② 库中不存在 Token 哈希（users/管理员为空即"未安装"）；
+//   ③ 原子抢写 setAdminTokenHashIfAbsent，多实例竞态下只有一个能装成。
+// 装完立即收敛（向导 409/410、页面锁定），暴露窗口天然只有首次启动那几分钟。
+// 保留的额外约束（komari 没有，但代价为零）：/api/install/* 每 IP 每 60s 5 次限流，
+// 以及 requireProto 要求 HTTPS 反代（安装会一次性回显管理员 Token，不应裸传）。
+// 被抢装可 `sudo bash diting.sh --reset-admin-token` 重置；若部署方想额外收紧，
+// 应在 Nginx 层对 /install 与 /api/install 做 IP/口令限制，而非依赖应用内闸。
 
 // ---- 请求校验（对应 komari completeRequest：sitename 1~100、description ≤1000）----
 function validateInstall(body) {
@@ -191,14 +166,8 @@ router.post('/complete', installRateLimit, (req, res) => {
   // 管理类凭证与 /api/setup/generate 同口径：必须经 HTTPS 反代；
   // 例外是 SSH 隧道直连回环（requireProto 内部判定，见 auth.js）。
   if (!requireProto(req, res)) return;
-  // 访问闸（§6.7）：仅「本机直连 / SSH 隧道」来源（私网 + 零代理头）可完成安装。
-  // 经反代的远程来源一律 403——不设 install_token 口令旁路（D8），避免用户体验摩擦。
-  if (!isTrustedInstallSource(req)) {
-    return res.status(403).json({
-      error: 'install_source_not_trusted',
-      message: '安装向导仅允许从本机或 SSH 隧道访问（来源需为内网且无代理头）。若在服务器上操作，请用 ssh -L 隧道后访问 http://127.0.0.1:<端口>/install',
-    });
-  }
+  // 不校验来源 IP：公网域名（Nginx 反代）也可完成安装，口径同 komari。
+  // 排他性由下方三层状态机保证，装完立即收敛。
   // 三层防重装之 ①：内存状态机。completed 状态一律 409。
   if (state !== 'ready') {
     return res.status(409).json({ error: 'already_completed', message: '安装已完成或正在进行中' });

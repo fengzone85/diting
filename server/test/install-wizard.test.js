@@ -52,9 +52,8 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // complete 端点有 60s/5 次的 IP 限流；测试进程同源同 IP（127.0.0.1），
 // 需在每个 complete 用例开头调用 install.resetInstallRateLimit() 清计数。
-// 注意：访问闸按「解析后的客户端 IP 是否内网」判定——直连 127.0.0.1（= ssh -L
-// 隧道语义）与内网反代（XFF 为 192.168.x/10.x 等内网地址）均放行，公网 IP 拒绝。
-// complete 校验用例全部走「直连 127.0.0.1、零代理头」，避免受来源判定干扰。
+// 来源口径对齐 komari：不校验来源 IP（公网域名反代、内网、SSH 隧道一视同仁），
+// 只保留 HTTPS 要求（X-Forwarded-Proto）与限流；排他性靠状态机 + 哈希锁。
 let xffSeq = 100;
 const XFF = () => ({ ...PROTO, 'X-Forwarded-For': `203.0.113.${xffSeq++}` });
 // 直连 complete（无代理头、可信来源）：用于校验逻辑与成功安装
@@ -203,65 +202,47 @@ test('requireProto：回环 + 带 X-Forwarded-Proto: http 仍 403（nginx 明文
   }
 });
 
-// ---- 访问闸（§6.7 / D8）：仅「私网 + 零代理头」可信，远程一律 403 ----------------
+// ---- 来源口径（对齐 komari）：不校验来源 IP，公网域名反代可直达安装 ----------
+// komari 的未安装实例以最小路由集监听 0.0.0.0，向导不做 IP 校验、无 install_token，
+// 排他性只由「未安装窗口 + 状态机 + 哈希锁」保证；diting 采用同一口径。
 
-test('访问闸：经反代的远程来源（带 XFF）→ 403 install_source_not_trusted', async () => {
+test('来源：公网客户端经域名反代（XFF 公网 IP + https）→ 不因来源被拒，进入业务校验', async () => {
   install.resetInstallRateLimit();
+  // 用非法 body：400 证明已越过来源判定，被后续 validateInstall 拦下
   const res = await request(app).post('/api/install/complete').set(XFF())
-    .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
-  assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.body.error, 'install_source_not_trusted');
-});
-
-test('访问闸：带 X-Real-IP 的来源同样视为远程 → 403', async () => {
-  install.resetInstallRateLimit();
-  const res = await request(app).post('/api/install/complete')
-    .set({ 'X-Forwarded-Proto': 'https', 'X-Real-IP': '203.0.113.77' })
-    .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
-  assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.body.error, 'install_source_not_trusted');
-});
-
-test('访问闸：带代理头的回环请求（nginx 在本机转发）不算可信来源 → 403', async () => {
-  install.resetInstallRateLimit();
-  const res = await request(app).post('/api/install/complete')
-    .set({ 'X-Forwarded-Proto': 'https', 'X-Forwarded-For': '203.0.113.77' })
-    .send({ sitename: 'x', token_mode: 'generate', agent_server_url: 'https://pt.example.com' });
-  assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.body.error, 'install_source_not_trusted');
-});
-
-test('访问闸：直连零代理头（ssh -L 隧道语义）→ 越过闸进入业务校验（400 而非 403）', async () => {
-  install.resetInstallRateLimit();
-  // 用非法 body：证明闸已过、被后续 validateInstall 拦下
-  const res = await complete({ sitename: 'x', token_mode: 'generate' });
+    .send({ sitename: 'x', token_mode: 'generate' });
   assert.strictEqual(res.status, 400);
   assert.strictEqual(res.body.error, 'missing_agent_server_url');
 });
 
-test('访问闸：局域网经内网反代（XFF 为内网地址）→ 越过闸（实测场景回归）', async () => {
-  // 场景来源：Nginx 在 192.168.0.6 反代到 127.0.0.1:8081，局域网浏览器访问
-  // https://192.168.0.6/install —— trust proxy（默认 loopback）采信 nginx 附带的
-  // XFF，req.ip 解析为内网访问者地址，应放行而不是 403。
+test('来源：X-Real-IP 为公网同样放行（反代只设该头也照常可用）', async () => {
+  install.resetInstallRateLimit();
+  const res = await request(app).post('/api/install/complete')
+    .set({ 'X-Forwarded-Proto': 'https', 'X-Real-IP': '203.0.113.77' })
+    .send({ sitename: 'x', token_mode: 'generate' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'missing_agent_server_url');
+});
+
+test('来源：内网客户端经局域网反代（XFF 内网地址）同样放行', async () => {
   for (const clientIp of ['192.168.0.50', '10.1.2.3', '172.16.5.9']) {
     install.resetInstallRateLimit();
     const res = await request(app).post('/api/install/complete')
       .set({ ...PROTO, 'X-Forwarded-For': clientIp })
-      .send({ sitename: 'x', token_mode: 'generate' }); // 非法 body：400 即证明过闸
-    assert.strictEqual(res.status, 400, `内网来源 ${clientIp} 应越过访问闸`);
+      .send({ sitename: 'x', token_mode: 'generate' });
+    assert.strictEqual(res.status, 400, `内网来源 ${clientIp} 应放行`);
     assert.strictEqual(res.body.error, 'missing_agent_server_url');
   }
 });
 
-test('访问闸：代理头存在但解析结果仍是回环（反代未给 XFF）→ 保守拒绝', async () => {
+test('来源：直连零代理头（ssh -L 隧道语义）放行', async () => {
   install.resetInstallRateLimit();
-  // 例：反代只设 X-Real-IP 不带 X-Forwarded-For，无法确定真实来源 → 403
-  const res = await request(app).post('/api/install/complete')
-    .set({ ...PROTO, 'X-Forwarded-For': '127.0.0.1' })
-    .send({ sitename: 'x', token_mode: 'generate' });
-  assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.body.error, 'install_source_not_trusted');
+  const res = await complete({ sitename: 'x', token_mode: 'generate' });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.body.error, 'missing_agent_server_url');
 });
+// 公网来源仍受 HTTPS 约束：见上节「requireProto：回环 + 带 X-Forwarded-Proto: http
+// 仍 403」——该用例同时证明放开来源后并未放弃 https 要求。
 
 // ---- 成功安装（本用例同时验证：回环直连无需 https 头、Token 只存哈希、不写 .env）----
 
