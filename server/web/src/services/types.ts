@@ -454,7 +454,7 @@ export interface RestoreAuditSummary {
 
 export interface RestoreAuditReport {
   ts: number;
-  backup: { name: string; ts: number; by: string };
+  backup: { name: string; ts: number; mtime?: number; by: string };
   source: 'db' | 'file';
   duration_ms: number;
   retention_days: number | null;

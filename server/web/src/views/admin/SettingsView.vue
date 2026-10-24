@@ -421,6 +421,31 @@ function restoreCheckText(c: RestoreAuditCheck): string {
   }
 }
 
+interface RestoreRetentionBucket {
+  rows: number;
+  from_ts: number;
+  to_ts: number;
+}
+
+// 过期数据的范围与批次（按保留周期分段），让「将删多少」落到具体时间段。
+const restoreRetention = computed(() => {
+  const c = (restoreAudit.value?.checks || []).find((x) => x.id === 'retention');
+  if (!c) return null;
+  const v = (c.value || {}) as {
+    earliest_ts?: number;
+    latest_ts?: number;
+    buckets?: RestoreRetentionBucket[];
+    truncated?: boolean;
+  };
+  if (!v.earliest_ts) return null;
+  return {
+    earliest: v.earliest_ts,
+    latest: v.latest_ts || 0,
+    buckets: v.buckets || [],
+    truncated: !!v.truncated,
+  };
+});
+
 async function save() {
   saving.value = true;
   message.value = '';
@@ -806,6 +831,25 @@ async function resetGroupAlert() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div v-if="restoreRetention" class="mt-3 rounded border border-white/10 p-2 text-xs">
+              <div class="opacity-70">
+                {{ t('settings.restoreAuditExpiredRange', {
+                  from: fmtTime(restoreRetention.earliest),
+                  to: fmtTime(restoreRetention.latest),
+                }) }}
+              </div>
+              <div v-for="(b, i) in restoreRetention.buckets" :key="i" class="mt-1 opacity-70">
+                {{ t('settings.restoreAuditBatch', {
+                  n: i + 1,
+                  from: fmtTime(b.from_ts),
+                  to: fmtTime(b.to_ts),
+                  rows: b.rows,
+                }) }}
+              </div>
+              <div v-if="restoreRetention.truncated" class="mt-1 opacity-50">
+                {{ t('settings.restoreAuditBatchTruncated') }}
+              </div>
             </div>
             <p class="mt-3 text-xs opacity-60">
               {{ t('settings.restoreAuditSummary', {

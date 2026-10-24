@@ -1536,6 +1536,12 @@ router.delete('/admin/backups/:name', adminOnly, agentScope, agentGlobalOnly, (r
   auditLog(req, 'delete_backup', `name=${r.name}`);
 });
 
+// F8.6：最近一次恢复审查报告。后台布局用它渲染顶部黄条（「恢复自 N 天前的备份，
+// X% 数据将被下次清理删除」），单独开接口避免为了一个提示拉整个备份目录。
+router.get('/admin/restore-audit', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  res.json({ report: db.getRestoreAuditReport() });
+});
+
 // 恢复：不直接改数据库，而是投递恢复请求文件，由宿主侧 diting.sh 消费执行
 // （脚本会先备份当前状态、校验完整性、停服原子替换再重启）。
 router.post('/admin/backups/:name/restore', adminOnly, agentScope, agentGlobalOnly, (req, res) => {

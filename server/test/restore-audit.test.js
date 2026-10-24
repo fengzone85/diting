@@ -13,6 +13,9 @@
 // ============================================================
 process.env.DB_PATH = '/tmp/diting-restore-audit-test.db';
 process.env.BACKUP_DIR = '/tmp/diting-restore-audit-backups';
+// 禁服真实通知（仓库 .env 的 SMTP 占位符会激活邮件通道并真实联网）
+process.env.SMTP_USER = '';
+process.env.SMTP_PASS = '';
 
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -72,7 +75,8 @@ test('库内标记：8 项检查执行、缺口重置、孤儿/软删清理、�
   db.db.prepare('UPDATE agents SET deleted_at=? WHERE id=?').run(now - 8 * DAY, expired.id);
 
   const by = 'admin(session) 10.0.0.9';
-  db.setRestoreAuditPending({ name: 'monitor_20260101_000000.db', ts: now - DAY, by });
+  const backupMtime = now - 45 * DAY;
+  db.setRestoreAuditPending({ name: 'monitor_20260101_000000.db', ts: now - DAY, mtime: backupMtime, by });
 
   const r = audit.runRestoreAudit({ now });
   assert.ok(r && r.report, '应产出审查报告');
@@ -81,6 +85,14 @@ test('库内标记：8 项检查执行、缺口重置、孤儿/软删清理、�
   const checks = Object.fromEntries(r.report.checks.map((c) => [c.id, c]));
   assert.strictEqual(checks.integrity.status, 'ok', '结构完整性通过');
   assert.strictEqual(checks.retention.status, 'warn', '过期占比 50% 应提示');
+  // 报告要能回答「删的是哪个时间段」：最早/最晚 + 按保留周期分段
+  assert.ok(checks.retention.value.earliest_ts > 0, '应给出最早过期时间');
+  assert.ok(checks.retention.value.latest_ts >= checks.retention.value.earliest_ts, '应给出最晚过期时间');
+  assert.strictEqual(checks.retention.value.buckets.length, 1, '仅 1 批过期数据');
+  assert.strictEqual(checks.retention.value.buckets[0].rows, 1);
+  assert.strictEqual(checks.retention.value.buckets[0].from_ts, now - 40 * DAY);
+  assert.strictEqual(checks.retention.value.truncated, false);
+  assert.strictEqual(r.report.backup.mtime, backupMtime, '报告应带上备份文件时间');
   assert.strictEqual(checks.folding.status, 'skipped', 'S2 未落地应跳过水位线检查');
   assert.strictEqual(checks.overlap.status, 'skipped', 'S2 未落地应跳过重叠检查');
   assert.strictEqual(checks.capacity.status, 'skipped', 'F12 未落地应跳过容量检查');
@@ -116,7 +128,7 @@ test('库内标记：8 项检查执行、缺口重置、孤儿/软删清理、�
 test('文件兜底标记：库内无标记时读取备份目录文件并在完成后删除', () => {
   const now = Date.now();
   fs.writeFileSync(PENDING_FILE, JSON.stringify({
-    name: 'monitor_20260202_000000.db', ts: now - 60000, by: 'host(cli)'
+    name: 'monitor_20260202_000000.db', ts: now - 60000, mtime: now - 5 * DAY, by: 'host(cli)'
   }));
 
   const r = audit.runRestoreAudit({ now });
@@ -131,4 +143,26 @@ test('F11 未落地时跳过软删检查（列不存在也不报错）', () => {
   // 检查不会误报失败；列缺失分支由 checkSoftDeleted 的 skipped 逻辑覆盖。
   const c = audit.checkSoftDeleted(Date.now());
   assert.ok(['ok', 'warn', 'skipped'].includes(c.status));
+});
+
+test('GET /api/admin/restore-audit：返回最近一次报告，未鉴权 401', async () => {
+  process.env.PORT = '0';
+  process.env.ADMIN_ALLOW_HTTP = '1';
+  process.env.ADMIN_TOKEN = 'restore-audit-admin-token-0123456789ab';
+  // eslint-disable-next-line global-require
+  const { app, server } = require('../server');
+  const request = require('supertest');
+  try {
+    const r = await request(app)
+      .get('/api/admin/restore-audit')
+      .set({ 'X-Admin-Token': process.env.ADMIN_TOKEN, 'X-Forwarded-Proto': 'https' });
+    assert.strictEqual(r.status, 200);
+    assert.ok(r.body.report && r.body.report.backup.name, '应返回最近一次审查报告');
+    assert.strictEqual(r.body.report.backup.mtime > 0, true);
+
+    const noAuth = await request(app).get('/api/admin/restore-audit');
+    assert.strictEqual(noAuth.status, 401, '未鉴权应 401');
+  } finally {
+    server.close();
+  }
 });

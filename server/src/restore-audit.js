@@ -79,23 +79,50 @@ function checkIntegrity() {
 
 // 2) retention 裁剪预演：恢复自很久以前的备份时，下一次 prune 会删掉大量数据，
 //    必须提前告诉用户，而不是等它静默消失。
+//    除总量/占比外，还要给出最早/最晚过期时间与「批次」（按保留周期分段），
+//    否则用户只知道「会删 5000 行」，不知道删的是哪个时间段。
+const RETENTION_MAX_BUCKETS = 8;
 function checkRetention(now) {
   const retentionDays = db.getRetentionDays();
   const cutoff = now - retentionDays * 86400000;
   let total = 0;
-  let expired = 0;
+  let stats = { n: 0, mn: 0, mx: 0 };
   try {
     total = db.db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0;
-    if (total) expired = db.db.prepare('SELECT COUNT(*) AS n FROM metrics WHERE ts < ?').get(cutoff).n || 0;
+    if (total) {
+      stats = db.db.prepare('SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM metrics WHERE ts < ?').get(cutoff)
+        || { n: 0, mn: 0, mx: 0 };
+    }
   } catch (e) {
     return check('retention', 'skipped', { reason: e.message });
   }
+  const expired = stats.n || 0;
   const ratio = total ? expired / total : 0;
+
+  // 批次：从 cutoff 往回每 retentionDays 一段（idx 越大越旧），最多 8 批，避免报告膨胀。
+  let buckets = [];
+  let truncated = false;
+  if (expired) {
+    try {
+      const span = retentionDays * 86400000;
+      const rows = db.db.prepare(`SELECT CAST((? - ts) / ? AS INTEGER) AS idx,
+          COUNT(*) AS rows, MIN(ts) AS from_ts, MAX(ts) AS to_ts
+        FROM metrics WHERE ts < ?
+        GROUP BY idx ORDER BY idx DESC LIMIT ?`).all(cutoff, span, cutoff, RETENTION_MAX_BUCKETS);
+      buckets = rows.map((b) => ({ rows: b.rows, from_ts: b.from_ts, to_ts: b.to_ts }));
+      if (expired > buckets.reduce((s, b) => s + b.rows, 0)) truncated = true;
+    } catch (e) { /* 批次统计失败不影响总量结论 */ }
+  }
+
   return check('retention', ratio > RETENTION_WARN_RATIO ? 'warn' : 'ok', {
     retention_days: retentionDays,
     total_rows: total,
     expired_rows: expired,
-    ratio: Number(ratio.toFixed(4))
+    ratio: Number(ratio.toFixed(4)),
+    earliest_ts: stats.mn || 0,
+    latest_ts: stats.mx || 0,
+    buckets,
+    truncated
   });
 }
 
@@ -304,6 +331,8 @@ function runRestoreAudit(opts = {}) {
     backup: {
       name: String(pending.name || ''),
       ts: Number(pending.ts) || 0,
+      // 备份文件自身时间（ms）；0 = 宿主未提供（老版本脚本/stat 失败）
+      mtime: Number(pending.mtime) || 0,
       by: String(pending.by || '')
     },
     source,

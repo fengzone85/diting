@@ -1487,13 +1487,16 @@ sync_to_visible_dir() {
 # 工具优先级：sqlite3 → 备份可见目录标记文件（服务端 BACKUP_DIR 与之同源）。
 # 全部失败只告警、不阻断恢复 —— 审查是增强能力，不能挡住「救数据」。
 _restore_pending_payload() {
-    local name="$1" by="$2" ts
+    local name="$1" by="$2" mtime="${3:-0}" ts
     ts="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
     # 白名单过滤：name 来自文件名，by 来自后台请求文件；两者都不允许引号/换行，
     # 这样拼进 JSON 与 SQL 字面量都是安全的（调用方不再做二次转义）。
     name="$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._-')"
     by="$(printf '%s' "${by:-host(cli)}" | tr -cd 'A-Za-z0-9._:() -' | cut -c1-120)"
-    printf '{"name":"%s","ts":%s,"by":"%s"}' "$name" "$ts" "$by"
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    # mtime = 备份文件自身的修改时间（ms）。「恢复自 N 天前的备份」要靠它，
+    # 不能用 ts（那是本次恢复的时刻）。
+    printf '{"name":"%s","ts":%s,"by":"%s","mtime":%s}' "$name" "$ts" "$by" "$mtime"
 }
 
 # 向待替换的库副本写标记；返回 0 表示成功。
@@ -1581,8 +1584,12 @@ _restore_apply() {
 
     # ── F8.6：把审查标记写进「即将替换进库」的那份文件 ──────────────────────
     # 必须在重启前完成（服务启动即读标记）；写失败只降级、不阻断恢复。
-    local pending_json marked_db=""
-    pending_json="$(_restore_pending_payload "$(basename "$in_path")" "${RESTORE_REQUESTED_BY:-host(cli)}")"
+    local pending_json marked_db="" backup_mtime=0
+    # 备份文件时间（秒 → 毫秒）；stat 失败按 0 处理，服务端会退化为「较早的备份」文案。
+    backup_mtime="$(stat -c %Y "$in_path" 2>/dev/null || echo 0)"
+    [[ "$backup_mtime" =~ ^[0-9]+$ ]] || backup_mtime=0
+    pending_json="$(_restore_pending_payload "$(basename "$in_path")" \
+        "${RESTORE_REQUESTED_BY:-host(cli)}" "$((backup_mtime * 1000))")"
     if [[ "$restore_src" == "$in_path" ]]; then
         # 未压缩备份 = 原始文件，不能污染：复制一份再写
         marked_tmp="$(mktemp "${TMPDIR:-/tmp}/diting_restore_marked_XXXXXX.db")"

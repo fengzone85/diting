@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
+import type { Agent, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -165,6 +165,9 @@ export const adminApi = {
 
   // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
   getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),
+
+  // F8.6：最近一次恢复审查（后台顶部黄条用，避免拉整个备份目录）
+  getRestoreAudit: () => api.get<{ report: RestoreAuditReport | null }>('/api/admin/restore-audit'),
 
   // 备份文件管理（需要宿主备份目录已挂进容器）
   listBackups: () => api.get<BackupList>('/api/admin/backups'),

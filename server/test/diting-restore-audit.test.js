@@ -33,24 +33,28 @@ test('恢复审查标记：payload 是合法 JSON，且过滤引号/换行', () 
   const code = [
     'set -u',
     fnBody('_restore_pending_payload'),
-    '_restore_pending_payload "$T_NAME" "$T_BY"',
+    '_restore_pending_payload "$T_NAME" "$T_BY" "$T_MTIME"',
   ].join('\n');
   const r = bash(code, {
     T_NAME: 'monitor_20260101_000000.db',
     T_BY: 'admin(session) 10.0.0.9',
+    T_MTIME: '1700000000000',
   });
   const o = JSON.parse(r.stdout);
   assert.strictEqual(o.name, 'monitor_20260101_000000.db');
   assert.strictEqual(o.by, 'admin(session) 10.0.0.9');
+  assert.strictEqual(o.mtime, 1700000000000, '应带备份文件时间（ms）');
   assert.ok(Number(o.ts) > 0, '应带毫秒时间戳');
 
   const evil = bash(code, {
     T_NAME: 'monitor_x.db"\'; DROP TABLE admin_config; --\n',
     T_BY: 'admin(session) 1.2.3.4\n\' OR 1=1 --',
+    T_MTIME: 'not-a-number',
   });
   const eo = JSON.parse(evil.stdout); // 过滤后必须仍是合法 JSON
   assert.ok(!/["';\n]/.test(eo.name), `文件名不应含引号/分号/换行: ${eo.name}`);
   assert.ok(!/[;\n]/.test(eo.by), `发起者不应含分号/换行: ${eo.by}`);
+  assert.strictEqual(eo.mtime, 0, '非法 mtime 应归零');
 });
 
 test('恢复审查标记：写入待替换库的 admin_config', (t) => {
@@ -109,4 +113,5 @@ test('恢复流程：发起者随请求文件传递，结果回写审计', () =>
   assert.match(apply, /_restore_mark_pending_db/, '替换前应写库内标记');
   assert.match(apply, /_restore_write_pending_file/, '写库失败应降级为文件标记');
   assert.match(apply, /cp "\$restore_src"/, '未压缩备份应复制后再写标记（不污染原始文件）');
+  assert.match(apply, /stat -c %Y/, '应取备份文件时间（黄条「恢复自 N 天前」依赖它）');
 });
