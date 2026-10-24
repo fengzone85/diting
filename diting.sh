@@ -1182,8 +1182,8 @@ do_backup() {
     [[ -z "$out_path" ]] && out_path="$DB_BACKUP_DIR/monitor_${ts}.db"
 
     # ── 空间预检 + 满盘自愈（B + C）─────────────────────────────────────────
-    # 先预估需求：库有多大，备份就要多大（SQLite .backup 是逐页原样拷贝，
-    # 含已删除数据留下的空闲页；实测压缩后约为原体积的 20%）。
+    # 先预估需求：按源库大小保守预估（F8.1 起宿主分支用 VACUUM INTO，产物 ≤ 源库
+    # —— 会去掉 freelist；旧 .backup/cp 则是逐页原样拷贝。实测压缩后约为原体积的 20%）。
     local need_kb=0
     case "$loc" in
         docker:*) need_kb="$(timeout 180 docker exec "$(echo "$loc" | cut -d: -f2)" \
@@ -1237,10 +1237,38 @@ do_backup() {
         timeout 180 docker run --rm -v "$vol":/data -v "$DB_BACKUP_DIR":/out \
             alpine:3.20 cp /data/monitor.db "/out/$(basename "$out_path")" 2>/dev/null
     else
-        # 宿主机文件：需先 flush，直接 cp（SQLite 单文件）
+        # 宿主机文件（F8.1，2026-10-24）：运行中的库禁止直接 cp —— rollback journal 模式下
+        # 「写 journal → 改页 → 删 journal」的窗口里 cp 会拷到半提交状态。
+        # 优先 sqlite3 VACUUM INTO（一致性快照 + 顺带去掉 freelist，体积更小）；
+        # 无 sqlite3 时回退服务端 better-sqlite3 的在线备份（等价 .backup）；
+        # 两者都不可用则中止，绝不静默退化为热 cp。
         local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
-        echo -e "${YELLOW}[信息] 复制宿主机数据库文件…${NC}"
-        cp "$fpath" "$out_path"
+        rm -f "$out_path"
+        if command -v sqlite3 >/dev/null 2>&1; then
+            echo -e "${YELLOW}[信息] 通过 sqlite3 VACUUM INTO 生成一致性快照…${NC}"
+            sqlite3 "$fpath" "VACUUM INTO '$out_path'" || {
+                echo -e "${RED}[错误] VACUUM INTO 失败（磁盘空间/权限），已中止；未产生不完整备份${NC}" >&2
+                db_backup_state_set last_status=failed "last_error=vacuum into failed" 2>/dev/null || true
+                return 1
+            }
+        else
+            echo -e "${YELLOW}[信息] 未安装 sqlite3，改用服务端 better-sqlite3 在线快照…${NC}"
+            local bak_js; bak_js="$(mktemp)"
+            cat > "$bak_js" <<'JS'
+const D = require('better-sqlite3');
+const [src, dest] = process.argv.slice(2);
+if (!src || !dest) { console.error('usage: node backup.js <src> <dest>'); process.exit(2); }
+const db = new D(src, { readonly: true, fileMustExist: true });
+db.backup(dest).then(() => db.close()).catch((e) => { console.error(e.message); process.exit(1); });
+JS
+            db_run_js "$bak_js" "$out_path" || {
+                rm -f "$bak_js"
+                echo -e "${RED}[错误] 在线快照失败，已中止（不回退热 cp）${NC}" >&2
+                db_backup_state_set last_status=failed "last_error=online backup failed" 2>/dev/null || true
+                return 1
+            }
+            rm -f "$bak_js"
+        fi
     fi
 
     if [[ ! -f "$out_path" ]]; then
