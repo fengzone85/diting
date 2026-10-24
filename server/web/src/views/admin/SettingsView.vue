@@ -521,7 +521,12 @@ async function resetGroupAlert() {
         <FormInput v-model="local.ui.alert!.cpu_pct" :label="t('settings.cpuThreshold')" type="number" />
         <FormInput v-model="local.ui.alert!.mem_pct" :label="t('settings.memThreshold')" type="number" />
         <FormInput v-model="local.ui.alert!.offline_sec" :label="t('settings.offlineSec')" type="number" />
-        <FormInput v-model="local.ui.probe_targets" :label="t('settings.probeTargets')" type="textarea" />
+        <FormInput
+          v-model="local.ui.probe_targets"
+          :label="t('settings.probeTargets')"
+          type="textarea"
+          :hint="t('settings.probeTargetsHint')"
+        />
 
         <!-- S1/F1：分组告警覆盖（留空 = 继承全局） -->
         <h2 class="mb-1 mt-8 text-lg font-semibold">{{ t('settings.groupAlertRules') }}</h2>

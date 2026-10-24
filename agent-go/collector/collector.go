@@ -21,6 +21,13 @@ type Probe struct {
 	// 故只取二值口径：TCP 握手成功 → 0，三轮全失败 → 100。
 	// 与 Python 版（ICMP 优先、可算真实丢包率）口径不同但字段一致，服务端无需改动。
 	Loss *float64 `json:"loss"`
+	// Type 探测类型：http；空 = tcp（缺省语义，JSON 省字段以保持老格式零变化）。
+	Type string `json:"type,omitempty"`
+	// Code 是 HTTP 状态码（仅 http 探测；连接失败/超时为 nil，JSON 中字段省略）。
+	Code *int `json:"code,omitempty"`
+	// CertDays 是 TLS 证书剩余天数（仅 https 探测且握手成功取到证书）。
+	// 0 = 已过期或当天到期；nil = 非 https 或无证书。服务端按 0..3650 校验。
+	CertDays *int `json:"cert_days,omitempty"`
 }
 
 // DiskInfo 是单块真实磁盘的使用情况（多盘展示用）。
@@ -102,11 +109,16 @@ type Metrics struct {
 	Disks []DiskInfo `json:"disks,omitempty"`
 }
 
-// ProbeTarget 是解析后的探测目标（label:host:port）。
+// ProbeTarget 是解析后的探测目标（label:host[:port] 或 label:http(s)://...）。
+//
+// Scheme 为空表示 TCP 探测（用 Host/Port）；http/https 表示 HTTP 探测（用 URL）。
+// Host/Port 对 http(s) 同样填充（端口为 URL 实际端口），便于日志与本地展示。
 type ProbeTarget struct {
-	Label string
-	Host  string
-	Port  int
+	Label  string
+	Host   string
+	Port   int
+	Scheme string
+	URL    string
 }
 
 // round2 四舍五入到 2 位小数（平台共用：linux disk.go 与 windows disk 使用）。

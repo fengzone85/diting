@@ -66,6 +66,14 @@ describe('publicApi 查询参数拼接', () => {
     expect(seen[1]).toBe('/api/public/agents/a1/probes?range=24h&max_points=500');
   });
 
+  it('probesDetailed：固定带 availability=1，range/max_points 可选', async () => {
+    mockFetch();
+    await publicApi.probesDetailed('a 1');
+    await publicApi.probesDetailed('a1', '24h', 500);
+    expect(seen[0]).toBe('/api/public/agents/a%201/probes?availability=1');
+    expect(seen[1]).toBe('/api/public/agents/a1/probes?range=24h&max_points=500&availability=1');
+  });
+
   it('meta / visitor / saveOrder 走对应端点', async () => {
     mockFetch();
     await publicApi.meta();

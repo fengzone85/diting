@@ -20,6 +20,9 @@ const MIN_KNOWN_SAMPLES = Math.min(WINDOW_SAMPLES, 2);
 
 // 上线通知宽限期（S1/F1）：离线超过该秒数后重连才发「已上线」，防抖动刷屏；0 = 关闭。
 const ONLINE_GRACE_SEC = Math.max(0, Number(process.env.ONLINE_NOTIFY_GRACE_SEC || 180));
+// 探测目标 TLS 证书到期阈值（F4）：任一 https 目标剩余天数 ≤ 该值即告警，冷却 24h。
+// 只对带 cert_days 的目标生效；非 https / 握手未取到证书（null）跳过——known 语义。
+const CERT_WARN_DAYS = Math.max(0, Math.floor(Number(process.env.CERT_WARN_DAYS) || 14));
 // 内存态离线起点：agent_id -> 首次观测到离线的时刻。
 // 进程重启后为空——首个检查轮只会记录起点，不会误发上线通知。
 const OFFLINE_SINCE = new Map();
@@ -272,6 +275,48 @@ async function checkTrafficQuota(now) {
   }
 }
 
+// 检查探测目标 TLS 证书剩余天数（F4）：数据取最近一条 metrics.probes 快照。
+//
+// cert_days 是「上报时刻」的剩余天数，必须按上报时间衰减——否则：
+//   - 一份旧快照会在阈值内每 24h 重复告警（证书已续签也照报）；
+//   - 数据库停写（容量保险丝）时快照停在过去，不衰减就永远算不出真实剩余天数。
+// 任一目标触发即发一条聚合告警（含全部待处理目标），恢复（全部高于阈值）清 state。
+async function checkCertExpiry(now) {
+  for (const a of db.getMonitoredAgents()) {
+    try {
+      const m = db.getLatestMetric(a.id);
+      if (!m || !m.probes) continue;
+      let probes;
+      try { probes = JSON.parse(m.probes); } catch (e) { continue; }
+      if (!probes || typeof probes !== 'object') continue;
+
+      const elapsedDays = Math.max(0, Math.floor((now - (m.ts || now)) / 86400000));
+      const warned = [];
+      for (const [label, p] of Object.entries(probes)) {
+        if (!p || typeof p !== 'object' || typeof p.cert_days !== 'number') continue;
+        const left = Math.max(0, p.cert_days - elapsedDays);
+        if (left <= CERT_WARN_DAYS) warned.push({ label, left });
+      }
+      if (!warned.length) {
+        db.clearAlertState(a.id, 'cert');
+        continue;
+      }
+
+      const st = db.getAlertState(a.id, 'cert');
+      if (st && now - st.last_sent <= 24 * 3600 * 1000) continue;
+      const detail = warned
+        .map((w) => `${w.label}（剩 ${w.left} 天${w.left === 0 ? '，已过期或当天到期' : ''}）`)
+        .join('、');
+      await sendAlertGuarded(a.id, 'cert',
+        `[监控] ${a.name} TLS 证书即将到期`,
+        `客户端 ${a.name}(${a.id}) 的探测目标证书剩余天数已低于 ${CERT_WARN_DAYS} 天：${detail}。请及时续签，避免 HTTPS 探测与应用访问中断。`,
+        a.name);
+    } catch (e) {
+      console.error(`[alerts] checkCertExpiry failed for ${a.id}:`, e.message);
+    }
+  }
+}
+
 function notifyStatus() {
   // S1/F2：渠道状态由 notify 统一计算（含 webhook 数量、启用组数）。
   return notify.notifyStatus();
@@ -294,6 +339,7 @@ async function runDailyChecks() {
   try {
     try { await checkExpiringAgents(now); } catch (e) { console.error('[alerts] checkExpiringAgents error:', e.message); }
     try { await checkTrafficQuota(now); } catch (e) { console.error('[alerts] checkTrafficQuota error:', e.message); }
+    try { await checkCertExpiry(now); } catch (e) { console.error('[alerts] checkCertExpiry error:', e.message); }
   } finally {
     dailyRunning = false;
   }
@@ -335,7 +381,7 @@ function stop() { if (timer) clearInterval(timer); if (dailyTimer) clearInterval
 // 导出 check / checkAgent：便于单测与手动排查（此前未导出，只能靠定时触发观察）。
 // checkAgent 供 E1（连续 N 采样 / 恢复通知）与 E6（disk/temp 告警）的回归断言直接驱动。
 module.exports = {
-  start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota,
+  start, stop, check, checkAgent, sendAlert, notifyStatus, checkExpiringAgents, checkTrafficQuota, checkCertExpiry,
   resolveAgentThresholds,
   // 供测试断言窗口配置（S1/F1）
   getAlertWindowConfig: () => ({

@@ -57,7 +57,8 @@ Content-Type: application/json
   "disk_r_rate": 0, "disk_w_rate": 0,
   "temp": 52.0,
   "uptime": 86400,
-  "probes": { "CM": { "ms": 12.3, "ok": true, "loss": 0 } },
+  "probes": { "CM": { "ms": 12.3, "ok": true, "loss": 0 },
+              "WEB": { "ms": 118.4, "ok": true, "loss": 0, "type": "http", "code": 200, "cert_days": 63 } },
   "disks": [ { "mount": "/", "used": 71.0, "total": 100 } ],
   "os": "Debian GNU/Linux 13", "hostname": "srv1"
 }
@@ -166,11 +167,33 @@ Content-Type: application/json
 | GET | `/api/public/overview` | 公开总览 |
 | GET | `/api/public/agents` | 公开节点列表（脱敏） |
 | GET | `/api/public/agents/sparklines` | 公开 Sparkline |
-| GET | `/api/public/agents/:id/probes` | 公开延迟历史 |
+| GET | `/api/public/agents/:id/probes` | 公开延迟历史；`?availability=1` 附可用率与证书元信息 |
 | GET | `/api/public/meta` | 站点元信息（logo / 标题） |
 | GET | `/api/public/themes` | 可用主题列表 |
 | GET | `/api/public/visitor` | 访客 IP / UA（公开页访客计数） |
 | POST | `/api/public/order` | 公开页卡片排序保存（需 admin） |
+
+`/api/public/agents/:id/probes` 默认返回 `{ "<label>": [{ ts, ms, ok, loss }] }`；
+追加 `?availability=1` 时返回 `{ series, availability }`（形状与默认不同，仅新前端使用）：
+
+```json
+{
+  "series": { "WEB": [{ "ts": 1730000000000, "ms": 118, "ok": true, "loss": 0 }] },
+  "availability": {
+    "WEB": {
+      "up_pct": 99.7, "samples": 1440, "down_samples": 4,
+      "avg_ms": 121.3, "max_ms": 890, "last_down_at": 1730000000000,
+      "unreachable": false, "type": "http", "code": 200,
+      "cert_days": 63, "cert_ts": 1730000000000
+    }
+  }
+}
+```
+
+- `up_pct` 分母为窗口内**全部**采样点（`range` 同延迟序列），保留 1 位小数。
+- `unreachable=true` 表示窗口内无一成功（目标本身不可达，如运营商 DNS 拒 TCP），前端显示「不可达」而非 0% 可用。
+- `cert_days` 是上报时刻的剩余天数；前端展示时按 `cert_ts` 到当前时间衰减。
+- 探测上报字段：`type`（`http`，缺省 `tcp`，为省体积 tcp 不落库）、`code`（100–599）、`cert_days`（0–3650），非法值单独丢弃而不影响整条结果。
 
 ## Komari 主题兼容层
 
