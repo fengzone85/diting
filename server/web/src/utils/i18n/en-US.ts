@@ -357,7 +357,11 @@ export const enUS: Record<string, string> = {
   'settings.backupRestoreQueued': 'Restore request queued. The host will run it within a few minutes (cron polls every 5 min). It briefly stops the service — refresh later to confirm.',
   'settings.backupDeleted': 'Backup deleted',
   'settings.backupOpFailed': 'Operation failed',
-  'settings.backupRestoreHint': '"Restore" only queues a request; the host-side diting.sh performs it (including an automatic pre-restore backup and a stop-then-swap). If it does not take effect, verify --backup-schedule install was run on the host and /etc/diting/host.env is configured.',
+  'settings.backupRestoreHint': '"Restore" only queues a request; the host-side diting.sh performs it (including an automatic pre-restore backup and a stop-then-swap). Before queueing, the selected .db runs a full integrity_check (10s timeout) and is rejected on failure; .gz backups are verified after extraction on the host. If it does not take effect, verify --backup-schedule install was run on the host and /etc/diting/host.env is configured.',
+  'settings.backupIntegrity': 'Integrity',
+  'settings.backupIntegrity_ok': 'OK',
+  'settings.backupIntegrity_fail': 'Corrupted',
+  'settings.backupIntegrity_unknown': 'Unchecked',
   // F8.6 post-restore consistency audit (runs at startup; read-only report)
   'settings.restoreAuditTitle': 'Last restore audit',
   'settings.restoreAuditHint': 'A restore overwrites the whole DB with a backup; at startup the server checks the time base, folding watermark and traffic baselines. Latest result:',

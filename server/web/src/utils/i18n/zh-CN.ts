@@ -359,7 +359,11 @@ export const zhCN: Record<string, string> = {
   'settings.backupRestoreQueued': '恢复请求已提交，宿主侧将在几分钟内执行（cron 每 5 分钟轮询一次）。执行会短暂停服，请稍后刷新页面确认。',
   'settings.backupDeleted': '备份已删除',
   'settings.backupOpFailed': '操作失败',
-  'settings.backupRestoreHint': '「恢复」只提交请求，由宿主侧 diting.sh 执行（含恢复前自动备份与停服替换）；若长时间未生效，请在宿主上确认已执行 --backup-schedule install 并配置 /etc/diting/host.env。',
+  'settings.backupRestoreHint': '「恢复」只提交请求，由宿主侧 diting.sh 执行（含恢复前自动备份与停服替换）；提交前会对选中的 .db 做一次完整 integrity_check（10 秒超时），失败直接拒绝；.gz 备份在宿主解压后校验。若长时间未生效，请在宿主上确认已执行 --backup-schedule install 并配置 /etc/diting/host.env。',
+  'settings.backupIntegrity': '完整性',
+  'settings.backupIntegrity_ok': '正常',
+  'settings.backupIntegrity_fail': '异常',
+  'settings.backupIntegrity_unknown': '未校验',
   // F8.6 恢复后一致性审查（服务启动时执行，报告只读）
   'settings.restoreAuditTitle': '最近一次恢复审查',
   'settings.restoreAuditHint': '恢复是用备份整库覆盖当前数据，服务启动时会检查时间基准、折叠水位线与流量基线的一致性；这里展示最近一次结果。',

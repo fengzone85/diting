@@ -446,6 +446,18 @@ const restoreRetention = computed(() => {
   };
 });
 
+// F8.3：备份完整性徽标（未知 = 尚未抽查 / gzip 需解压后校验）
+function integrityClass(status?: string): string {
+  if (status === 'ok') return 'text-emerald-400';
+  if (status === 'fail') return 'text-rose-400';
+  return 'opacity-60';
+}
+function integrityText(status?: string): string {
+  const key = `settings.backupIntegrity_${status || 'unknown'}`;
+  const out = t(key);
+  return out === key ? t('settings.backupIntegrity_unknown') : out;
+}
+
 async function save() {
   saving.value = true;
   message.value = '';
@@ -905,6 +917,7 @@ async function resetGroupAlert() {
                   <th class="py-2 pr-4">{{ t('settings.backupFile') }}</th>
                   <th class="py-2 pr-4">{{ t('settings.backupTime') }}</th>
                   <th class="py-2 pr-4">{{ t('settings.backupSize') }}</th>
+                  <th class="py-2 pr-4">{{ t('settings.backupIntegrity') }}</th>
                   <th class="py-2 text-right">{{ t('common.actions') }}</th>
                 </tr>
               </thead>
@@ -918,6 +931,9 @@ async function resetGroupAlert() {
                   </td>
                   <td class="py-2 pr-4 whitespace-nowrap">{{ fmtTime(f.mtime) }}</td>
                   <td class="py-2 pr-4 whitespace-nowrap">{{ fmtBytes(f.size_bytes) }}</td>
+                  <td class="py-2 pr-4 whitespace-nowrap" :class="integrityClass(f.integrity)" :title="f.integrity_reason || ''">
+                    {{ integrityText(f.integrity) }}
+                  </td>
                   <td class="py-2 text-right whitespace-nowrap">
                     <button
                       class="mr-2 rounded border border-white/20 px-2 py-1 text-xs hover:bg-white/10"

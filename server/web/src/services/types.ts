@@ -431,6 +431,9 @@ export interface BackupFile {
   mtime: number;
   compressed: boolean;
   kind: 'monitor' | 'pre_restore';
+  // F8.3：列表抽查（quick_check）结果；恢复前会再做一次完整 integrity_check
+  integrity?: 'ok' | 'fail' | 'unknown';
+  integrity_reason?: string;
 }
 
 // F8.6：恢复后一致性审查（服务端启动时写入，本页只读展示）
