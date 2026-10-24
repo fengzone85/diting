@@ -31,6 +31,7 @@ description: 服务端与受控端环境变量参考
 | `AUDIT_RETENTION_DAYS` | 否 | `90` | 管理员操作审计日志保留天数（下限 7）。独立于 `RETENTION_DAYS`：审计属安全记录，默认保留更久 |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭） |
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
+| `CERT_WARN_DAYS` | 否 | `14` | HTTPS 探测目标的证书到期告警阈值（天）：剩余天数 ≤ 该值发 `cert` 事件，24h 冷却；恢复后清状态 |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` | 否 | `90` | CPU / 内存告警阈值（%） |
 | `ALERT_COOLDOWN_SEC` | 否 | `1800` | 告警冷却时间（秒） |
 | `ALERT_WINDOW_SAMPLES` | 否 | `5` | 告警采样窗口（2–20）：窗口内超限占比达到比例才触发/恢复 |
@@ -97,14 +98,16 @@ description: 服务端与受控端环境变量参考
 | `INTERVAL` | 否 | `20`（Docker 镜像与 Windows 为 `15`） | 上报间隔（秒），最小 5 |
 | `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。由服务端按此口径累计月流量（受控端不保存本地状态） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
-| `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]`，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
+| `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]` TCP / `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 
 ### PROBE_TARGETS 说明
 
-- 多个目标用逗号分隔，格式 `label:host[:port]`（如 `CM:www.10086.cn:443`）
-- Go 受控端为**纯 TCP** 握手探测（端口序：目标端口 → 443 → 80），`loss` 仅 `0` / `100` 二值、不伪造中间值
+- 多个目标用逗号分隔，格式 `label:host[:port]`（TCP，如 `CM:www.10086.cn:443`）或 `label:http(s)://host[:port]/path`（HTTP，如 `WEB:https://example.com/health`）
+- TCP 目标为握手探测（端口序：目标端口 → 443 → 80）；HTTP(S) 目标为一次 `GET`（5s 超时、不跟随重定向、2xx/3xx 视为可达），并记录状态码与耗时
+- HTTPS 目标额外上报证书剩余天数（`cert_days`）；探测**不校验证书信任链**，自签/内网证书站点不会因此被判 down，证书临期由服务端 `cert` 告警负责
+- 两类目标的 `loss` 均为 `0` / `100` 二值、不伪造中间值
 - **运行期无下发通道**：目标只在安装时由一键命令写入本地一次，之后只能在本机改——服务端没有任何 API 能在运行期推送探测目标
 - `label` 建议用 ≤2 字符缩写（`CM`=移动门户 / `CT`=电信 / `CU`=联通 / `GG`=公共谷歌 DNS），状态卡片空间有限；默认 `PROBE_TARGETS=CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`（运营商 DNS 对 TCP 全拒，CM 用移动自家门户测"移动入口可达性"）
 
@@ -113,6 +116,9 @@ description: 服务端与受控端环境变量参考
 ```bash
 # 探测移动门户 + 电信/联通 DNS + 谷歌 DNS（默认，label 用两字母缩写）
 PROBE_TARGETS=CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8
+
+# 追加 HTTP/TLS 探测（2xx/3xx 可达；https 附带证书剩余天数）
+PROBE_TARGETS=CM:www.10086.cn:443,GG:8.8.8.8,WEB:https://example.com/health,API:http://127.0.0.1:8080/ping
 
 # 关闭探测
 PROBE_TARGETS=

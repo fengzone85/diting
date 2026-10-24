@@ -366,11 +366,14 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
             name,
             value: v && v.ms != null ? Number(v.ms) : null,
             loss: v && v.loss != null ? Number(v.loss) : (v && v.ok === true ? 0 : 100),
+            // F4 透传：社区主题不消费则无害；消费时可区分 tcp/http 与状态码。
+            type: v && v.type === 'http' ? 'http' : 'tcp',
+            code: v && Number.isInteger(v.code) ? v.code : null,
           }));
       for (const it of items) {
         if (it.value == null || !Number.isFinite(it.value)) continue;
         let t = tasks.get(it.name);
-        if (!t) { t = { id: ++tid, name: it.name, interval: 1, loss: it.loss || 0 }; tasks.set(it.name, t); }
+        if (!t) { t = { id: ++tid, name: it.name, interval: 1, loss: it.loss || 0, type: it.type || 'tcp', code: it.code ?? null }; tasks.set(it.name, t); }
         records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
       }
     }

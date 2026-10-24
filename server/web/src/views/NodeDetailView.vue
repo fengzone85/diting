@@ -12,7 +12,7 @@ import AiNodeAnalysisDialog from '../components/ai/AiNodeAnalysisDialog.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
-import type { Probes, ChartPoint, SparklinePoint } from '../services/types';
+import type { Probes, ProbeAvailability, ChartPoint, SparklinePoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber, formatCurrency, formatRemaining } from '../utils/format';
 import {
   Cpu,
@@ -43,6 +43,8 @@ const { state, visibleAgents } = useApp();
 const agentId = computed(() => route.params.id as string);
 // 对齐 Komari：切 range 打后端，后端按 max_points 降采样返回（避免短 range 从 30d 全量截取导致点过稀）
 const probes = ref<Probes>({});
+// F4：可用率/证书元信息（与 probes 同一次请求返回，窗口 = currentRange）
+const availability = ref<Record<string, ProbeAvailability>>({});
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -276,6 +278,43 @@ function p95Probe(points: { ts: number; ms: number; ok: boolean; loss: number }[
   return ok[Math.max(0, idx)];
 }
 
+// ---- F4：可用率 / 证书倒计时 ----------------------------------------------
+// 可用率文案：全失败显示「不可达」而非 0%——运营商 DNS 等目标对 TCP 全拒，
+// 显示 0% 会被误读成探测链路故障。
+function probeUpLabel(target: string): string {
+  const av = availability.value[target];
+  if (!av) return '—';
+  if (av.unreachable) return t('node.probeUnreachable');
+  return av.up_pct == null ? '—' : `${av.up_pct.toFixed(1)}%`;
+}
+
+function probeUpClass(target: string): string {
+  const av = availability.value[target];
+  if (!av || av.unreachable) return 'text-rose-400';
+  const pct = av.up_pct ?? 0;
+  if (pct >= 99) return 'text-emerald-400';
+  if (pct >= 95) return 'text-amber-400';
+  return 'text-rose-400';
+}
+
+// 证书剩余天数 = 上报时刻的 cert_days − 距上报经过的天数。
+// 必须做这个衰减：快照可能几天没更新（节点离线/历史停写），直接展示 cert_days
+// 会让倒计时停在过去。
+function probeCertLeft(target: string): number | null {
+  const av = availability.value[target];
+  if (!av || av.cert_days == null) return null;
+  const age = av.cert_ts ? Math.max(0, Math.floor((Date.now() - av.cert_ts) / 86400000)) : 0;
+  return Math.max(0, av.cert_days - age);
+}
+
+function probeCertClass(target: string): string {
+  const left = probeCertLeft(target);
+  if (left == null) return 'text-muted';
+  if (left <= 14) return 'text-rose-400';
+  if (left <= 30) return 'text-amber-400';
+  return 'text-emerald-400';
+}
+
 function probeSeries(points: { ts: number; ms: number; ok: boolean; loss: number }[]): ChartPoint[] {
   if (!points) return [];
   return points
@@ -337,8 +376,9 @@ async function switchChartRange(range: string) {
 // 每段 range 各自保证点数合适（1h→600, 6h→1000, 24h→1500, 7d→2000, 30d→3000）。
 async function loadProbes(range: string) {
   const mp = RANGE_MAX_POINTS[range] ?? 3000;
-  const data = await publicApi.probes(agentId.value, range, mp);
-  probes.value = data || {};
+  const data = await publicApi.probesDetailed(agentId.value, range, mp);
+  probes.value = data?.series || {};
+  availability.value = data?.availability || {};
 }
 
 // 切范围：对齐 Komari，置 loading → 打后端 → 取消 loading（loading 反馈掩盖网络延迟，体验丝滑）
@@ -722,6 +762,17 @@ onMounted(load);
               </span>
               <span class="ml-1.5 text-sky-400">P95 {{ p95Probe(points) != null ? `${p95Probe(points)?.toFixed(1)} ms` : '—' }}</span>
               <span class="ml-1.5 text-muted">{{ t('node.loss', { pct: formatNumber(lossPercent(points), 1) }) }}</span>
+              <!-- F4：窗口可用率；全失败显示「不可达」而不是 0% -->
+              <span class="ml-1.5" :class="probeUpClass(target)">
+                {{ t('node.availability') }} {{ probeUpLabel(target) }}
+              </span>
+              <!-- F4：证书倒计时（仅 https 目标有 cert_days） -->
+              <span v-if="probeCertLeft(target) != null" class="ml-1.5" :class="probeCertClass(target)">
+                {{ probeCertLeft(target) === 0 ? t('node.certExpired') : t('node.certDays', { days: probeCertLeft(target) ?? 0 }) }}
+              </span>
+              <span v-else-if="availability[target]?.type === 'http'" class="ml-1.5 text-sky-400">
+                {{ t('node.probeHttp', { code: availability[target]?.code ?? '—' }) }}
+              </span>
             </span>
           </div>
           <ChartLatencyMulti :title="t('node.chart.latency')" :series="probeSeriesList" />

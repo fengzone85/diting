@@ -3,25 +3,50 @@ package collector
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
 
-// TestParseProbeTargets 覆盖解析规则：label:host:port / 默认 53 / 截断 / 上限。
+// TestParseProbeTargets 覆盖解析规则：TCP（label:host:port / 默认 53）、
+// HTTP（label:http(s)://... / 默认 80、443）、裸目标、IPv6、截断与上限。
 func TestParseProbeTargets(t *testing.T) {
+	tcp := func(label, host string, port int) ProbeTarget {
+		return ProbeTarget{Label: label, Host: host, Port: port}
+	}
 	cases := []struct {
 		name string
 		in   string
 		want []ProbeTarget
 	}{
 		{"空串", "", nil},
-		{"默认端口", "GG:8.8.8.8", []ProbeTarget{{"GG", "8.8.8.8", 53}}},
-		{"完整三段", "CM:211.136.192.6:443", []ProbeTarget{{"CM", "211.136.192.6", 443}}},
+		{"默认端口", "GG:8.8.8.8", []ProbeTarget{tcp("GG", "8.8.8.8", 53)}},
+		{"完整三段", "CM:211.136.192.6:443", []ProbeTarget{tcp("CM", "211.136.192.6", 443)}},
 		{"多目标", "CM:211.136.192.6,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8",
-			[]ProbeTarget{{"CM", "211.136.192.6", 53}, {"CT", "101.226.4.6", 53}, {"CU", "202.106.0.20", 53}, {"GG", "8.8.8.8", 53}}},
-		{"label超长截断到24", string(make([]byte, 0)) + repeat('x', 30) + ":8.8.8.8", []ProbeTarget{{repeat('x', 24), "8.8.8.8", 53}}},
+			[]ProbeTarget{tcp("CM", "211.136.192.6", 53), tcp("CT", "101.226.4.6", 53), tcp("CU", "202.106.0.20", 53), tcp("GG", "8.8.8.8", 53)}},
+		{"label超长截断到24", string(make([]byte, 0)) + repeat('x', 30) + ":8.8.8.8", []ProbeTarget{tcp(repeat('x', 24), "8.8.8.8", 53)}},
 		{"非法端口丢弃", "CM:211.136.192.6:99999", nil},
 		{"空host丢弃", "CM:", nil},
+		{"裸主机", "8.8.8.8", []ProbeTarget{tcp("8.8.8.8", "8.8.8.8", 53)}},
+		{"IPv6带端口", "V6:[2606:4700:4700::1111]:443",
+			[]ProbeTarget{tcp("V6", "2606:4700:4700::1111", 443)}},
+		{"裸IPv6不被误拆端口", "V6:2606:4700:4700::1111",
+			[]ProbeTarget{tcp("V6", "2606:4700:4700::1111", 53)}},
+		{"HTTP目标", "WEB:https://example.com/health",
+			[]ProbeTarget{{Label: "WEB", Host: "example.com", Port: 443, Scheme: "https", URL: "https://example.com/health"}}},
+		{"HTTP默认端口", "WEB:http://example.com",
+			[]ProbeTarget{{Label: "WEB", Host: "example.com", Port: 80, Scheme: "http", URL: "http://example.com"}}},
+		{"HTTP显式端口", "WEB:https://example.com:8443/x",
+			[]ProbeTarget{{Label: "WEB", Host: "example.com", Port: 8443, Scheme: "https", URL: "https://example.com:8443/x"}}},
+		{"大写scheme归一", "WEB:HTTPS://example.com",
+			[]ProbeTarget{{Label: "WEB", Host: "example.com", Port: 443, Scheme: "https", URL: "https://example.com"}}},
+		{"裸URL label取主机名", "https://example.com/p",
+			[]ProbeTarget{{Label: "example.com", Host: "example.com", Port: 443, Scheme: "https", URL: "https://example.com/p"}}},
+		{"非法URL丢弃", "WEB:https://", nil},
+		{"超过8个截断", "a:1.1.1.1,b:1.1.1.2,c:1.1.1.3,d:1.1.1.4,e:1.1.1.5,f:1.1.1.6,g:1.1.1.7,h:1.1.1.8,i:1.1.1.9",
+			[]ProbeTarget{tcp("a", "1.1.1.1", 53), tcp("b", "1.1.1.2", 53), tcp("c", "1.1.1.3", 53), tcp("d", "1.1.1.4", 53),
+				tcp("e", "1.1.1.5", 53), tcp("f", "1.1.1.6", 53), tcp("g", "1.1.1.7", 53), tcp("h", "1.1.1.8", 53)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -99,6 +124,125 @@ func TestProbeOneBudget(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Fatalf("probeOne took %v, want within budget ~%v (legacy would be 1.2s)", elapsed, budget)
+	}
+}
+
+// TestProbeHTTP 验证 HTTP 探测成功口径：2xx → ok、记录状态码与耗时、loss=0。
+func TestProbeHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tgt, ok := parseHTTPTarget("WEB", srv.URL)
+	if !ok {
+		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
+	}
+	p := probeHTTP(tgt)
+	if !p.Ok || p.Type != "http" || p.Code == nil || *p.Code != 200 {
+		t.Fatalf("probeHTTP = %+v, want ok/http/200", p)
+	}
+	if p.Ms == nil || *p.Ms < 0 || p.Loss == nil || *p.Loss != 0 {
+		t.Fatalf("probeHTTP ms/loss = %v/%v, want >=0/0", p.Ms, p.Loss)
+	}
+	if p.CertDays != nil {
+		t.Fatalf("http target must not report cert_days, got %d", *p.CertDays)
+	}
+}
+
+// TestProbeHTTPStatusFail 4xx/5xx 视为不可用：ok=false、loss=100，但状态码与耗时仍保留。
+func TestProbeHTTPStatusFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	tgt, ok := parseHTTPTarget("WEB", srv.URL)
+	if !ok {
+		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
+	}
+	p := probeHTTP(tgt)
+	if p.Ok || p.Code == nil || *p.Code != 500 {
+		t.Fatalf("probeHTTP = %+v, want not-ok/500", p)
+	}
+	if p.Loss == nil || *p.Loss != 100 || p.Ms == nil {
+		t.Fatalf("probeHTTP ms/loss = %v/%v, want kept/100", p.Ms, p.Loss)
+	}
+}
+
+// TestProbeHTTPSCertDays 验证 https 探测附带证书剩余天数（自签证书也应能取到）。
+func TestProbeHTTPSCertDays(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tgt, ok := parseHTTPTarget("TLS", srv.URL)
+	if !ok {
+		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
+	}
+	p := probeHTTP(tgt)
+	if !p.Ok || p.Type != "http" {
+		t.Fatalf("probeHTTP = %+v, want ok", p)
+	}
+	if p.CertDays == nil || *p.CertDays <= 0 || *p.CertDays > 3650 {
+		t.Fatalf("cert_days = %v, want 1..3650", p.CertDays)
+	}
+}
+
+// TestCertDaysLeft 边界：向上取整、过期归零、上限 3650。
+func TestCertDaysLeft(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		notAfter time.Time
+		want     int
+	}{
+		{"整30天", now.Add(30 * 24 * time.Hour), 30},
+		{"不足1天向上取整", now.Add(2 * time.Hour), 1},
+		{"已过期归零", now.Add(-48 * time.Hour), 0},
+		{"超长上限", now.AddDate(20, 0, 0), 3650},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := certDaysLeft(now, c.notAfter); got != c.want {
+				t.Fatalf("certDaysLeft() = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+// TestProbeRunnerHTTP 验证 HTTP 目标同样进入后台快照（与 TCP 共用一轮并发）。
+func TestProbeRunnerHTTP(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	tgt, ok := parseHTTPTarget("WEB", srv.URL)
+	if !ok {
+		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
+	}
+
+	r := NewProbeRunner([]ProbeTarget{tgt})
+	r.interval = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snap := r.Snapshot()
+		if snap != nil {
+			v, exists := snap["WEB"]
+			if !exists || !v.Ok || v.Type != "http" || v.Code == nil || *v.Code != 200 {
+				t.Fatalf("WEB probe = %+v, want ok/http/200", v)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Snapshot still nil after 5s")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

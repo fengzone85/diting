@@ -110,7 +110,16 @@ const validateReport = (b) => {
         const ms = (v.ms === null || v.ms === undefined) ? null : num(v.ms, 0, 100000);
         // loss 丢包率 0-100（对齐 Komari 延迟采集标准）；缺省视为 0
         const loss = (v.loss === null || v.loss === undefined) ? (v.ok === true ? 0 : 100) : Math.round(num(v.loss, 0, 100));
+        // F4：探测类型 + HTTP 状态码 + TLS 剩余天数。
+        // 三项都是可选，非法值降级为缺省（不因单个字段丢掉整条探测结果）。
+        // type 只在 http 时落库：tcp 是缺省语义，写入会让全部历史行的 JSON 变长，
+        // 也破坏既有「{ms,ok,loss}」形状（security.test.js 锁死了老格式）。
+        const code = optInt(v.code, 100, 599);
+        const certDays = optInt(v.cert_days, 0, 3650);
         out[k] = { ms, ok: v.ok === true, loss };
+        if (v.type === 'http') out[k].type = 'http';
+        if (code !== null) out[k].code = code;
+        if (certDays !== null) out[k].cert_days = certDays;
         n++;
       }
       return JSON.stringify(out);

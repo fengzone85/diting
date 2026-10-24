@@ -877,6 +877,8 @@ function downsampleSparklines(rows, maxPoints) {
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
 // 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。
 // 受 ui.public_enabled 控制；range 支持 1h/6h/24h/7d。
+// ?availability=1（F4）额外返回可用率聚合 { series, availability }，缺省保持原
+// 「纯 series 对象」形状不变——社区主题/既有调用方零影响。
 router.get('/public/agents/:id/probes', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
@@ -889,7 +891,11 @@ router.get('/public/agents/:id/probes', (req, res) => {
   // 再叠加 SQL 层采样：全量 9.5 万行 → maxPoints 行，逐行 JSON.parse 次数同比骤降。
   // 采样点数取 max(上限, 5000) 的 3 倍冗余，保证后续 avg 桶聚合仍有足够样本、统计不失真。
   const rows = db.getMetricsProbesOne(a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
+  const wantAvail = req.query.availability === '1' || req.query.availability === 'true';
   const series = {}; // label -> [{ts, ms}]
+  // 可用率累加器（F4）：只统计采样后的原始上报点，不受下面时间桶聚合影响；
+  // SQL 采样是均匀抽样（metricsProbesOne 的 rn % step），对 up/down 比例无系统偏差。
+  const stats = wantAvail ? {} : null;
   for (const r of rows) {
     if (!r.probes) continue;
     let probes;
@@ -897,13 +903,35 @@ router.get('/public/agents/:id/probes', (req, res) => {
     if (!probes || typeof probes !== 'object') continue;
     for (const [label, p] of Object.entries(probes)) {
       if (!p || typeof p !== 'object') continue;
+      const ok = p.ok !== false;
+      const ms = typeof p.ms === 'number' ? Math.round(p.ms) : null;
       if (!series[label]) series[label] = [];
       series[label].push({
         ts: r.ts,
-        ms: typeof p.ms === 'number' ? Math.round(p.ms) : null,
-        ok: p.ok !== false,
-        loss: typeof p.loss === 'number' ? Math.round(p.loss) : (p.ok !== false ? 0 : 100)
+        ms,
+        ok,
+        loss: typeof p.loss === 'number' ? Math.round(p.loss) : (ok ? 0 : 100)
       });
+      if (stats) {
+        const st = stats[label] || (stats[label] = {
+          samples: 0, up: 0, msSum: 0, msCnt: 0, maxMs: null, lastDownAt: null, latest: null
+        });
+        st.samples++;
+        if (ok) st.up++;
+        if (ms !== null) {
+          st.msSum += ms;
+          st.msCnt++;
+          if (st.maxMs === null || ms > st.maxMs) st.maxMs = ms;
+        }
+        if (!ok) st.lastDownAt = r.ts;
+        // rows 按 ts ASC，最后写入即最新一条
+        st.latest = {
+          ts: r.ts,
+          type: p.type === 'http' ? 'http' : 'tcp',
+          code: typeof p.code === 'number' ? p.code : null,
+          cert_days: typeof p.cert_days === 'number' ? p.cert_days : null
+        };
+      }
     }
   }
   if (PROBES_DOWNSAMPLE) {
@@ -954,6 +982,29 @@ router.get('/public/agents/:id/probes', (req, res) => {
         return { ts: b.ts, ms: b.ms, ok: b.ok, loss: b.loss };
       });
     }
+  }
+
+  if (wantAvail) {
+    const availability = {};
+    for (const [label, st] of Object.entries(stats)) {
+      availability[label] = {
+        // 保留 1 位小数：99.9%/99.95% 的差异对可用性判断有意义，整数会把它们抹平。
+        up_pct: st.samples ? Math.round((st.up / st.samples) * 1000) / 10 : null,
+        samples: st.samples,
+        down_samples: st.samples - st.up,
+        avg_ms: st.msCnt ? Math.round((st.msSum / st.msCnt) * 10) / 10 : null,
+        max_ms: st.maxMs,
+        last_down_at: st.lastDownAt,
+        // 窗口内全部失败 ≠ 「0% 可用」：多半是目标本身不可达（运营商 DNS 拒 TCP 等），
+        // 前端据此显示「不可达」，避免被误判成探测链路故障。
+        unreachable: st.samples > 0 && st.up === 0,
+        type: st.latest ? st.latest.type : 'tcp',
+        code: st.latest ? st.latest.code : null,
+        cert_days: st.latest ? st.latest.cert_days : null,
+        cert_ts: st.latest ? st.latest.ts : null
+      };
+    }
+    return res.json({ series, availability });
   }
   res.json(series);
 });
