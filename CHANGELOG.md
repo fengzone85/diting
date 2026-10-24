@@ -2,6 +2,60 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 流量记账防双计：接口集指纹 + 三段式累加（S1）
+
+修掉两类「月流量莫名跳涨」：一是 Linux 把 `docker0/veth/br-*` 等虚拟接口一起累加，
+新建一个已运行数周的网桥会把它的生命周期计数当成本期流量；二是容器/隧道双计与
+重启后的计数器归零没有判别依据。
+
+### 说明
+
+- **受控端接口过滤**（默认开）：按 monitor 同一套规则排除 `lo/docker/veth/br-/virbr/tap/
+  tun/wg/tailscale/cni/flannel/podman/...`、堆叠接口（`bond/br/vlan/vmbr/pppoe-`、名字含 `.`）、
+  以及 sysfs 能判定的网桥/网桥端口/隧道（`DEVTYPE`、`lower_*`、`brport`、隧道 type）。
+  `NET_IFACE_FILTER=0` 回退旧口径；`NET_IFACE_ONLY=eth0,wg0` 白名单优先于一切内置规则
+  （隧道即唯一上行的节点必须显式指定，否则会被排除到 0）。Windows 本轮只排除 loopback。
+- **接口集指纹 `net_epoch`**：`bootID/digest`（FNV-1a 对排序后的接口名集合）。Linux 取
+  `/proc/sys/kernel/random/boot_id`；Windows 为 `MachineGuid@开机时间`。
+- **服务端三段式记账**（对齐 monitor `db.rs`）：boot 段变化且 `booted > last_ts` → 离线期重启，
+  整段 since-boot 补账；接口集变化 → 只对齐基线（新接口的生命周期计数不计入）；
+  首报/状态丢失 → 只对齐基线；其余正常累加。`rotate=0`（绝对累计）只跟随绝对值，绝不叠加。
+- **新周期首报也记账**：`used = delta`（此前丢弃，每个周期起点少记一个上报间隔）。
+
+### ⚠️ 行为变更
+
+- Linux 默认不再统计虚拟接口：升级后月流量会**变小**（原本被双计的部分消失），这是预期。
+- 首个带 `net_epoch` 的上报会触发一次基线对齐：`month_rotate>0` 的节点会丢约一个上报间隔
+  的流量；`rotate=0` 节点无影响。
+- 升级顺序：**先服务端后受控端**；老 agent（无 `net_epoch`）继续走原 delta 逻辑，行为不变。
+- 新增受控端环境变量 `NET_IFACE_FILTER` / `NET_IFACE_ONLY`。
+## 2026-10-24 小时级历史折叠（S2 第一段）
+
+为「明细只留 7 天、长窗口仍能查 30 天」打地基。按方案的两段灰度，本段**只折叠**：
+不删除明细、不改任何查询路由，用于验证折叠值是否正确。
+
+### 说明
+
+- 新表 `metrics_hour`（`WITHOUT ROWID`，主键 `agent_id + hour_ts`）+ `hour_ts` 索引；
+  与明细并存，`metrics` 的读取路径本段完全不变。
+- `src/rollup.js`：整点对齐定时 + **启动即追赶**（从水位线折到「已封口」的最新小时，
+  每 24 小时让出一次事件循环）；`METRICS_ROLLUP_ENABLED=0` 可整段关闭。
+- 水位线 `metrics_rolled` 存 `admin_config`；**每小时一个事务**（折叠 + probes + 水位线原子提交），
+  迟到容忍 `LATE = 1h + 1min`（该小时不再可能有新数据才折）。
+- 折叠口径：`n = COUNT(*)`、均值 `AVG`、峰值 `MAX`；**计费曲线（net_rx_month/net_tx_month）
+  取小时末行**（AVG 会让月累计曲线回退）。
+- `probes_hour`（与 F4 协调后的结构）：`{ms_avg, loss_avg, n, n_ms, n_loss, n_ok, cert_min, type}`
+  —— `ms/loss` 为 null 的样本不计入对应均值，`n_ok`/`cert_min` 让 30 天可用率与证书倒计时
+  在折叠层仍可追溯（F4 已合入，必须保留这两项）。
+- 删除节点：`metrics_hour` 刻意不声明 FK，物理删除时由 `purgeDeletedAgents()` 显式清理（F11 软删流程）。
+
+### ⚠️ 注意事项（本段）
+
+- 本段**不删除明细**：`metrics` 仍按 `RETENTION_DAYS` 全量保留，磁盘占用会额外增加小时行。
+- 查询仍是明细口径，**性能与结果本段不变**；长窗口提速与明细瘦身在第二段（prune 分批 +
+  `metrics_hour`/`metrics` UNION ALL 合并读 + 首末点覆盖）落地。
+- `metrics_hour` 不回填超出 `RETENTION_DAYS` 的旧明细（水位线直接抬到保留窗口起点）。
+
 ## 2026-10-24 探测增强：HTTP/TLS 证书探测 + 可用率聚合（F4）
 
 受控端探测目标新增 HTTP(S) 语法，服务端补可用率聚合与证书到期告警。

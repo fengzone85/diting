@@ -255,6 +255,8 @@ diting/
 | `INTERVAL` | 否 | `20`（Docker 镜像 / Windows 为 `15`） | 上报间隔（秒） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]` TCP 或 `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」 |
+| `NET_IFACE_FILTER` | 否 | `1` | 网络计数接口过滤（S1）：`0` 回退旧口径（全部非 lo 接口）。默认排除 docker/veth/br-/bond/vlan/隧道等虚拟接口，避免网桥/容器的生命周期计数被当成本期流量 |
+| `NET_IFACE_ONLY` | 否 | — | 接口白名单（逗号分隔的完整接口名）：非空时只统计这些接口、忽略全部内置排除规则。隧道即唯一上行的节点（如 WireGuard 出口 VPS）必须用它，否则流量会被归零 |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |

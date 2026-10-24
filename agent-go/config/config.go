@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,10 @@ type Config struct {
 	Interval     time.Duration // 固定模式间隔（ADAPTIVE=false 时生效）
 	DiskPath     string
 	ProbeTargets string
+	// 网络口径（S1）：NET_IFACE_FILTER 默认开；NET_IFACE_ONLY 为逗号分隔白名单
+	// （非空时只统计这些接口，忽略全部内置排除规则）。
+	NetIfaceFilter bool
+	NetIfaceOnly   string
 	// MonthRotate：Komari 兼容流量重置日（0=绝对累计，1–31=周期重置日；越界回落 0）。
 	MonthRotate  int
 	Debug        bool
@@ -52,6 +57,17 @@ func Load() (*Config, error) {
 	} else {
 		cfg.ProbeTargets = "CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8"
 	}
+
+	// S1 网络接口过滤：NET_IFACE_FILTER=0/false/off 关闭（回退旧口径：全部非 lo 接口）；
+	// NET_IFACE_ONLY 为逗号分隔白名单，非空时忽略全部内置排除规则。
+	cfg.NetIfaceFilter = true
+	if v, ok := os.LookupEnv("NET_IFACE_FILTER"); ok {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "0", "false", "off", "no":
+			cfg.NetIfaceFilter = false
+		}
+	}
+	cfg.NetIfaceOnly = strings.TrimSpace(os.Getenv("NET_IFACE_ONLY"))
 
 	// MonthRotate：优先 MONTH_ROTATE，兼容 Komari 别名 AGENT_MONTH_ROTATE；取第一个非空值，非法/越界回落 0。
 	cfg.MonthRotate = getEnvRotate("MONTH_ROTATE", "AGENT_MONTH_ROTATE")

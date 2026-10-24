@@ -13,6 +13,7 @@ import (
 // 内部持有前次样本（CPU/网络/磁盘 IO），用于算差值。
 type linuxCollector struct {
 	diskPath     string
+	netOpts      NetIfaceOptions
 	prevCPU      cpuSample
 	prevNet      *netSample
 	prevNetTime  time.Time
@@ -32,8 +33,8 @@ type diskIOSample struct {
 
 // NewCollector 创建并初始化采集器。
 // 构造时 prime 一次 CPU 样本（阻塞 ~100ms），与 Python Collector.__init__ 一致。
-func NewCollector(diskPath string) Collector {
-	c := &linuxCollector{diskPath: diskPath}
+func NewCollector(diskPath string, netOpts NetIfaceOptions) Collector {
+	c := &linuxCollector{diskPath: diskPath, netOpts: netOpts}
 	// Prime CPU sample
 	c.prevCPU, _ = readCPUSample()
 	if c.prevCPU.total > 0 {
@@ -82,8 +83,8 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 	// 进程数（仅计数：/proc 下纯数字目录数）
 	procCount := processCount()
 
-	// 网络
-	rx, tx := netTotals()
+	// 网络（S1：过滤后再累加；同时记录参与计数的接口集指纹）
+	rx, tx, netIfaces := netTotals(c.netOpts)
 	var rxRate, txRate float64
 	if c.prevNet != nil && !c.prevNetTime.IsZero() {
 		dt := now.Sub(c.prevNetTime).Seconds()
@@ -139,6 +140,7 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 		NetTxRate: txRate,
 		NetRx:     rx,
 		NetTx:     tx,
+		NetEpoch:  ifaceEpoch(bootID(), netIfaces),
 		DiskRRate: diskRRate,
 		DiskWRate: diskWRate,
 		Disks:     disks,

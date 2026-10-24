@@ -147,6 +147,7 @@ type netSample struct {
 // windowsCollector 是 Windows 平台采集器，内部持有 CPU/网络前次样本与 PDH 句柄。
 type windowsCollector struct {
 	diskPath    string // 仅保留签名兼容；Windows 顶层盘 = 全部固定盘求和（对齐 Python），不用此字段
+	netOpts     NetIfaceOptions
 	prevCPU     cpuSample
 	prevNet     *netSample
 	prevNetTime time.Time
@@ -155,8 +156,8 @@ type windowsCollector struct {
 
 // NewCollector 创建 Windows 采集器（与 linux.go 同名，build tag 互斥）。
 // 构造时 prime 一次 CPU 样本（阻塞 ~100ms），与 Python Collector.__init__ 一致。
-func NewCollector(diskPath string) Collector {
-	c := &windowsCollector{diskPath: diskPath, pdhIO: newPdhDiskIO()}
+func NewCollector(diskPath string, netOpts NetIfaceOptions) Collector {
+	c := &windowsCollector{diskPath: diskPath, netOpts: netOpts, pdhIO: newPdhDiskIO()}
 	c.prevCPU, _ = readWinCPUSample()
 	if c.prevCPU.total() > 0 {
 		time.Sleep(100 * time.Millisecond)
@@ -204,8 +205,8 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 	processCount := c.pdhIO.Processes()
 	temp := c.pdhIO.TempC()
 
-	// 网络：全部非 loopback 接口求和（GetIfEntry2，64 位计数）
-	rx, tx, err := winNetTotals()
+	// 网络：非 loopback 接口求和（GetIfEntry2，64 位计数）；S1 起同时返回接口集供 epoch
+	rx, tx, netIfaces, err := winNetTotals(c.netOpts)
 	if err != nil {
 		return nil, fmt.Errorf("GetIfEntry2: %w", err)
 	}
@@ -258,6 +259,7 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 		NetTxRate: txRate,
 		NetRx:     rx,
 		NetTx:     tx,
+		NetEpoch:  ifaceEpoch(bootID(), netIfaces),
 		// 磁盘 IO 速率：pdh.dll 直调 \PhysicalDisk(_Total)\Disk Read|Write
 		// Bytes/sec（零依赖，恢复 Python psutil.disk_io_counters 既有能力；
 		// 2026-10-12 修订 M2 时的"不抄 PDH"决策——彼时误判为采集面扩张）。
@@ -366,18 +368,28 @@ func winDiskList() []DiskInfo {
 	return out
 }
 
-// winNetTotals 求和全部非 loopback 接口的收发字节（GetIfEntry2，64 位计数）。
+// winNetTotals 求和非 loopback 接口的收发字节（GetIfEntry2，64 位计数）。
 // 对齐 Python psutil.net_io_counters()（排除 loopback）。
-func winNetTotals() (uint64, uint64, error) {
+//
+// S1：返回值额外带上被计入的接口名（供 net_epoch）。Windows 本轮**不启用**内置
+// 排除规则（Hyper-V vSwitch 的计数语义需真机验证），只排除 loopback；显式
+// NET_IFACE_ONLY 仍生效（白名单优先于一切规则）。
+func winNetTotals(opts NetIfaceOptions) (uint64, uint64, []string, error) {
 	// 标准库 net.Interfaces 在 Windows 底层即 GetAdaptersAddresses（iphlpapi），
 	// 零依赖拿到接口索引列表；再用 GetIfEntry2 取 64 位计数。
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	var rx, tx uint64
-	found := false
+	var names []string
 	for _, ifi := range ifaces {
+		if ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if len(opts.Only) > 0 && !ifaceInList(opts.Only, ifi.Name) {
+			continue
+		}
 		row := mibIfRow2{InterfaceIndex: uint32(ifi.Index)}
 		r, _, _ := procGetIfEntry2.Call(uintptr(unsafe.Pointer(&row)))
 		if r != 0 {
@@ -388,12 +400,12 @@ func winNetTotals() (uint64, uint64, error) {
 		}
 		rx += row.InOctets
 		tx += row.OutOctets
-		found = true
+		names = append(names, ifi.Name)
 	}
-	if !found {
-		return 0, 0, errors.New("no interface data")
+	if len(names) == 0 {
+		return 0, 0, nil, errors.New("no interface data")
 	}
-	return rx, tx, nil
+	return rx, tx, names, nil
 }
 
 // winOsName 取产品名口径，与 Python os_name()（L-9 修正后）一致：
