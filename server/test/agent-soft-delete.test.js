@@ -114,6 +114,27 @@ test('F11：purge 只清过期软删，按序清状态表并由 CASCADE 带走�
   assert.ok(db.getLatestMetric(fresh.id), '未过期节点 metrics 保留');
 });
 
+test('F11/F7.1：purge 事务化——中途失败整体回滚，不留半清理', () => {
+  const a = mkAgent('soft-tx');
+  db.deleteAgent(a.id);
+  db.db.prepare('UPDATE agents SET deleted_at=? WHERE id=?').run(Date.now() - 8 * DAY, a.id);
+
+  // 在第二条清理语句（alert_overrides）上制造失败：事务应整体回滚。
+  db.db.exec("CREATE TRIGGER purge_tx_boom BEFORE DELETE ON alert_overrides BEGIN SELECT RAISE(ABORT, 'purge-tx-boom'); END");
+  assert.throws(() => db.purgeDeletedAgents(), /purge-tx-boom/, 'purge 应把底层错误抛出');
+  db.db.exec('DROP TRIGGER purge_tx_boom');
+
+  assert.ok(db.getAgentIncludingDeleted(a.id), '回滚后 agents 行仍在');
+  assert.ok(db.getAlertState(a.id, 'offline'), '回滚后 alert_state 仍在（事务前序语句被撤销）');
+  assert.ok(db.getAlertOverride(a.id), '回滚后 alert_overrides 仍在');
+  assert.ok(db.getLatestMetric(a.id), '回滚后 metrics 仍在');
+
+  // 修复后重跑：完整清理
+  assert.ok(db.purgeDeletedAgents() >= 1);
+  assert.strictEqual(db.getAgentIncludingDeleted(a.id), undefined, '重跑后物理删除');
+  assert.strictEqual(db.getAlertOverride(a.id), null, '重跑后覆盖行清除');
+});
+
 test('F11：API —— 删除后进入最近删除，restore 端点恢复，重复恢复 404', async () => {
   const a = mkAgent('soft-api');
 
