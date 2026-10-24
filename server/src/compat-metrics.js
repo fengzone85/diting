@@ -134,7 +134,9 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
             if (pk === 'ping.latency_ms') {
               if (typeof v.ms === 'number') points.push({ time: new Date(r.ts).toISOString(), value: v.ms, count: 1 });
             } else if (pk === 'ping.loss') {
-              points.push({ time: new Date(r.ts).toISOString(), value: Number(v.loss) || 0, count: 1 });
+              // S3：无采样（loss=null）不出点，避免被压成 0% 丢包
+              if (v.loss == null) continue;
+              points.push({ time: new Date(r.ts).toISOString(), value: Number(v.loss), count: 1 });
             }
           } catch (_) {}
         }

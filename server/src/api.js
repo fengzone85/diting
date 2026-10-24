@@ -903,16 +903,15 @@ router.get('/public/agents/:id/probes', (req, res) => {
     if (!probes || typeof probes !== 'object') continue;
     for (const [label, p] of Object.entries(probes)) {
       if (!p || typeof p !== 'object') continue;
-      const ok = p.ok !== false;
+      // S3 三态：ok=null 表示无采样（解析超时），既不是成功也不是失败
+      const ok = (p.ok === null || p.ok === undefined) ? null : p.ok !== false;
       const ms = typeof p.ms === 'number' ? Math.round(p.ms) : null;
+      const loss = typeof p.loss === 'number'
+        ? Math.round(p.loss)
+        : (p.loss === null ? null : (ok === false ? 100 : (ok ? 0 : null)));
       if (!series[label]) series[label] = [];
-      series[label].push({
-        ts: r.ts,
-        ms,
-        ok,
-        loss: typeof p.loss === 'number' ? Math.round(p.loss) : (ok ? 0 : 100)
-      });
-      if (stats) {
+      series[label].push({ ts: r.ts, ms, ok, loss });
+      if (stats && ok !== null) {
         const st = stats[label] || (stats[label] = {
           samples: 0, up: 0, msSum: 0, msCnt: 0, maxMs: null, lastDownAt: null, latest: null
         });
@@ -923,7 +922,7 @@ router.get('/public/agents/:id/probes', (req, res) => {
           st.msCnt++;
           if (st.maxMs === null || ms > st.maxMs) st.maxMs = ms;
         }
-        if (!ok) st.lastDownAt = r.ts;
+        if (ok === false) st.lastDownAt = r.ts;
         // rows 按 ts ASC，最后写入即最新一条
         st.latest = {
           ts: r.ts,
@@ -954,18 +953,19 @@ router.get('/public/agents/:id/probes', (req, res) => {
             ts: pt.ts,
             ms: pt.ms, // last 模式用桶内第一个点
             ok: pt.ok, loss: pt.loss,
-            // avg 累加器
+            // avg 累加器：ok 只统计有采样点（ok!=null），loss 只对有值样本求均值
             sumMs: pt.ms != null ? pt.ms : 0, cntMs: pt.ms != null ? 1 : 0,
-            okCnt: pt.ok ? 1 : 0, sumLoss: pt.loss != null ? pt.loss : 0, cnt: 1
+            okCnt: pt.ok === true ? 1 : 0, sampCnt: pt.ok === null ? 0 : 1,
+            sumLoss: pt.loss != null ? pt.loss : 0, cntLoss: pt.loss != null ? 1 : 0
           });
           order.push(key);
         } else {
           const cur = map.get(key);
           cur.ts = pt.ts;
           if (pt.ms != null) { cur.sumMs += pt.ms; cur.cntMs++; }
-          if (pt.ok) cur.okCnt++;
-          if (pt.loss != null) cur.sumLoss += pt.loss;
-          cur.cnt++;
+          if (pt.ok === true) cur.okCnt++;
+          if (pt.ok !== null) cur.sampCnt++;
+          if (pt.loss != null) { cur.sumLoss += pt.loss; cur.cntLoss++; }
           if (agg === 'last' && pt.ms != null) cur.ms = pt.ms; // last 模式覆盖为桶内最后一个有效点
         }
       }
@@ -975,8 +975,9 @@ router.get('/public/agents/:id/probes', (req, res) => {
           return {
             ts: b.ts,
             ms: b.cntMs ? Math.round(b.sumMs / b.cntMs) : null,
-            ok: b.okCnt > 0,
-            loss: Math.round(b.sumLoss / b.cnt)
+            // 桶内全无采样 → ok=null（不是失败）；否则有任一成功即视为可达
+            ok: b.sampCnt ? b.okCnt > 0 : null,
+            loss: b.cntLoss ? Math.round(b.sumLoss / b.cntLoss) : null
           };
         }
         return { ts: b.ts, ms: b.ms, ok: b.ok, loss: b.loss };

@@ -299,7 +299,7 @@ const trafficEstimate = (db, agentId, since) => {
 // 与明细 probes 的 {ms,ok,loss,type,code,cert_days} 都折算成同一累加器：
 //   ms 以 n_ms 加权、loss 以 n_loss 加权、ok 用 n_ok 计数，cert 取最小。
 function probeAccumulator() {
-  return { ts: 0, msSum: 0, nMs: 0, lossSum: 0, nLoss: 0, n: 0, nOk: 0, certMin: null, http: false, code: null };
+  return { ts: 0, msSum: 0, nMs: 0, lossSum: 0, nLoss: 0, n: 0, nOk: 0, nDown: 0, certMin: null, http: false, code: null };
 }
 
 function pushDetailProbe(acc, p, ts) {
@@ -307,7 +307,9 @@ function pushDetailProbe(acc, p, ts) {
   acc.n++;
   if (typeof p.ms === 'number' && Number.isFinite(p.ms)) { acc.msSum += p.ms; acc.nMs++; }
   if (typeof p.loss === 'number' && Number.isFinite(p.loss)) { acc.lossSum += p.loss; acc.nLoss++; }
-  if (p.ok !== false) acc.nOk++;
+  // 三态：ok=null 既不计成功也不计失败
+  if (p.ok === true) acc.nOk++;
+  else if (p.ok === false) acc.nDown++;
   if (typeof p.cert_days === 'number' && Number.isFinite(p.cert_days)) {
     acc.certMin = acc.certMin === null ? p.cert_days : Math.min(acc.certMin, p.cert_days);
   }
@@ -325,6 +327,9 @@ function pushHourProbe(acc, p, ts) {
   const nLoss = Number(p.n_loss) || 0;
   if (nLoss > 0 && typeof p.loss_avg === 'number') { acc.lossSum += p.loss_avg * nLoss; acc.nLoss += nLoss; }
   acc.nOk += Number(p.n_ok) || 0;
+  // n_samp 缺失 = 本列是 S3 之前折叠的（当时 ok 恒为布尔），按全部有采样处理
+  const nSamp = Number.isFinite(Number(p.n_samp)) ? Number(p.n_samp) : n;
+  acc.nDown += Math.max(0, nSamp - (Number(p.n_ok) || 0));
   if (typeof p.cert_min === 'number' && Number.isFinite(p.cert_min)) {
     acc.certMin = acc.certMin === null ? p.cert_min : Math.min(acc.certMin, p.cert_min);
   }
@@ -333,10 +338,12 @@ function pushHourProbe(acc, p, ts) {
 }
 
 function finishProbe(acc) {
+  // 三态：没有任何 ok 布尔样本 → ok=null（无采样），loss 也保持 null
+  const sampled = acc.nOk + acc.nDown;
   const out = {
     ms: acc.nMs ? Math.round((acc.msSum / acc.nMs) * 10) / 10 : null,
-    ok: acc.nOk > 0,
-    loss: acc.nLoss ? Math.round(acc.lossSum / acc.nLoss) : (acc.nOk > 0 ? 0 : 100),
+    ok: sampled === 0 ? null : acc.nOk > 0,
+    loss: acc.nLoss ? Math.round(acc.lossSum / acc.nLoss) : (sampled === 0 ? null : (acc.nOk > 0 ? 0 : 100)),
   };
   if (acc.http) out.type = 'http';
   if (acc.code !== null) out.code = acc.code;

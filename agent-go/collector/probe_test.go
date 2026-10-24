@@ -2,9 +2,11 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -81,7 +83,7 @@ func TestProbeOneSuccess(t *testing.T) {
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	ms, ok, loss := probeOne("127.0.0.1", port, time.Second, 5*time.Second)
-	if !ok || ms == nil || loss == nil || *loss != 0 {
+	if ok == nil || !*ok || ms == nil || loss == nil || *loss != 0 {
 		t.Fatalf("probeOne ok=%v ms=%v loss=%v, want ok=true loss=0", ok, ms, loss)
 	}
 	if *ms < 0 || *ms > 1000 {
@@ -103,7 +105,7 @@ func TestProbeOneTargetPortFirst(t *testing.T) {
 	// 预算恰好只够 1 次拨号：若目标端口在首位则立即成功；
 	// 若回归（443 在首位），首次 dial 100ms 超时耗尽预算 → 失败。
 	ms, ok, loss := probeOne("127.0.0.1", port, 100*time.Millisecond, 120*time.Millisecond)
-	if !ok || ms == nil || loss == nil || *loss != 0 {
+	if ok == nil || !*ok || ms == nil || loss == nil || *loss != 0 {
 		t.Fatalf("target port must be tried first: ok=%v ms=%v loss=%v", ok, ms, loss)
 	}
 }
@@ -119,7 +121,7 @@ func TestProbeOneBudget(t *testing.T) {
 	t0 := time.Now()
 	ms, ok, loss := probeOne("192.0.2.1", 53, timeout, budget)
 	elapsed := time.Since(t0)
-	if ok || ms != nil || loss == nil || *loss != 100 {
+	if ok == nil || *ok || ms != nil || loss == nil || *loss != 100 {
 		t.Fatalf("probeOne ok=%v ms=%v loss=%v, want ok=false loss=100", ok, ms, loss)
 	}
 	if elapsed > time.Second {
@@ -139,7 +141,7 @@ func TestProbeHTTP(t *testing.T) {
 		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
 	}
 	p := probeHTTP(tgt)
-	if !p.Ok || p.Type != "http" || p.Code == nil || *p.Code != 200 {
+	if p.Ok == nil || !*p.Ok || p.Type != "http" || p.Code == nil || *p.Code != 200 {
 		t.Fatalf("probeHTTP = %+v, want ok/http/200", p)
 	}
 	if p.Ms == nil || *p.Ms < 0 || p.Loss == nil || *p.Loss != 0 {
@@ -162,7 +164,7 @@ func TestProbeHTTPStatusFail(t *testing.T) {
 		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
 	}
 	p := probeHTTP(tgt)
-	if p.Ok || p.Code == nil || *p.Code != 500 {
+	if p.Ok == nil || *p.Ok || p.Code == nil || *p.Code != 500 {
 		t.Fatalf("probeHTTP = %+v, want not-ok/500", p)
 	}
 	if p.Loss == nil || *p.Loss != 100 || p.Ms == nil {
@@ -182,7 +184,7 @@ func TestProbeHTTPSCertDays(t *testing.T) {
 		t.Fatalf("parseHTTPTarget(%q) failed", srv.URL)
 	}
 	p := probeHTTP(tgt)
-	if !p.Ok || p.Type != "http" {
+	if p.Ok == nil || !*p.Ok || p.Type != "http" {
 		t.Fatalf("probeHTTP = %+v, want ok", p)
 	}
 	if p.CertDays == nil || *p.CertDays <= 0 || *p.CertDays > 3650 {
@@ -234,7 +236,7 @@ func TestProbeRunnerHTTP(t *testing.T) {
 		snap := r.Snapshot()
 		if snap != nil {
 			v, exists := snap["WEB"]
-			if !exists || !v.Ok || v.Type != "http" || v.Code == nil || *v.Code != 200 {
+			if !exists || v.Ok == nil || !*v.Ok || v.Type != "http" || v.Code == nil || *v.Code != 200 {
 				t.Fatalf("WEB probe = %+v, want ok/http/200", v)
 			}
 			return
@@ -272,12 +274,12 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 	for {
 		snap := r.Snapshot()
 		if snap != nil {
-			if v, ok := snap["UP"]; !ok || !v.Ok || v.Ms == nil {
+			if v, ok := snap["UP"]; !ok || v.Ok == nil || !*v.Ok || v.Ms == nil {
 				t.Fatalf("UP probe = %+v, want ok", v)
 			}
 			// 拷贝语义：改动返回值不影响内部快照
 			snap["UP"] = Probe{}
-			if r.Snapshot()["UP"].Ok != true {
+			if o := r.Snapshot()["UP"].Ok; o == nil || !*o {
 				t.Fatal("Snapshot must return a copy")
 			}
 			break
@@ -286,5 +288,32 @@ func TestProbeRunnerSnapshot(t *testing.T) {
 			t.Fatal("Snapshot still nil after 5s")
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestProbeMarshalTriState 三态序列化：无采样必须是 {"ok":null,"ms":null,"loss":null}，
+// 三个字段都要在（Ok 不能加 omitempty，否则 null 会被整个省略）。
+func TestProbeMarshalTriState(t *testing.T) {
+	b, err := json.Marshal(Probe{})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+	for _, want := range []string{`"ok":null`, `"ms":null`, `"loss":null`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("marshal Probe{} = %s, want %s", got, want)
+		}
+	}
+}
+
+// TestProbeOneResolveTimeoutNoSample 解析超时 → 无采样（ok/ms/loss 全 nil），
+// 与「解析报错 → 不可达」严格区分。
+func TestProbeOneResolveTimeoutNoSample(t *testing.T) {
+	old := probeResolveTimeout
+	probeResolveTimeout = time.Nanosecond
+	defer func() { probeResolveTimeout = old }()
+	ms, ok, loss := probeOne("diting-resolve-timeout.invalid", 53, 100*time.Millisecond, 500*time.Millisecond)
+	if ms != nil || ok != nil || loss != nil {
+		t.Fatalf("resolve timeout = (%v,%v,%v), want (nil,nil,nil)", ms, ok, loss)
 	}
 }
