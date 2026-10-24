@@ -55,6 +55,7 @@ interface UiSettings {
   backup_schedule?: 'off' | 'daily' | 'weekly';
   backup_hour?: number;
   backup_keep_days?: number;
+  backup_keep_count?: number;
   backup_compress?: boolean;
 }
 
@@ -110,6 +111,7 @@ function resetLocal() {
       backup_schedule: 'off',
       backup_hour: 3,
       backup_keep_days: 14,
+      backup_keep_count: 10,
       backup_compress: true,
       // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）。
       // 必须在这里给默认值：模板 v-model="local.ui.alert!.cpu_pct" 会被立即求值，
@@ -213,6 +215,7 @@ function cloneSettings(src: Settings): SettingsForm {
       backup_schedule: ui.backup_schedule || 'off',
       backup_hour: Number.isFinite(Number(ui.backup_hour)) ? Number(ui.backup_hour) : 3,
       backup_keep_days: Number.isFinite(Number(ui.backup_keep_days)) ? Number(ui.backup_keep_days) : 14,
+      backup_keep_count: Number.isFinite(Number(ui.backup_keep_count)) ? Number(ui.backup_keep_count) : 10,
       // 注意：后端默认 true，未配置时也应显示开启，故用 !== false 判断
       backup_compress: ui.backup_compress !== false,
     },
@@ -767,6 +770,12 @@ async function resetGroupAlert() {
               :label="t('settings.backupKeepDays')"
               type="number"
               :hint="t('settings.backupKeepDaysHint')"
+            />
+            <FormInput
+              v-model="local.ui.backup_keep_count"
+              :label="t('settings.backupKeepCount')"
+              type="number"
+              :hint="t('settings.backupKeepCountHint')"
             />
             <FormInput
               v-model="local.ui.backup_compress"

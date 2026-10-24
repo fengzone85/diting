@@ -325,6 +325,8 @@ export const zhCN: Record<string, string> = {
   'settings.backupHour': '执行小时（0-23）',
   'settings.backupHourHint': '按服务器本地时区。',
   'settings.backupKeepDays': '保留天数',
+  'settings.backupKeepCount': '保留份数',
+  'settings.backupKeepCountHint': '最多保留多少份 monitor_* 备份（默认 10，0 = 不限）；按时间清理最旧，pre_restore_* 回滚点不受影响。',
   'settings.backupKeepDaysHint': '超期自动清理最旧的备份；0 = 不自动清理。',
   'settings.backupCompress': 'gzip 压缩备份',
   'settings.backupCompressHint': '强烈建议开启：数据库含大量空闲页且数值重复度高，实测可压到原体积约 20%（1.5G → 约 320M）。',

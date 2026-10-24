@@ -97,8 +97,9 @@ sudo bash diting.sh --backup-schedule status
 sudo bash diting.sh --backup-schedule uninstall
 ```
 
-备份默认压缩（优先 `pigz`，无则回退 `gzip`；体积约为库的 20%）并按保留天数轮转。
-后台「设置 → 数据库备份」可调整**周期（off/daily/weekly）、保留天数、是否压缩**——这三项由 cron 里的
+备份默认压缩（优先 `pigz`，无则回退 `gzip`；体积约为库的 20%），并按**保留天数 + 保留份数**
+双重轮转（份数默认 10、`0` = 不限；只统计 `monitor_*`，`pre_restore_*` 回滚点不自动清理）。
+后台「设置 → 数据库备份」可调整**周期（off/daily/weekly）、保留天数、保留份数、是否压缩**——这四项由 cron 里的
 `BACKUP_AUTO=1 diting.sh --backup` 实时读取，改完即时生效、无需重建定时任务；
 但**执行小时**在 `--backup-schedule install` 时写死进 cron（默认凌晨 3 点，`diting.sh:1234-1260`），
 后台改「执行小时」不会改变实际备份时刻，需手动 `crontab -e` 改那一行或重跑 install。

@@ -894,6 +894,11 @@ DB_BACKUP_DIR="${DB_BACKUP_DIR:-}"
 # 备份保留天数（默认 14）。超出时「自动备份」会清理最旧的 monitor_*.db；
 # =0 关闭清理（永不自动删除）。可用 --keep-days N 覆盖，或环境变量 DB_BACKUP_KEEP_DAYS。
 DB_BACKUP_KEEP_DAYS="${DB_BACKUP_KEEP_DAYS:-14}"
+# 备份保留份数（F8.4，默认 10，0 = 不限）。与「保留天数」并存：先按天清理，
+# 再按份数兜底 —— 天数管不住「一天手动点很多次」或「上传件堆积」，份数能兜住。
+# 只作用于 monitor_*（含上传件：统一归一化为该前缀）；pre_restore_* 是恢复回滚点，
+# 按既有约定不自动清理。
+DB_BACKUP_KEEP_COUNT="${DB_BACKUP_KEEP_COUNT:-10}"
 # 是否压缩备份（gzip，默认开）。SQLite 逐页拷贝会带上已删数据留下的空闲页，
 # 且内容为高重复数值，实测可压到原体积约 20%（1.5G → ~300M），是控制占用最有效的手段。
 # 关闭：DB_BACKUP_COMPRESS=0 或 --no-compress（环境无 gzip 时自动跳过）。
@@ -1322,6 +1327,12 @@ do_backup() {
         if [[ "$prune_out" =~ ([0-9]+)[[:space:]]*(个|expired) ]]; then
             pruned="${BASH_REMATCH[1]}"
         fi
+        # F8.4：份数上限（与保留天数并存）。天数管不住「一天多次手动备份」和
+        # 「上传件堆积」，份数是占用兜底；源目录与可见目录都要执行。
+        local keep_count=""
+        keep_count="$(db_ui_field_get_soft backup_keep_count 2>/dev/null || true)"
+        keep_count="${keep_count:-${DB_BACKUP_KEEP_COUNT:-10}}"
+        prune_backups_count "$keep_count" || true
         # 可见目录（BACKUP_VISIBLE_DIR）的副本同样要轮转：sync_to_visible_dir 每次
         # 备份都复制一份，若不清理会与源目录一起无限增长（占用翻倍）。
         # prune_backups 以 DB_BACKUP_DIR 为目标，这里临时切换后立即还原。
@@ -1330,6 +1341,7 @@ do_backup() {
             local saved_dir="$DB_BACKUP_DIR"
             DB_BACKUP_DIR="$vis"
             prune_backups "${keep_days:-$DB_BACKUP_KEEP_DAYS}" 2>/dev/null || true
+            prune_backups_count "$keep_count" 2>/dev/null || true
             DB_BACKUP_DIR="$saved_dir"
         fi
     fi
@@ -1430,6 +1442,38 @@ prune_backups() {
     fi
     echo -e "${YELLOW}[信息] $(msg "bk.pruning")${NC}"
     local freed=0
+    for f in "${old[@]}"; do
+        local s; s="$(du -k "$f" 2>/dev/null | cut -f1)"; s="${s:-0}"
+        if rm -f "$f" 2>/dev/null; then
+            echo "       - $(basename "$f")"
+            freed=$((freed + s))
+        fi
+    done
+    echo -e "${GREEN}[OK]   $(msg "bk.pruned") ${#old[@]} $(msg "bk.pruned_unit")（~$((freed / 1024)) MB）${NC}"
+}
+
+# F8.4：按「份数」清理最旧的 monitor_*（与按天的 prune_backups 并存）。
+# 保留天数管不住一天多次手动备份/上传件堆积；份数上限是最后一道占用兜底。
+# keep<=0 表示不限；只统计/删除 monitor_*，pre_restore_* 是回滚点，永远不动。
+prune_backups_count() {
+    local keep="${1:-${DB_BACKUP_KEEP_COUNT:-10}}"
+    [[ -z "$keep" || "$keep" =~ ^[0-9]+$ ]] || keep="${DB_BACKUP_KEEP_COUNT:-10}"
+    [[ "${keep:-0}" -le 0 ]] && return 0
+    [[ -d "$DB_BACKUP_DIR" ]] || return 0
+
+    local -a files=()
+    local f
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && files+=("$f")
+    done < <(find "$DB_BACKUP_DIR" -maxdepth 1 -type f \( -name 'monitor_*.db' -o -name 'monitor_*.db.gz' \) \
+        -printf '%T@ %p\n' 2>/dev/null | sort -n | cut -d' ' -f2-)
+
+    local total=${#files[@]}
+    [[ "$total" -le "$keep" ]] && return 0
+
+    local -a old=("${files[@]:0:$((total - keep))}")
+    local freed=0
+    echo -e "${YELLOW}[信息] $(msg "bk.pruning")${NC}"
     for f in "${old[@]}"; do
         local s; s="$(du -k "$f" 2>/dev/null | cut -f1)"; s="${s:-0}"
         if rm -f "$f" 2>/dev/null; then

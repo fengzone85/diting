@@ -323,6 +323,8 @@ export const enUS: Record<string, string> = {
   'settings.backupHour': 'Hour (0-23)',
   'settings.backupHourHint': 'Server local time.',
   'settings.backupKeepDays': 'Retention (days)',
+  'settings.backupKeepCount': 'Keep copies',
+  'settings.backupKeepCountHint': 'Max monitor_* backups to keep (default 10, 0 = unlimited); oldest are pruned, pre_restore_* rollback points are never touched.',
   'settings.backupKeepDaysHint': 'Older backups are pruned automatically; 0 = never prune.',
   'settings.backupCompress': 'gzip compress backups',
   'settings.backupCompressHint': 'Strongly recommended: the DB carries many free pages with repetitive values — measured at ~20% of original size (1.5G -> ~320M).',
