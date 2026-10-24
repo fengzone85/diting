@@ -2,6 +2,22 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 diting.sh 支持原生 systemd 服务端控制
+
+原生化部署（`diting-server.service`）此前无法用脚本管理：菜单没有启停入口、`--status`
+只查 Docker compose，`sudo bash diting.sh` 对运行中的服务端完全无效。
+
+### 说明
+
+- 新增 `--start-server` / `--stop-server` / `--restart-server`，按部署形态自动分派：
+  systemd → `systemctl start/stop/restart diting-server`；Docker → `docker compose up -d/stop/restart server`。
+- 交互菜单新增「12) 服务端运行控制」（启动 / 停止 / 重启 / 查看状态）。
+- `--status` 自动识别形态：原生显示 `active`、端口（读 unit 工作目录的 `.env`）、PID、启动时间、工作目录；
+  Docker 分支行为不变。
+- 形态探测 **systemd 优先**（原生机器上常同时装了 docker 跑别的服务，反向判断会把原生实例误判成容器）；
+  非标准单元路径可用 `DITING_SERVER_UNIT_FILE` 覆盖。
+- 脚本版本 `1.1.9`（2026-10-24）。
+
 ## 2026-10-24 探测增强：HTTP/TLS 证书探测 + 可用率聚合（F4）
 
 受控端探测目标新增 HTTP(S) 语法，服务端补可用率聚合与证书到期告警。
