@@ -88,6 +88,16 @@ export interface Agent {
   };
 }
 
+// F11：最近删除（软删节点，7 天缓冲期内可恢复）
+export interface DeletedAgent {
+  id: string;
+  name: string;
+  hostname?: string;
+  version?: string;
+  deleted_at: number;
+  days_left: number;
+}
+
 // ---- S1/F1 告警规则覆盖 ----
 export interface AlertThresholds {
   offline_sec: number;

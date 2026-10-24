@@ -77,7 +77,9 @@ Content-Type: application/json
 | GET | `/api/agents/:id/metrics` | 节点指标时序 |
 | POST | `/api/agents` | 创建节点 |
 | PUT | `/api/agents/:id` | 编辑节点 |
-| DELETE | `/api/agents/:id` | 删除节点 |
+| DELETE | `/api/agents/:id` | 删除节点（软删：7 天缓冲，期间可恢复） |
+| GET | `/api/agents/deleted` | 最近删除（软删节点 + 剩余天数） |
+| POST | `/api/agents/:id/restore` | 恢复软删节点（7 天缓冲期内） |
 | POST | `/api/agents/:id/reset-token` | 重置 Token |
 | POST | `/api/agents/:id/renew` | 续期（计费周期顺延） |
 | GET | `/api/billing` | 计费总览 |

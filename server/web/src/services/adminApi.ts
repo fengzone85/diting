@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
+import type { Agent, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -40,6 +40,11 @@ export const adminApi = {
   updateAgent: (id: string, payload: Partial<Agent>) =>
     api.put<Agent>(`/api/agents/${encodeURIComponent(id)}`, payload),
   deleteAgent: (id: string) => api.del<void>(`/api/agents/${encodeURIComponent(id)}`),
+  // F11：最近删除（7 天缓冲）
+  listDeletedAgents: () =>
+    api.get<{ items: DeletedAgent[]; grace_days: number }>('/api/agents/deleted'),
+  restoreAgent: (id: string) =>
+    api.post<{ ok: boolean }>(`/api/agents/${encodeURIComponent(id)}/restore`, {}),
   resetToken: (id: string) =>
     api.post<{ ok: boolean; token: string; install: InstallCommands }>(`/api/agents/${encodeURIComponent(id)}/reset-token`, {}),
   renewAgent: (id: string) =>

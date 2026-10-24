@@ -231,14 +231,19 @@ test('未知节点：PUT 覆盖返回 404（不创建孤儿覆盖行）', async 
   assert.strictEqual(db.getAlertOverride('agt_not_exist'), null);
 });
 
-// ---- 6. 级联清理 ------------------------------------------------------------
+// ---- 6. 删除语义（F11 软删） ------------------------------------------------
 
-test('删除 agent 时同事务清理覆盖行（FK 不强制）', () => {
+test('软删保留覆盖行，物理清理时删除（F11）', () => {
   const a = db.createAgent({ name: 'cleanup-node' });
   db.upsertAlertOverride(a.id, { cpu_pct: 50 });
   assert.ok(db.getAlertOverride(a.id));
+  // F11：删除改为软删——覆盖行保留 7 天（恢复后告警冷却连续，不重复通知）。
   db.deleteAgent(a.id);
-  assert.strictEqual(db.getAlertOverride(a.id), null, '覆盖行应随 agent 删除');
+  assert.ok(db.getAlertOverride(a.id), '软删期间覆盖行应保留');
+  // 到期物理清理：显式删覆盖行，再删 agents 行（CASCADE 带走 metrics）。
+  db.db.prepare('UPDATE agents SET deleted_at=? WHERE id=?').run(Date.now() - 8 * 86400000, a.id);
+  db.purgeDeletedAgents();
+  assert.strictEqual(db.getAlertOverride(a.id), null, '物理清理后覆盖行应删除');
 });
 
 // ---- 7. 上线通知（S1/F1）---------------------------------------------------

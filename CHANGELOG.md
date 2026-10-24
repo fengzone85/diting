@@ -2,6 +2,22 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 节点删除改为软删（7 天缓冲）
+
+### ⚠️ 行为变更
+
+- **删除节点不再立即物理删除**：节点立即从面板 / 公开页 / 告警 / AI 统计中消失，但 `agents` 行与
+  全部历史（`metrics` / `traffic_state`）保留 **7 天**；期间可在「最近删除」一键恢复——身份、配置、
+  历史原样，恢复后最多 10 分钟自动重新上报（agent 对 401/403 只做 10 分钟退避、不会退出）。
+- **删除确认文案**：列表 / 批量 / 详情三处改为「身份与历史保留 7 天后自动清理」口径，不再提示「无法恢复」。
+- **新增 API**：`GET /api/agents/deleted`（最近删除，含剩余天数）、`POST /api/agents/:id/restore`（恢复）。
+  `DELETE /api/agents/:id` 响应兼容（200 + `grace_days: 7`），但实际执行软删。
+- **7 天后物理清理**：每小时 prune 顺带执行 `purgeDeletedAgents()`——先显式清 `alert_state` /
+  `alert_overrides`（以及存在时的 `metrics_hour`）与内存流量缓存，再删 `agents` 行，
+  由 FK CASCADE 带走 `metrics` / `traffic_state`；整条清理在一个事务内，失败整体回滚。
+- **软删期间告警冷却与覆盖保留**：`alert_state` / `alert_overrides` 不动，恢复后不会立刻重复通知。
+- **新增 `agents.deleted_at` 列**（`ALTER TABLE ADD COLUMN`，存量数据 NULL = 未删除，毫秒级）。
+
 ## 2026-10-22 安装向导（对照 komari）+ 管理员 Token 入库哈希 + 安装器端口 / 升级备份
 
 首次部署体验向 komari 对齐：未安装时全站 307 到 `/install`，管理员 Token 由向导生成且**只存 sha256 哈希**；

@@ -8,7 +8,7 @@ import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
-import type { InstallCommands, Agent } from '../../services/types';
+import type { InstallCommands, Agent, DeletedAgent } from '../../services/types';
 
 const { state } = useAdmin();
 const router = useRouter();
@@ -116,8 +116,38 @@ async function remove(id: string) {
     await adminApi.deleteAgent(id);
     selected.value.delete(id);
     await loadAdmin();
+    if (showDeleted.value) await loadDeleted();
   } catch (e) {
     error.value = (e as Error).message || t('agents.deleteFailed');
+  }
+}
+
+// F11：最近删除（软删节点，7 天缓冲期内可恢复）
+const showDeleted = ref(false);
+const deletedAgents = ref<DeletedAgent[]>([]);
+
+async function loadDeleted() {
+  try {
+    deletedAgents.value = (await adminApi.listDeletedAgents()).items;
+  } catch (e) {
+    error.value = (e as Error).message || t('agents.deleteFailed');
+  }
+}
+
+async function toggleDeleted() {
+  showDeleted.value = !showDeleted.value;
+  if (showDeleted.value) await loadDeleted();
+}
+
+async function restore(id: string) {
+  if (!confirm(t('agents.restoreConfirm'))) return;
+  try {
+    await adminApi.restoreAgent(id);
+    await Promise.all([loadDeleted(), loadAdmin()]);
+    error.value = t('agents.restored');
+    setTimeout(() => (error.value = ''), 2500);
+  } catch (e) {
+    error.value = (e as Error).message || t('agents.restoreFailed');
   }
 }
 
@@ -331,6 +361,30 @@ async function batchRenew() {
         <input type="checkbox" :checked="allSelected" @change="toggleAll" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500" />
         {{ t('agents.selectAll') }}
       </label>
+    </div>
+
+    <!-- F11: 最近删除（7 天缓冲期内可恢复） -->
+    <div class="mb-4 flex items-center justify-between">
+      <button class="text-xs text-slate-400 hover:text-sky-300" @click="toggleDeleted">
+        {{ showDeleted ? t('agents.deletedHide') : t('agents.deletedToggle') }}
+      </button>
+      <span v-if="showDeleted" class="text-xs text-slate-500">{{ t('agents.deletedHint') }}</span>
+    </div>
+    <div v-if="showDeleted" class="glass mb-4 p-4">
+      <div v-if="!deletedAgents.length" class="text-xs text-slate-500">{{ t('agents.deletedEmpty') }}</div>
+      <ul v-else class="space-y-2">
+        <li v-for="d in deletedAgents" :key="d.id" class="flex items-center justify-between gap-3 text-sm">
+          <span class="truncate text-slate-300">
+            {{ d.name }}<span class="ml-2 text-xs text-slate-500">{{ d.id }}</span>
+          </span>
+          <span class="flex shrink-0 items-center gap-3">
+            <span class="text-xs text-amber-300">{{ t('agents.daysLeft', { n: d.days_left }) }}</span>
+            <button class="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-500" @click="restore(d.id)">
+              {{ t('agents.restore') }}
+            </button>
+          </span>
+        </li>
+      </ul>
     </div>
 
     <div v-if="selected.size" class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3">

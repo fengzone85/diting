@@ -586,6 +586,9 @@ function runPrune() {
     // revoked 行一并清（其 last_seen 停留在最后活动时刻，同样会被 TTL 覆盖）。
     const nSess = db.pruneSessions(Date.now() - SESSION_TTL * 2);
     if (nSess > 0) console.log(`[prune] removed ${nSess} expired sessions`);
+    // F11：软删节点到期物理清理（7 天缓冲；先清状态表与缓存，再删行触发 CASCADE）。
+    const nPurge = db.purgeDeletedAgents();
+    if (nPurge > 0) console.log(`[prune] purged ${nPurge} soft-deleted agents`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);

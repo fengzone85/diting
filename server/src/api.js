@@ -565,6 +565,24 @@ router.get('/agents/sparklines/overview', adminOrReadonly, agentScope, asyncHand
   })));
 }));
 
+// ---- Admin: 最近删除（F11，7 天缓冲）----
+// 必须注册在 /agents/:id 之前，否则会被 :id 路由吞掉。
+router.get('/agents/deleted', adminOrReadonly, agentScope, (req, res) => {
+  const now = Date.now();
+  const graceMs = 7 * 86400000;
+  const items = db.listDeletedAgents()
+    .filter((a) => inAgentScope(req, a.id))
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      hostname: shortHost(a.hostname),
+      version: a.version || '',
+      deleted_at: a.deleted_at,
+      days_left: Math.max(0, Math.ceil((a.deleted_at + graceMs - now) / 86400000))
+    }));
+  res.json({ items, grace_days: 7 });
+});
+
 // ---- Admin: single agent info ----
 router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
   if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
@@ -1330,9 +1348,20 @@ router.put('/agents/:id', adminOnly, agentScope, (req, res) => {
 // ---- Admin: delete agent ----
 router.delete('/agents/:id', adminOnly, agentScope, (req, res) => {
   if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
+  // F11：软删——节点立即从面板消失，身份与历史保留 7 天，可由 /restore 恢复。
   db.deleteAgent(req.params.id);
+  res.json({ ok: true, grace_days: 7 });
+  auditLog(req, 'delete_agent', `id=${req.params.id} soft=1`);
+});
+
+// F11：恢复软删节点（7 天缓冲期内）。
+router.post('/agents/:id/restore', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
+  const target = db.getAgentIncludingDeleted(req.params.id);
+  if (!target || !target.deleted_at) return res.status(404).json({ error: 'not_deleted' });
+  if (db.restoreAgent(req.params.id) === 0) return res.status(404).json({ error: 'not_deleted' });
   res.json({ ok: true });
-  auditLog(req, 'delete_agent', `id=${req.params.id}`);
+  auditLog(req, 'restore_agent', `id=${req.params.id}`);
 });
 
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
