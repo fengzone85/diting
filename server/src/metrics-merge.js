@@ -173,7 +173,7 @@ function weightedRows(db, spec, opts) {
 function detailEdge(db, spec, { agentId, since, until, direction }) {
   const cols = spec.map((s) => `${s.detail} AS ${s.out}`).join(', ');
   const row = db.prepare(`
-    SELECT ts, ${cols} FROM metrics
+    SELECT ts, agent_id, ${cols} FROM metrics
     WHERE agent_id=@id AND ts >= @since AND (@until IS NULL OR ts < @until)
       AND (ts >= @wm OR NOT EXISTS (
         SELECT 1 FROM metrics_hour mh WHERE mh.agent_id = metrics.agent_id
