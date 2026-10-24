@@ -8,8 +8,12 @@
 // 未认证即可触发）。本模块把 SQL 与连接解耦（首个参数是 db 句柄），于是：
 //   - 主线程：db.js 委派到这里（行为不变，作为 worker 不可用时的回退路径）；
 //   - worker thread（dbworker.js）：用独立只读连接执行，事件循环保持响应。
-// 改 SQL 只需改这一处，两条路径自动一致（避免语义分叉）。
+//
+// S2：SQL 本体已改为 metrics-merge.js 的「小时行 + 明细行加权合并」，
+// 本文件只保留对外签名，保证 worker / 主线程两条路径共用同一份口径。
 // ============================================================
+
+const merge = require('./metrics-merge');
 
 // 负载曲线列集（不含 probes / disks 大字段）。db.js 与本文件共用同一份定义，
 // 避免两处列清单漂移导致主线程与 worker 返回结构不一致。
@@ -17,95 +21,29 @@ const LOAD_COLS = `ts, agent_id, cpu, mem_used, mem_total, mem_pct, load1, load5
   net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, disk_used, disk_total,
   disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp, process_count`;
 
-// 单节点负载曲线采样（保留首尾点）：窗口函数按 ts 编号均匀抽样。
-const loadOne = (db, agentId, sinceTs, maxPoints) => {
-  const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
-  return db.prepare(`
-    WITH numbered AS (
-      SELECT ${LOAD_COLS},
-             ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
-             COUNT(*) OVER () AS cnt
-      FROM metrics WHERE agent_id=@agentId AND ts>=@since
-    )
-    SELECT ${LOAD_COLS} FROM numbered
-    WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-    ORDER BY ts ASC`).all({ agentId, since: sinceTs, step });
-};
+// 单节点负载曲线（保留首末点明细精度）
+const loadOne = (db, agentId, sinceTs, maxPoints, untilTs) =>
+  merge.loadOne(db, agentId, sinceTs, maxPoints, untilTs);
 
-// 跨节点负载曲线采样：按「时间桶 + 桶内最早一行」（不用窗口函数，实测 720h
-// 全库 23.6s → 2.2s），保留首尾桶语义。
-const loadAll = (db, sinceTs, maxPoints) => {
-  const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
-  return db.prepare(`
-    SELECT ${LOAD_COLS.replace(/\b(ts|agent_id)\b/g, 'm.$1')} FROM metrics m
-    JOIN (
-      SELECT agent_id, MIN(ts) AS ts
-      FROM metrics WHERE ts>=@since
-      GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-    ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
-    ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
-};
+// 跨节点负载曲线（每 agent 一个序列）
+const loadAll = (db, sinceTs, maxPoints, untilTs) =>
+  merge.loadAll(db, sinceTs, maxPoints, untilTs);
 
-// 全量 sparklines 采样：窗口函数按 agent 分组，每 agent 最多 maxPoints 点。
-const sparklinesAllSampled = (db, sinceTs, maxPoints, untilTs) => {
-  const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
-  return db.prepare(`
-    WITH numbered AS (
-      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-             net_rx_month, net_tx_month,
-             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-             process_count,
-             ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY ts ASC) AS rn,
-             COUNT(*) OVER (PARTITION BY agent_id) AS cnt
-      FROM metrics WHERE ts>=@since AND (@until IS NULL OR ts<@until)
-    )
-    SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-           net_rx_month, net_tx_month,
-           load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-           process_count
-    FROM numbered
-    WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
-    ORDER BY agent_id, ts ASC`).all({ since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
-};
+// 全量 sparklines（按 agent 分组，桶宽由窗口/maxPoints 反推）
+const sparklinesAllSampled = (db, sinceTs, maxPoints, untilTs) =>
+  merge.sparklinesAll(db, sinceTs, maxPoints, untilTs);
 
-// 集群级时间桶聚合（仪表盘平均 CPU/内存趋势）：跨 agent 按桶求均值。
-const clusterAvg = (db, sinceTs, spanMs, maxPoints) => {
-  const bucket = Math.max(1, Math.ceil(spanMs / Math.max(1, maxPoints)));
-  return db.prepare(`
-    WITH agg AS (
-      SELECT CAST((ts - @since) / @bucket AS INTEGER) AS b,
-             AVG(cpu) AS cpu, AVG(mem_pct) AS mem_pct
-      FROM metrics WHERE ts>=@since AND cpu IS NOT NULL
-      GROUP BY b
-    )
-    SELECT (@since + CAST(b AS INTEGER) * @bucket) AS ts, cpu, mem_pct
-    FROM agg ORDER BY b ASC`).all({ since: sinceTs, bucket });
-};
+// 集群级时间桶聚合（仪表盘平均 CPU/内存趋势）
+const clusterAvg = (db, sinceTs, spanMs, maxPoints) =>
+  merge.clusterAvg(db, sinceTs, spanMs, maxPoints);
 
-// 磁盘趋势：跨 agent 按时间桶取 disk_pct 均值。必须输出 MIN(ts) AS ts——
-// 调用方用首末 ts 求跨度，只返回桶号会得到 NaN 使趋势分析静默失效。
-const diskTrendAll = (db, sinceTs, bucketMs) => db.prepare(`
-  SELECT agent_id,
-         MIN(ts) AS ts,
-         AVG(disk_pct) AS pct
-  FROM metrics
-  WHERE ts >= @since AND disk_pct IS NOT NULL
-  GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-  ORDER BY agent_id, ts`).all({ since: sinceTs, bucket: Math.max(1, bucketMs) });
+// 磁盘趋势（AI 日报 14 天窗口依赖）
+const diskTrendAll = (db, sinceTs, bucketMs) =>
+  merge.diskTrendAll(db, sinceTs, bucketMs);
 
-// 探针（ping）历史：只取 ts+agent_id+probes 三列，按 agent 时间桶降采样，
-// 规避 SELECT * 全表物化（720h 数百万行）导致 OOM。
-const probesAll = (db, sinceTs, maxPoints) => {
-  const bucket = Math.max(1, Math.floor((Date.now() - sinceTs) / Math.max(1, Number(maxPoints) || 1)));
-  return db.prepare(`
-    SELECT m.ts, m.agent_id, m.probes FROM metrics m
-    JOIN (
-      SELECT agent_id, MIN(ts) AS ts
-      FROM metrics WHERE ts>=@since AND probes IS NOT NULL
-      GROUP BY agent_id, CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER)
-    ) k ON m.agent_id = k.agent_id AND m.ts = k.ts
-    ORDER BY m.agent_id, m.ts ASC`).all({ since: sinceTs, bucket });
-};
+// 探针（ping）历史：小时折叠层与明细层加权合并
+const probesAll = (db, sinceTs, maxPoints) =>
+  merge.probesAll(db, sinceTs, maxPoints);
 
 module.exports = {
   LOAD_COLS, loadOne, loadAll, sparklinesAllSampled, clusterAvg, diskTrendAll, probesAll

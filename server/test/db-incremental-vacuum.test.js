@@ -79,7 +79,7 @@ test('db.js：打开库时置位 auto_vacuum，prune 后调用 incremental_vacuu
   assert.match(DB_JS, /pragma\('auto_vacuum = INCREMENTAL'\)/, '打开库应置位 INCREMENTAL');
   const pruneBody = DB_JS.slice(DB_JS.indexOf('const prune = ('), DB_JS.indexOf('const getAlertState'));
   assert.match(pruneBody, /db\.pragma\('incremental_vacuum'\)/, 'prune 删除后应做增量回收');
-  assert.match(pruneBody, /if \(r\.changes > 0\)/, '仅在确有删除时才回收，避免空转');
+  assert.match(pruneBody, /if \(changes > 0\)/, '仅在确有删除时才回收，避免空转');
 });
 
 test('diting.sh：--db-vacuum 已接入 usage / 解析 / 分发，且复用 db_run_js', () => {
