@@ -169,6 +169,10 @@ export const adminApi = {
   // F8.6：最近一次恢复审查（后台顶部黄条用，避免拉整个备份目录）
   getRestoreAudit: () => api.get<{ report: RestoreAuditReport | null }>('/api/admin/restore-audit'),
 
+  // F8.1：应用内一致性快照（不用停服，产物与宿主脚本同名规则）
+  createBackup: () =>
+    api.post<{ ok: boolean; name: string; size_bytes: number; mtime: number }>('/api/admin/backups'),
+
   // 备份文件管理（需要宿主备份目录已挂进容器）
   listBackups: () => api.get<BackupList>('/api/admin/backups'),
   deleteBackup: (name: string) => api.del<{ ok: boolean }>(`/api/admin/backups/${encodeURIComponent(name)}`),

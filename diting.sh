@@ -1237,10 +1237,36 @@ do_backup() {
         timeout 180 docker run --rm -v "$vol":/data -v "$DB_BACKUP_DIR":/out \
             alpine:3.20 cp /data/monitor.db "/out/$(basename "$out_path")" 2>/dev/null
     else
-        # 宿主机文件：需先 flush，直接 cp（SQLite 单文件）
+        # 宿主机文件（生产形态：systemd + 宿主文件）。
+        # ⚠️ rollback journal 模式的提交是「写 journal → 改页 → 删 journal」，直接 cp
+        # 可能落在改页窗口，拷到半提交状态的库（F8.1 审查发现；原注释写「需先
+        # flush」但代码既无 flush 也无 checkpoint）。必须用一致性快照：
+        #   1) 有 sqlite3 → VACUUM INTO：读事务内导出已提交内容，顺带去掉空闲页；
+        #   2) 无 sqlite3 → 停服后 cp（无写入 = 安全），无论成败都恢复服务。
         local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
-        echo -e "${YELLOW}[信息] 复制宿主机数据库文件…${NC}"
-        cp "$fpath" "$out_path"
+        local svc="diting-server" stopped=0 cp_rc=0
+        if command -v sqlite3 >/dev/null 2>&1; then
+            echo -e "${YELLOW}[信息] 通过 sqlite3 VACUUM INTO 生成一致性快照…${NC}"
+            rm -f "$out_path"
+            if ! timeout 600 sqlite3 "$fpath" "VACUUM INTO '$out_path'" 2>/dev/null; then
+                rm -f "$out_path"
+                echo -e "${YELLOW}[警告] VACUUM INTO 失败，回退为停服拷贝${NC}" >&2
+            fi
+        fi
+        if [[ ! -f "$out_path" ]]; then
+            if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
+                echo -e "${YELLOW}[信息] 停止 ${svc} 后拷贝（避免热拷贝半提交状态）…${NC}"
+                systemctl stop "$svc" 2>/dev/null && stopped=1
+            fi
+            cp "$fpath" "$out_path" 2>/dev/null
+            cp_rc=$?
+            # 备份失败也不能把服务留在停止状态
+            [[ "$stopped" -eq 1 ]] && systemctl start "$svc" 2>/dev/null
+            if [[ "$cp_rc" -ne 0 ]]; then
+                echo -e "${RED}[错误] 宿主库拷贝失败（服务已恢复运行）${NC}" >&2
+                return 1
+            fi
+        fi
     fi
 
     if [[ ! -f "$out_path" ]]; then

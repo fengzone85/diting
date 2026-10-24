@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 const router = express.Router();
 const db = require('./db');
 const { rateLimitTouch, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
@@ -1534,6 +1535,28 @@ router.delete('/admin/backups/:name', adminOnly, agentScope, agentGlobalOnly, (r
   if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
   res.json({ ok: true, name: r.name });
   auditLog(req, 'delete_backup', `name=${r.name}`);
+});
+
+// F8.1：应用内一致性快照（better-sqlite3 db.backup 在线备份，无需停服）。
+// 产物沿用宿主脚本命名，宿主清理/恢复无需区分来源；.db（未压缩），
+// 与上传件一样受保留策略管理（需长期保留请下载归档）。
+router.post('/admin/backups', adminOnly, agentScope, agentGlobalOnly, async (req, res) => {
+  const name = backups.snapshotName();
+  const full = path.join(backups.BACKUP_DIR, name);
+  try {
+    fs.mkdirSync(backups.BACKUP_DIR, { recursive: true });
+    if (fs.existsSync(full)) {
+      return res.status(409).json({ error: 'backup name already exists, retry in a second' });
+    }
+    await db.backupTo(full);
+    try { fs.chmodSync(full, 0o600); } catch (e) { /* 权限收紧失败不影响备份 */ }
+    const st = fs.statSync(full);
+    res.json({ ok: true, name, size_bytes: st.size, mtime: st.mtimeMs });
+    auditLog(req, 'create_backup', `name=${name} size=${st.size}`);
+  } catch (e) {
+    try { fs.unlinkSync(full); } catch (err) { /* 清理半成品 */ }
+    res.status(500).json({ error: (e && e.message) || 'backup failed' });
+  }
 });
 
 // F8.6：最近一次恢复审查报告。后台布局用它渲染顶部黄条（「恢复自 N 天前的备份，

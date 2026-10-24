@@ -1157,6 +1157,11 @@ const markTrafficGap = (agentId, nowMs = Date.now()) => {
     .run(nowMs, nowMs, agentId);
 };
 
+// F8.1：应用内一致性快照。better-sqlite3 的 db.backup() 是异步在线备份
+// （逐页拷贝已提交内容），无需停服，也不受 rollback journal 写窗口影响。
+// 返回 Promise；调用方负责目录创建、目标名冲突检查与权限收紧。
+const backupTo = (dest) => db.backup(dest);
+
 const trafficFlushTimer = setInterval(flushTraffic, 60000);
 trafficFlushTimer.unref();
 process.once('exit', () => {
@@ -1675,6 +1680,7 @@ module.exports = {
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,
   markTrafficGap,
+  backupTo,
   getRestoreAuditPending, setRestoreAuditPending, clearRestoreAuditPending,
   getRestoreAuditReport, setRestoreAuditReport,
   listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,

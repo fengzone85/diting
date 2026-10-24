@@ -319,6 +319,21 @@ async function onPickBackup(ev: Event) {
   }
 }
 
+// F8.1：应用内一致性快照（better-sqlite3 在线备份，不需要停服）
+async function createSnapshot() {
+  backupBusy.value = 'create';
+  backupMsg.value = '';
+  try {
+    const r = await adminApi.createBackup();
+    backupMsg.value = t('settings.backupCreated').replace('{name}', r.name);
+    await Promise.all([loadBackups(), loadBackupState()]);
+  } catch (e) {
+    backupMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    backupBusy.value = '';
+  }
+}
+
 async function restoreBackup(f: BackupFile) {
   if (!confirm(t('settings.backupRestoreConfirm').replace('{name}', f.name))) return;
   backupBusy.value = f.name;
@@ -885,6 +900,18 @@ async function resetGroupAlert() {
             >
               {{ t('common.refresh') }}
             </button>
+          </div>
+
+          <!-- F8.1：应用内快照（在线备份，不需要停服） -->
+          <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <button
+              :disabled="!!backupBusy || backupUploading"
+              class="rounded border border-emerald-400/40 px-3 py-1 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+              @click="createSnapshot"
+            >
+              {{ backupBusy === 'create' ? t('settings.backupCreating') : t('settings.backupCreateNow') }}
+            </button>
+            <span class="opacity-60">{{ t('settings.backupCreateHint') }}</span>
           </div>
 
           <!-- 上传外部备份：服务端只认 SQLite / gzip，文件名由服务端生成 -->

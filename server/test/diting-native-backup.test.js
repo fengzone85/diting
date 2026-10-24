@@ -74,6 +74,13 @@ test('安装 / 更新服务端仍要求 Docker', () => {
   }
 });
 
+test('F8.1 宿主备份：VACUUM INTO 优先，无 sqlite3 时停服拷贝并恢复服务', () => {
+  const body = fnBody('do_backup');
+  assert.match(body, /VACUUM INTO/, '有 sqlite3 时应生成一致性快照而不是热 cp');
+  assert.match(body, /systemctl stop/, '无 sqlite3 时应先停服再拷贝（无写入 = 安全）');
+  assert.match(body, /systemctl start/, '拷贝后必须把服务拉起来（失败也不能留在停止态）');
+});
+
 test('diting.sh 语法校验通过', () => {
   const r = spawnSync('bash', ['-n', SCRIPT], { encoding: 'utf8' });
   assert.strictEqual(r.status, 0, `bash -n 失败：${r.stderr}`);

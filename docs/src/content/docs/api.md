@@ -113,6 +113,7 @@ Content-Type: application/json
 | POST | `/api/setup/generate` | 首次访问生成管理员 Token（独立限流） |
 | POST | `/api/setup/register` | 受控端自助注册（需 `SETUP_TOKEN`，独立限流） |
 | GET | `/api/admin/backups` | 备份文件列表（含 `integrity` 三态、`restore_audit` 最近一次恢复审查报告；只读角色不返回报告） |
+| POST | `/api/admin/backups` | 应用内一致性快照（`db.backup()` 在线备份，产物 `monitor_*.db`，权限 0600，写 `create_backup` 审计） |
 | GET | `/api/admin/restore-audit` | 最近一次恢复审查报告（后台顶部黄条数据源；含 retention 最早/最晚与分批次） |
 | GET | `/api/admin/backups/:name/download` | 下载指定备份 |
 | DELETE | `/api/admin/backups/:name` | 删除指定备份 |

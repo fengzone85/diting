@@ -234,6 +234,14 @@ function deleteBackup(name) {
   }
 }
 
+// F8.1：应用内快照命名，与宿主脚本保持一致（monitor_YYYYMMDD_HHMMSS.db，本地时间），
+// 这样宿主侧列表、清理、恢复都不需要区分来源。
+function snapshotName(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `monitor_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`
+    + `_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}.db`;
+}
+
 // 写入恢复请求，交由宿主侧 diting.sh 消费。
 // 刻意不直接改数据库：直接改只能改容器内副本/卷内当前库路径，且无法兼顾
 // 「恢复前先备份当前状态」等安全步骤，交给脚本实现更可靠。
@@ -287,6 +295,7 @@ module.exports = {
   backupSummary,
   inspectFile,
   inspectIntegrity,
+  snapshotName,
   detectUploadKind,
   saveUploadedBackup,
   deleteBackup,
