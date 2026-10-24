@@ -199,6 +199,8 @@ test('S2.5 跨节点合并：每 agent 独立分组，输出含 agent_id', () =>
   assert.ok(ids.has(a) && ids.has(b), '两个 agent 都应出现');
   assert.strictEqual(rows.find((r) => r.agent_id === a).cpu, 10);
   assert.strictEqual(rows.find((r) => r.agent_id === b).cpu, 30);
+  // 首末点覆盖产生的 edge 行也必须带 agent_id（否则 /public/agents/sparklines 会出现 undefined 键）
+  for (const r of rows) assert.strictEqual(typeof r.agent_id, 'string');
 });
 
 test('S2.6 trafficEstimateBucketed：跨水位线仍积分（小时行 + 明细）', () => {
