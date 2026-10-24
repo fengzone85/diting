@@ -13,8 +13,54 @@
 // ============================================================
 const MAP_CAP = 10000;
 
+// ============================================================
+// 限流/封禁维度的 IP 归桶（S4，对齐 monitor auth.rs:93-98）
+//
+// 为什么需要：IPv6 用户侧接口 ID 可任意变换，按完整地址计数时攻击者每换一个
+// 地址就是「新 IP」，配额形同虚设（/64 内几乎是无限地址）。同一 /64 在现实网络里
+// 同属一个用户/一个站点，按 /64 归桶既堵住旋转攻击，也不会把不同用户混在一起。
+//
+// 取舍（与 monitor 相同）：同一 /64 内的多个用户**共享**失败计数——误伤代价是
+// 多等一个窗口/封禁，被绕过的代价是配额失效，安全侧选后者。
+//
+// 两个必须处理的坑：
+//   1. **先剥 ::ffff: 壳**：Express 对 IPv4-mapped 连接（v4 客户端走 v6 监听）
+//      返回的正是 `::ffff:1.2.3.4`。若直接进 IPv6 分支，点分四段会被 parseInt(x,16)
+//      解析成 1，落到完全错误的桶里。
+//   2. 括号与 zone id（`[::1]` / `fe80::1%eth0`）：Express 一般不返回，但代理层会。
+// ============================================================
+const { ip6ToBits } = require('./util');
+
+function bucketKey(ip) {
+  let s = String(ip || '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (s.startsWith('[') && s.endsWith(']')) s = s.slice(1, -1);
+  const pct = s.indexOf('%');
+  if (pct > 0) s = s.slice(0, pct); // zone id
+  if (!s.includes(':')) return s; // IPv4（或主机名）原样
+
+  if (s.startsWith('::ffff:')) {
+    const rest = s.slice(7);
+    if (rest.includes('.')) return rest; // ::ffff:1.2.3.4 → 归一为 IPv4 桶
+    const m = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(rest); // ::ffff:c0a8:1
+    if (m) {
+      const hi = parseInt(m[1], 16);
+      const lo = parseInt(m[2], 16);
+      return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+    }
+  }
+
+  const bits = ip6ToBits(s);
+  if (bits === null) return s; // 解析失败：退化为原值，绝不放大成整网误伤
+  // 只保留高 64 位，格式化成稳定的「前缀::/64」字符串（不用字符串切分，压缩格式会出错）
+  const hi = bits >> 64n;
+  const hex = hi.toString(16).padStart(16, '0');
+  return `${hex.slice(0, 4)}:${hex.slice(4, 8)}:${hex.slice(8, 12)}:${hex.slice(12, 16)}::/64`;
+}
+
 // 记一次命中。返回 false 表示已超速（调用方应 429）；true 放行。
 // map: Map<ip, {reset, count}>；windowMs: 窗口毫秒；max: 窗口内最大次数。
+// ip 一律传 bucketKey(req.ip) 归桶后的值，不要传裸地址。
 function rateLimitTouch(map, ip, windowMs, max) {
   const now = Date.now();
   if (map.size >= MAP_CAP) {
@@ -135,7 +181,7 @@ function loginGuardFail(key) {
 function loginGuardClear(key) { deleteState(key); }
 
 module.exports = {
-  rateLimitTouch, MAP_CAP,
+  rateLimitTouch, MAP_CAP, bucketKey,
   loginGuard, loginGuardFail, loginGuardClear,
   LOGIN_GUARD_FAIL_LIMIT, LOGIN_GUARD_MAX_BAN_SEC,
   // 仅供单测构造边界场景（生产代码不应直接改写状态）

@@ -6,6 +6,8 @@ const totp = require('./totp');
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
 // 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
 const { verifyAdminToken } = require('./token-policy');
+// IPv6 解析为 128 位 BigInt（S4 起 ratelimit.js 也用它做 /64 归桶，故放 util.js）。
+const { ip6ToBits } = require('./util');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
@@ -439,32 +441,6 @@ function ip6InCIDR(ip, cidr, bits) {
   if (bits === 128) return ipBits === cidrBits;
   const shift = 128n - BigInt(bits);
   return (ipBits >> shift) === (cidrBits >> shift);
-}
-
-function ip6ToBits(ip) {
-  try {
-    // 手动展开压缩格式 :: 与全写为 8 段 × 16 位
-    let s = String(ip).toLowerCase().trim();
-    if (!s.includes(':')) return null;
-    // 展开 ::
-    let parts = s.split('::');
-    if (parts.length > 2) return null; // 非法
-    let head = parts[0] ? parts[0].split(':') : [];
-    let tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
-    const missing = 8 - head.length - tail.length;
-    if (missing < 0) return null;
-    const full = [...head, ...Array(missing).fill('0'), ...tail];
-    if (full.length !== 8) return null;
-    let bits = 0n;
-    for (let i = 0; i < 8; i++) {
-      const segment = parseInt(full[i] || '0', 16);
-      if (isNaN(segment) || segment < 0 || segment > 0xffff) return null;
-      bits = (bits << 16n) | BigInt(segment);
-    }
-    return bits;
-  } catch (e) {
-    return null;
-  }
 }
 
 // ---- 审计日志：记录管理员写操作 ----

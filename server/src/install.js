@@ -21,7 +21,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const db = require('./db');
-const { rateLimitTouch } = require('./ratelimit');
+const { rateLimitTouch, bucketKey } = require('./ratelimit');
 const { hasAdminToken, hashAdminToken, MIN_LEN, PLACEHOLDER } = require('./token-policy');
 const { requireProto } = require('./auth');
 
@@ -39,7 +39,7 @@ function needsInstall() { return !hasAdminToken(); }
 const WINDOW = 60000, MAX = 5;
 const hits = new Map();
 const installRateLimit = (req, res, next) => {
-  if (!rateLimitTouch(hits, req.ip || req.socket.remoteAddress, WINDOW, MAX)) {
+  if (!rateLimitTouch(hits, bucketKey(req.ip || req.socket.remoteAddress), WINDOW, MAX)) {
     return res.status(429).json({ error: 'too many requests' });
   }
   next();
