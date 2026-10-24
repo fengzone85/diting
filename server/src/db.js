@@ -84,8 +84,10 @@ CREATE TABLE IF NOT EXISTS alert_state (
 );
 
 -- 告警规则覆盖（S1/F1）：NULL = 继承上层（分组 > 全局）。
--- 刻意不声明 FOREIGN KEY：本库未启用 PRAGMA foreign_keys（better-sqlite3 默认关），
--- 级联不会执行；删除 agent 时由 deleteAgent() 同事务显式清理本表。
+-- 刻意不声明 FOREIGN KEY：不是「级联不执行」（better-sqlite3 11.x 默认已开
+-- PRAGMA foreign_keys=ON，metrics/traffic_state 的 CASCADE 实测真实生效），而是
+-- 主动选择「删除语义显式、可审计」——由 deleteAgent() 在同一事务里显式清理本表，
+-- 不让级联静默带走数据。
 CREATE TABLE IF NOT EXISTS alert_overrides (
   agent_id    TEXT PRIMARY KEY,
   offline_sec INTEGER,
@@ -97,6 +99,23 @@ CREATE TABLE IF NOT EXISTS alert_overrides (
   muted       INTEGER DEFAULT 0,
   updated_at  INTEGER NOT NULL
 );
+
+-- 在线时段（F7）：agents.last_seen 只有「最后一刻」，无法回答「过去 30 天在线率」。
+-- 由 alerts.checkAgent 的在线判定派生（不改 agent 协议）：
+--   ended_at IS NULL = 进行中；end_reason ∈ offline / pending / deleted / stale。
+-- 同样刻意不声明 FOREIGN KEY：删除 agent 时由 deleteAgent() 同事务显式清理。
+CREATE TABLE IF NOT EXISTS online_sessions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id   TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at   INTEGER,
+  end_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_online_agent_start ON online_sessions(agent_id, started_at);
+-- 同一 agent 最多一条进行中的 session：并发检查/崩溃重启时由唯一索引兜底，
+-- 避免「两个 open session」把在线时长算成两倍。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_online_agent_open
+  ON online_sessions(agent_id) WHERE ended_at IS NULL;
 
 -- 分组级覆盖：grp 为 agents.grp 的取值（'' = 未分组/默认组）。
 CREATE TABLE IF NOT EXISTS alert_group_overrides (
@@ -432,6 +451,19 @@ const stmts = {
   setAlertState: db.prepare('INSERT OR REPLACE INTO alert_state (agent_id, type, last_sent) VALUES (?,?,?)'),
   clearAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=? AND type=?'),
   clearAllAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
+  // ---- 在线时段（F7）----
+  getOpenOnlineSession: db.prepare('SELECT * FROM online_sessions WHERE agent_id=? AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1'),
+  listOpenOnlineSessions: db.prepare('SELECT * FROM online_sessions WHERE ended_at IS NULL ORDER BY started_at ASC'),
+  // 上一条（任意状态）session：用于把新 session 起点钳到上一段 ended_at 之后，避免重叠双计
+  getLastOnlineSession: db.prepare('SELECT * FROM online_sessions WHERE agent_id=? ORDER BY started_at DESC LIMIT 1'),
+  openOnlineSession: db.prepare('INSERT INTO online_sessions(agent_id, started_at) VALUES (?, ?)'),
+  closeOnlineSession: db.prepare('UPDATE online_sessions SET ended_at=?, end_reason=? WHERE id=? AND ended_at IS NULL'),
+  // 删除/清理用；window 查询取与 [since, now] 有交集的全部 session（含进行中）
+  onlineSessionsSince: db.prepare('SELECT * FROM online_sessions WHERE agent_id=? AND (ended_at IS NULL OR ended_at>=?) ORDER BY started_at ASC'),
+  allOnlineSessionsSince: db.prepare('SELECT agent_id, started_at, ended_at FROM online_sessions WHERE ended_at IS NULL OR ended_at>=? ORDER BY agent_id ASC, started_at ASC'),
+  deleteOnlineSessionsByAgent: db.prepare('DELETE FROM online_sessions WHERE agent_id=?'),
+  deleteOrphanOnlineSessions: db.prepare('DELETE FROM online_sessions WHERE agent_id NOT IN (SELECT id FROM agents)'),
+  pruneOnlineSessions: db.prepare('DELETE FROM online_sessions WHERE ended_at IS NOT NULL AND ended_at<?'),
   // ---- 告警覆盖（S1/F1）----
   getAlertOverride: db.prepare('SELECT * FROM alert_overrides WHERE agent_id=?'),
   listAlertOverrides: db.prepare('SELECT * FROM alert_overrides ORDER BY agent_id'),
@@ -715,12 +747,162 @@ const updateAgent = (id, f) => {
   });
 };
 
-const deleteAgent = (id) => {
+// 删除 agent = 一次事务里的显式清理 + 删行（不依赖 FK CASCADE）。
+// 事务化的原因：此前三条独立语句，在第二条前中断会留下「agent 还在、告警状态已丢」
+// 的半清理状态——该节点的冷却/恢复判定一起丢失，会触发重复告警。
+const deleteAgent = db.transaction((id) => {
   stmts.clearAllAlertState.run(id);
-  // F1：覆盖表无 FK 强制（见建表注释），同事务显式清理。
   stmts.deleteAlertOverride.run(id);
+  // F7：在线时段显式清理（软删场景在 purge 时走同一函数；见 IMPLEMENTATION_PLAN F11）
+  stmts.deleteOnlineSessionsByAgent.run(id);
   return stmts.deleteAgent.run(id);
+});
+
+// ---- 在线时段（F7）-----------------------------------------------------------
+// 状态机在 alerts.checkAgent 里驱动：online → 确保有 open session；offline → 关闭。
+// 这里只负责持久化与聚合，不重复判定在线。
+const DAY_MS = 86400000;
+
+const openOnlineSession = (agentId, startedAt) => {
+  try {
+    return Number(stmts.openOnlineSession.run(agentId, startedAt).lastInsertRowid);
+  } catch (e) {
+    // 唯一索引冲突（并发下已有 open session）→ 幂等返回现有行
+    if (String(e && e.message).includes('UNIQUE')) {
+      const row = stmts.getOpenOnlineSession.get(agentId);
+      return row ? row.id : null;
+    }
+    throw e;
+  }
 };
+const getOpenOnlineSession = (agentId) => stmts.getOpenOnlineSession.get(agentId);
+const getLastOnlineSession = (agentId) => stmts.getLastOnlineSession.get(agentId);
+const closeOnlineSession = (id, endedAt, reason) => stmts.closeOnlineSession.run(endedAt, reason || '', id).changes > 0;
+
+// 本地日 0 点（按主机时区；跨 DST 由 Date 构造器处理）
+function localDayStart(ts) {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+function localDayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function nextLocalDayStart(ts) {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+}
+
+// 把 session 与 [from,to] 的交集按本地日累加（session 可跨天）。
+function addSessionByDay(map, s, from, to) {
+  let cur = Math.max(s.started_at, from);
+  const end = Math.min(s.ended_at == null ? to : s.ended_at, to);
+  while (cur < end) {
+    const segEnd = Math.min(end, nextLocalDayStart(cur));
+    if (segEnd <= cur) break; // 防御：异常时间戳防死循环
+    const key = localDayKey(cur);
+    map.set(key, (map.get(key) || 0) + Math.round((segEnd - cur) / 1000));
+    cur = segEnd;
+  }
+}
+
+// 单节点在线历史：daily（按本地日切分）+ outages（离线缺口）+ 窗口总体 uptime。
+// pct 分母是「当天已过去的时间」，不是 86400——否则今天永远显示 50%。
+function onlineHistory(agentId, days, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const n = Math.max(1, Math.min(90, Math.floor(Number(days) || 30)));
+  const todayStart = localDayStart(now);
+  const since = (() => {
+    const d = new Date(todayStart);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (n - 1)).getTime();
+  })();
+  const rows = stmts.onlineSessionsSince.all(agentId, since);
+
+  const perDay = new Map();
+  for (const s of rows) addSessionByDay(perDay, s, since, now);
+
+  const daily = [];
+  let upTotal = 0;
+  for (let t = since; t <= now;) {
+    const key = localDayKey(t);
+    const dayStart = localDayStart(t);
+    const dayEnd = nextLocalDayStart(t);
+    const up = perDay.get(key) || 0;
+    const span = Math.max(0, Math.round((Math.min(dayEnd, now) - dayStart) / 1000));
+    daily.push({ date: key, up_sec: up, pct: span > 0 ? Math.round((up / span) * 1000) / 10 : null });
+    upTotal += up;
+    t = dayEnd;
+  }
+
+  // 覆盖率分母从「窗口内第一条 session 起点」算起：功能上线前/新节点没有历史，
+  // 把那段算成停机会让上线率长期失真（nezha 同样只按已有观测统计）。
+  const firstStart = rows.length ? Math.max(rows[0].started_at, since) : now;
+  const covered = Math.max(0, Math.round((now - firstStart) / 1000));
+  const uptime_pct = covered > 0 ? Math.round(Math.min(100, (upTotal / covered) * 100) * 10) / 10 : null;
+
+  // 停机缺口：相邻 session 之间（窗口内）+ 当前仍未恢复的尾部。
+  // 窗口起点之前的缺口不完整，不统计（避免每天把「上线前」算一次停机）。
+  const outages = [];
+  let prevEnd = null;
+  for (const s of rows) {
+    if (prevEnd != null && s.started_at > prevEnd) {
+      outages.push({ started_at: prevEnd, ended_at: s.started_at, duration_sec: Math.round((s.started_at - prevEnd) / 1000) });
+    }
+    if (s.ended_at != null) prevEnd = Math.max(prevEnd || 0, s.ended_at);
+  }
+  const last = rows[rows.length - 1];
+  if (!last || last.ended_at != null) {
+    if (prevEnd != null && now - prevEnd >= 60000) {
+      outages.push({ started_at: prevEnd, ended_at: null, duration_sec: Math.round((now - prevEnd) / 1000) });
+    }
+  }
+  outages.sort((a, b) => b.started_at - a.started_at);
+
+  return { days: n, since, now, daily, outages: outages.slice(0, 20), uptime_pct };
+}
+
+// 全节点窗口在线率（公开列表用，一次查询扫全表，避免 N 个 agent 各查一次）。
+function onlineUptimeAll(sinceTs, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const since = Number(sinceTs) || (now - 30 * DAY_MS);
+  const rows = stmts.allOnlineSessionsSince.all(since);
+  const sums = new Map();
+  for (const s of rows) {
+    const cur = sums.get(s.agent_id) || { up: 0, first: null };
+    const from = Math.max(s.started_at, since);
+    const to = Math.min(s.ended_at == null ? now : s.ended_at, now);
+    if (to > from) cur.up += Math.round((to - from) / 1000);
+    const start = Math.max(s.started_at, since);
+    if (cur.first == null || start < cur.first) cur.first = start;
+    sums.set(s.agent_id, cur);
+  }
+  const out = {};
+  for (const [id, s] of sums) {
+    const covered = Math.max(0, Math.round((now - s.first) / 1000));
+    out[id] = covered > 0 ? Math.round(Math.min(100, (s.up / covered) * 100) * 10) / 10 : null;
+  }
+  return out;
+}
+
+// 启动时清理（崩溃安全）：孤儿 session 直接删；stale open session 关闭到 last_seen。
+// stale 阈值 = max(24h, 观测上报间隔 × 48)：不硬编码 24h，避免把「1 小时上报一次」
+// 的慢节点误判为崩溃；无观测样本时回退 24h。
+function cleanupOnlineSessions(nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const removed = stmts.deleteOrphanOnlineSessions.run().changes;
+  let closed = 0;
+  for (const s of stmts.listOpenOnlineSessions.all()) {
+    const a = stmts.getAgent.get(s.agent_id);
+    if (!a) continue; // 上一步已按孤儿删除
+    const iv = observedIntervalSec(a.id) || Number(process.env.AGENT_INTERVAL || 20);
+    const staleMs = Math.max(24 * 3600 * 1000, iv * 48 * 1000);
+    if (!a.last_seen || now - a.last_seen > staleMs) {
+      const end = Math.max(a.last_seen || 0, s.started_at);
+      if (stmts.closeOnlineSession.run(end, 'stale', s.id).changes > 0) closed++;
+    }
+  }
+  return { removed, closed };
+}
 
 // ---- 告警覆盖（S1/F1）-------------------------------------------------------
 // 字段范围与 resolveAlertThresholds() 保持一致；越界/非数字 → null（视为未设置）。
@@ -1116,6 +1298,11 @@ const getMetricsLoadAll = (sinceTs, maxPoints) => stmts.metricsLoadAll(sinceTs, 
 const prune = (retentionDays) => {
   const cutoff = Date.now() - retentionDays * 86400000;
   const r = stmts.prune.run(cutoff);
+  // F7：在线时段随同一保留期清理（只删已结束的；进行中的继续累计）。
+  // 出错不影响指标清理主流程（老库可能还没有该表）。
+  try { stmts.pruneOnlineSessions.run(cutoff); } catch (e) {
+    console.warn('[db] prune online_sessions 失败（不影响清理）:', e.message);
+  }
   // 删完立刻把空闲页还给文件系统（仅 auto_vacuum=INCREMENTAL 时有效；
   // 其它模式是 no-op，不会报错）。不这么做的话文件只涨不缩。
   if (r.changes > 0) {
@@ -1574,6 +1761,9 @@ module.exports = {
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
+  // F7 在线时段
+  getOpenOnlineSession, getLastOnlineSession, openOnlineSession, closeOnlineSession,
+  onlineHistory, onlineUptimeAll, cleanupOnlineSessions,
   getAlertOverride, listAlertOverrides, upsertAlertOverride, deleteAlertOverride,
   getGroupAlertOverride, listGroupAlertOverrides, upsertGroupAlertOverride, deleteGroupAlertOverride,
   ALERT_OVERRIDE_KEYS, ALERT_OVERRIDE_LIMITS,

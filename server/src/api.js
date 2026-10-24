@@ -595,6 +595,17 @@ router.get('/agents/:id/metrics', adminOrReadonly, agentScope, (req, res) => {
   res.json(rows);
 });
 
+// ---- Admin: 在线时段历史（F7）----
+// daily 按主机本地日切分（SQL/JS 都用 localtime 语义，避免 UTC+8 下错位 8 小时）；
+// outages 只列窗口内的离线缺口，进行中的缺口 ended_at=null、duration 持续增长。
+router.get('/agents/:id/online-history', adminOrReadonly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'agent not found' });
+  const days = Math.min(90, Math.max(1, Math.floor(Number(req.query.days) || 30)));
+  res.json(db.onlineHistory(a.id, days));
+});
+
 // ---- Admin: overview ----
 // 在原有「总数/在线/离线/平均 CPU/内存」基础上，补充「流量概览」与「分组概览」，
 // 供前端对标社区主题的流量/地区概览区块直接渲染。
@@ -698,6 +709,22 @@ router.get('/public/overview', (req, res) => {
   });
 });
 
+// F7：30 天在线率（公开列表用）。聚合要扫 online_sessions，100 台规模下没必要每个
+// 请求重算 → 30s 进程内缓存，与 sparklines / records 缓存同口径。
+const UPTIME_CACHE_TTL = 30000;
+let uptimeCache = { ts: 0, data: {} };
+function getUptime30d() {
+  const now = Date.now();
+  if (now - uptimeCache.ts < UPTIME_CACHE_TTL) return uptimeCache.data;
+  try {
+    uptimeCache = { ts: now, data: db.onlineUptimeAll(now - 30 * 86400000, now) };
+  } catch (e) {
+    // 老库无 online_sessions 时不影响公开列表主流程
+    uptimeCache = { ts: now, data: {} };
+  }
+  return uptimeCache.data;
+}
+
 // 公开 agent 列表（游客可见，受 ui_settings.public_enabled 控制）。
 // 默认透出商家/到期/备注/配额/套餐等业务字段——这是公开页首页「商家数、即将到期」
 // 与详情页「备注、套餐卡片」的数据来源，故不能简单删除；
@@ -709,12 +736,15 @@ router.get('/public/agents', (req, res) => {
   const showBiz = ui.public_show_business !== false;
   const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
   const now = Date.now();
+  const uptime30d = getUptime30d();
   const list = db.getMonitoredAgents().map((a) => {
     const latest = db.getLatestMetric(a.id);
     const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
     const m = online && latest ? latest : null;
     const base = {
       id: a.id, name: a.name, group: a.grp || '',
+      // F7：30 天在线率（%，1 位小数）；null = 窗口内还没有任何 session 记录
+      uptime_30d: uptime30d[a.id] ?? null,
       country: a.country || '',
       online: !!online,
       cpu: m ? m.cpu : null,
@@ -873,6 +903,17 @@ function downsampleSparklines(rows, maxPoints) {
   }
   return out;
 }
+
+// 公开单节点在线时段历史（F7，脱敏）：详情页在线率卡用。
+// 与 admin 版同一份口径，只是去掉权限；受 ui.public_enabled 控制。
+router.get('/public/agents/:id/online-history', (req, res) => {
+  const ui = db.getUiSettings();
+  if (ui.public_enabled === false) return publicDisabled(res);
+  const a = db.getAgent(req.params.id);
+  if (!a) return res.status(404).json({ error: 'agent not found' });
+  const days = Math.min(90, Math.max(1, Math.floor(Number(req.query.days) || 30)));
+  res.json(db.onlineHistory(a.id, days));
+});
 
 // 公开单节点探针延迟历史（脱敏）：详情页 ping 值延迟分析图表用。
 // 从 metrics.probes 历史读取，按探测点 label 归并，返回每个探测点的延迟时间序列。

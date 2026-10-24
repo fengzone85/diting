@@ -2,6 +2,32 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 在线时段统计（F7）
+
+`agents.last_seen` 只有「最后一刻」，无法回答「过去 30 天在线率」。新增在线时段表与聚合，
+全部由服务端从现有上报派生，**不改 agent 协议、老 agent 无需升级**。
+
+### 说明
+
+- 新表 `online_sessions(agent_id, started_at, ended_at, end_reason)` + 索引；对 `ended_at IS NULL`
+  建部分唯一索引，保证同一节点最多一条进行中的时段（并发/崩溃时不会重复计时）。
+- 状态机挂在 `alerts.checkAgent` 的在线判定上：上线开段（起点回填一个上报间隔，避免削掉轮询间隔）、
+  离线关闭到 `last_seen`、恢复后新段起点不早于上一段 `ended_at`（不重叠双计）。
+- 启动时清理：孤儿时段删除；`stale` open 时段关闭到 `last_seen`（阈值 `max(24h, 观测间隔×48)`，
+  慢上报节点不会被误判成崩溃）。
+- 保留：随 `RETENTION_DAYS` 一起清理（只删已结束的，进行中的保留）。
+- 删除节点改为**事务化**并显式清理 `online_sessions`（顺带修正建表注释里「FK 默认关」的错误说法）。
+- API：`GET /api/agents/:id/online-history?days=30`、`GET /api/public/agents/:id/online-history?days=30`
+  返回 `daily[{date,up_sec,pct}]`、`outages[{started_at,ended_at,duration_sec}]`、`uptime_pct`；
+  `/api/public/agents` 附 `uptime_30d`（30s 进程内缓存）。
+- 前端：节点详情新增「在线率（30 天）」卡（热力条 + 最近停机），节点卡脚注显示 30 天在线率。
+
+### ⚠️ 行为变更
+
+- 新增表与索引（启动时自动创建，无需手工迁移）；老库无数据时页面显示「无记录」。
+- `daily.pct` 按**主机本地时区**切天；容器部署需显式设置 `TZ`，否则按 UTC 切分。
+- 删除节点由三条独立语句改为单事务（失败整体回滚，不再出现「agent 还在、告警状态已丢」）。
+
 ## 2026-10-24 探测增强：HTTP/TLS 证书探测 + 可用率聚合（F4）
 
 受控端探测目标新增 HTTP(S) 语法，服务端补可用率聚合与证书到期告警。

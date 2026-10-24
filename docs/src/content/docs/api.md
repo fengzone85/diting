@@ -76,6 +76,7 @@ Content-Type: application/json
 | GET | `/api/agents/sparklines/overview` | 集群平均 CPU/内存趋势 |
 | GET | `/api/agents/:id` | 节点详情 |
 | GET | `/api/agents/:id/metrics` | 节点指标时序 |
+| GET | `/api/agents/:id/online-history` | 在线时段历史（`?days=30`，返回 daily + outages + uptime_pct） |
 | POST | `/api/agents` | 创建节点 |
 | PUT | `/api/agents/:id` | 编辑节点 |
 | DELETE | `/api/agents/:id` | 删除节点 |
@@ -165,9 +166,10 @@ Content-Type: application/json
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/public/overview` | 公开总览 |
-| GET | `/api/public/agents` | 公开节点列表（脱敏） |
+| GET | `/api/public/agents` | 公开节点列表（脱敏；附带 `uptime_30d` 30 天在线率） |
 | GET | `/api/public/agents/sparklines` | 公开 Sparkline |
 | GET | `/api/public/agents/:id/probes` | 公开延迟历史；`?availability=1` 附可用率与证书元信息 |
+| GET | `/api/public/agents/:id/online-history` | 公开在线时段历史（详情页在线率卡；`?days=30`） |
 | GET | `/api/public/meta` | 站点元信息（logo / 标题） |
 | GET | `/api/public/themes` | 可用主题列表 |
 | GET | `/api/public/visitor` | 访客 IP / UA（公开页访客计数） |
@@ -194,6 +196,24 @@ Content-Type: application/json
 - `unreachable=true` 表示窗口内无一成功（目标本身不可达，如运营商 DNS 拒 TCP），前端显示「不可达」而非 0% 可用。
 - `cert_days` 是上报时刻的剩余天数；前端展示时按 `cert_ts` 到当前时间衰减。
 - 探测上报字段：`type`（`http`，缺省 `tcp`，为省体积 tcp 不落库）、`code`（100–599）、`cert_days`（0–3650），非法值单独丢弃而不影响整条结果。
+
+`/api/public/agents/:id/online-history`（F7 在线率）返回：
+
+```json
+{
+  "days": 30,
+  "since": 1730000000000,
+  "now": 1732592000000,
+  "daily": [{ "date": "2026-10-24", "up_sec": 79200, "pct": 99.9 }],
+  "outages": [{ "started_at": 1730000000000, "ended_at": 1730003600000, "duration_sec": 3600 }],
+  "uptime_pct": 99.9
+}
+```
+
+- `daily` 按**主机本地日**切分（跨天 session 拆到两天）；`pct` 的分母是当天已过去的时间，所以今天不会是整天。
+- `outages` 只列窗口内的缺口；`ended_at=null` 表示当前仍离线，`duration_sec` 随时间增长。
+- `uptime_pct` 的分母从窗口内第一条 session 起算，避免把功能上线前/新节点没数据的时间算成停机；窗口内无 session 时为 `null`。
+- 在线时段由 `alerts` 的在线判定派生（不改 agent 协议），保留期与 `RETENTION_DAYS` 一致。
 
 ## Komari 主题兼容层
 

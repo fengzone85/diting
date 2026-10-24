@@ -31,6 +31,8 @@ export interface Agent {
   swap_used?: number;
   swap_total?: number;
   uptime?: number;
+  // F7：30 天在线率（%，1 位小数）；null/缺失 = 还没有 session 记录
+  uptime_30d?: number | null;
   os?: string;
   hostname?: string;
   version?: string;
@@ -195,6 +197,29 @@ export interface ProbePoint {
 }
 
 export type Probes = Record<string, ProbePoint[]>;
+
+// F7：在线时段（/agents/:id/online-history 与 /public/... 同结构）。
+// pct 的分母是「当天已过去的时间」，所以今天不会是整天；null = 窗口内无数据。
+export interface OnlineDay {
+  date: string;
+  up_sec: number;
+  pct: number | null;
+}
+
+export interface OnlineOutage {
+  started_at: number;
+  ended_at: number | null; // null = 仍在离线
+  duration_sec: number;
+}
+
+export interface OnlineHistory {
+  days: number;
+  since: number;
+  now: number;
+  daily: OnlineDay[];
+  outages: OnlineOutage[];
+  uptime_pct: number | null;
+}
 
 // F4：探测可用率聚合（/probes?availability=1）。
 // up_pct 的分母是窗口内全部采样点；unreachable 表示窗口内无一成功
