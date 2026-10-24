@@ -10,6 +10,7 @@ const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessi
 const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
+const capacity = require('./capacity');
 const { daysUntil, asyncHandler } = require('./util');
 const { nextExpire, autoRenewExpire } = require('./renew');
 const { computeBilling } = require('./billing');
@@ -288,7 +289,11 @@ router.post('/report', agentAuth, (req, res) => {
   const ts = Date.now();
   // P1：先用服务端累加器按 month_rotate 口径覆盖 m.net_*_month，再落 metrics。
   db.accumulateTraffic(req.agent.id, m, ts);
-  db.insertMetric(req.agent.id, Object.assign({ ts }, m));
+  // F12：容量硬限时只停写历史明细 —— /report 仍 200、流量累加器/在线状态/告警
+  // 全部照常，绝不因容量问题让节点被判定离线或告警失联。
+  if (capacity.shouldWriteHistory()) {
+    db.insertMetric(req.agent.id, Object.assign({ ts }, m));
+  }
   // 受控端版本从 User-Agent 解析（diting-agent-go/1.0.9）；
   // 解析不到就传空，db 层用 COALESCE(NULLIF()) 保留库中已有值。
   const uaVer = (() => {
@@ -1450,6 +1455,20 @@ function sanitizeBackupSettings(ui) {
   if (ui.backup_compress !== undefined) ui.backup_compress = !!ui.backup_compress;
 }
 
+// F12：容量保险丝阈值。行数/库字节（MiB）都做范围钳制，防止误填 0 或天文数字
+// 导致「一启动就停写」或「永远不会触发」。
+function sanitizeCapacitySettings(ui) {
+  if (ui.capacity_enabled !== undefined) ui.capacity_enabled = !!ui.capacity_enabled;
+  if (ui.capacity_max_rows !== undefined) {
+    const n = Number(ui.capacity_max_rows);
+    ui.capacity_max_rows = Number.isFinite(n) ? Math.min(100000000, Math.max(1000, Math.trunc(n))) : 2000000;
+  }
+  if (ui.capacity_max_mb !== undefined) {
+    const n = Number(ui.capacity_max_mb);
+    ui.capacity_max_mb = Number.isFinite(n) ? Math.min(16777216, Math.max(64, Math.trunc(n))) : 2048;
+  }
+}
+
 // ---- Admin: 数据库备份监控（宿主侧 diting.sh 执行后回写的状态）----
 // 服务端本身不执行备份（容器内访问不到宿主备份目录），仅负责展示与下发策略。
 router.get('/admin/backup-status', adminOrReadonly, (req, res) => {
@@ -1537,6 +1556,20 @@ router.delete('/admin/backups/:name', adminOnly, agentScope, agentGlobalOnly, (r
   auditLog(req, 'delete_backup', `name=${r.name}`);
 });
 
+// ---- F12 容量保险丝：状态与一键清理 ----
+// 只读角色也可看水位（与看板同类信息），清理必须管理员。
+router.get('/admin/capacity', adminOrReadonly, (req, res) => {
+  res.json(capacity.getStatus());
+});
+
+// 一键「清理并恢复」：只跑既有 retention 清理（不额外删数据、不 VACUUM）。
+// 清完仍超限时前端会提示「缩短保留天数 / 调高阈值」，不会静默继续停写。
+router.post('/admin/capacity/cleanup', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+  const r = capacity.cleanup();
+  res.json(r);
+  auditLog(req, 'capacity_cleanup', `deleted=${r.deleted} level=${r.level} rows=${r.rows} bytes=${r.bytes}`);
+});
+
 // F8.1：应用内一致性快照（better-sqlite3 db.backup 在线备份，无需停服）。
 // 产物沿用宿主脚本命名，宿主清理/恢复无需区分来源；.db（未压缩），
 // 与上传件一样受保留策略管理（需长期保留请下载归档）。
@@ -1592,6 +1625,7 @@ router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
     // M-1：自定义 CSS 在落库前清洗，杜绝 @import/url()/外链字体/脚本注入。
     if (typeof b.ui.custom_css === 'string') b.ui.custom_css = sanitizeCss(b.ui.custom_css);
     sanitizeBackupSettings(b.ui);
+    sanitizeCapacitySettings(b.ui);
     // setUiSettings 是整体覆盖写：仪表盘布局由专用接口 PUT /admin/dashboard/layout 管理，
     // 设置表单未携带该字段时沿用旧值，避免在设置页保存后把布局清空。
     if (!Object.prototype.hasOwnProperty.call(b.ui, 'admin_dashboard_layout')) {

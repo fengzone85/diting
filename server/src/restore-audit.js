@@ -13,8 +13,8 @@
 //   3. 报告写入 admin_config.restore_audit_last（备份页面板），审计写
 //      restore_completed —— 必须写进**恢复后的库**，否则会随旧库一起消失。
 //
-// 降级：S2 折叠（metrics_hour / metrics_rolled）、F12 容量保险丝、F11 软删列
-// 未落地时对应检查标 skipped，不得当成失败阻断启动。
+// 降级：S2 折叠（metrics_hour / metrics_rolled）未落地、F11 软删列缺失、
+// F12 容量保险丝被关闭时，对应检查标 skipped，不得当成失败阻断启动。
 // ============================================================
 const fs = require('node:fs');
 const path = require('node:path');
@@ -268,18 +268,25 @@ function checkSoftDeleted(now) {
   return check('soft_deleted', purged ? 'warn' : 'ok', { expired, purged });
 }
 
-// 8) 容量水位（F12）：只评估 + 告警，绝不静默停写。F12 未落地时跳过。
+// 8) 容量水位（F12）：只评估 + 告警，绝不静默停写。
+// 恢复回旧库后行数/文件大小可能已超阈值，这里立即刷新一次让保险丝生效。
 function checkCapacity() {
-  let cfg = null;
-  try { cfg = JSON.parse(db.getConfig('capacity_limits') || 'null'); } catch (e) { cfg = null; }
-  if (!cfg || typeof cfg !== 'object') return check('capacity', 'skipped', { reason: 'capacity_not_enabled' });
-  const maxRows = Number(cfg.max_rows) || 0;
-  const maxBytes = Number(cfg.max_bytes) || 0;
-  const rows = db.db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0;
-  let bytes = 0;
-  try { bytes = db.getDbFileSize(); } catch (e) { bytes = 0; }
-  const over = (maxRows && rows >= maxRows) || (maxBytes && bytes >= maxBytes);
-  return check('capacity', over ? 'warn' : 'ok', { rows, bytes, max_rows: maxRows, max_bytes: maxBytes, over });
+  try {
+    // 延迟 require：restore-audit 在启动早期加载，capacity 依赖 db 与 alerts
+    const capacity = require('./capacity');
+    const s = capacity.getStatus({ refresh: true });
+    if (!s.enabled) return check('capacity', 'skipped', { reason: 'capacity_disabled' });
+    return check('capacity', s.level === 'full' ? 'warn' : 'ok', {
+      rows: s.rows,
+      bytes: s.bytes,
+      max_rows: s.max_rows,
+      max_bytes: s.max_bytes,
+      pct: s.pct,
+      over: s.level === 'full'
+    });
+  } catch (e) {
+    return check('capacity', 'skipped', { reason: e.message });
+  }
 }
 
 function summarize(checks) {

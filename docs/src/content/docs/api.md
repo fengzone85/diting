@@ -119,6 +119,8 @@ Content-Type: application/json
 | DELETE | `/api/admin/backups/:name` | 删除指定备份 |
 | POST | `/api/admin/backups/:name/restore` | 请求宿主侧恢复（提交前对 `.db` 做 10s `integrity_check`，失败 400；由 cron 每 5 分钟消费；发起者随请求文件写入，恢复后由脚本补记 `restore_backup` / `restore_completed` 审计） |
 | GET | `/api/admin/backup-status` | 备份配置与备份监控状态 |
+| GET | `/api/admin/capacity` | 容量保险丝状态（行数/库字节水位、是否暂停历史写入、跳过次数） |
+| POST | `/api/admin/capacity/cleanup` | 按当前保留天数清理过期明细并重新评估（写 `capacity_cleanup` 审计） |
 | GET | `/api/admin/audit-logs` | 管理员操作审计日志 |
 | GET | `/api/admin/2fa/status` | 2FA 状态 |
 | POST | `/api/admin/2fa/setup` `/enable` `/disable` | 绑定 / 启用 / 关闭 2FA |

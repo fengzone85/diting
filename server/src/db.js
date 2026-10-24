@@ -1273,6 +1273,12 @@ function getUiSettings() {
     backup_schedule: 'off',           // off / daily / weekly（weekly 在周一执行）
     backup_hour: 3,                   // 执行小时 0-23
     backup_keep_days: 14,             // 保留天数（0=不自动清理）
+    backup_keep_count: 10,            // 保留份数（0=不限，F8.4）
+    // F12 容量保险丝：行数 + 库文件双水位；100% 只停写历史明细，
+    // 不动 /report 接收、告警判定与实时数据（agents/traffic_state）。
+    capacity_enabled: true,
+    capacity_max_rows: 2000000,       // 默认 200 万行（按 S2 折叠后口径的约 10 倍余量）
+    capacity_max_mb: 2048,            // 默认库文件 2 GiB
     backup_compress: true             // gzip 压缩（实测体积约 20%，强烈建议开启）
   };
   try {

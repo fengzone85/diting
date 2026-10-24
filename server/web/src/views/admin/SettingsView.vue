@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
-import type { Settings, BackupFile, AlertThresholds, AlertOverride, RestoreAuditCheck, RestoreAuditReport } from '../../services/types';
+import type { Settings, BackupFile, AlertThresholds, AlertOverride, RestoreAuditCheck, RestoreAuditReport, CapacityStatus } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 import NotifyPanel from '../../components/admin/NotifyPanel.vue';
@@ -57,6 +57,10 @@ interface UiSettings {
   backup_keep_days?: number;
   backup_keep_count?: number;
   backup_compress?: boolean;
+  // F12 容量保险丝（行数 + 库文件双水位；100% 只暂停历史明细）
+  capacity_enabled?: boolean;
+  capacity_max_rows?: number;
+  capacity_max_mb?: number;
 }
 
 // 备份监控状态（宿主侧 diting.sh 执行后回写服务端，本页只读展示）
@@ -113,6 +117,9 @@ function resetLocal() {
       backup_keep_days: 14,
       backup_keep_count: 10,
       backup_compress: true,
+      capacity_enabled: true,
+      capacity_max_rows: 2000000,
+      capacity_max_mb: 2048,
       // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）。
       // 必须在这里给默认值：模板 v-model="local.ui.alert!.cpu_pct" 会被立即求值，
       // 若 settings 尚未到达（冷加载）或拉取失败（429/5xx），alert 为 undefined
@@ -218,6 +225,9 @@ function cloneSettings(src: Settings): SettingsForm {
       backup_keep_count: Number.isFinite(Number(ui.backup_keep_count)) ? Number(ui.backup_keep_count) : 10,
       // 注意：后端默认 true，未配置时也应显示开启，故用 !== false 判断
       backup_compress: ui.backup_compress !== false,
+      capacity_enabled: ui.capacity_enabled !== false,
+      capacity_max_rows: Number.isFinite(Number(ui.capacity_max_rows)) ? Number(ui.capacity_max_rows) : 2000000,
+      capacity_max_mb: Number.isFinite(Number(ui.capacity_max_mb)) ? Number(ui.capacity_max_mb) : 2048,
     },
     notify: { ...notify },
   };
@@ -258,6 +268,30 @@ const backupBusy = ref('');
 const backupMsg = ref('');
 // F8.6：最近一次恢复审查（恢复后由服务端启动流程写入，这里只读展示）
 const restoreAudit = ref<RestoreAuditReport | null>(null);
+// F12：容量保险丝状态与一键清理
+const capacityStatus = ref<CapacityStatus | null>(null);
+const capacityBusy = ref(false);
+const capacityMsg = ref('');
+
+async function loadCapacity() {
+  try { capacityStatus.value = await adminApi.getCapacity(); } catch { capacityStatus.value = null; }
+}
+
+async function cleanupCapacity() {
+  if (!confirm(t('settings.capacityCleanupConfirm'))) return;
+  capacityBusy.value = true;
+  capacityMsg.value = '';
+  try {
+    const r = await adminApi.cleanupCapacity();
+    capacityStatus.value = r;
+    capacityMsg.value = t('settings.capacityCleaned').replace('{n}', String(r.deleted || 0));
+    if (r.paused) capacityMsg.value = `${capacityMsg.value} ${t('settings.capacityStillFull')}`;
+  } catch (e) {
+    capacityMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    capacityBusy.value = false;
+  }
+}
 
 async function loadBackups() {
   try {
@@ -352,7 +386,7 @@ async function restoreBackup(f: BackupFile) {
   }
 }
 
-onMounted(() => { loadBackupState(); loadBackups(); });
+onMounted(() => { loadBackupState(); loadBackups(); loadCapacity(); });
 
 function fmtBytes(n?: number): string {
   const v = Number(n || 0);
@@ -996,6 +1030,76 @@ async function resetGroupAlert() {
               </tbody>
             </table>
             <p class="mt-3 text-xs opacity-60">{{ t('settings.backupRestoreHint') }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- F12：容量保险丝（metrics 行数 + 库文件双水位） -->
+      <div class="glass p-6 lg:col-span-2">
+        <h2 class="mb-1 text-lg font-semibold">{{ t('settings.capacityTitle') }}</h2>
+        <p class="mb-4 text-xs opacity-70">{{ t('settings.capacityHint') }}</p>
+
+        <div v-if="capacityStatus" class="mb-4 rounded-lg border border-white/10 p-3 text-sm">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span
+              class="rounded px-2 py-0.5 text-xs"
+              :class="capacityStatus.level === 'full'
+                ? 'bg-rose-500/20 text-rose-300'
+                : capacityStatus.level === 'warn'
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : 'bg-emerald-500/20 text-emerald-300'"
+            >
+              {{ t(`settings.capacityLevel_${capacityStatus.level}`) }}
+            </span>
+            <span v-if="capacityStatus.paused" class="text-xs text-rose-300">{{ t('settings.capacityPaused') }}</span>
+          </div>
+          <div class="grid grid-cols-1 gap-1 text-xs opacity-80 sm:grid-cols-2">
+            <div>
+              {{ t('settings.capacityRowsValue', {
+                rows: capacityStatus.rows,
+                max: capacityStatus.max_rows,
+                pct: Math.round(capacityStatus.row_pct * 100),
+              }) }}
+            </div>
+            <div>
+              {{ t('settings.capacityBytesValue', {
+                cur: fmtBytes(capacityStatus.bytes),
+                max: fmtBytes(capacityStatus.max_bytes),
+                pct: Math.round(capacityStatus.byte_pct * 100),
+              }) }}
+            </div>
+          </div>
+          <div v-if="capacityStatus.skipped" class="mt-1 text-xs text-amber-300">
+            {{ t('settings.capacitySkipped', { n: capacityStatus.skipped }) }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+          <div>
+            <FormInput v-model="local.ui.capacity_enabled" :label="t('settings.capacityEnabled')" type="checkbox" />
+            <FormInput
+              v-model="local.ui.capacity_max_rows"
+              :label="t('settings.capacityMaxRows')"
+              type="number"
+              :hint="t('settings.capacityMaxRowsHint')"
+            />
+            <FormInput
+              v-model="local.ui.capacity_max_mb"
+              :label="t('settings.capacityMaxMb')"
+              type="number"
+              :hint="t('settings.capacityMaxMbHint')"
+            />
+          </div>
+          <div class="flex flex-col justify-end gap-2">
+            <button
+              :disabled="capacityBusy"
+              class="self-start rounded border border-amber-400/40 px-3 py-1 text-xs text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+              @click="cleanupCapacity"
+            >
+              {{ capacityBusy ? t('settings.capacityCleaning') : t('settings.capacityCleanup') }}
+            </button>
+            <p class="text-xs opacity-60">{{ t('settings.capacityCleanupHint') }}</p>
+            <p v-if="capacityMsg" class="text-xs text-sky-300">{{ capacityMsg }}</p>
           </div>
         </div>
       </div>

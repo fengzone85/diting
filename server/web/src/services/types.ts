@@ -267,6 +267,24 @@ export interface Settings {
   notify?: Record<string, unknown>;
 }
 
+// F12 容量保险丝状态（行数 + 库文件双水位）
+export interface CapacityStatus {
+  enabled: boolean;
+  level: 'ok' | 'warn' | 'full';
+  rows: number;
+  bytes: number;
+  max_rows: number;
+  max_bytes: number;
+  row_pct: number;
+  byte_pct: number;
+  pct: number;
+  paused: boolean;
+  skipped: number;
+  retention_days: number;
+  ts: number;
+  deleted?: number;
+}
+
 export interface User {
   id: string;
   username: string;

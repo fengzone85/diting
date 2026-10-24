@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import Sidebar from '../../components/admin/Sidebar.vue';
 import { adminApi } from '../../services/adminApi';
-import type { RestoreAuditReport } from '../../services/types';
+import type { RestoreAuditReport, CapacityStatus } from '../../services/types';
 import { loadAdmin, startAutoRefresh, stopAutoRefresh } from '../../composables/useAdmin';
 import { setAutoRefreshPaused as setPublicAutoRefreshPaused } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
@@ -50,9 +50,39 @@ function dismissRestoreBanner() {
   restoreDismissed.value = true;
 }
 
+// F12：容量保险丝黄条（80% 预警 / 100% 已暂停历史写入）。
+// 比恢复审查更紧急，放在最上面；清理按钮直接调后端（只删过期明细）。
+const capacityStatus = ref<CapacityStatus | null>(null);
+const capacityBusy = ref(false);
+
+async function loadCapacity() {
+  try { capacityStatus.value = await adminApi.getCapacity(); } catch { capacityStatus.value = null; }
+}
+
+const capacityBanner = computed(() => {
+  const s = capacityStatus.value;
+  if (!s || !s.enabled || s.level === 'ok') return null;
+  return { level: s.level, pct: Math.round(s.pct * 100), skipped: s.skipped };
+});
+
+async function cleanupCapacity() {
+  if (!confirm(t('capacityBanner.cleanupConfirm'))) return;
+  capacityBusy.value = true;
+  try {
+    const r = await adminApi.cleanupCapacity();
+    capacityStatus.value = r;
+    if (r.paused) alert(t('capacityBanner.stillFull'));
+  } catch (e) {
+    alert((e as Error).message || t('capacityBanner.cleanupFailed'));
+  } finally {
+    capacityBusy.value = false;
+  }
+}
+
 onMounted(() => {
   loadAdmin();
   loadRestoreAudit();
+  loadCapacity();
   startAutoRefresh();
   // 后台管理页不需要公开页实时数据（DashboardView 等仍 useApp() 读 meta，
   // 其 onMounted 会启动 10s 轮询，这里暂停掉，避免后台无谓拉 public/agents+meta+overview）。
@@ -76,6 +106,34 @@ onUnmounted(() => {
         <span>☰</span>
         {{ t('nav.menu') }}
       </button>
+      <!-- F12：容量保险丝（比恢复审查更紧急，放最上面） -->
+      <div
+        v-if="capacityBanner"
+        class="mb-4 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm"
+        :class="capacityBanner.level === 'full'
+          ? 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+          : 'border-amber-500/40 bg-amber-500/10 text-amber-200'"
+      >
+        <span>
+          {{
+            capacityBanner.level === 'full'
+              ? t('capacityBanner.full', { pct: capacityBanner.pct, skipped: capacityBanner.skipped })
+              : t('capacityBanner.warn', { pct: capacityBanner.pct })
+          }}
+        </span>
+        <button
+          :disabled="capacityBusy"
+          class="rounded border px-2 py-1 text-xs hover:bg-white/10 disabled:opacity-50"
+          :class="capacityBanner.level === 'full' ? 'border-rose-400/40' : 'border-amber-400/40'"
+          @click="cleanupCapacity"
+        >
+          {{ capacityBusy ? t('capacityBanner.cleaning') : t('capacityBanner.cleanup') }}
+        </button>
+        <RouterLink to="/admin/settings" class="ml-auto text-xs underline">
+          {{ t('capacityBanner.settings') }}
+        </RouterLink>
+      </div>
+
       <!-- F8.6：恢复自较早备份时提示「下次清理会删多少」 -->
       <div
         v-if="restoreBanner"

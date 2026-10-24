@@ -95,7 +95,8 @@ test('库内标记：8 项检查执行、缺口重置、孤儿/软删清理、�
   assert.strictEqual(r.report.backup.mtime, backupMtime, '报告应带上备份文件时间');
   assert.strictEqual(checks.folding.status, 'skipped', 'S2 未落地应跳过水位线检查');
   assert.strictEqual(checks.overlap.status, 'skipped', 'S2 未落地应跳过重叠检查');
-  assert.strictEqual(checks.capacity.status, 'skipped', 'F12 未落地应跳过容量检查');
+  // F12 已落地：默认阈值（2M 行 / 2 GiB）下测试库远未触顶 → ok
+  assert.strictEqual(checks.capacity.status, 'ok', '容量检查应实际执行并正常');
 
   // 缺口：基线清零（下一条上报只建基线，不把缺口算进当月）
   const tr = db.db.prepare('SELECT last_rx, last_tx, last_ts FROM traffic_state WHERE agent_id=?').get(a.id);
