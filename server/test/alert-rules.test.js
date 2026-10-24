@@ -9,7 +9,8 @@
 //   4. 采样窗口：默认 5 样本 / 70% 比例；ALERT_SUSTAIN_SAMPLES 显式设置时退回
 //      「连续 N 次全超限」旧行为；
 //   5. API：覆盖 CRUD + 审计 + /agents 附带 effective；
-//   6. 删除 agent 时同事务清理覆盖行（本库 FK 不强制，见 db.js 建表注释）。
+//   6. 删除/清理语义（F11 软删）：软删保留覆盖行（恢复后冷却连续），
+//      purgeDeletedAgents() 在事务内显式清理。
 //
 // 运行前提与 integration.api.test.js 相同：PORT=0 / ADMIN_ALLOW_HTTP=1 /
 // 测试专用 ADMIN_TOKEN / DB_PATH 指向 /tmp 临时库（绝不触碰生产 monitor.db）。
