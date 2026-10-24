@@ -29,7 +29,7 @@ description: 服务端与受控端环境变量参考
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |
 | `METRICS_ROLLUP_ENABLED` | 否 | `1` | 小时级历史折叠任务（S2）。`0` 完全关闭，小时表保留不删 |
-| `METRICS_DETAIL_DAYS` | 否 | `7` | 明细保留天数（3–30）。S2 第二段启用删除后，超过该天数的查询走小时行 |
+| `METRICS_DETAIL_DAYS` | 否 | `7` | 明细保留天数（3–30）：超过该天数的明细会被清理，长窗口查询自动改读小时聚合（S2 两级历史） |
 | `AUDIT_RETENTION_DAYS` | 否 | `90` | 管理员操作审计日志保留天数（下限 7）。独立于 `RETENTION_DAYS`：审计属安全记录，默认保留更久 |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭） |
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |

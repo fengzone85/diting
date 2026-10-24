@@ -6,6 +6,7 @@ const Database = require('better-sqlite3');
 // worker 线程（dbworker.js 只读连接）共用同一份实现，避免两条路径语义分叉。
 const heavyQueries = require('./heavy-queries');
 const traffic = require('./traffic');
+const merge = require('./metrics-merge');
 
 // 数据库默认落盘位置：容器内若挂载了持久卷 /data（docker-compose 的 server-data），
 // 则写入 /data/monitor.db，确保重建容器后数据仍在；否则回退到本地 server/data（开发/裸跑）。
@@ -392,6 +393,8 @@ const stmts = {
     VALUES (@agent_id, @cycle_key, @cycle_start, @used_rx, @used_tx, @last_rx, @last_tx, @last_ts, @epoch, @updated_at)`),
   allTrafficState: db.prepare('SELECT * FROM traffic_state'),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
+  // S2：metrics_hour 无 FK，删除节点时显式清理（F11 后由 purgeDeletedAgents 调用）
+  deleteMetricsHourByAgent: db.prepare('DELETE FROM metrics_hour WHERE agent_id = ?'),
   // 审查 G4：批准自助注册的待确认 agent（pending 1→0）
   approveAgent: db.prepare('UPDATE agents SET pending=0 WHERE id=?'),
   // 审查 E1：最近 N 条指标（旧→新），供告警"连续 N 个采样超限"判定
@@ -647,11 +650,8 @@ const approveAgent = (id) => stmts.approveAgent.run(id).changes > 0;
 // 钳零而静默漏报）。桶聚合而非逐行积分：30 天原始行可达 17 万行/台，桶化后
 // ≤720 行/台，成本可忽略；间隔异常（>1h，如断连）的桶间不计。
 function trafficEstimateBucketed(agentId, sinceTs) {
-  const rows = db.prepare(`
-    SELECT CAST(ts/3600000 AS INTEGER) AS bucket,
-           AVG(net_rx_rate) AS rx, AVG(net_tx_rate) AS tx
-    FROM metrics WHERE agent_id=? AND ts>=?
-    GROUP BY bucket ORDER BY bucket ASC`).all(agentId, sinceTs);
+  // S2：小时行 + 明细行加权合并（按小时桶），跨水位线后长窗口不再丢数据
+  const rows = merge.trafficEstimate(db, agentId, sinceTs);
   let rx = 0, tx = 0;
   for (let i = 1; i < rows.length; i++) {
     const gapSec = (rows[i].bucket - rows[i - 1].bucket) * 3600;
@@ -690,7 +690,7 @@ const metricsClusterAvg = (sinceTs, spanMs, maxPoints) => stmts.metricsClusterAv
 const metricsDiskTrendAll = (sinceTs, bucketMs) => stmts.metricsDiskTrendAll(sinceTs, bucketMs);
 
 // 单节点 sparklines SQL 层采样（节点详情页）：只返回 maxPoints 行，保留首尾点供磁盘耗尽预测。
-const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints, untilTs) => stmts.metricsSparklinesOne(agentId, sinceTs, maxPoints, untilTs);
+const getMetricsSparklinesOne = (agentId, sinceTs, maxPoints, untilTs) => merge.sparklinesOne(db, agentId, sinceTs, maxPoints, untilTs);
 
 // 重置某 Agent 的 Token：生成新 token 并写入哈希，旧 token 立即失效。返回新明文 token。
 const resetAgentToken = (id) => {
@@ -703,7 +703,7 @@ const resetAgentToken = (id) => {
 
 
 // 单节点探针 SQL 层采样（详情页延迟波形）：只返回 maxPoints 行，规避 9.5 万次 JSON.parse。
-const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => stmts.metricsProbesOne(agentId, sinceTs, maxPoints);
+const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => merge.probesOne(db, agentId, sinceTs, maxPoints);
 
 // 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
 // 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。
@@ -756,6 +756,9 @@ const deleteAgent = (id) => {
   stmts.clearAllAlertState.run(id);
   // F1：覆盖表无 FK 强制（见建表注释），同事务显式清理。
   stmts.deleteAlertOverride.run(id);
+  // S2：metrics_hour 刻意不声明 FK，不会被 CASCADE 带走，必须显式清理。
+  // F11 软删合入后此语句移到 purgeDeletedAgents()，语义不变。
+  try { stmts.deleteMetricsHourByAgent.run(id); } catch (e) { /* 老库无该表时忽略 */ }
   return stmts.deleteAgent.run(id);
 };
 
@@ -1143,24 +1146,58 @@ const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
 const countActiveAgents = (sinceTs) => (stmts.countActiveAgents.get(sinceTs) || {}).c || 0;
 // 单节点全字段采样：只返回 ≤maxPoints 行（保留首尾），替代 getMetrics 全量拉取。
 const getMetricsSampled = (agent_id, sinceTs, maxPoints) =>
-  stmts.metricsRangeSampled(agent_id, sinceTs, maxPoints);
+  merge.rangeSampled(db, agent_id, sinceTs, maxPoints);
 
 // 负载曲线采样（不含 probes/disks 大字段）：单节点 / 跨节点两版
 const getMetricsLoadOne = (agent_id, sinceTs, maxPoints) =>
   stmts.metricsLoadOne(agent_id, sinceTs, maxPoints);
 const getMetricsLoadAll = (sinceTs, maxPoints) => stmts.metricsLoadAll(sinceTs, maxPoints);
 
+// 明细分批删除：一次最多 5000 行，避免单条大 DELETE 长时间持有写锁把 /report 卡住。
+// better-sqlite3 是同步 API，无法在语句之间真正让出事件循环；用行数上限把单次
+// 持锁时间压到毫秒级（100 节点 × 30 天量级下每节点几轮即可删净）。
+function pruneMetricsDetail(cutoff) {
+  if (!Number.isFinite(cutoff)) return 0;
+  let total = 0;
+  const agents = db.prepare('SELECT DISTINCT agent_id FROM metrics WHERE ts < ?').all(cutoff);
+  const del = db.prepare('DELETE FROM metrics WHERE rowid IN (SELECT rowid FROM metrics WHERE agent_id=? AND ts<? LIMIT 5000)');
+  for (const { agent_id } of agents) {
+    for (let i = 0; i < 10000; i++) {
+      const n = del.run(agent_id, cutoff).changes;
+      total += n;
+      if (n < 5000) break;
+    }
+  }
+  return total;
+}
+
 const prune = (retentionDays) => {
-  const cutoff = Date.now() - retentionDays * 86400000;
-  const r = stmts.prune.run(cutoff);
+  const now = Date.now();
+  const keepCutoff = now - retentionDays * 86400000;
+  const wm = getMetricsWatermark();
+  let changes = 0;
+
+  if (wm > 0) {
+    // 明细上限 = min(now - DETAIL_DAYS, 水位线)：rollup 落后时绝不删除未折叠明细
+    const detailCutoff = Math.min(now - merge.detailDays() * 86400000, wm);
+    changes = pruneMetricsDetail(detailCutoff);
+    // 小时行按整体保留期清理（wm 之后的小时行尚未生成，不存在）
+    try { db.prepare('DELETE FROM metrics_hour WHERE hour_ts < ?').run(keepCutoff); } catch (e) {
+      console.warn('[db] prune metrics_hour 失败（不影响清理）:', e.message);
+    }
+  } else {
+    // 折叠任务未启用 / 尚未初始化：保持旧口径（只按 RETENTION_DAYS 删明细）
+    changes = stmts.prune.run(keepCutoff).changes;
+  }
+
   // 删完立刻把空闲页还给文件系统（仅 auto_vacuum=INCREMENTAL 时有效；
   // 其它模式是 no-op，不会报错）。不这么做的话文件只涨不缩。
-  if (r.changes > 0) {
+  if (changes > 0) {
     try { db.pragma('incremental_vacuum'); } catch (e) {
       console.warn('[db] incremental_vacuum 失败（不影响清理）:', e.message);
     }
   }
-  return r.changes;
+  return changes;
 };
 
 const getAlertState = (agent_id, type) => stmts.getAlertState.get(agent_id, type);
