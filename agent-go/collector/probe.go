@@ -2,20 +2,32 @@ package collector
 
 import (
 	"context"
-	"fmt"
+	"crypto/tls"
+	"io"
+	"math"
 	"net"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// ParseProbeTargets 解析 PROBE_TARGETS 环境变量格式：label:host[:port],...
+// maxProbeTargets 与 validate.js 的「键 ≤ 8」上限一致，超出部分静默丢弃。
+const maxProbeTargets = 8
+
+// ParseProbeTargets 解析 PROBE_TARGETS 环境变量格式：
+//
+//	label:host[:port]                 TCP 探测（端口缺省 53）
+//	label:http://host[:port]/path      HTTP 探测（端口缺省 80）
+//	label:https://host[:port]/path     HTTPS 探测（端口缺省 443，附带证书剩余天数）
+//	host / http(s)://...               裸目标（label 取主机名）
 //
 // 校验规则（对齐 Python collector.py:265-299 与服务端 validate.js）：
 //   - label ≤ 24 字符（超长截断）
 //   - host ≤ 253 字符
-//   - port ∈ [1, 65535]，默认 53
+//   - port ∈ [1, 65535]
 //   - 最多 8 个目标
 func ParseProbeTargets(spec string) []ProbeTarget {
 	if spec == "" {
@@ -27,52 +39,120 @@ func ParseProbeTargets(spec string) []ProbeTarget {
 		if part == "" {
 			continue
 		}
-		if !strings.Contains(part, ":") {
-			// 只有 host，默认 port=53
-			if len(part) > 253 {
-				continue
-			}
-			out = append(out, ProbeTarget{Label: part, Host: part, Port: 53})
+		label, rest := splitLabel(part)
+		var (
+			tgt ProbeTarget
+			ok  bool
+		)
+		if hasHTTPScheme(rest) {
+			tgt, ok = parseHTTPTarget(label, rest)
+		} else {
+			tgt, ok = parseTCPTarget(label, rest)
+		}
+		if !ok {
 			continue
 		}
-		label := part
-		host := part
-		port := 53
-		// 拆 label:host:port
-		if idx := strings.Index(part, ":"); idx >= 0 {
-			label = strings.TrimSpace(part[:idx])
-			rest := part[idx+1:]
-			// rest 可能是 host 或 host:port
-			if pIdx := strings.LastIndex(rest, ":"); pIdx >= 0 {
-				host = rest[:pIdx]
-				p, err := strconv.Atoi(rest[pIdx+1:])
-				if err == nil {
-					port = p
-				}
-			} else {
-				host = rest
-			}
-		}
-		// 校验
-		if host == "" || len(host) > 253 {
-			continue
-		}
-		if port < 1 || port > 65535 {
-			continue
-		}
-		label = strings.TrimSpace(label)
-		if label == "" {
-			label = host
-		}
-		if len(label) > 24 {
-			label = label[:24]
-		}
-		out = append(out, ProbeTarget{Label: label, Host: host, Port: port})
-		if len(out) >= 8 {
+		out = append(out, tgt)
+		if len(out) >= maxProbeTargets {
 			break
 		}
 	}
 	return out
+}
+
+// splitLabel 把 "label:target" 拆成两段。
+// 裸 URL 的冒号属于 scheme，不能按首个冒号切，否则 label 会变成 "https"。
+func splitLabel(part string) (label, rest string) {
+	if hasHTTPScheme(part) {
+		// 裸 URL 无 label：交回空 label，由 normalizeProbeLabel 用主机名兜底。
+		return "", part
+	}
+	if idx := strings.Index(part, ":"); idx >= 0 {
+		return strings.TrimSpace(part[:idx]), part[idx+1:]
+	}
+	return part, part
+}
+
+func hasHTTPScheme(s string) bool {
+	l := strings.ToLower(s)
+	return strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://")
+}
+
+// parseTCPTarget 解析 TCP 目标。除 host:port 外兼容裸 IPv6：
+// 旧实现用 LastIndex 取端口，会把 "2606:4700::1111" 的 "1111" 当成端口；
+// 这里只在「单冒号」时按 host:port 拆，多冒号一律当裸主机（端口 53）。
+func parseTCPTarget(label, rest string) (ProbeTarget, bool) {
+	host := rest
+	port := 53
+	if h, p, err := net.SplitHostPort(rest); err == nil {
+		host = h
+		if n, e := strconv.Atoi(p); e == nil {
+			port = n
+		}
+	} else if strings.Count(rest, ":") == 1 {
+		idx := strings.LastIndex(rest, ":")
+		host = rest[:idx]
+		if n, e := strconv.Atoi(rest[idx+1:]); e == nil {
+			port = n
+		} else {
+			host = rest // 冒号后不是端口，整体当主机名
+		}
+	}
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" || len(host) > 253 {
+		return ProbeTarget{}, false
+	}
+	if port < 1 || port > 65535 {
+		return ProbeTarget{}, false
+	}
+	return ProbeTarget{Label: normalizeProbeLabel(label, host), Host: host, Port: port}, true
+}
+
+// parseHTTPTarget 解析 HTTP(S) 目标，端口缺省 80/443。
+func parseHTTPTarget(label, rest string) (ProbeTarget, bool) {
+	u, err := url.Parse(strings.TrimSpace(rest))
+	if err != nil || u.Host == "" {
+		return ProbeTarget{}, false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ProbeTarget{}, false
+	}
+	host := u.Hostname()
+	if host == "" || len(host) > 253 {
+		return ProbeTarget{}, false
+	}
+	port := 80
+	if scheme == "https" {
+		port = 443
+	}
+	if p := u.Port(); p != "" {
+		n, e := strconv.Atoi(p)
+		if e != nil || n < 1 || n > 65535 {
+			return ProbeTarget{}, false
+		}
+		port = n
+	}
+	u.Scheme = scheme
+	return ProbeTarget{
+		Label:  normalizeProbeLabel(label, host),
+		Host:   host,
+		Port:   port,
+		Scheme: scheme,
+		URL:    u.String(),
+	}, true
+}
+
+// normalizeProbeLabel 空 label 回退主机名，超长截断到 24 字符（与服务端一致）。
+func normalizeProbeLabel(label, host string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = host
+	}
+	if len(label) > 24 {
+		label = label[:24]
+	}
+	return label
 }
 
 // probeOne 对单个目标做 TCP 探测，返回 (ms, ok, loss)。
@@ -103,7 +183,7 @@ func probeOne(host string, port int, timeout time.Duration, budget time.Duration
 				return nil, false, &hundred
 			}
 			dialStart := time.Now()
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, p), timeout)
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(p)), timeout)
 			if err != nil {
 				continue
 			}
@@ -114,6 +194,80 @@ func probeOne(host string, port int, timeout time.Duration, budget time.Duration
 		}
 	}
 	return nil, false, &hundred
+}
+
+// httpProbeTimeout HTTP 探测单目标超时（对齐 F4 方案：5s）。
+const httpProbeTimeout = 5 * time.Second
+
+// httpProbeClient 包级复用的 HTTP 探测客户端（避免每轮每目标新建 Transport）。
+//
+// 三个刻意选择：
+//  1. InsecureSkipVerify：探测只回答「能否拿到 HTTP 响应」与「证书还剩几天」。
+//     自签/私有 CA 的内网站点若因信任链失败被判 down，可用率会长期 0%；
+//     证书过期由 cert_days 独立告警，不依赖握手失败。只读探测，不传输任何数据。
+//  2. 不跟随重定向：3xx 本身即「服务可达」；跟随会把状态码与证书换成跳转后目标的，
+//     导致证书倒计时指向错误的域名。
+//  3. 不走 ProxyFromEnvironment：Agent 环境里的代理变量不应改变探测口径。
+var httpProbeClient = &http.Client{
+	Timeout: httpProbeTimeout,
+	Transport: &http.Transport{
+		Proxy:             nil,
+		DisableKeepAlives: true,
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // 只读探测，理由见上
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// probeHTTP 对单个 HTTP(S) 目标做一次 GET 探测。
+//
+// 与 TCP 探测的口径差异：不做 3 次重试——HTTP 是一次完整请求（含 TLS 握手与响应头），
+// 重试会成倍拉长单目标耗时（3×5s）；握手抖动已由 60s 一轮的后台节奏吸收。
+// 成功判定与 nezha/CF 一致：2xx/3xx 为 ok，4xx/5xx/超时/连接失败为 not-ok。
+func probeHTTP(t ProbeTarget) Probe {
+	p := Probe{Type: "http"}
+	start := time.Now()
+	resp, err := httpProbeClient.Get(t.URL)
+	if err != nil {
+		hundred := 100.0
+		p.Loss = &hundred
+		return p
+	}
+	defer resp.Body.Close()
+	// 只读 4 KiB 后丢弃：探测不消费响应体内容，但要读一点以覆盖 TLS/首包路径。
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+
+	elapsed := float64(time.Since(start).Microseconds()) / 1000
+	ms := round1(elapsed)
+	p.Ms = &ms
+	code := resp.StatusCode
+	p.Code = &code
+	p.Ok = code >= 200 && code < 400
+	loss := 100.0
+	if p.Ok {
+		loss = 0
+	}
+	p.Loss = &loss
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		days := certDaysLeft(time.Now(), resp.TLS.PeerCertificates[0].NotAfter)
+		p.CertDays = &days
+	}
+	return p
+}
+
+// certDaysLeft 把证书到期时间换算为剩余天数（向上取整）。
+// 已过期统一记 0：与服务端 0..3650 的校验范围一致，且「过期」与「当天到期」
+// 对告警处理没有区别（都该立即续签），无需单独编码。
+func certDaysLeft(now, notAfter time.Time) int {
+	days := int(math.Ceil(notAfter.Sub(now).Hours() / 24))
+	if days < 0 {
+		return 0
+	}
+	if days > 3650 {
+		return 3650
+	}
+	return days
 }
 
 // DefaultProbeInterval 探测缓存刷新周期（与 Linux Python 版 collector.py 的
@@ -168,7 +322,7 @@ func (r *ProbeRunner) Start(ctx context.Context) {
 }
 
 // refresh 并发探测一轮，整体写回快照（读方要么看到上一轮完整结果，要么 nil，
-// 不存在半新半旧的混合）。
+// 不存在半新半旧的混合）。TCP 与 HTTP 目标共用同一轮并发，单目标失败只影响自身。
 func (r *ProbeRunner) refresh() {
 	results := make(map[string]Probe, len(r.targets))
 	var mu sync.Mutex
@@ -177,9 +331,16 @@ func (r *ProbeRunner) refresh() {
 		wg.Add(1)
 		go func(tgt ProbeTarget) {
 			defer wg.Done()
-			ms, ok, loss := probeOne(tgt.Host, tgt.Port, probeTimeout, probeBudget)
+			var p Probe
+			if tgt.Scheme != "" {
+				p = probeHTTP(tgt)
+			} else {
+				// TCP 不带 type：与老版本上报完全一致，服务端按 tcp 缺省处理。
+				ms, ok, loss := probeOne(tgt.Host, tgt.Port, probeTimeout, probeBudget)
+				p = Probe{Ok: ok, Ms: ms, Loss: loss}
+			}
 			mu.Lock()
-			results[tgt.Label] = Probe{Ok: ok, Ms: ms, Loss: loss}
+			results[tgt.Label] = p
 			mu.Unlock()
 		}(t)
 	}

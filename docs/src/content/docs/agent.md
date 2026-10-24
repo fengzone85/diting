@@ -128,7 +128,7 @@ DISK_PATH=/ \
 | `INTERVAL` | `20` | 固定模式间隔秒（`ADAPTIVE=false` 时生效，最小 5） |
 | `MONTH_ROTATE` | `0` | 流量重置日：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`，仅 Go 受控端生效 |
 | `DEBUG` | `0` | `1`/`true` 打印调试日志（不打印 token） |
-| `PROBE_TARGETS` | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 探测目标；**显式设空 `""` 可关闭探测**。运营商 DNS 对 TCP 全拒，`CM` 为移动门户 |
+| `PROBE_TARGETS` | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 探测目标；**显式设空 `""` 可关闭探测**。TCP 用 `label:host[:port]`，HTTP(S) 用 `label:http(s)://host/path`（https 附带证书剩余天数）。运营商 DNS 对 TCP 全拒，`CM` 为移动门户 |
 | `ADAPTIVE` | `1`（开） | `0`/`false` 关闭自适应，改用固定 `INTERVAL` |
 | `FAST_INTERVAL` | `10` | 自适应快档间隔秒（指标显著变化时） |
 | `SLOW_INTERVAL` | `60` | 自适应慢档间隔秒（平稳时） |

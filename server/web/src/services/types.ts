@@ -196,6 +196,28 @@ export interface ProbePoint {
 
 export type Probes = Record<string, ProbePoint[]>;
 
+// F4：探测可用率聚合（/probes?availability=1）。
+// up_pct 的分母是窗口内全部采样点；unreachable 表示窗口内无一成功
+// （多半是目标本身不可达，如运营商 DNS 拒绝 TCP），不应显示成「0% 可用」。
+export interface ProbeAvailability {
+  up_pct: number | null;
+  samples: number;
+  down_samples: number;
+  avg_ms: number | null;
+  max_ms: number | null;
+  last_down_at: number | null;
+  unreachable: boolean;
+  type: 'tcp' | 'http';
+  code: number | null;
+  cert_days: number | null;
+  cert_ts: number | null;
+}
+
+export interface ProbesDetailed {
+  series: Probes;
+  availability: Record<string, ProbeAvailability>;
+}
+
 export type GlassPreset = 'emerald' | 'soft' | 'high-contrast' | 'midnight' | 'custom';
 export type ColorVision = 'normal' | 'protanopia' | 'deuteranopia' | 'tritanopia';
 export type CardScheme = 'official' | 'basic' | 'ops' | 'resource' | 'finance' | 'traffic' | 'gpu' | 'asset' | 'full';
