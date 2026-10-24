@@ -58,7 +58,8 @@ test('Docker 卷形态：仍要求 Docker，失败则中止', () => {
 });
 
 test('数据类命令不再裸调 ensure_docker（否则原生部署全废）', () => {
-  for (const fn of ['do_backup', 'do_restore', 'do_db_stats', 'do_clear_ip_whitelist']) {
+  // F8.6 起 do_restore 是审计外壳，恢复主体在 _restore_apply（库形态判定也在这）。
+  for (const fn of ['do_backup', '_restore_apply', 'do_db_stats', 'do_clear_ip_whitelist']) {
     const body = fnBody(fn);
     assert.ok(!/^\s*ensure_docker \|\| (return|exit) 1\s*$/m.test(body),
       `${fn} 不该无条件 ensure_docker`);

@@ -5,7 +5,7 @@ const router = express.Router();
 const db = require('./db');
 const { rateLimitTouch, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
 const { heavyQuery } = require('./heavy-db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 const backups = require('./backups');
@@ -1475,7 +1475,10 @@ router.get('/admin/backups', adminOrReadonly, (req, res) => {
     dir: backups.BACKUP_DIR,
     available: fs.existsSync(backups.BACKUP_DIR),
     files: backups.listBackups(),
-    restore_request: backups.readRestoreRequest()
+    restore_request: backups.readRestoreRequest(),
+    // F8.6：最近一次恢复审查报告（恢复后由 server 启动流程写入）。
+    // 报告含跨节点 agent_id，只读角色（节点白名单 Token）不返回，口径同审计日志。
+    restore_audit: req.role === 'admin' ? db.getRestoreAuditReport() : null
   });
 });
 
@@ -1536,7 +1539,9 @@ router.delete('/admin/backups/:name', adminOnly, agentScope, agentGlobalOnly, (r
 // 恢复：不直接改数据库，而是投递恢复请求文件，由宿主侧 diting.sh 消费执行
 // （脚本会先备份当前状态、校验完整性、停服原子替换再重启）。
 router.post('/admin/backups/:name/restore', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
-  const r = backups.requestRestore(req.params.name);
+  // actor 随请求文件交给脚本：恢复会覆盖当前库，这条 API 审计会随之消失，
+  // 必须让「谁发起」跟着请求走到恢复后的库里（F8.6）。
+  const r = backups.requestRestore(req.params.name, actorLabel(req));
   if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
   res.json({ ok: true, name: r.name, trigger: r.trigger, queued: true });
   auditLog(req, 'request_restore_backup', `name=${r.name}`);

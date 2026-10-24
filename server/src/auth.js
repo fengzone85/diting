@@ -468,15 +468,23 @@ function ip6ToBits(ip) {
 }
 
 // ---- 审计日志：记录管理员写操作 ----
-// 从 req 提取操作者身份（session 中的 admin name 或 via 信息）和 IP。
+// 操作者标识（与审计 admin 列同款格式）。F8.6 的恢复请求要把它写进请求文件，
+// 由宿主脚本在恢复完成后回写审计 —— 否则「谁发起了恢复」会随旧库一起消失。
+function actorLabel(req) {
+  const sess = getSession(req);
+  const r = resolveRole(req);
+  const who = sess?.role === 'admin' ? 'admin(session)' : (r?.via === 'token' ? 'admin(token)' : 'unknown');
+  const ip = String(req.ip || req.socket?.remoteAddress || '');
+  return ip ? `${who} ${ip}` : who;
+}
+
+// 从 req 提取操作者身份和 IP 并落库。
 function auditLog(req, action, detail) {
   try {
-    const sess = getSession(req);
     const r = resolveRole(req);
-    const admin = sess?.role === 'admin' ? 'admin(session)' : (r?.via === 'token' ? 'admin(token)' : 'unknown');
-    const ip = String(req.ip || req.socket?.remoteAddress || '');
     const via = r?.via || '';
-    db.addAuditLog(Date.now(), admin, ip, action, detail, via);
+    const ip = String(req.ip || req.socket?.remoteAddress || '');
+    db.addAuditLog(Date.now(), actorLabel(req), ip, action, detail, via);
   } catch { /* 审计失败不影响主流程 */ }
 }
 
@@ -485,6 +493,6 @@ module.exports = {
   resolveRole, agentScope, inAgentScope,
   safeEqual, signSession, verifySession, getSession, verifyAdminToken,
   setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
-  revokeAllSessions, verifyTotpHeader, auditLog, clearSessionCache,
+  revokeAllSessions, verifyTotpHeader, auditLog, actorLabel, clearSessionCache,
   verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
 };

@@ -433,11 +433,43 @@ export interface BackupFile {
   kind: 'monitor' | 'pre_restore';
 }
 
+// F8.6：恢复后一致性审查（服务端启动时写入，本页只读展示）
+export interface RestoreAuditCheck {
+  id: string;
+  status: 'ok' | 'warn' | 'skipped' | 'fail';
+  value: Record<string, unknown>;
+}
+
+export interface RestoreAuditSummary {
+  ok: number;
+  warn: number;
+  skipped: number;
+  fail: number;
+  total_rows: number;
+  expired_rows: number;
+  orphan_deleted: number;
+  purged_agents: number;
+  traffic_gap_fixed: number;
+}
+
+export interface RestoreAuditReport {
+  ts: number;
+  backup: { name: string; ts: number; by: string };
+  source: 'db' | 'file';
+  duration_ms: number;
+  retention_days: number | null;
+  fatal: boolean;
+  error: string;
+  checks: RestoreAuditCheck[];
+  summary: RestoreAuditSummary;
+}
+
 export interface BackupList {
   dir: string;
   available: boolean;
   files: BackupFile[];
   restore_request: { file?: string; name?: string; ts?: number } | null;
+  restore_audit?: RestoreAuditReport | null;
 }
 
 // 数据库备份监控状态（宿主侧 diting.sh 执行后回写服务端）

@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
-import type { Settings, BackupFile, AlertThresholds, AlertOverride } from '../../services/types';
+import type { Settings, BackupFile, AlertThresholds, AlertOverride, RestoreAuditCheck, RestoreAuditReport } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 import NotifyPanel from '../../components/admin/NotifyPanel.vue';
@@ -253,6 +253,8 @@ const backupDir = ref('');
 const backupAvailable = ref(true);
 const backupBusy = ref('');
 const backupMsg = ref('');
+// F8.6：最近一次恢复审查（恢复后由服务端启动流程写入，这里只读展示）
+const restoreAudit = ref<RestoreAuditReport | null>(null);
 
 async function loadBackups() {
   try {
@@ -260,6 +262,7 @@ async function loadBackups() {
     backupFiles.value = r.files || [];
     backupDir.value = r.dir || '';
     backupAvailable.value = r.available !== false;
+    restoreAudit.value = r.restore_audit || null;
   } catch {
     backupFiles.value = [];
     backupAvailable.value = false;
@@ -358,6 +361,65 @@ const backupStale = computed(() => {
   // 超过 48 小时没成功备份即视为「可能未运行」
   return Date.now() - ts > 48 * 3600 * 1000;
 });
+
+// ---- F8.6：恢复审查展示 ----
+function restoreCheckName(c: RestoreAuditCheck): string {
+  const key = `settings.restoreAuditCheck_${c.id}`;
+  const out = t(key);
+  return out === key ? c.id : out;
+}
+function restoreStatusName(c: RestoreAuditCheck): string {
+  const key = `settings.restoreAuditStatus_${c.status}`;
+  const out = t(key);
+  return out === key ? c.status : out;
+}
+function restoreStatusClass(status: string): string {
+  if (status === 'ok') return 'text-emerald-400';
+  if (status === 'warn') return 'text-amber-400';
+  if (status === 'fail') return 'text-rose-400';
+  return 'opacity-60';
+}
+function restoreCheckText(c: RestoreAuditCheck): string {
+  const v = (c.value || {}) as Record<string, unknown>;
+  const num = (k: string) => Number(v[k] || 0);
+  switch (c.id) {
+    case 'integrity':
+      return String(v.result ?? '');
+    case 'retention':
+      return t('settings.restoreAuditRetentionValue', {
+        expired: num('expired_rows'),
+        total: num('total_rows'),
+        pct: Math.round(Number(v.ratio || 0) * 100),
+        days: num('retention_days'),
+      });
+    case 'folding':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditFoldingValue', {
+            before: String(v.watermark_before ?? '-'),
+            after: String(v.watermark_after ?? '-'),
+            catchUp: String(v.catch_up || '-'),
+          });
+    case 'overlap':
+      return v.reason ? String(v.reason) : t('settings.restoreAuditDeletedValue', { n: num('deleted') });
+    case 'traffic_gap':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditGapValue', { fixed: num('fixed'), checked: num('checked') });
+    case 'orphans':
+      return t('settings.restoreAuditDeletedValue', { n: num('deleted') });
+    case 'soft_deleted':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditPurgedValue', { expired: num('expired'), purged: num('purged') });
+    case 'capacity':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditCapacityValue', { rows: num('rows'), over: v.over ? 'yes' : 'no' });
+    default:
+      return '';
+  }
+}
 
 async function save() {
   saving.value = true;
@@ -699,6 +761,61 @@ async function resetGroupAlert() {
               </div>
             </dl>
           </div>
+        </div>
+
+        <!-- F8.6：最近一次恢复审查（恢复后服务端启动时生成，只读） -->
+        <div class="mt-6 border-t border-white/10 pt-4">
+          <h3 class="mb-1 font-semibold">{{ t('settings.restoreAuditTitle') }}</h3>
+          <p class="mb-3 text-xs opacity-60">{{ t('settings.restoreAuditHint') }}</p>
+          <div v-if="!restoreAudit" class="text-sm opacity-60">{{ t('settings.restoreAuditNone') }}</div>
+          <template v-else>
+            <dl class="mb-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditTime') }}</dt>
+                <dd class="text-right">{{ fmtTime(restoreAudit.ts) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditFrom') }}</dt>
+                <dd class="break-all text-right">{{ restoreAudit.backup?.name || '-' }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditBy') }}</dt>
+                <dd class="break-all text-right">{{ restoreAudit.backup?.by || '-' }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditDuration') }}</dt>
+                <dd class="text-right">{{ restoreAudit.duration_ms }} ms</dd>
+              </div>
+            </dl>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="text-xs opacity-60">
+                  <tr>
+                    <th class="py-2 pr-4">{{ t('settings.restoreAuditCheck') }}</th>
+                    <th class="py-2 pr-4">{{ t('settings.restoreAuditStatus') }}</th>
+                    <th class="py-2">{{ t('settings.restoreAuditDetail') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in restoreAudit.checks || []" :key="c.id" class="border-t border-white/10">
+                    <td class="py-2 pr-4 whitespace-nowrap">{{ restoreCheckName(c) }}</td>
+                    <td class="py-2 pr-4 whitespace-nowrap" :class="restoreStatusClass(c.status)">
+                      {{ restoreStatusName(c) }}
+                    </td>
+                    <td class="py-2 break-all opacity-80">{{ restoreCheckText(c) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-3 text-xs opacity-60">
+              {{ t('settings.restoreAuditSummary', {
+                expired: restoreAudit.summary?.expired_rows ?? 0,
+                total: restoreAudit.summary?.total_rows ?? 0,
+                orphans: restoreAudit.summary?.orphan_deleted ?? 0,
+                purged: restoreAudit.summary?.purged_agents ?? 0,
+              }) }}
+            </p>
+          </template>
         </div>
 
         <!-- 备份文件列表：下载 / 恢复 / 删除 -->

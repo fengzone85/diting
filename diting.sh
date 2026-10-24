@@ -1433,9 +1433,13 @@ process_restore_request() {
     fi
     local reqf="${RESTORE_REQUEST_FILE:-}"
     [[ -n "$reqf" && -f "$reqf" ]] || return 1
-    local file name
+    local file name by
     file="$(sed -n 's/.*"file":"\([^"]*\)".*/\1/p' "$reqf" | head -n1)"
     name="$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$reqf" | head -n1)"
+    # F8.6：把发起者带进恢复流程，供审计记录「谁发起的恢复」。旧请求文件没有该字段，
+    # 回退为 host(cli)（等价于宿主侧手动执行）。
+    by="$(sed -n 's/.*"by":"\([^"]*\)".*/\1/p' "$reqf" | head -n1)"
+    export RESTORE_REQUESTED_BY="${by:-host(cli)}"
     if [[ -z "$file" ]]; then
         echo -e "${RED}[错误] 恢复请求文件格式异常，已忽略: $reqf${NC}" >&2
         rm -f "$reqf"
@@ -1470,8 +1474,66 @@ sync_to_visible_dir() {
     chmod 600 "$dst/$(basename "$src")" 2>/dev/null || true
 }
 
-# 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务
+# ── F8.6 恢复后一致性审查标记 ──────────────────────────────────────────────
+# 恢复是「整库回滚」：时间基准、折叠水位线、流量累计器都会一起被拨回过去，
+# 而 prune 与流量差量都默认「时间是单调的」。所以在替换数据库之前，先往
+# **即将生效的那份副本**写入 admin_config.restore_audit_pending，服务启动时
+# 检测到它就立刻跑一次一致性审查（见 server/src/restore-audit.js）。
+#
+# 时序很重要：必须在重启前写。服务启动瞬间就会读该标记，重启后再写等于没写。
+# 也不能直接写 restore_src：未压缩备份就是原始备份文件本身，写标记会污染它
+# （同一份备份可能还要再次恢复/归档），因此先复制一份再写。
+#
+# 工具优先级：sqlite3 → 备份可见目录标记文件（服务端 BACKUP_DIR 与之同源）。
+# 全部失败只告警、不阻断恢复 —— 审查是增强能力，不能挡住「救数据」。
+_restore_pending_payload() {
+    local name="$1" by="$2" ts
+    ts="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")"
+    # 白名单过滤：name 来自文件名，by 来自后台请求文件；两者都不允许引号/换行，
+    # 这样拼进 JSON 与 SQL 字面量都是安全的（调用方不再做二次转义）。
+    name="$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._-')"
+    by="$(printf '%s' "${by:-host(cli)}" | tr -cd 'A-Za-z0-9._:() -' | cut -c1-120)"
+    printf '{"name":"%s","ts":%s,"by":"%s"}' "$name" "$ts" "$by"
+}
+
+# 向待替换的库副本写标记；返回 0 表示成功。
+_restore_mark_pending_db() {
+    local db_file="$1" payload="$2"
+    command -v sqlite3 >/dev/null 2>&1 || return 1
+    sqlite3 "$db_file" \
+        "CREATE TABLE IF NOT EXISTS admin_config (key TEXT PRIMARY KEY, value TEXT);
+         INSERT INTO admin_config (key, value) VALUES ('restore_audit_pending', '$payload')
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value;" 2>/dev/null || return 1
+    return 0
+}
+
+# 降级路径：库内标记写不进去时，落到备份可见目录（容器内 BACKUP_DIR 与之同源），
+# 服务端启动时一并读取。文件随恢复库一起生效，语义与库内标记等价。
+_restore_write_pending_file() {
+    local payload="$1" dst="${BACKUP_VISIBLE_DIR:-}"
+    [[ -n "$dst" && -d "$dst" ]] || return 1
+    printf '%s' "$payload" > "$dst/.restore_audit_pending.json" 2>/dev/null || return 1
+    chmod 644 "$dst/.restore_audit_pending.json" 2>/dev/null || true
+    return 0
+}
+
+# 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务。
+# 外层只补审计：恢复会覆盖当前库，API 侧那条 request_restore_backup 记录会随
+# 旧库一起消失（F8.6），所以结果必须在新库里再记一条（via=script）。
 do_restore() {
+    local in_path="${1:-}" rc=0
+    RESTORE_RESULT=""
+    _restore_apply "$in_path" || rc=$?
+    local result="${RESTORE_RESULT:-failed}"
+    [[ $rc -eq 0 && -z "$RESTORE_RESULT" ]] && result=ok
+    # 不阻塞主流程：库刚重启，容器内 node 可能还没就绪；写失败由服务端审查的
+    # restore_completed 兜底（前提是标记写入成功）。
+    db_audit_log restore_backup \
+        "name=$(basename "${in_path:-}") result=${result} rc=${rc} pre_restore=${RESTORE_PRE_BACKUP:-}" 2>/dev/null || true
+    return $rc
+}
+
+_restore_apply() {
     _init_backup_dir
     local in_path="$1"
     [[ -z "$in_path" ]] && { echo -e "${RED}[错误] 用法: --restore <备份文件路径>${NC}" >&2; return 1; }
@@ -1480,7 +1542,7 @@ do_restore() {
 
     # ── 解压（备份可能是 .gz）──────────────────────────────────────────────
     # 解压到同目录临时文件，校验/替换都用解压后的路径；退出时清理。
-    local restore_src="$in_path" tmp_dec=""
+    local restore_src="$in_path" tmp_dec="" marked_tmp=""
     if [[ "$in_path" == *.gz ]]; then
         if ! command -v gzip >/dev/null 2>&1; then
             echo -e "${RED}[错误] 备份为 gzip 压缩格式，但本机无 gzip（apt-get install -y gzip）${NC}" >&2
@@ -1495,8 +1557,8 @@ do_restore() {
         fi
         restore_src="$tmp_dec"
     fi
-    # 无论成功失败都清理临时解压文件
-    trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"' RETURN
+    # 无论成功失败都清理临时解压/标记副本
+    trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"; [[ -n "${marked_tmp:-}" && -f "${marked_tmp:-}" ]] && rm -f "$marked_tmp"' RETURN
 
     # ── 校验：SQLite 完整性 + 魔数 ──────────────────────────────────────────
     # 用 read 而非 $(head -c)：SQLite 头部第 16 字节是 \0，命令替换会丢弃并告警
@@ -1517,6 +1579,32 @@ do_restore() {
         echo -e "${YELLOW}[警告] 宿主机无 sqlite3，跳过完整性校验（仅校验了魔数）${NC}"
     fi
 
+    # ── F8.6：把审查标记写进「即将替换进库」的那份文件 ──────────────────────
+    # 必须在重启前完成（服务启动即读标记）；写失败只降级、不阻断恢复。
+    local pending_json marked_db=""
+    pending_json="$(_restore_pending_payload "$(basename "$in_path")" "${RESTORE_REQUESTED_BY:-host(cli)}")"
+    if [[ "$restore_src" == "$in_path" ]]; then
+        # 未压缩备份 = 原始文件，不能污染：复制一份再写
+        marked_tmp="$(mktemp "${TMPDIR:-/tmp}/diting_restore_marked_XXXXXX.db")"
+        if cp "$restore_src" "$marked_tmp" 2>/dev/null; then
+            marked_db="$marked_tmp"
+        else
+            rm -f "$marked_tmp"; marked_tmp=""
+        fi
+    else
+        # 解压产物是临时文件，可就地写（原始 .gz 不受影响）
+        marked_db="$restore_src"
+    fi
+    if [[ -n "$marked_db" ]] && _restore_mark_pending_db "$marked_db" "$pending_json"; then
+        restore_src="$marked_db"
+        # 清掉上一次可能残留的降级标记，避免服务端读到更旧的元数据
+        rm -f "${BACKUP_VISIBLE_DIR:-}/.restore_audit_pending.json" 2>/dev/null || true
+    elif _restore_write_pending_file "$pending_json"; then
+        echo -e "${YELLOW}[信息] 库内无法写审查标记（无 sqlite3），已改用备份目录标记文件${NC}"
+    else
+        echo -e "${YELLOW}[警告] 无法写入恢复审查标记，本次恢复将跳过启动审查（恢复动作仍会记审计）${NC}" >&2
+    fi
+
     local loc; loc="$(locate_db)"
     if [[ -z "$loc" ]]; then
         echo -e "${RED}[错误] 无法定位当前数据库，确认服务端已安装${NC}" >&2
@@ -1529,8 +1617,8 @@ do_restore() {
     # 此时放行 —— 后台「恢复」按钮本身已是管理员显式操作（写保护 + 审计日志），
     # 且流程内已强制自动备份当前状态可回滚，不再要求第二次人工确认。
     if [[ -t 0 && "${RESTORE_ASSUME_YES:-}" != "1" ]]; then
-        read -r -p "确认恢复？输入 yes 继续: " confirm || { echo "已取消"; return 0; }
-        [[ "$confirm" == "yes" ]] || { echo "已取消"; return 0; }
+        read -r -p "确认恢复？输入 yes 继续: " confirm || { RESTORE_RESULT=cancelled; echo "已取消"; return 0; }
+        [[ "$confirm" == "yes" ]] || { RESTORE_RESULT=cancelled; echo "已取消"; return 0; }
     else
         echo -e "${YELLOW}[信息] 非交互执行（后台请求/管道），跳过二次确认${NC}"
     fi
@@ -1551,6 +1639,9 @@ do_restore() {
     fi
 
     # ── 原子替换 ────────────────────────────────────────────────────────────
+    # 注意（F8.6）：当前 `db.js` 使用 rollback journal（未设 journal_mode，现网也无
+    # -wal/-shm），覆盖 monitor.db 不会残留旧日志。若将来改用 WAL，这里必须同时
+    # 删除 -wal/-shm，否则旧 WAL 会被新库误认成自己的日志（数据错乱）。
     if [[ "$loc" == docker:* ]]; then
         local cid svc cpath
         cid="$(echo "$loc" | cut -d: -f2)"
@@ -1585,6 +1676,9 @@ do_restore() {
         fi
         cp "$fpath" "${fpath}.before_restore.bak"
         cp "$restore_src" "$fpath"
+        # 现网是 rollback journal，下面两个文件通常不存在；保留删除是为了将来
+        # 启用 WAL 后不把旧日志带进新库（见「原子替换」开头的说明）。
+        rm -f "${fpath}-wal" "${fpath}-shm" 2>/dev/null || true
         # 重启
         if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
             ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d 2>/dev/null ) || true
@@ -1593,6 +1687,9 @@ do_restore() {
 
     echo -e "${GREEN}[OK]   数据库已恢复${NC}"
     echo -e "${YELLOW}[提示] 请刷新后台确认数据正确；如有问题可从 ${pre_restore:-（无）} 回滚${NC}"
+    # 供外层 do_restore 写审计（恢复动作在新库里必须留痕，F8.6）
+    RESTORE_RESULT=ok
+    RESTORE_PRE_BACKUP="$(basename "${pre_restore:-}")"
     # 恢复结果回写状态，供后台展示（与备份共用 backup_state）
     db_backup_state_set last_status=ok last_run_ts="$(date +%s%3N 2>/dev/null || echo "$(date +%s)000")" \
         "last_error=" "last_file=restore:$(basename "$in_path")" 2>/dev/null || true
@@ -2063,6 +2160,35 @@ cur.updated_at = Date.now();
 db.prepare('INSERT INTO admin_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(KEY, JSON.stringify(cur));
 JS
     db_run_js "$js" "$@" >/dev/null 2>&1
+    local rc=$?
+    rm -f "$js"
+    return $rc
+}
+
+# 向 audit_logs 写一条脚本侧审计（F8.6：恢复动作留痕）。
+# 为什么必须由脚本写：后台点「恢复」时 API 记的 request_restore_backup 会随旧库
+# 一起被覆盖，恢复完成后再查只剩备份库里的旧记录 —— 事后无法复盘谁恢复了什么。
+# 用法：db_audit_log <action> <detail>；admin 取发起者（RESTORE_REQUESTED_BY），via=script。
+db_audit_log() {
+    local action="$1" detail="${2:-}"
+    [[ -n "$action" ]] || return 1
+    local js; js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.exec(`CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  admin TEXT NOT NULL,
+  ip TEXT DEFAULT '',
+  action TEXT NOT NULL,
+  detail TEXT DEFAULT '',
+  via TEXT DEFAULT ''
+)`);
+db.prepare('INSERT INTO audit_logs (ts, admin, ip, action, detail, via) VALUES (?, ?, ?, ?, ?, ?)')
+  .run(Date.now(), process.argv[3], '', process.argv[4], process.argv[5], 'script');
+JS
+    db_run_js "$js" "${RESTORE_REQUESTED_BY:-host(cli)}" "$action" "$detail" >/dev/null 2>&1
     local rc=$?
     rm -f "$js"
     return $rc

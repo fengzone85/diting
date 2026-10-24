@@ -2,6 +2,33 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 恢复后一致性审查（F8.6）
+
+### ⚠️ 行为变更
+
+- **恢复动作能查到了**：恢复会用备份整库覆盖当前库，后台点「恢复」时记的 `request_restore_backup`
+  会随旧库一起消失。现在 `diting.sh` 在恢复完成后向新库补记 `restore_backup`
+  （`ok` / `failed` / `cancelled`，含 `pre_restore` 回滚点），服务端审查完成后再记
+  `restore_completed`（来源备份、8 项结果摘要、待清理预估）。审计 `admin` 列记录发起者
+  （`admin(session) 1.2.3.4` / `host(cli)`），`via=script`。
+- **恢复后自动审查 8 项**：`diting.sh` 在替换数据库前把 `admin_config.restore_audit_pending`
+  写进「即将生效」的副本（无 sqlite3 时降级为备份目录 `.restore_audit_pending.json`），
+  服务启动时依次检查：结构完整性、retention 预演、折叠水位线、明细/小时重叠、流量缺口、
+  孤儿数据、软删过期、容量水位。S2 / F11 / F12 未落地时对应项标「跳过」而不是失败。
+- **流量缺口不计入当月用量**：`traffic_state.last_ts` 落后超过 `max(3 × 上报间隔, 1h)` 时，
+  把 `last_rx/last_tx` 重置为 NULL（下一条上报只建基线），避免整段缺口的累计增量被
+  `max(baseRx - last_rx, 0)` 一次性算进当月、误触配额告警；内存 `trafficCache` 同步重置，
+  防止下次 flush 写回旧基线。
+- **孤儿与过期软删立即清理**：`metrics` / `metrics_hour` / `traffic_state` / `alert_state` /
+  `alert_overrides` / `online_sessions` 中 agent 已不存在的行直接删除；`agents.deleted_at`
+  超过 7 天的节点在启动审查时即 purge。
+- **结构完整性失败拒绝启动**：提示从 `pre_restore_*.db` 回滚；标记保留，修好后重启会再查一次
+  （避免带着坏库继续写入）。审查自身异常只记日志，不影响启动。
+- **备份页新增「最近一次恢复审查」面板**：恢复时间、来源备份、发起者、各项检查结果与待清理预估；
+  `GET /api/admin/backups` 增加 `restore_audit` 字段（只读角色不返回，口径同审计日志）。
+- **WAL 提示**：当前用 rollback journal，覆盖 `monitor.db` 安全；若将来启用 WAL，替换流程必须
+  同时删除 `-wal`/`-shm`（已写入 `diting.sh` 注释与宿主机分支）。
+
 ## 2026-10-24 节点删除改为软删（7 天缓冲）
 
 ### ⚠️ 行为变更

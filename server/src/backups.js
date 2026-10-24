@@ -156,13 +156,15 @@ function deleteBackup(name) {
 // 写入恢复请求，交由宿主侧 diting.sh 消费。
 // 刻意不直接改数据库：直接改只能改容器内副本/卷内当前库路径，且无法兼顾
 // 「恢复前先备份当前状态」等安全步骤，交给脚本实现更可靠。
-function requestRestore(name) {
+// actor（F8.6）：操作者标识，脚本恢复完成后会把它写进恢复后库的审计
+// —— 否则「谁发起了恢复」这条记录会随旧库一起被覆盖。
+function requestRestore(name, actor) {
   const full = resolveBackupFile(name);
   if (!full) return { ok: false, code: 400, error: 'invalid name' };
   const chk = inspectFile(full, name);
   if (!chk.ok) return { ok: false, code: 400, error: chk.reason };
   ensureDir();
-  const payload = JSON.stringify({ file: full, name, ts: Date.now() });
+  const payload = JSON.stringify({ file: full, name, ts: Date.now(), by: actor || 'admin' });
   try {
     fs.writeFileSync(RESTORE_TRIGGER, payload, { mode: 0o600 });
     return { ok: true, name, trigger: RESTORE_TRIGGER };

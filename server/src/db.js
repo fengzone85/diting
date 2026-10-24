@@ -1139,6 +1139,24 @@ const flushTraffic = () => {
   trafficDirty.clear();
 };
 
+// F8.6：恢复后检测到流量缺口时重置基线。
+// last_rx/last_tx 置 NULL 表示「下一条上报只建基线」——traffic.js 的
+// `last_rx !== null` 分支不成立，缺口期间累计的增量不会被一次性算进当月
+// （否则 max(baseRx - last_rx, 0) 会把整段缺口算成当月用量，可能误触配额告警）。
+// 内存缓存必须同步修改：否则下一次 flush 会把旧 last_rx 写回，覆盖刚做的修复。
+const markTrafficGap = (agentId, nowMs = Date.now()) => {
+  const s = trafficCache.get(agentId);
+  if (s) {
+    s.last_rx = null;
+    s.last_tx = null;
+    s.last_ts = nowMs;
+    s.updated_at = nowMs;
+    trafficDirty.add(agentId);
+  }
+  db.prepare('UPDATE traffic_state SET last_rx=NULL, last_tx=NULL, last_ts=?, updated_at=? WHERE agent_id=?')
+    .run(nowMs, nowMs, agentId);
+};
+
 const trafficFlushTimer = setInterval(flushTraffic, 60000);
 trafficFlushTimer.unref();
 process.once('exit', () => {
@@ -1449,6 +1467,25 @@ function setBackupState(s) {
   setConfig(BACKUP_STATE_KEY, JSON.stringify(merged));
 }
 
+// ---- F8.6：恢复后一致性审查 ----
+// diting.sh 在替换数据库前把 restore_audit_pending 写进「即将生效」的库；
+// 服务启动时读到它就跑一次审查（src/restore-audit.js），完成后清标记、
+// 把报告写入 restore_audit_last（备份页「最近一次恢复审查」面板读它）。
+const RESTORE_AUDIT_PENDING_KEY = 'restore_audit_pending';
+const RESTORE_AUDIT_LAST_KEY = 'restore_audit_last';
+
+function parseJsonConfig(key) {
+  try {
+    const o = JSON.parse(getConfig(key) || 'null');
+    return o && typeof o === 'object' ? o : null;
+  } catch (e) { return null; }
+}
+function getRestoreAuditPending() { return parseJsonConfig(RESTORE_AUDIT_PENDING_KEY); }
+function setRestoreAuditPending(v) { setConfig(RESTORE_AUDIT_PENDING_KEY, JSON.stringify(v || {})); }
+function clearRestoreAuditPending() { deleteConfig(RESTORE_AUDIT_PENDING_KEY); }
+function getRestoreAuditReport() { return parseJsonConfig(RESTORE_AUDIT_LAST_KEY); }
+function setRestoreAuditReport(r) { setConfig(RESTORE_AUDIT_LAST_KEY, JSON.stringify(r || {})); }
+
 // ---- AI 报告 CRUD ----
 function insertAiReport(r) {
   const info = stmts.insertAiReport.run({
@@ -1637,6 +1674,9 @@ module.exports = {
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,
+  markTrafficGap,
+  getRestoreAuditPending, setRestoreAuditPending, clearRestoreAuditPending,
+  getRestoreAuditReport, setRestoreAuditReport,
   listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,
   deleteThemeMarketSource, OFFICIAL_THEME_MARKET,
   getThemeConfig, setThemeConfig, deleteThemeConfig,
