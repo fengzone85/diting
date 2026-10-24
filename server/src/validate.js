@@ -82,6 +82,15 @@ const validateReport = (b) => {
     net_rx: optNum(b.net_rx, 0, Number.MAX_SAFE_INTEGER),
     net_tx: optNum(b.net_tx, 0, Number.MAX_SAFE_INTEGER),
     month_rotate: optInt(b.month_rotate, 0, 31),
+    // S1：接口集指纹（bootID/digest）。必须**恒返回字符串**：
+    //   - undefined 会让 upsertTrafficState 绑定时抛 TypeError（每轮 flush 崩一次）；
+    //   - '' !== undefined 又会让老 agent 每报都进异常分支（永不累加）。
+    // 字符集刻意不含 {}：Windows GUID 在 agent 侧拼 bootID 前已 Trim 花括号，
+    // 放宽会让同一台机器带/不带花括号产生两个 epoch、周期性触发基线对齐。
+    net_epoch: (() => {
+      const s = str(b.net_epoch, 80);
+      return /^[0-9a-fA-F@/_-]*$/.test(s) ? s : '';
+    })(),
     disk_r_rate: num(b.disk_r_rate, 0, 1e15),
     disk_w_rate: num(b.disk_w_rate, 0, 1e15),
     uptime: num(b.uptime, 0, 1e12),

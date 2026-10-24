@@ -95,6 +95,13 @@ type Metrics struct {
 	NetRx uint64 `json:"net_rx"`
 	NetTx uint64 `json:"net_tx"`
 
+	// NetEpoch 是「参与计数的接口集」指纹（S1）= bootID + "/" + 排序接口名的 FNV-1a 摘要。
+	// 服务端只做不透明比较：
+	//   - boot 段（"/" 前）变化 → 主机重启过，计数器归零，离线期增量按 since-boot 补账；
+	//   - 整串变化（接口集变了）→ 只对齐基线，不把新接口的生命周期计数计入本期。
+	// 空 = 老 agent 或平台不支持（服务端退回旧的 delta 逻辑）。
+	NetEpoch string `json:"net_epoch,omitempty"`
+
 	// 流量重置日（Komari month_rotate；0=绝对累计，1–31=周期重置日；服务端 agents.month_rotate 未设置时采用）
 	MonthRotate int `json:"month_rotate,omitempty"`
 
@@ -107,6 +114,15 @@ type Metrics struct {
 
 	// 多盘（可空，omitempty）
 	Disks []DiskInfo `json:"disks,omitempty"`
+}
+
+// NetIfaceOptions 是网络接口过滤选项（S1）。
+type NetIfaceOptions struct {
+	// Filter：NET_IFACE_FILTER，默认 true。false = 回退旧口径（全部非 lo 接口）。
+	Filter bool
+	// Only：NET_IFACE_ONLY 白名单（逗号分隔的完整接口名）。非空时忽略全部内置排除规则
+	// ——否则「隧道即唯一上行」的节点（WireGuard 出口 VPS）会被排除到 0。
+	Only []string
 }
 
 // ProbeTarget 是解析后的探测目标（label:host[:port] 或 label:http(s)://...）。

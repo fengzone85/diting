@@ -13,6 +13,7 @@ const v1 = require('./src/v1');
 const install = require('./src/install');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
+const rollup = require('./src/rollup');
 const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
@@ -606,6 +607,8 @@ const server = app.listen(PORT, () => {
   console.log(`[monitor] server listening on :${PORT}`);
   alerts.start();
   ai.start();
+  // S2 第一段：只折叠，不删明细、不改读取路由（灰度开关 METRICS_ROLLUP_ENABLED=0）
+  rollup.start();
 });
 
 // 第三方主题兼容 WebSocket：主题通过 ws://host/api/clients 发送 "get" 获取实时快照。

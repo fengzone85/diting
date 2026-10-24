@@ -28,6 +28,8 @@ description: 服务端与受控端环境变量参考
 | `AI_API_KEY` | 否 | — | 配合 `AI_KEY_FROM_ENV=1` 使用：模型服务的 API Key |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |
+| `METRICS_ROLLUP_ENABLED` | 否 | `1` | 小时级历史折叠任务（S2）。`0` 完全关闭，小时表保留不删 |
+| `METRICS_DETAIL_DAYS` | 否 | `7` | 明细保留天数（3–30）。S2 第二段启用删除后，超过该天数的查询走小时行 |
 | `AUDIT_RETENTION_DAYS` | 否 | `90` | 管理员操作审计日志保留天数（下限 7）。独立于 `RETENTION_DAYS`：审计属安全记录，默认保留更久 |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭） |
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
@@ -99,6 +101,8 @@ description: 服务端与受控端环境变量参考
 | `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。由服务端按此口径累计月流量（受控端不保存本地状态） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]` TCP / `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
+| `NET_IFACE_FILTER` | 否 | `1` | 网络计数接口过滤（S1）：`0` 关闭，回退旧口径（全部非 lo 接口）。默认排除 docker/veth/br-/bond/vlan/隧道等虚拟接口 |
+| `NET_IFACE_ONLY` | 否 | — | 接口白名单（逗号分隔完整接口名）：非空时只统计这些接口、忽略全部内置排除规则；隧道即唯一上行的节点必须设置 |
 | `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 

@@ -72,8 +72,15 @@ const emptyState = (agentId) => ({
   last_rx: null,
   last_tx: null,
   last_ts: 0,
+  // S1：接口集指纹（'' = 老 agent/平台不支持）。必须进 emptyState 与 upsert 列清单，
+  // 否则每轮 flush 落盘时会被默认值覆盖 → 下一报又触发基线对齐。
+  epoch: '',
   updated_at: 0,
 });
+
+// epoch 格式 bootID/digest：重启判定只比较 "/" 前的 boot 段，
+// 避免「接口集变化」被误判成重启而整段补账。
+const bootPartOf = (epoch) => String(epoch || '').split('/')[0];
 
 // 输入 state 会被原地更新；report 为 validateReport 之后的对象（net_rx/net_tx/month_rotate 可空）。
 // 返回 { has_counter, used_rx, used_tx }；调用方负责把 used_* 回写到 metrics.net_*_month。
@@ -103,15 +110,54 @@ function accumulate(state, agent, report, nowMs, tzOffsetHours = 0) {
     state.used_tx = 0;
   }
 
+  // S1 三段式记账（对齐 monitor db.rs:1530-1591）：
+  //   unseenBoot  离线期间主机重启：计数器归零，整段 since-boot 补账
+  //   epochChanged 接口集变化：只对齐基线（新接口的生命周期计数不能算本期）
+  //   首报/状态丢失：只对齐基线（last_rx=null 时 base-null 会把整段算成本期）
+  const epoch = String(report.net_epoch || '');
+  const stateEpoch = String(state.epoch || '');
+  const hasEpoch = epoch !== '';
+
   if (rotate === 0) {
+    // 绝对累计口径：只跟随绝对值，绝不叠加补账（否则重启会在绝对值上再叠一段）。
     state.used_rx = baseRx;
     state.used_tx = baseTx;
-  } else if (!newCycle && state.last_rx !== null && state.last_rx !== undefined) {
-    // 新周期首报只设基线，不把上一周期尾巴计入新周期。
-    state.used_rx = clampCounter(state.used_rx + Math.max(baseRx - state.last_rx, 0));
-    state.used_tx = clampCounter(state.used_tx + Math.max(baseTx - state.last_tx, 0));
+  } else {
+    const upSec = (report.uptime === null || report.uptime === undefined) ? null : Number(report.uptime);
+    const booted = (upSec === null || !Number.isFinite(upSec)) ? null : nowMs - upSec * 1000;
+    const bootChanged = hasEpoch && stateEpoch !== '' && bootPartOf(stateEpoch) !== bootPartOf(epoch);
+    const unseenBoot = bootChanged && state.last_ts > 0 && booted !== null && booted > state.last_ts;
+    const epochChanged = hasEpoch && stateEpoch !== epoch;
+    const noBaseline = state.last_rx === null || state.last_rx === undefined
+      || state.last_tx === null || state.last_tx === undefined;
+
+    let dRx = 0;
+    let dTx = 0;
+    if (unseenBoot) {
+      dRx = baseRx;
+      dTx = baseTx;
+    } else if (epochChanged) {
+      // 只对齐基线：不累加、也不清零（monitor 同款）
+    } else if (noBaseline) {
+      // 首报/状态丢失：只对齐基线
+    } else {
+      // 含「老 agent 无 epoch」：必须正常累加（不能照抄 monitor 的空 epoch 即重置）
+      dRx = Math.max(baseRx - state.last_rx, 0);
+      dTx = Math.max(baseTx - state.last_tx, 0);
+    }
+
+    if (newCycle) {
+      // 新周期首报也要记账：d 是「距上次上报」这段时间的增量，
+      // 完全丢弃会让每个周期起点少记一个上报间隔。
+      state.used_rx = clampCounter(dRx);
+      state.used_tx = clampCounter(dTx);
+    } else {
+      state.used_rx = clampCounter(state.used_rx + dRx);
+      state.used_tx = clampCounter(state.used_tx + dTx);
+    }
   }
 
+  state.epoch = epoch;
   state.last_rx = baseRx;
   state.last_tx = baseTx;
   state.last_ts = nowMs;
@@ -129,5 +175,6 @@ module.exports = {
   lastResetDate,
   cycleKeyOf,
   emptyState,
+  bootPartOf,
   accumulate,
 };

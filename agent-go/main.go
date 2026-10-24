@@ -44,11 +44,14 @@ func main() {
 		if cfg.Adaptive {
 			mode = "adaptive"
 		}
-		log.Printf("[debug] server=%s id=%s mode=%s fast=%s slow=%s interval=%s disk=%s probes=%s",
-			cfg.ServerURL, cfg.AgentID, mode, cfg.FastInterval, cfg.SlowInterval, cfg.Interval, cfg.DiskPath, cfg.ProbeTargets)
+		log.Printf("[debug] server=%s id=%s mode=%s fast=%s slow=%s interval=%s disk=%s probes=%s iface_filter=%v iface_only=%q",
+			cfg.ServerURL, cfg.AgentID, mode, cfg.FastInterval, cfg.SlowInterval, cfg.Interval, cfg.DiskPath, cfg.ProbeTargets, cfg.NetIfaceFilter, cfg.NetIfaceOnly)
 	}
 
-	c := collector.NewCollector(cfg.DiskPath)
+	c := collector.NewCollector(cfg.DiskPath, collector.NetIfaceOptions{
+		Filter: cfg.NetIfaceFilter,
+		Only:   collector.ParseIfaceOnly(cfg.NetIfaceOnly),
+	})
 	r := reporter.NewReporter(cfg.ServerURL, cfg.AgentID, cfg.AgentToken, cfg.Interval, version)
 	targets := collector.ParseProbeTargets(cfg.ProbeTargets)
 

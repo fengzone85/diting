@@ -76,6 +76,33 @@ CREATE INDEX IF NOT EXISTS idx_metrics_agent_ts ON metrics(agent_id, ts);
 -- 全量 sparklines 查询（WHERE ts>=? 无 agent_id 条件）需要单列 ts 索引，避免 7d 窗口全表扫描
 CREATE INDEX IF NOT EXISTS idx_metrics_ts ON metrics(ts);
 
+-- 小时级历史（S2）：由 rollup 任务从 metrics 折叠而来，保留期 = RETENTION_DAYS。
+-- 明细只保留 METRICS_DETAIL_DAYS（默认 7 天），长窗口查询走「小时行 + 明细行」合并读。
+-- 刻意不声明 FOREIGN KEY：purgeDeletedAgents() 显式清理（S2.4 / F11 约定）。
+CREATE TABLE IF NOT EXISTS metrics_hour (
+  agent_id   TEXT NOT NULL,
+  hour_ts    INTEGER NOT NULL,
+  n          INTEGER NOT NULL,
+  cpu_avg REAL,          cpu_max REAL,
+  mem_pct_avg REAL,      mem_pct_max REAL,
+  mem_used_avg INTEGER,  mem_total_avg INTEGER,
+  disk_pct_avg REAL,     disk_pct_max REAL,
+  disk_used_avg INTEGER, disk_total_avg INTEGER,
+  load1_avg REAL,        load1_max REAL,
+  load5_avg REAL,        load15_avg REAL,
+  net_rx_rate_avg REAL,  net_rx_rate_max REAL,
+  net_tx_rate_avg REAL,  net_tx_rate_max REAL,
+  net_rx_month INTEGER,  net_tx_month INTEGER,
+  swap_pct_avg REAL,     swap_used_avg INTEGER, swap_total_avg INTEGER,
+  uptime_avg REAL,
+  temp_avg REAL,         temp_max REAL,
+  disk_r_rate_max REAL,  disk_w_rate_max REAL,
+  process_count_max INTEGER,
+  probes_hour TEXT,
+  PRIMARY KEY (agent_id, hour_ts)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_metrics_hour_ts ON metrics_hour(hour_ts);
+
 CREATE TABLE IF NOT EXISTS alert_state (
   agent_id   TEXT NOT NULL,
   type       TEXT NOT NULL,
@@ -194,6 +221,8 @@ CREATE TABLE IF NOT EXISTS traffic_state (
   last_rx     INTEGER CHECK (last_rx BETWEEN 0 AND 9007199254740991),
   last_tx     INTEGER CHECK (last_tx BETWEEN 0 AND 9007199254740991),
   last_ts     INTEGER,
+  -- S1：受控端上报的接口集指纹（bootID/digest）。空 = 老 agent 或平台不支持。
+  epoch       TEXT DEFAULT '',
   updated_at  INTEGER
 );
 
@@ -319,6 +348,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   if (!existing.has('month_rotate')) db.exec('ALTER TABLE agents ADD COLUMN month_rotate INTEGER');
 }
 
+// schema migration: traffic_state 增加接口集指纹列（S1）。
+// 必须同时进 upsertTrafficState 的列清单：INSERT OR REPLACE 未列出的列会取默认值，
+// 漏掉会让每次 flush 后 epoch 丢失 → 下轮又触发一次基线对齐。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(traffic_state)').all().map((r) => r.name));
+  if (!existing.has('epoch')) db.exec("ALTER TABLE traffic_state ADD COLUMN epoch TEXT DEFAULT ''");
+}
+
 // schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
 {
   const existing = new Set(db.prepare('PRAGMA table_info(ai_reports)').all().map((r) => r.name));
@@ -351,8 +388,8 @@ const stmts = {
     grp=@grp, country=@country, probe_targets=@probe_targets
     WHERE id=@id`),
   upsertTrafficState: db.prepare(`INSERT OR REPLACE INTO traffic_state
-    (agent_id, cycle_key, cycle_start, used_rx, used_tx, last_rx, last_tx, last_ts, updated_at)
-    VALUES (@agent_id, @cycle_key, @cycle_start, @used_rx, @used_tx, @last_rx, @last_tx, @last_ts, @updated_at)`),
+    (agent_id, cycle_key, cycle_start, used_rx, used_tx, last_rx, last_tx, last_ts, epoch, updated_at)
+    VALUES (@agent_id, @cycle_key, @cycle_start, @used_rx, @used_tx, @last_rx, @last_tx, @last_ts, @epoch, @updated_at)`),
   allTrafficState: db.prepare('SELECT * FROM traffic_state'),
   deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
   // 审查 G4：批准自助注册的待确认 agent（pending 1→0）
@@ -1149,6 +1186,16 @@ const deleteConfig = (k) => _delCfg.run(k).changes > 0;
 // ---- 管理员 Token：只存 sha256 哈希，库文件泄露不等于拿到 Token ----
 // 明文只存在于用户手里（向导一次性展示 / reset 脚本一次性打印），永不落盘。
 const ADMIN_TOKEN_HASH = 'admin_token_hash';
+// ---- 小时折叠水位线（S2）----
+// metrics_rolled = 已折叠到的小时上界（epoch ms，整点）。0 = 尚未初始化。
+// 存 admin_config 而不新建表：单值、与其它运行态开关同源（monitor 同款）。
+const METRICS_ROLLED_KEY = 'metrics_rolled';
+const getMetricsWatermark = () => {
+  const v = Number(getConfig(METRICS_ROLLED_KEY));
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+};
+const setMetricsWatermark = (ts) => setConfig(METRICS_ROLLED_KEY, String(Math.max(0, Math.floor(Number(ts) || 0))));
+
 const getAdminTokenHash = () => getConfig(ADMIN_TOKEN_HASH) || '';
 const setAdminTokenHash = (h) => setConfig(ADMIN_TOKEN_HASH, String(h || ''));
 // 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（即"已安装"，防重装）。
@@ -1584,6 +1631,7 @@ module.exports = {
   createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, revokeAllSessionRowsExcept, pruneSessions, touchSession,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, deleteConfig, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
+  getMetricsWatermark, setMetricsWatermark,
   getAdminTokenHash, setAdminTokenHash, setAdminTokenHashIfAbsent, clearAdminTokenHash,
   getSetupToken, setSetupToken, clearSetupToken,
   isSetupTokenCleared, markSetupTokenCleared, unmarkSetupTokenCleared,
