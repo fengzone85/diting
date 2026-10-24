@@ -955,10 +955,11 @@ server_ctl_menu() {
         "0" "$(msg "ctl.back")" )" || return
     [[ -z "$c" ]] && return
     case "$c" in
-        1) server_ctl start ;;
-        2) server_ctl stop ;;
-        3) server_ctl restart ;;
-        4) server_ctl status ;;
+        # 交互菜单每轮会 clear 重绘：不 pause 的话刚打印的结果/Token 会立刻被清掉。
+        1) server_ctl start; pause_return ;;
+        2) server_ctl stop; pause_return ;;
+        3) server_ctl restart; pause_return ;;
+        4) server_ctl status; pause_return ;;
         *) return ;;
     esac
 }
@@ -2460,7 +2461,9 @@ JS
     echo ""
     echo -e "${GREEN}$(msg "reset.ok")${NC}"
     echo ""
-    echo "  $new_token"
+    # 裸行输出：带前导空格时用户整行复制会把空格一起粘进登录框 → 401（无任何提示），
+    # 现场排查成本极高。Token 自身不含空白，单独一行最安全。
+    echo "$new_token"
     echo ""
     echo -e "${YELLOW}$(msg "reset.save")${NC}"
 
@@ -2865,8 +2868,10 @@ show_menu() {
         6) status_all; pause_return ;;
         7) uninstall_all ;;
         8) db_manage_menu ;;
-        9) do_reset_admin_token ;;
-        10) do_clear_ip_whitelist ;;
+        # 两个救援动作都会打印关键信息（新 Token / 清除结果），必须暂停，
+        # 否则菜单清屏后用户什么都看不到——「重置 Token 没反应」的根因。
+        9) do_reset_admin_token; pause_return ;;
+        10) do_clear_ip_whitelist; pause_return ;;
         11) switch_lang ;;
         12) server_ctl_menu ;;
         *) echo "$(msg "menu.exit_msg")"; exit 0 ;;
