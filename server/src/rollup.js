@@ -109,13 +109,15 @@ function foldProbes(rows) {
       if (!p || typeof p !== 'object') continue;
       let acc = labels.get(label);
       if (!acc) {
-        acc = { msSum: 0, nMs: 0, lossSum: 0, nLoss: 0, n: 0, nOk: 0, certMin: null, http: false };
+        acc = { msSum: 0, nMs: 0, lossSum: 0, nLoss: 0, n: 0, nOk: 0, nSamp: 0, certMin: null, http: false };
         labels.set(label, acc);
       }
       acc.n++;
       if (typeof p.ms === 'number' && Number.isFinite(p.ms)) { acc.msSum += p.ms; acc.nMs++; }
       if (typeof p.loss === 'number' && Number.isFinite(p.loss)) { acc.lossSum += p.loss; acc.nLoss++; }
       if (p.ok !== false) acc.nOk++;
+      // n_samp = ok 为布尔值的样本数（三态：null 是无采样，不算成功/失败）
+      if (p.ok !== null && p.ok !== undefined) acc.nSamp++;
       if (typeof p.cert_days === 'number' && Number.isFinite(p.cert_days)) {
         acc.certMin = acc.certMin === null ? p.cert_days : Math.min(acc.certMin, p.cert_days);
       }
@@ -133,6 +135,7 @@ function foldProbes(rows) {
         n_ms: a.nMs,
         n_loss: a.nLoss,
         n_ok: a.nOk,
+        n_samp: a.nSamp,
         cert_min: a.certMin,
         type: a.http ? 'http' : 'tcp',
       };

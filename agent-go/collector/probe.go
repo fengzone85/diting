@@ -3,11 +3,13 @@ package collector
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -155,23 +157,37 @@ func normalizeProbeLabel(label, host string) string {
 	return label
 }
 
-// probeOne 对单个目标做 TCP 探测，返回 (ms, ok, loss)。
+// probeOne 对单个目标做 TCP 探测，返回三态 (ms, ok, loss)。
 //
-// 策略（对齐 Python collector.py:302-354，端口序按 Go 纯 TCP 特性调整）：
-//   - 端口序：目标端口优先，再 443/80。DNS 目标的 TCP:53 几乎必通且 RTT 最有
-//     代表性——若 443/80 排前面且被 DROP（各吃满 timeout），预算内 53 会永远
-//     轮不到（实测 CU/GG 误报离线的根因），故目标端口必须排最前。
-//   - 重试 3 次吸收抖动
-//   - budget 总预算：累计耗时达到预算立即放弃，防不可达目标无限重试；
-//     默认 8s = 3轮×3端口×2.5s 全覆盖 + 防呆余量（探测已后台化，预算
-//     不再影响上报节奏，仅封顶单目标耗时）
-//   - 纯 TCP 握手时延，不采任何主机指纹
+// S3 口径（对齐 monitor tcp_ping）：
+//   - **先解析、再计时**：解析有独立死线；解析超时 → 无采样 (nil,nil,nil)，
+//     解析报错 → 不可达 (nil,false,100)。解析耗时不计入 RTT。
+//   - 对解析出的最多 3 个地址逐个计时，每个地址时钟从零开始，首个成功者为 RTT。
+//   - 单次握手死线 900ms（压在内核 1s SYN 重传之下），防止重传成功的 1200ms 被记成 RTT。
+//   - 保留既有「目标端口优先 → 443 → 80、3 轮、预算封顶」语义。
 //
-// loss 口径：纯 TCP 无 ICMP 丢包统计，故只给二值 ——
-// 握手成功 → 0，预算内全部失败 → 100。不伪造中间值（如 33/66），
-// 因为「三轮重试中有几次失败」不代表链路丢包率。
-func probeOne(host string, port int, timeout time.Duration, budget time.Duration) (ms *float64, ok bool, loss *float64) {
+// loss 口径不变：握手成功 → 0，预算内全部失败 → 100；无采样 → null。
+func probeOne(host string, port int, timeout time.Duration, budget time.Duration) (ms *float64, ok *bool, loss *float64) {
+	okTrue, okFalse := true, false
 	zero, hundred := 0.0, 100.0
+
+	ctx, cancel := context.WithTimeout(context.Background(), probeResolveTimeout)
+	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+	resolveTimedOut := ctx.Err() == context.DeadlineExceeded
+	cancel()
+	if err != nil {
+		if resolveTimedOut || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, nil // 解析超时：本轮无采样，不是「不可达」
+		}
+		return nil, &okFalse, &hundred
+	}
+	if len(addrs) > 3 {
+		addrs = addrs[:3]
+	}
+	if len(addrs) == 0 {
+		return nil, &okFalse, &hundred
+	}
+
 	ports := []int{port}
 	if port != 443 && port != 80 {
 		ports = append(ports, 443, 80)
@@ -179,21 +195,23 @@ func probeOne(host string, port int, timeout time.Duration, budget time.Duration
 	start := time.Now()
 	for attempt := 0; attempt < 3; attempt++ {
 		for _, p := range ports {
-			if time.Since(start) >= budget {
-				return nil, false, &hundred
+			for _, addr := range addrs {
+				if time.Since(start) >= budget {
+					return nil, &okFalse, &hundred
+				}
+				dialStart := time.Now()
+				conn, derr := net.DialTimeout("tcp", net.JoinHostPort(addr, strconv.Itoa(p)), timeout)
+				if derr != nil {
+					continue
+				}
+				elapsed := time.Since(dialStart).Seconds() * 1000
+				conn.Close()
+				v := round1(elapsed)
+				return &v, &okTrue, &zero
 			}
-			dialStart := time.Now()
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(p)), timeout)
-			if err != nil {
-				continue
-			}
-			elapsed := time.Since(dialStart).Seconds() * 1000
-			conn.Close()
-			v := round1(elapsed)
-			return &v, true, &zero
 		}
 	}
-	return nil, false, &hundred
+	return nil, &okFalse, &hundred
 }
 
 // httpProbeTimeout HTTP 探测单目标超时（对齐 F4 方案：5s）。
@@ -243,9 +261,10 @@ func probeHTTP(t ProbeTarget) Probe {
 	p.Ms = &ms
 	code := resp.StatusCode
 	p.Code = &code
-	p.Ok = code >= 200 && code < 400
+	ok := code >= 200 && code < 400
+	p.Ok = &ok
 	loss := 100.0
-	if p.Ok {
+	if ok {
 		loss = 0
 	}
 	p.Loss = &loss
@@ -277,10 +296,29 @@ const DefaultProbeInterval = 60 * time.Second
 // probeTimeout / probeBudget 单次拨号超时与单目标总预算。
 // 预算 8s = 3轮×3端口×2.5s 全覆盖 + 余量：探测在后台独立节奏跑，预算只是
 // 防呆封顶（旧同步实现里 22.5s 会直接拖慢上报，现已无此问题）。
-const (
-	probeTimeout = 2500 * time.Millisecond
-	probeBudget  = 8 * time.Second
+var (
+	// S3：单次握手死线 900ms（压在内核 1s SYN 重传之下，避免把重传成功的
+	// 1200/3200ms 记成 RTT）。可用 PROBE_TIMEOUT_MS 覆盖。
+	probeTimeout = envMillis("PROBE_TIMEOUT_MS", 900*time.Millisecond)
+	// 主机名解析独立死线，默认同 monitor 的 900ms；PROBE_RESOLVE_MS 可覆盖。
+	// 解析失败要区分「超时（无采样）」与「报错（不可达）」。
+	probeResolveTimeout = envMillis("PROBE_RESOLVE_MS", 900*time.Millisecond)
+	// 预算：3 轮 × 3 端口 × 900ms = 8.1s → 10s 封顶（探测后台化，不拖上报）。
+	probeBudget = 10 * time.Second
 )
+
+// envMillis 读取毫秒环境变量（非法/越界回落默认值）。
+func envMillis(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 || n > 60000 {
+		return def
+	}
+	return time.Duration(n) * time.Millisecond
+}
 
 // ProbeRunner 后台探测缓存：以独立节奏并发探测所有目标，上报方取最近一轮快照。
 //

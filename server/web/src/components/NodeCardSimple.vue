@@ -159,6 +159,10 @@ const lossBars = computed(() => {
   }
   return Array.from({ length: BAR_COUNT }, (_, i) => {
     const [target, v] = entries[i % entries.length];
+    // 三态：无采样给中性样式，不能渲染成 timeout/最差信号
+    if (v.ok === null) {
+      return { key: `${target}-${i}`, className: 'bg-muted-foreground/20', tooltip: `${target}: —` };
+    }
     const loss = v.loss ?? 0;
     const ok = v.ok !== false;
     return {
@@ -189,7 +193,7 @@ function lossColorClass(loss: number): string {
 
 const avgLatency = computed(() => {
   const probes = parseProbes();
-  const entries = Object.entries(probes).filter(([, v]) => v.ok !== false && v.ms != null);
+  const entries = Object.entries(probes).filter(([, v]) => v.ok === true && v.ms != null);
   if (entries.length === 0) return '—';
   const avg = entries.reduce((s, [, v]) => s + (v.ms || 0), 0) / entries.length;
   return avg.toFixed(0) + 'ms';
@@ -197,10 +201,10 @@ const avgLatency = computed(() => {
 
 const avgLoss = computed(() => {
   const probes = parseProbes();
-  const entries = Object.entries(probes);
-  if (entries.length === 0) return '0%';
-  const failed = entries.filter(([, v]) => v.ok === false).length;
-  return ((failed / entries.length) * 100).toFixed(1) + '%';
+  const sampled = Object.values(probes).filter((v) => v.ok !== null && v.loss != null);
+  if (sampled.length === 0) return '—';
+  const failed = sampled.filter((v) => v.ok === false).length;
+  return ((failed / sampled.length) * 100).toFixed(1) + '%';
 });
 
 const tags = computed(() => {

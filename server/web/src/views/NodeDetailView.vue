@@ -259,20 +259,23 @@ const diskWriteSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({
 const tempSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.temp ?? 0 })));
 const swapSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.swap_pct ?? 0 })));
 
-function avgProbe(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
+function avgProbe(points: { ts: number; ms: number | null; ok: boolean | null; loss: number | null }[]) {
   if (!points || !points.length) return null;
-  const ok = points.filter(p => p.ok);
+  // 三态：无采样（ok=null）不计入均值
+  const ok = points.filter(p => p.ok === true && p.ms != null);
   if (!ok.length) return null;
-  return ok.reduce((s, p) => s + p.ms, 0) / ok.length;
+  return ok.reduce((s, p) => s + (p.ms as number), 0) / ok.length;
 }
 
-function lossPercent(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
-  if (!points || !points.length) return 0;
-  return points.filter(p => !p.ok).length / points.length * 100;
+function lossPercent(points: { ts: number; ms: number | null; ok: boolean | null; loss: number | null }[]) {
+  // 分母只算有采样条目；无采样既不是成功也不是失败，不能把丢包率抬到 100%
+  const sampled = (points || []).filter(p => p.loss != null);
+  if (!sampled.length) return 0;
+  return sampled.filter(p => p.ok === false).length / sampled.length * 100;
 }
 
-function p95Probe(points: { ts: number; ms: number; ok: boolean; loss: number }[]) {
-  const ok = (points || []).filter(p => p.ok).map(p => p.ms).sort((a, b) => a - b);
+function p95Probe(points: { ts: number; ms: number | null; ok: boolean | null; loss: number | null }[]) {
+  const ok = (points || []).filter(p => p.ok === true && p.ms != null).map(p => p.ms as number).sort((a, b) => a - b);
   if (!ok.length) return null;
   const idx = Math.min(ok.length - 1, Math.ceil(ok.length * 0.95) - 1);
   return ok[Math.max(0, idx)];
@@ -315,11 +318,11 @@ function probeCertClass(target: string): string {
   return 'text-emerald-400';
 }
 
-function probeSeries(points: { ts: number; ms: number; ok: boolean; loss: number }[]): ChartPoint[] {
+function probeSeries(points: { ts: number; ms: number | null; ok: boolean | null; loss: number | null }[]): ChartPoint[] {
   if (!points) return [];
   return points
-    .filter(p => p.ok)
-    .map(p => ({ t: p.ts, v: p.ms })) // metrics.ts 已是毫秒，勿再 *1000
+    .filter(p => p.ok === true && p.ms != null)
+    .map(p => ({ t: p.ts, v: p.ms as number })) // metrics.ts 已是毫秒，勿再 *1000
     .sort((a, b) => a.t - b.t);
 }
 

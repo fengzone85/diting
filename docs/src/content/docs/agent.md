@@ -129,6 +129,8 @@ DISK_PATH=/ \
 | `MONTH_ROTATE` | `0` | 流量重置日：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`，仅 Go 受控端生效 |
 | `DEBUG` | `0` | `1`/`true` 打印调试日志（不打印 token） |
 | `PROBE_TARGETS` | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 探测目标；**显式设空 `""` 可关闭探测**。TCP 用 `label:host[:port]`，HTTP(S) 用 `label:http(s)://host/path`（https 附带证书剩余天数）。运营商 DNS 对 TCP 全拒，`CM` 为移动门户 |
+| `PROBE_TIMEOUT_MS` | `900` | TCP 单次握手死线（毫秒） |
+| `PROBE_RESOLVE_MS` | `900` | 主机名解析死线（毫秒）；超时为「无采样」 |
 | `NET_IFACE_FILTER` | `1` | 网络计数接口过滤：`0` 关闭，回退旧口径（全部非 lo 接口） |
 | `NET_IFACE_ONLY` | — | 接口白名单（逗号分隔完整接口名）：非空时只统计这些接口、忽略全部内置排除规则（隧道即唯一上行的节点必须设置） |
 | `ADAPTIVE` | `1`（开） | `0`/`false` 关闭自适应，改用固定 `INTERVAL` |

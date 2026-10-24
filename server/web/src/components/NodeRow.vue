@@ -114,6 +114,8 @@ const lossBars = computed(() => {
   }
   return Array.from({ length: BAR_COUNT }, (_, i) => {
     const [target, v] = entries[i % entries.length];
+    // 三态：无采样（ok=null）给中性样式，不能渲染成最差信号
+    if (v.ok === null) return { key: `${target}-${i}`, className: 'bg-muted-foreground/20', tooltip: `${target}: —` };
     const loss = v.loss ?? 0;
     const ok = v.ok !== false;
     return { key: `${target}-${i}`, className: !ok ? 'bg-signal-5 ping-signal-pattern-4' : lossColorClass(loss), tooltip: `${target}: ${ok ? loss.toFixed(1) + '%' : 'timeout'}` };
@@ -122,16 +124,17 @@ const lossBars = computed(() => {
 
 const avgLatency = computed(() => {
   const probes = parseProbes();
-  const entries = Object.entries(probes).filter(([, v]) => v.ok !== false && v.ms != null);
+  const entries = Object.entries(probes).filter(([, v]) => v.ok === true && v.ms != null);
   if (entries.length === 0) return '—';
   return (entries.reduce((s, [, v]) => s + (v.ms || 0), 0) / entries.length).toFixed(0) + 'ms';
 });
 const avgLoss = computed(() => {
   const probes = parseProbes();
-  const entries = Object.entries(probes);
-  if (entries.length === 0) return '0%';
-  const failed = entries.filter(([, v]) => v.ok === false).length;
-  return ((failed / entries.length) * 100).toFixed(1) + '%';
+  // 分母只算有采样条目：无采样既不是成功也不是失败，不能稀释丢包率
+  const sampled = Object.values(probes).filter((v) => v.ok !== null && v.loss != null);
+  if (sampled.length === 0) return '—';
+  const failed = sampled.filter((v) => v.ok === false).length;
+  return ((failed / sampled.length) * 100).toFixed(1) + '%';
 });
 
 const trafficUsed = computed(() => {

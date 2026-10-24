@@ -320,6 +320,8 @@ function aggregateProbes(rows, opts) {
     for (const key of Object.keys(obj)) {
       const v = obj[key];
       if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+      // S3 无采样（解析超时）：ms/loss 都是 null，既不计 samples 也不计失败
+      if (v.ms == null && v.loss == null) continue;
       const slot = acc.get(key) || { samples: 0, ok: 0, loss: [], ms: [] };
       slot.samples++;
       if (v.ok) slot.ok++;

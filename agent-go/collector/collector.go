@@ -15,7 +15,9 @@ type Collector interface {
 // Probe 是单个探测点的结果（对应 Python probe_one 返回值）。
 // Ms 为指针允许 null（可达但 RTT 解析失败的情况）。
 type Probe struct {
-	Ok bool     `json:"ok"`
+	// Ok 三态（S3）：true=可达、false=不可达、nil=无采样（解析超时等）。
+	// 必须是 *bool 才能发出 null；**不要加 omitempty**——nil 必须落成 "ok":null。
+	Ok *bool    `json:"ok"`
 	Ms *float64 `json:"ms"`
 	// Loss 为丢包率（0 或 100）。Go 版为纯 TCP 探测，无 ICMP 丢包统计能力，
 	// 故只取二值口径：TCP 握手成功 → 0，三轮全失败 → 100。

@@ -193,6 +193,7 @@ Content-Type: application/json
 - `up_pct` 分母为窗口内**全部**采样点（`range` 同延迟序列），保留 1 位小数。
 - `unreachable=true` 表示窗口内无一成功（目标本身不可达，如运营商 DNS 拒 TCP），前端显示「不可达」而非 0% 可用。
 - `cert_days` 是上报时刻的剩余天数；前端展示时按 `cert_ts` 到当前时间衰减。
+- 探测三态：正常 `{ms, ok:true, loss}`、不可达 `{ms:null, ok:false, loss:100}`、无采样 `{ms:null, ok:null, loss:null}`（解析超时）；无采样不计入可用率分母，也不会被压成 100% 丢包。
 - 探测上报字段：`type`（`http`，缺省 `tcp`，为省体积 tcp 不落库）、`code`（100–599）、`cert_days`（0–3650），非法值单独丢弃而不影响整条结果。
 
 ## Komari 主题兼容层

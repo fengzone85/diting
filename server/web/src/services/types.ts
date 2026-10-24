@@ -189,9 +189,10 @@ export interface ChartPoint {
 
 export interface ProbePoint {
   ts: number;
-  ms: number;
-  ok: boolean;
-  loss: number;
+  ms: number | null;
+  // S3 三态：true=可达、false=不可达、null=无采样（解析超时）
+  ok: boolean | null;
+  loss: number | null;
 }
 
 export type Probes = Record<string, ProbePoint[]>;
