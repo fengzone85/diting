@@ -45,7 +45,9 @@ export const publicApi = {
     version?: string;
     build_time?: string;
     hash?: string;
-    data?: { version?: string; build_time?: string; hash?: string };
+    /** S5.3-4：受控端最新 Release tag（6h 缓存；null = 未知/上游不可达） */
+    agent_latest?: string | null;
+    data?: { version?: string; build_time?: string; hash?: string; agent_latest?: string | null };
   }>('/api/version'),
   visitor: () => api.get<{ ip: string; browser: string; ua: string }>('/api/public/visitor'),
   saveOrder: (order: string[]) => api.post<{ ok: boolean }>('/api/public/order', { order }),

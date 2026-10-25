@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
@@ -9,6 +9,7 @@ import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
 import type { InstallCommands, Agent, DeletedAgent } from '../../services/types';
+import { publicApi } from '../../services/publicApi';
 
 const { state } = useAdmin();
 const router = useRouter();
@@ -17,6 +18,21 @@ const { t, locale } = useI18n();
 // 列表行附加信息：分组（group/grp 两种字段名兼容）、agent 版本
 const agentGroup = (a: Agent) => a.group || a.grp || '';
 const agentVersion = (a: Agent) => (a.version ? `v${String(a.version).replace(/^v/i, '')}` : '');
+
+// S5.3-4 版本差：受控端最新 Release tag（服务端 6h 缓存）。未知时为空 → 不渲染「可升级」徽标，
+// 绝不把「查不到最新版」误显示成「已是最新」。
+const agentLatest = ref('');
+const normVer = (v: string) => String(v || '').replace(/^v/i, '').trim();
+const isOutdated = (a: Agent) => {
+  const latest = normVer(agentLatest.value);
+  const cur = normVer(a.version || '');
+  return !!latest && !!cur && latest !== cur;
+};
+onMounted(() => {
+  publicApi.version()
+    .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })
+    .catch(() => { agentLatest.value = ''; });
+});
 
 // 「位置」列：库里只存 ISO 3166-1 alpha-2 国家码，用 Intl.DisplayNames 反查当前语言下的地区名
 const regionName = (code?: string) => {
@@ -449,6 +465,12 @@ async function batchRenew() {
               <td class="px-3 py-3 align-middle">
                 <span v-if="agentVersion(agent)" class="rounded bg-slate-700/50 px-1.5 py-0.5 text-[11px] text-slate-300">{{ agentVersion(agent) }}</span>
                 <span v-else class="text-slate-500">—</span>
+                <!-- 落后于最新 Release：整卡描边 + 徽标（比颜色更易读，色弱友好） -->
+                <span
+                  v-if="isOutdated(agent)"
+                  class="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300 ring-1 ring-amber-400/40"
+                  :title="t('agent.upgradeAvailable') + ' ' + agentLatest"
+                >{{ t('agent.upgradeBadge') }}</span>
               </td>
               <td class="px-3 py-3 align-middle">
                 <span v-if="agentGroup(agent)" class="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">{{ agentGroup(agent) }}</span>

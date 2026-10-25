@@ -763,6 +763,7 @@ export const enUS: Record<string, string> = {
   // footer
   'footer.visitorIp': 'Your IP',
   'footer.buildTime': 'Build time',
+  'footer.agentLatest': 'latest agent',
 
   // ai
   'ai.title': 'AI Analysis',
@@ -891,6 +892,8 @@ export const enUS: Record<string, string> = {
   'agent.status': 'Status',
   'agent.os': 'OS',
   'agent.version': 'Version',
+  'agent.upgradeBadge': 'upgrade',
+  'agent.upgradeAvailable': 'new version',
   'agent.lastSeen': 'Last seen',
   'agent.chartCpu': 'CPU (%)',
   'agent.chartMem': 'Memory (%)',

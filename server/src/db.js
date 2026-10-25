@@ -448,6 +448,13 @@ const stmts = {
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
+  // S1.5：手工修正月流量后同步「最新一条」明细的月累计列——面板读的是 latest metric，
+  // 不刷新的话修正要等下一轮上报才可见（rotate=0 节点甚至会永远看不到）。
+  // 必须显式取主键：`SELECT *` 虽含 id，但绑定 undefined 会静默失败；
+  // 也不能用 rowid——本表有显式 `id INTEGER PRIMARY KEY`，rowid 是它的别名，
+  // 查出来字段名是 id，写 `row.rowid` 会拿到 undefined。
+  latestMetricId: db.prepare('SELECT id FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
+  updateMetricMonth: db.prepare('UPDATE metrics SET net_rx_month=?, net_tx_month=? WHERE id=?'),
   // metricsRange（SELECT * 单节点全量）已于 2026-09-13 删除：
   // 唯一调用方 /api/agents/:id/metrics 已改走 metricsRangeSampled（见 getMetricsSampled）。
   // 该路由此前会全量拉取（30d 约 12.9 万行 + probes/disks 大 JSON），apdex 极差。
@@ -1342,6 +1349,53 @@ const hasTrafficCounter = (agentId) => {
   return !!(s && s.last_rx !== null && s.last_rx !== undefined && s.last_tx !== null && s.last_tx !== undefined);
 };
 
+// S1.5 手工修正月流量（对齐 monitor set_traffic，db.rs:1604-1630）。
+//
+// 关键点：修正值必须**打当前周期戳**（cycle_key/cycle_start）。否则 state 里残留的是旧
+// 周期键，下一轮上报一进来就判定 newCycle → used 清零 → 修正被静默丢弃。
+// 语义与 monitor 一致：
+//   - 只修提供的字段（rx/tx 可单独给）；
+//   - 周期键一律刷新为「当前周期」（节点跨周期未上报时也按当前周期修，不继承旧值）；
+//   - last_rx/last_tx 基线不动，后续上报在修正值上继续累加 delta。
+// rotate=0（绝对累计）注意：下一轮上报会把 used 直接设为计数器绝对值，修正会被覆盖——
+// 该口径下计数器即事实源，此为用户可见的预期行为（CHANGELOG 已注明）。
+const correctTraffic = (agentId, patch) => {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return null;
+  const tzOffsetHours = Number(getAiConfig().tz_offset_hours) || 0;
+  const rotate = traffic.normalizeRotate(agent.month_rotate) ?? 0;
+  const cycleStart = rotate === 0 ? null : traffic.lastResetDate(rotate, Date.now(), tzOffsetHours);
+  const cycleKey = rotate === 0 ? 'cumulative' : traffic.cycleKeyOf(cycleStart, tzOffsetHours);
+
+  let state = trafficCache.get(agentId);
+  if (!state) {
+    state = traffic.emptyState(agentId);
+    trafficCache.set(agentId, state);
+  }
+  state.cycle_key = cycleKey;
+  state.cycle_start = cycleStart;
+  if (patch && patch.rx !== undefined) state.used_rx = traffic.clampCounter(patch.rx);
+  if (patch && patch.tx !== undefined) state.used_tx = traffic.clampCounter(patch.tx);
+  state.updated_at = Date.now();
+  trafficDirty.add(agentId);
+
+  // 同步最新一条明细，保证面板立刻可见（best-effort：没有上报过就算了）
+  const row = stmts.latestMetricId.get(agentId);
+  if (row) {
+    try {
+      stmts.updateMetricMonth.run(state.used_rx, state.used_tx, row.id);
+    } catch (e) {
+      console.warn('[db] correctTraffic 同步 latest metric 失败（不影响修正本身）:', e.message);
+    }
+  }
+  return {
+    cycle_key: state.cycle_key,
+    cycle_start: state.cycle_start,
+    used_rx: state.used_rx,
+    used_tx: state.used_tx,
+  };
+};
+
 const flushTraffic = () => {
   if (!trafficDirty.size) return;
   const rows = [];
@@ -1930,7 +1984,7 @@ module.exports = {
   listDeletedAgents, getAgentIncludingDeleted, restoreAgent, purgeDeletedAgents,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
-  getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter,
+  getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter, correctTraffic,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
