@@ -5,6 +5,7 @@ import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
 import { apiErrorMessage } from '../../utils/apiError';
+import { publicApi } from '../../services/publicApi';
 import { BILLING_CYCLES, CURRENCIES } from '../../utils/billing';
 import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
@@ -200,6 +201,15 @@ async function changeRange(r: '1h' | '6h' | '24h' | '7d' | '30d') {
   await loadMetrics();
 }
 
+// S5.3-4：受控端最新 Release tag，用于「有新版本」提示（服务端 6h 缓存，失败静默）
+const agentLatest = ref('');
+const normVer = (v: string) => String(v || '').replace(/^v/i, '').trim();
+const versionOutdated = computed(() => {
+  const latest = normVer(agentLatest.value);
+  const cur = normVer(agent.value?.version || '');
+  return !!latest && !!cur && latest !== cur;
+});
+
 onMounted(async () => {
   // 本页是编辑表单：进入时暂停全局 10s 自动刷新（与 SettingsView/TemplateView 一致）。
   // 否则 loadAdmin() 每 10s 把 state.agents 整数组替换为新对象引用，watch(agent) 会触发
@@ -210,6 +220,9 @@ onMounted(async () => {
     await loadAdmin();
     await fetchCommands();
     await loadMetrics();
+    publicApi.version()
+      .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })
+      .catch(() => { agentLatest.value = ''; });
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
   } finally {
@@ -445,7 +458,14 @@ function formatDate(ts?: number) {
             <div class="flex justify-between"><span class="text-slate-400">ID</span><span class="font-mono text-slate-200">{{ agent?.id }}</span></div>
             <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.os') }}</span><span class="text-slate-200">{{ agent?.os || '-' }}</span></div>
             <div class="flex justify-between"><span class="text-slate-400">{{ t('node.hostname') }}</span><span class="text-slate-200">{{ agent?.hostname || '-' }}</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.version') }}</span><span class="text-slate-200">{{ agent?.version || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.version') }}</span>
+              <span class="text-slate-200">{{ agent?.version || '-' }}
+                <!-- S5.3-4：落后于最新 Release 时给可操作提示（含目标 tag） -->
+                <span v-if="versionOutdated" class="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">
+                  {{ t('agent.upgradeAvailable') }} {{ agentLatest }}
+                </span>
+              </span>
+            </div>
             <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.lastSeen') }}</span><span class="text-slate-200">{{ formatDate(agent?.last_seen) }}</span></div>
           </div>
         </div>

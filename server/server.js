@@ -14,6 +14,7 @@ const install = require('./src/install');
 // S5：受控端二进制签名中继（GET /api/releases/agent/:os/:arch）
 const agentRelay = require('./src/agent-relay');
 const alerts = require('./src/alerts');
+const releaseInfo = require('./src/release-info');
 const ai = require('./src/ai');
 const rollup = require('./src/rollup');
 // F8.6：恢复后一致性审查（diting.sh 在替换数据库前写入 pending 标记）
@@ -313,6 +314,9 @@ app.get('/api/version', (req, res) => {
   // 2026-10-21 用户指定：页脚公开显示「版本 (commit)」与构建时间，
   // 匿名也返回完整版本号/hash（原先仅主版本号的 G5 收敛被显式放开）。
   const payload = { version: APP_VERSION, build_time: APP_BUILD_TIME, hash: APP_HASH };
+  // S5.3-4：受控端最新 Release tag（6h 缓存，冷启动后台刷新、失败返回 null）。
+  // 面板据此算「hub/agent 版本差」；匿名端点同样返回——release tag 本就是公开信息。
+  payload.agent_latest = releaseInfo.latestAgentTag();
   return res.json({
     status: 'success',
     message: '',

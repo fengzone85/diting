@@ -189,6 +189,30 @@
   的流量；`rotate=0` 节点无影响。
 - 升级顺序：**先服务端后受控端**；老 agent（无 `net_epoch`）继续走原 delta 逻辑，行为不变。
 - 新增受控端环境变量 `NET_IFACE_FILTER` / `NET_IFACE_ONLY`。
+## 2026-10-25 手工修正月流量 + 面板 hub/agent 版本差（S1.5 / S5.3-4）
+
+补上 MONITOR_PARITY 方案里两个可选项：换硬件/重装后计数器归零时的人工兜底，
+以及「哪些节点版本落后」的面板可见性。
+
+### 说明
+
+- **`PATCH /api/agents/:id/traffic`**（S1.5，对齐 monitor `set_traffic`）：`{rx,tx}` 至少一项，
+  字节、非负整数。修正值**打当前周期戳**（`cycle_key`/`cycle_start`）——否则下一轮上报按旧周期
+  把修正清零；`last_rx/last_tx` 基线不动，后续上报在修正值上继续累加 delta；
+  最新一条 `metrics` 的月累计列同步刷新，面板立即可见；写审计 `traffic_correct`（含数值）。
+  `month_rotate=0`（绝对累计）节点的下一轮上报会用计数器绝对值覆盖修正值（该口径下计数器即事实源）。
+- **`/api/version` 附带 `agent_latest`**（S5.3-4）：受控端最新 Release tag，服务端缓存 6h、
+  失败负缓存 10min、冷启动后台刷新不阻塞响应、in-flight 去重；上游不可达时返回 `null`。
+- 面板：页脚展示「受控端最新 <tag>」；管理端节点列表对落后节点加「可升级」徽标
+  （查不到最新版时不渲染，绝不把「未知」显示成「已最新」）；节点详情版本行给出版本差提示。
+- 新增 `server/src/release-info.js`（版本查询）与 `db.correctTraffic()`；`traffic.js` 导出
+  `normalizeRotate/clampCounter/lastResetDate/cycleKeyOf` 供周期计算复用（与 `accumulate` 同源）。
+
+### ⚠️ 行为变更
+
+- `/api/version` 响应新增字段 `agent_latest`（旧客户端忽略即可）。
+- 新增管理端写端点 `PATCH /api/agents/:id/traffic`（adminOnly + agentScope + 审计）。
+
 ## 2026-10-24 受控端二进制签名中继（S5）
 
 连不上 GitHub 的节点（j4125 电信出口实测）现在可以从 diting 服务端拉 agent 二进制。

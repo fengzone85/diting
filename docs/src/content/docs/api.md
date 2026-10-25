@@ -105,6 +105,7 @@ Content-Type: application/json
 | GET | `/api/ai/status` | AI 任务运行状态 |
 | POST | `/api/ai/analyze-node/:id` | 单节点 AI 分析 |
 | GET | `/api/ai/node-reports` | 节点报告列表 |
+| PATCH | `/api/agents/:id/traffic` | 手工修正月流量 `{rx,tx}`（字节，至少一项；打当前周期戳） |
 | GET | `/api/agents/:id/commands` | 生成该节点的一键安装 / 「修改探测目标」命令（免 Token，凭管理员身份） |
 | GET | `/api/client-ip` | 当前请求所见 IP 与反代信任判定（排查白名单 / 限流归属） |
 | POST | `/api/login` · POST `/api/logout` | Web 登录 / 登出（签发表态 Cookie） |

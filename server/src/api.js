@@ -1464,6 +1464,37 @@ router.post('/agents/:id/restore', adminOnly, agentScope, (req, res) => {
   auditLog(req, 'restore_agent', `id=${req.params.id}`);
 });
 
+// ---- Admin: 手工修正月流量（S1.5，对齐 monitor set_traffic）----
+// 场景：换硬件/重装系统后计数器归零、或需要把某段流量从本月剔除。修正值会打「当前周期」戳，
+// 否则下一轮上报按旧周期把修正清零。只修提供的字段；last_rx/last_tx 基线不动，
+// 后续上报在修正值上继续累加 delta。
+// rotate=0（绝对累计）节点的下一轮上报会用计数器绝对值覆盖修正值——该口径下计数器即事实源。
+router.patch('/agents/:id/traffic', adminOnly, agentScope, (req, res) => {
+  if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
+  if (!db.getAgent(req.params.id)) return res.status(404).json({ error: 'not found' });
+  const body = req.body || {};
+  const hasRx = body.rx !== undefined && body.rx !== null;
+  const hasTx = body.tx !== undefined && body.tx !== null;
+  if (!hasRx && !hasTx) return res.status(400).json({ error: 'rx_or_tx_required' });
+  // 只接受非负整数（字节数）；显式拒绝而非静默 clamp——流量修正必须可预期
+  const parse = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return null;
+    const i = Math.floor(n);
+    return Number.isSafeInteger(i) ? i : null;
+  };
+  const rx = hasRx ? parse(body.rx) : undefined;
+  const tx = hasTx ? parse(body.tx) : undefined;
+  if ((hasRx && rx === null) || (hasTx && tx === null)) {
+    return res.status(400).json({ error: 'invalid_traffic_value' });
+  }
+  const out = db.correctTraffic(req.params.id, { rx, tx });
+  if (!out) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, id: req.params.id, ...out });
+  // 审计带具体数值：流量修正是高危写操作，需要可追溯（非凭据，无脱敏必要）
+  auditLog(req, 'traffic_correct', `id=${req.params.id} rx=${rx === undefined ? '-' : rx} tx=${tx === undefined ? '-' : tx}`);
+});
+
 // ---- Admin: reset an agent's token (returns new token; old one invalidated) ----
 router.post('/agents/:id/reset-token', adminOnly, agentScope, (req, res) => {
   if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });

@@ -765,6 +765,7 @@ export const zhCN: Record<string, string> = {
   // 页脚
   'footer.visitorIp': '您的 IP',
   'footer.buildTime': '构建时间',
+  'footer.agentLatest': '受控端最新',
 
   // AI
   'ai.title': 'AI 运维分析',
@@ -893,6 +894,8 @@ export const zhCN: Record<string, string> = {
   'agent.status': '状态',
   'agent.os': '系统',
   'agent.version': '版本',
+  'agent.upgradeBadge': '可升级',
+  'agent.upgradeAvailable': '有新版本',
   'agent.lastSeen': '最后在线',
   'agent.chartCpu': 'CPU (%)',
   'agent.chartMem': '内存 (%)',

@@ -12,16 +12,20 @@ const { state } = useApp();
 const version = ref('');
 const buildTime = ref('');
 const hash = ref('');
+// S5.3-4：受控端最新 Release tag（服务端 6h 缓存，冷启动首帧可能为 null）
+const agentLatest = ref('');
 async function loadVersion() {
   try {
     const info = await publicApi.version();
     version.value = info.version || info.data?.version || '';
     buildTime.value = info.build_time || info.data?.build_time || '';
     hash.value = info.hash || info.data?.hash || '';
+    agentLatest.value = info.agent_latest || info.data?.agent_latest || '';
   } catch {
     version.value = '';
     buildTime.value = '';
     hash.value = '';
+    agentLatest.value = '';
   }
 }
 
@@ -65,6 +69,7 @@ const cvLabel: Record<string, string> = {
       :version="version"
       :build-time="buildTime"
       :hash="hash"
+      :agent-latest="agentLatest"
       :ip="state.visitor?.ip"
       :browser="state.visitor?.browser"
     />

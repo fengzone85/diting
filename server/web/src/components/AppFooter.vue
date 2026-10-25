@@ -9,6 +9,8 @@ const props = defineProps<{
   buildTime?: string;
   /** 构建 commit 短 hash：与版本号一起显示为「1.0.0 (fcd27e5)」 */
   hash?: string;
+  /** S5.3-4：受控端最新 Release tag（服务端 6h 缓存；空 = 未知，不渲染该行） */
+  agentLatest?: string;
   meta?: PublicMeta | null;
   ip?: string;
   browser?: string;
@@ -48,6 +50,8 @@ const socialItems = computed(() => {
         </div>
         <div v-if="version" class="text-muted">
           {{ version }}<span v-if="hash && hash !== '-'"> ({{ hash }})</span>
+          <!-- S5.3-4：hub/agent 版本差——只展示最新 tag，逐节点对比在管理端节点列表 -->
+          <span v-if="agentLatest"> · {{ t('footer.agentLatest') }}: {{ agentLatest }}</span>
         </div>
         <div v-if="ip">
           {{ t('footer.visitorIp') }}: {{ ip }}<span v-if="browser"> · {{ browser }}</span>
