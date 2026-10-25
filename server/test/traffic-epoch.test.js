@@ -134,3 +134,52 @@ test('S1 落盘：flush 后 traffic_state.epoch 不丢，重载后仍能识别�
   const out = db.accumulateTraffic(a.id, r2, T0 + 60 * MIN);
   assert.strictEqual(out.used_rx, 0, '接口集变化后不得把新接口计数计入');
 });
+
+// ---- 状态丢失 / 服务端重启边界（TRAFFIC_PLAN 验收清单第 3 条的补齐）----------
+// 这两条此前只有代码路径（traffic.js 的 noBaseline 分支），没有显式断言用例。
+
+test('状态丢失：traffic_state 行丢失后，下一轮只对齐基线、不把缺口算进 used', () => {
+  const s = traffic.emptyState('lost');
+  traffic.accumulate(s, AGENT, rep(1000, 500, 'a1b2c3d4/aaaa', 100), T0);
+  traffic.accumulate(s, AGENT, rep(1600, 800, 'a1b2c3d4/aaaa', 160), T0 + MIN);
+  assert.strictEqual(s.used_rx, 600, '前情：已累加 600');
+
+  // 状态行丢失（DB 被清 / 迁移回滚 / agent 行还在但状态没了）→ 重新取空状态
+  const after = traffic.emptyState('lost');
+  // 计数器在丢失期间继续走（agent 侧不知道服务端丢了状态）
+  traffic.accumulate(after, AGENT, rep(5000, 4000, 'a1b2c3d4/aaaa', 220), T0 + 2 * MIN);
+  assert.strictEqual(after.used_rx, 0, '状态丢失后的第一轮只对齐基线，不得把整段缺口计入');
+  assert.strictEqual(after.last_rx, 5000, '基线必须对齐到丢失后的新值');
+
+  // 之后的第二轮恢复正常累加
+  traffic.accumulate(after, AGENT, rep(5100, 4100, 'a1b2c3d4/aaaa', 280), T0 + 3 * MIN);
+  assert.strictEqual(after.used_rx, 100, '基线重建后应正常累加');
+});
+
+test('服务端重启：traffic_state 持久在库里，重启后接着累加、不重置', () => {
+  const a = db.createAgent({ name: 'traffic-restart' });
+  db.updateAgent(a.id, { name: 'traffic-restart', month_rotate: 15 });
+  const r1 = validateReport({ cpu: 1, mem_total: 1, net_rx: 1000, net_tx: 500, net_epoch: 'a1b2c3d4/aaaa', uptime: 100, month_rotate: 15 });
+  db.accumulateTraffic(a.id, r1, T0);
+  db.accumulateTraffic(a.id, validateReport({ cpu: 1, mem_total: 1, net_rx: 1600, net_tx: 800, net_epoch: 'a1b2c3d4/aaaa', uptime: 160, month_rotate: 15 }), T0 + MIN);
+  db.flushTraffic();
+
+  // 模拟「服务端重启」：状态从库里读回（内存态清空），不重置
+  const row = db.db.prepare('SELECT * FROM traffic_state WHERE agent_id=?').get(a.id);
+  assert.ok(row, 'traffic_state 应已落盘');
+  assert.strictEqual(row.last_rx, 1600, '基线应落盘为最近一次上报的计数器值');
+  assert.strictEqual(row.used_rx, 600, '本周期累计应落盘');
+  const reloaded = {
+    agent_id: a.id,
+    cycle_key: row.cycle_key, cycle_start: row.cycle_start,
+    used_rx: row.used_rx, used_tx: row.used_tx,
+    last_rx: row.last_rx, last_tx: row.last_tx, last_ts: row.last_ts,
+    epoch: row.epoch || '', updated_at: row.updated_at
+  };
+  assert.strictEqual(reloaded.used_rx, 600, '重启前已累加的量必须保留');
+
+  // 重启后的下一轮：从落盘基线继续累加（不重置、不补账整段）
+  const r3 = validateReport({ cpu: 1, mem_total: 1, net_rx: 1800, net_tx: 900, net_epoch: 'a1b2c3d4/aaaa', uptime: 220, month_rotate: 15 });
+  const out = db.accumulateTraffic(a.id, r3, T0 + 2 * MIN);
+  assert.strictEqual(out.used_rx, 800, '重启后应从落盘基线继续累加（600 + 200）');
+});

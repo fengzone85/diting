@@ -242,3 +242,22 @@ test('updateTheme / deleteTheme：内置主题只读', async () => {
   assert.throws(() => theme.backupTheme('neobrutalism'), (e) => e.code === 'theme_bundled_readonly');
   assert.throws(() => theme.deleteTheme('neobrutalism'), (e) => e.code === 'theme_bundled_readonly');
 });
+
+// S5/F10：官方源种子默认 **disabled**（外部源需管理员显式授权后才启用）。
+// 种子用 INSERT OR IGNORE ⇒ 只影响新建库；已有库保持管理员的既有选择不被覆盖。
+test('官方主题源种子：默认 disabled（对齐方案口径）', () => {
+  assert.strictEqual(db.OFFICIAL_THEME_MARKET.enabled, false,
+    '官方源种子默认应为 disabled（外部源需显式授权）');
+  const row = db.db.prepare('SELECT * FROM theme_market_sources WHERE id = ?').get(db.OFFICIAL_THEME_MARKET.id);
+  if (row) {
+    assert.strictEqual(row.enabled, 0, '新建库里的官方源应为禁用状态');
+  }
+  // 管理员手动启用后应能正常工作（禁用只是默认值，不是硬限制）
+  const before = db.listThemeMarketSources().find((s) => s.id === db.OFFICIAL_THEME_MARKET.id);
+  if (before) {
+    db.updateThemeMarketSource(db.OFFICIAL_THEME_MARKET.id, { enabled: true });
+    const after = db.listThemeMarketSources().find((s) => s.id === db.OFFICIAL_THEME_MARKET.id);
+    assert.strictEqual(after.enabled, true, '管理员应能把官方源显式启用');
+    db.updateThemeMarketSource(db.OFFICIAL_THEME_MARKET.id, { enabled: false });
+  }
+});

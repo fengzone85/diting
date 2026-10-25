@@ -197,7 +197,7 @@ db.insertMetric(bizAgent.id, {
   uptime: 100, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
   disk_r_rate: 0, disk_w_rate: 0,
   // 与 validateReport 落库格式一致：对象而非数组
-  probes: JSON.stringify({ '移动': { ms: 12, ok: true, loss: 0 } }),
+  probes: JSON.stringify({ '移动': { ms: 12, ok: true, loss: 0, type: 'http', code: 200, cert_days: 30 } }),
   disks: '[]'
 });
 
@@ -311,6 +311,17 @@ test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空
   assert.ok(res.body.tasks.some((t) => t.name === '移动'), 'tasks 应包含「移动」');
   const rec = res.body.records.find((r) => r.value === 12);
   assert.ok(rec, '应存在 value=12 的延迟记录');
+});
+
+// F4 收口：compat 层除 type/code 外也要透传 cert_days（社区主题消费时可显示证书到期）。
+test('F4：/api/records/ping 的 tasks 透传 type/code/cert_days', async () => {
+  const res = await request(app).get('/api/records/ping?hours=1');
+  assert.strictEqual(res.status, 200);
+  const t = res.body.tasks.find((x) => x.name === '移动');
+  assert.ok(t, 'tasks 应包含「移动」');
+  assert.strictEqual(t.type, 'http', 'type 应透传');
+  assert.strictEqual(t.code, 200, 'code 应透传');
+  assert.strictEqual(t.cert_days, 30, 'cert_days 应透传（F4 收口项）');
 });
 
 test('H-04：public_enabled=false 时 /api/v1/nodes 与 /api/public/agents 同步 403', async () => {
