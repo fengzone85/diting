@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const router = express.Router();
 const db = require('./db');
-const { rateLimitTouch, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
+const { rateLimitTouch, bucketKey, loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
 const { heavyQuery } = require('./heavy-db');
 const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache } = require('./auth');
 const totp = require('./totp');
@@ -53,7 +53,7 @@ const RATE_WINDOW = 10000, RATE_MAX = 60;
 const rateHits = new Map();
 const rateLimit = (req, res, next) => {
   if (req.path === '/report') return next();
-  if (!rateLimitTouch(rateHits, req.ip || req.socket.remoteAddress, RATE_WINDOW, RATE_MAX)) {
+  if (!rateLimitTouch(rateHits, bucketKey(req.ip || req.socket.remoteAddress), RATE_WINDOW, RATE_MAX)) {
     return res.status(429).json({ error: 'too many requests' });
   }
   next();
@@ -81,7 +81,7 @@ router.use(rateLimit);
 const LOGIN_WINDOW = 60000, LOGIN_MAX = 5;
 const loginHits = new Map();
 const loginRateLimit = (req, res, next) => {
-  if (!rateLimitTouch(loginHits, req.ip || req.socket.remoteAddress, LOGIN_WINDOW, LOGIN_MAX)) {
+  if (!rateLimitTouch(loginHits, bucketKey(req.ip || req.socket.remoteAddress), LOGIN_WINDOW, LOGIN_MAX)) {
     return res.status(429).json({ error: 'too many login attempts, retry in 60s' });
   }
   next();
@@ -93,7 +93,8 @@ const loginRateLimit = (req, res, next) => {
 // 将来若引入账号体系，把 key 改成 ip|username 即可，主逻辑不变。
 // 已知取舍（见 CHANGELOG 与 docs/security.md）：管理员自己输错 3 次也会被封 81 秒，
 // 需等 Retry-After 或重启服务（内存态）解除。
-const loginGuardKey = (req) => String(req.ip || req.socket?.remoteAddress || 'unknown');
+// S4：封禁维度同样按 /64 归桶——否则攻击者轮换接口 ID 即可绕开指数封禁。
+const loginGuardKey = (req) => bucketKey(req.ip || req.socket?.remoteAddress || 'unknown');
 // 审计只记 key 哈希，不落明文 IP（IP 属可关联信息，不进审计明文）。
 const loginGuardKeyHash = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
 // 统一记录封禁并写审计（action=login_banned，detail 含 key 哈希与 Retry-After）。
@@ -122,7 +123,7 @@ router.get('/setup/status', (req, res) => {
 const SETUP_WINDOW = 60000, SETUP_MAX = 5;
 const setupHits = new Map();
 const setupRateLimit = (req, res, next) => {
-  if (!rateLimitTouch(setupHits, req.ip || req.socket.remoteAddress, SETUP_WINDOW, SETUP_MAX)) {
+  if (!rateLimitTouch(setupHits, bucketKey(req.ip || req.socket.remoteAddress), SETUP_WINDOW, SETUP_MAX)) {
     return res.status(429).json({ error: 'too many requests' });
   }
   next();
@@ -313,7 +314,7 @@ const registerHits = new Map();
 // SETUP_TOKEN 解析口径见 src/setup-token.js（注册端点专用；安装口令 install_token 已移除）
 const { resolveSetupToken, isWeakSetupToken } = require('./setup-token');
 const registerRateLimit = (req, res, next) => {
-  if (!rateLimitTouch(registerHits, req.ip || req.socket.remoteAddress, REGISTER_WINDOW, REGISTER_MAX)) {
+  if (!rateLimitTouch(registerHits, bucketKey(req.ip || req.socket.remoteAddress), REGISTER_WINDOW, REGISTER_MAX)) {
     return res.status(429).json({ error: 'too many requests' });
   }
   next();

@@ -26,4 +26,33 @@ function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-module.exports = { daysUntil, cycleLabel, asyncHandler };
+// 把 IPv6 地址解析为 128 位 BigInt；非 IPv6（含 IPv4/主机名）或非法返回 null。
+// 从 auth.js 迁出：auth.js 与 ratelimit.js 都需要它（限流 /64 归桶），
+// 放 util 避免两处实现漂移。纯计算，无副作用。
+function ip6ToBits(ip) {
+  try {
+    // 手动展开压缩格式 :: 与全写为 8 段 × 16 位
+    let s = String(ip).toLowerCase().trim();
+    if (!s.includes(':')) return null;
+    // 展开 ::
+    let parts = s.split('::');
+    if (parts.length > 2) return null; // 非法
+    let head = parts[0] ? parts[0].split(':') : [];
+    let tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return null;
+    const full = [...head, ...Array(missing).fill('0'), ...tail];
+    if (full.length !== 8) return null;
+    let bits = 0n;
+    for (let i = 0; i < 8; i++) {
+      const segment = parseInt(full[i] || '0', 16);
+      if (isNaN(segment) || segment < 0 || segment > 0xffff) return null;
+      bits = (bits << 16n) | BigInt(segment);
+    }
+    return bits;
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { daysUntil, cycleLabel, asyncHandler, ip6ToBits };
