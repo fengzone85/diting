@@ -188,6 +188,10 @@ const trafficPct = computed(() => {
     <!-- ===== 旧版 .foot ===== -->
     <div class="card-foot">
       <span class="uptime">{{ t('card.uptime') }} {{ formatDuration(agent.uptime) }}</span>
+      <!-- F7：30 天在线率（null = 窗口内还没数据，不显示） -->
+      <span v-if="agent.uptime_30d != null" class="uptime" :title="t('card.uptime30dTitle')">
+        {{ t('card.uptime30d') }} {{ agent.uptime_30d.toFixed(1) }}%
+      </span>
       <span v-if="agent.expire_at" class="text-[10px]" :class="(daysUntil(agent.expire_at) ?? 0) < 0 ? 'text-rose-400' : (daysUntil(agent.expire_at) ?? 999) <= 7 ? 'text-amber-400' : 'text-muted'">{{ (daysUntil(agent.expire_at) ?? 0) < 0 ? t('card.expired') : t('card.remainingDays', { n: daysUntil(agent.expire_at) ?? 0 }) }}</span>
     </div>
   </RouterLink>

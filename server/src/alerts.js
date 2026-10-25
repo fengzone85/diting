@@ -86,10 +86,40 @@ async function alertThreshold(agent, type, msg, now, cooldown) {
 // ctx 为预取的覆盖表 Map（见 check()），仅在没有显式 cfg 时生效。
 // 注意：db.setAlertState 必须在 await sendAlert 之前同步写入 —— better-sqlite3 为同步 API，
 // 这样即便定时任务重入也不会重复发信（冷却窗口已在此点生效）。
+// F7：在线时段状态机（派生自 checkAgent 的 online 判定，不改 agent 协议）。
+// 只在库里真实存在的 agent 上记账——checkAgent 也被单测/回放用于临时对象，
+// 否则会给不存在的 agent 留孤儿 session。
+function syncOnlineSession(a, online, now) {
+  try {
+    if (!db.getAgent(a.id)) return;
+    const open = db.getOpenOnlineSession(a.id);
+    if (!online) {
+      if (!open) return;
+      // 关闭点取 last_seen（真实失联时刻），钳在 [started_at, now]
+      const end = Math.max(open.started_at, Math.min(a.last_seen || now, now));
+      db.closeOnlineSession(open.id, end, 'offline');
+      return;
+    }
+    if (open) return;
+    // 起点回填一个上报间隔：把「告警轮询发现上线」与「真实恢复上报」之间的
+    // 空档算进在线，否则短周期 agent 每次都会被削掉一个轮询间隔。
+    const iv = db.observedIntervalSec(a.id) || Number(process.env.AGENT_INTERVAL || 20);
+    const last = db.getLastOnlineSession(a.id);
+    const back = (a.last_seen || now) - iv * 1000;
+    const floor = last && last.ended_at ? last.ended_at : 0;
+    const start = Math.min(now, Math.max(back, floor));
+    db.openOnlineSession(a.id, start);
+  } catch (e) {
+    // 在线统计失败绝不影响告警主流程（最坏情况：少记一段在线时长）
+    console.error(`[alerts] online session sync failed for ${a.id}:`, e.message);
+  }
+}
+
 function checkAgent(a, now, cfg, ctx) {
   try {
     const c = cfg || resolveAgentThresholds(a, ctx);
     const online = a.last_seen && (now - a.last_seen) < c.offlineSec * 1000;
+    syncOnlineSession(a, !!online, now);
     if (!online) {
       // 记录离线起点（内存态）：供上线通知的宽限期判定。
       if (!OFFLINE_SINCE.has(a.id)) OFFLINE_SINCE.set(a.id, now);
@@ -359,6 +389,14 @@ function checkOfflineThresholdSanity() {
   }
 }
 function start() {
+  // F7：启动时清理在线时段（崩溃安全）——孤儿 session 删除；无法继续的上报
+  // 证明「还活着」的 open session 关闭到 last_seen，避免一次崩溃留下永久 open 段。
+  try {
+    const r = db.cleanupOnlineSessions();
+    if (r.removed || r.closed) console.log(`[alerts] online sessions cleaned: removed=${r.removed} closed=${r.closed}`);
+  } catch (e) {
+    console.error('[alerts] cleanupOnlineSessions error:', e.message);
+  }
   // 检查节奏同样按生效的离线阈值推导（阈值收敛后与告警判定同源）
   let offlineSec = 60;
   try { offlineSec = db.resolveAlertThresholds().offline_sec; } catch (e) {}
