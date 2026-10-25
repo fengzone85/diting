@@ -1005,7 +1005,7 @@ router.get('/public/agents/:id/online-history', (req, res) => {
 // 受 ui.public_enabled 控制；range 支持 1h/6h/24h/7d。
 // ?availability=1（F4）额外返回可用率聚合 { series, availability }，缺省保持原
 // 「纯 series 对象」形状不变——社区主题/既有调用方零影响。
-router.get('/public/agents/:id/probes', (req, res) => {
+router.get('/public/agents/:id/probes', async (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const a = db.getAgent(req.params.id);
@@ -1016,7 +1016,12 @@ router.get('/public/agents/:id/probes', (req, res) => {
   // 仅取 ts+probes 两列：30d 近 9.5 万行，SELECT * 物化全行开销大（实测 5.4s vs 0.56s）
   // 再叠加 SQL 层采样：全量 9.5 万行 → maxPoints 行，逐行 JSON.parse 次数同比骤降。
   // 采样点数取 max(上限, 5000) 的 3 倍冗余，保证后续 avg 桶聚合仍有足够样本、统计不失真。
-  const rows = db.getMetricsProbesOne(a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
+  //
+  // F4 收口：取数走 **worker**（heavyQuery('probesOne')），不再在主线程跑这段 SQL。
+  // 理由：公开端点未认证即可触发，30d 窗口的采样 + JSON.parse 在主线程会阻塞事件循环
+  // （期间 /report 与告警全部挂起）。worker 不可用时 heavy-db 自动回落主线程同步执行，
+  // 行为与改造前完全一致（可用性优先）。
+  const rows = await heavyQuery('probesOne', a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
   const wantAvail = req.query.availability === '1' || req.query.availability === 'true';
   const series = {}; // label -> [{ts, ms}]
   // 可用率累加器（F4）：只统计采样后的原始上报点，不受下面时间桶聚合影响；

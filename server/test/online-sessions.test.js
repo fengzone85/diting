@@ -113,8 +113,13 @@ test('F7 清理：孤儿 session 删除；stale open 关闭到 last_seen 且 rea
 
 test('F7 聚合：跨天 session 按本地日切分；今天分母为已过去时间', () => {
   const id = db.createAgent({ name: 'f7-agg' }).id;
-  const now = Date.now();
-  const today0 = localMidnight(now);
+  // 用**固定参照时刻**而不是真实 now：
+  // 原写法依赖真实时钟 —— 本地时间落在 00:00–01:00 窗口时，「今天 01:00」的 session
+  // 尚未结束，今天那段会被截断成「已过去的秒数」，断言 3600 必然失败（时间相关 flake）。
+  // 固定观察时刻后，本用例与真实时钟解耦，任何时间跑结果一致。
+  const REF_OFFSET_MS = 19 * 3600 * 1000 + 45 * 60 * 1000; // 今天 19:45（与历史跑的时段一致）
+  const today0 = localMidnight(Date.now());
+  const now = today0 + REF_OFFSET_MS;
   const y0 = localMidnight(today0 - 86400000);
   // 昨天 23:00 → 今天 01:00，应各记 3600s
   const s = y0 + 23 * 3600 * 1000;

@@ -548,6 +548,33 @@ S2 第一段只折叠不删；本段把「明细只留 7 天」和「长窗口�
 - 既有 TCP 目标的报文与入库形状**完全不变**（`type` 仅在 http 时落库，避免全部历史行 JSON 变长）；只有 https 目标会多出 `type/code/cert_days`。
 - 新增服务端环境变量 `CERT_WARN_DAYS`；受控端无新增必填变量，老 agent 全部照常工作。
 
+### 受控端发版
+
+- F4 的 HTTP/TLS 探测能力随 **`agent-go-v1.1.0`（2026-10-24）** 发布；后续 `v1.1.1`（接口过滤 + net_epoch）、
+  `v1.1.2`（探测死线 + 三态）、`v1.1.3`、`v1.1.4` 均沿用该能力，未再单独发版。
+
+### 真机验证记录（2026-10-26）
+
+| 平台 | 节点 | 结果 |
+|---|---|---|
+| Linux | j4125（Debian 13，x86_64） | ✅ 临时加 `TLS:https://letsencrypt.org` 目标后，上报 `type=http, code=200, cert_days=39`；既有 TCP 目标报文形状**完全不变**（不落 `type` 字段）；`?availability=1` 聚合出 `up_pct=100`；`cert_days=39 > CERT_WARN_DAYS(14)` ⇒ 不触发证书告警 |
+| Windows consumer | wxwin-go（Windows 11 24H2，x64） | ✅ 见下方说明（用动态提取配置的临时 bat 启动验证），上报 `type=http, code=200, cert_days=39` |
+| Windows Server 2019+ | — | ⚠️ **未覆盖**（无该类真机） |
+
+- Windows 侧之所以用临时 bat：`run_scheduled.bat` 里的 `set PROBE_TARGETS=...` **实际没有被受控端读到**
+  （受控端实际用的是内置默认目标 `CM/CT/CU/GG`）—— 见下方「已知问题」。验证时从生产 bat **动态提取**
+  `SERVER_URL/AGENT_ID/AGENT_TOKEN/INTERVAL/MONTH_ROTATE` 生成临时 bat（不落任何明文凭据到命令或日志），
+  由**计划任务**启动（SSH 会话断开会连带回收子进程，直接 `Start-Process` 不可用）。
+- 验证完成后**两台节点的探测配置均已恢复原状**（j4125 的 `agent.env` 与 wxwin-go 的 `run_scheduled.bat` 已回滚，临时物料已删）。
+
+### ⚠️ 已知问题（本次真机验证顺带发现，非本条引入）
+
+- **Windows 受控端的 `PROBE_TARGETS` 配置不生效**：`run_scheduled.bat` 里 `set PROBE_TARGETS=移动:…,公共:8.8.8.8`
+  看似被设置，但受控端上报的探测目标始终是内置默认值 `CM/CT/CU/GG` ⇒ **管理员在 bat 里改探测目标一直是无效的**。
+  初步线索：bat 文件为「UTF-8 with BOM + 中文双编码」，cmd 侧按 GBK 还原后才得到正确中文，
+  但该行是否真正进入子进程环境变量尚未定位到根因（待单独排期）。
+- 本条只记录现象与影响面，**不在本次改动范围内修复**。
+
 ## 2026-10-22 安装向导（对照 komari）+ 管理员 Token 入库哈希 + 安装器端口 / 升级备份
 
 首次部署体验向 komari 对齐：未安装时全站 307 到 `/install`，管理员 Token 由向导生成且**只存 sha256 哈希**；

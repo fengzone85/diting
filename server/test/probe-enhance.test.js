@@ -190,3 +190,42 @@ test('F4 alerts：cert_days 越旧越少（按上报时间衰减），旧快照�
     restore();
   }
 });
+
+// ---- 4. F4 收口：可用率取数改走 heavy worker --------------------------------
+// 为什么要 worker：公开端点未认证即可触发，30d 窗口的 SQL 采样 + JSON.parse
+// 在主线程执行会阻塞事件循环（期间 /report 与告警全部挂起）。
+test('F4 收口：公开 probes 端点的取数走 heavy worker（不走主线程 SQL）', async () => {
+  const fsx = require('node:fs');
+  const path = require('node:path');
+  const src = fsx.readFileSync(path.join(__dirname, '..', 'src', 'api.js'), 'utf8');
+  // 取出该路由的源码片段（到下一个 router. 定义为止）
+  const start = src.indexOf("router.get('/public/agents/:id/probes'");
+  assert.ok(start > 0, '应能找到公开 probes 路由');
+  const rest = src.slice(start);
+  const end = rest.indexOf('\nrouter.', 10);
+  const seg = end > 0 ? rest.slice(0, end) : rest;
+  assert.ok(seg.includes("heavyQuery('probesOne'"), '该路由应通过 heavyQuery 取数');
+  assert.ok(!seg.includes('db.getMetricsProbesOne('), '该路由不应再直接调用主线程 SQL');
+
+  // worker 路径与主线程回落路径必须口径一致（worker 不可用时 heavy-db 自动回落）
+  const { heavyQuery } = require('../src/heavy-db');
+  const id = db.createAgent({ name: 'f4-worker-check' }).id;
+  const now = Date.now();
+  for (let i = 0; i < 3; i++) {
+    db.insertMetric(id, {
+      ts: now - i * 60000, cpu: 1, mem_used: 1, mem_total: 2, mem_pct: 50,
+      disk_used: 1, disk_total: 2, disk_pct: 50, load1: 0, load5: 0, load15: 0,
+      net_rx_rate: 0, net_tx_rate: 0, net_rx_month: 0, net_tx_month: 0,
+      uptime: 1, temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
+      disk_r_rate: 0, disk_w_rate: 0, process_count: 1, interval: 20,
+      probes: JSON.stringify({ web: { ms: 10 + i, ok: true, loss: 0, type: 'http', code: 200, cert_days: 30 } }),
+      disks: null
+    });
+  }
+  const since = now - 3600000;
+  const viaWorker = await heavyQuery('probesOne', id, since, 5000);
+  const viaMain = db.getMetricsProbesOne(id, since, 5000);
+  assert.ok(Array.isArray(viaWorker), 'worker 路径应返回数组');
+  assert.deepStrictEqual(viaWorker.map((r) => r.ts), viaMain.map((r) => r.ts),
+    'worker 与主线程回落路径的取数结果必须一致');
+});

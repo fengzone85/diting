@@ -822,6 +822,7 @@ const heavyQuerySync = (fn, args) => {
     clusterAvg: (...a) => heavyQueries.clusterAvg(db, ...a),
     diskTrendAll: (...a) => heavyQueries.diskTrendAll(db, ...a),
     probesAll: (...a) => heavyQueries.probesAll(db, ...a),
+    probesOne: (...a) => heavyQueries.probesOne(db, ...a),
   };
   if (!fns[fn]) throw new Error('unknown heavy fn: ' + fn);
   return fns[fn](...(args || []));
@@ -2079,7 +2080,9 @@ const OFFICIAL_THEME_MARKET = {
   id: 'official',
   name: 'Diting Official',
   url: 'https://raw.githubusercontent.com/fengzone85/diting-theme-market/main/v1.json',
-  enabled: true
+  // 默认 **disabled**（对齐 IMPLEMENTATION_PLAN S5/F10：外部源需管理员显式授权后才启用）。
+  // 种子用 INSERT OR IGNORE ⇒ 只影响**新建库**；已有库保持原状（不覆盖管理员的既有选择）。
+  enabled: false
 };
 function seedThemeMarketSources() {
   try {
