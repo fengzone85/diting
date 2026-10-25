@@ -527,6 +527,7 @@ function formatDate(ts?: number) {
               </span>
             </div>
             <p class="pt-1 text-xs text-slate-500">{{ t('node.buildTagHint') }}</p>
+            <p class="pt-1 text-xs leading-relaxed text-slate-500">{{ t('node.buildInfoHint') }}</p>
           </div>
         </div>
       </div>
