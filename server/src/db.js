@@ -114,8 +114,8 @@ CREATE TABLE IF NOT EXISTS alert_state (
 -- 告警规则覆盖（S1/F1）：NULL = 继承上层（分组 > 全局）。
 -- 刻意不声明 FOREIGN KEY：不是「级联不执行」（better-sqlite3 11.x 默认已开
 -- PRAGMA foreign_keys=ON，metrics/traffic_state 的 CASCADE 实测真实生效），而是
--- 主动选择「删除语义显式、可审计」——由 deleteAgent() 在同一事务里显式清理本表，
--- 不让级联静默带走数据。
+-- 主动选择「删除语义显式、可审计」——不给级联静默带走数据的机会。
+-- 本表无 FK，由 purgeDeletedAgents()（软删到期）在同一事务里显式清理。
 CREATE TABLE IF NOT EXISTS alert_overrides (
   agent_id    TEXT PRIMARY KEY,
   offline_sec INTEGER,
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS notify_groups (
   updated_at INTEGER NOT NULL
 );
 
--- 组与渠道多对多。刻意不声明外键（本库未启用 foreign_keys），删除时由函数显式清理。
+-- 组与渠道多对多。刻意不声明外键（删除语义显式化；better-sqlite3 默认 FK=ON），删除时由函数显式清理。
 CREATE TABLE IF NOT EXISTS notify_group_channels (
   group_id   INTEGER NOT NULL,
   channel_id INTEGER NOT NULL,
