@@ -103,9 +103,15 @@ test('deleteBackup: 删除合法文件；非法名与不存在分别返回 400/4
   assert.strictEqual(bad.code, 400);
 });
 
-test('requestRestore: 校验文件后写请求；垃圾文件与非法名被拒', () => {
+test('requestRestore: 真实库通过完整性预检后写请求；垃圾文件与非法名被拒', () => {
   const name = 'monitor_20260914_031500.db';
-  makeFile(name);
+  // F8.3 起恢复前会跑 integrity_check，假文件（只有魔数）会被拒绝，必须用真实库
+  const Database = require('better-sqlite3');
+  const p = path.join(DIR, name);
+  const d = new Database(p);
+  d.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT); INSERT INTO t (v) VALUES ('x');");
+  d.close();
+
   const r = backups.requestRestore(name);
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.name, name);

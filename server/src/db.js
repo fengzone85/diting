@@ -367,6 +367,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('month_rotate')) db.exec('ALTER TABLE agents ADD COLUMN month_rotate INTEGER');
 }
+// F11（2026-10-24）：agents 增加软删列。删除 = 写 deleted_at（节点立即从全部读路径消失），
+// 7 天缓冲期内可由「最近删除」恢复；到期由 purgeDeletedAgents() 物理删除
+//（此时 FK CASCADE 才带走 metrics / traffic_state）。NULL = 未删除。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('deleted_at')) db.exec('ALTER TABLE agents ADD COLUMN deleted_at INTEGER');
+}
 
 // schema migration: traffic_state 增加接口集指纹列（S1）。
 // 必须同时进 upsertTrafficState 的列清单：INSERT OR REPLACE 未列出的列会取默认值，
@@ -396,8 +403,11 @@ const genToken = () => crypto.randomBytes(24).toString('hex');
 const genId = () => 'agt_' + crypto.randomBytes(6).toString('hex');
 
 const stmts = {
-  getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
-  getAgents: db.prepare('SELECT * FROM agents ORDER BY created_at DESC'),
+  // F11：读路径统一排除软删节点；恢复/删除判定用 getAgentIncludingDeleted。
+  getAgent: db.prepare('SELECT * FROM agents WHERE id = ? AND deleted_at IS NULL'),
+  getAgents: db.prepare('SELECT * FROM agents WHERE deleted_at IS NULL ORDER BY created_at DESC'),
+  getDeletedAgents: db.prepare('SELECT * FROM agents WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC'),
+  getAgentIncludingDeleted: db.prepare('SELECT * FROM agents WHERE id = ?'),
   insertAgent: db.prepare(`INSERT INTO agents
     (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, pending, created_at, last_seen)
     VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @pending, @created_at, 0)`),
@@ -411,8 +421,14 @@ const stmts = {
     (agent_id, cycle_key, cycle_start, used_rx, used_tx, last_rx, last_tx, last_ts, epoch, updated_at)
     VALUES (@agent_id, @cycle_key, @cycle_start, @used_rx, @used_tx, @last_rx, @last_tx, @last_ts, @epoch, @updated_at)`),
   allTrafficState: db.prepare('SELECT * FROM traffic_state'),
-  deleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
-  // S2：metrics_hour 无 FK，删除节点时显式清理（F11 后由 purgeDeletedAgents 调用）
+  // F11：软删（一条 UPDATE，7 天缓冲）；物理删除仅由 purgeDeletedAgents 使用。
+  softDeleteAgent: db.prepare('UPDATE agents SET deleted_at=? WHERE id=? AND deleted_at IS NULL'),
+  restoreAgentRow: db.prepare('UPDATE agents SET deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL'),
+  hardDeleteAgent: db.prepare('DELETE FROM agents WHERE id = ?'),
+  expiredDeletedAgents: db.prepare('SELECT id FROM agents WHERE deleted_at IS NOT NULL AND deleted_at < ?'),
+  purgeAlertState: db.prepare('DELETE FROM alert_state WHERE agent_id=?'),
+  purgeAlertOverride: db.prepare('DELETE FROM alert_overrides WHERE agent_id=?'),
+  // S2：metrics_hour 无 FK，物理删除节点时显式清理（F11 后由 purgeDeletedAgents 调用）
   deleteMetricsHourByAgent: db.prepare('DELETE FROM metrics_hour WHERE agent_id = ?'),
   // 审查 G4：批准自助注册的待确认 agent（pending 1→0）
   approveAgent: db.prepare('UPDATE agents SET pending=0 WHERE id=?'),
@@ -784,19 +800,44 @@ const updateAgent = (id, f) => {
   });
 };
 
-// 删除 agent = 一次事务里的显式清理 + 删行（不依赖 FK CASCADE）。
-// 事务化的原因：此前三条独立语句，在第二条前中断会留下「agent 还在、告警状态已丢」
-// 的半清理状态——该节点的冷却/恢复判定一起丢失，会触发重复告警。
-const deleteAgent = db.transaction((id) => {
-  stmts.clearAllAlertState.run(id);
-  stmts.deleteAlertOverride.run(id);
-  // S2：metrics_hour 刻意不声明 FK，不会被 CASCADE 带走，必须显式清理。
-  // F11 软删合入后此语句移到 purgeDeletedAgents()，语义不变。
-  try { stmts.deleteMetricsHourByAgent.run(id); } catch (e) { /* 老库无该表时忽略 */ }
-  // F7：在线时段显式清理（软删场景在 purge 时走同一函数；见 IMPLEMENTATION_PLAN F11）
-  try { stmts.deleteOnlineSessionsByAgent.run(id); } catch (e) { /* 老库无该表时忽略 */ }
-  return stmts.deleteAgent.run(id);
-});
+// F11（2026-10-24）：删除改为软删——一条 UPDATE，不碰 alert_state / alert_overrides
+//（7 天内恢复时告警冷却连续，不会立刻重复通知）。物理清理见 purgeDeletedAgents()。
+const deleteAgent = (id) => stmts.softDeleteAgent.run(Date.now(), id).changes;
+const listDeletedAgents = () => stmts.getDeletedAgents.all();
+const getAgentIncludingDeleted = (id) => stmts.getAgentIncludingDeleted.get(id);
+const restoreAgent = (id) => stmts.restoreAgentRow.run(id).changes;
+
+// F11：软删缓冲期（固定 7 天，见 IMPLEMENTATION_PLAN §5 F11）。
+const SOFT_DELETE_GRACE_MS = 7 * 86400000;
+
+const tableExists = (name) => Boolean(
+  db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)
+);
+
+// F11：物理清理过期软删节点。顺序不可换：
+//   ① 显式清无 FK 的状态表（alert_state / alert_overrides）+ 内存 trafficCache；
+//   ② metrics_hour（S2 折叠表）按约定不声明 FK，存在时显式删；
+//   ③ 最后删 agents 行 —— 此时 metrics / traffic_state 由 FK CASCADE 带走。
+// 每条节点清理包在 db.transaction 内：任一语句失败整体回滚，不留「半清理」。
+const purgeDeletedAgents = (now = Date.now()) => {
+  const rows = stmts.expiredDeletedAgents.all(now - SOFT_DELETE_GRACE_MS);
+  if (!rows.length) return 0;
+  const delHour = tableExists('metrics_hour')
+    ? db.prepare('DELETE FROM metrics_hour WHERE agent_id=?')
+    : null;
+  const purgeOne = db.transaction((id) => {
+    stmts.purgeAlertState.run(id);
+    stmts.purgeAlertOverride.run(id);
+    if (delHour) delHour.run(id);
+    // F7：online_sessions 无 FK，同样显式清理（软删期间保留，恢复后在线时段可延续）
+    try { stmts.deleteOnlineSessionsByAgent.run(id); } catch (e) { /* 老库无该表时忽略 */ }
+    trafficCache.delete(id);
+    stmts.hardDeleteAgent.run(id);
+  });
+  for (const r of rows) purgeOne(r.id);
+  return rows.length;
+
+};
 
 // ---- 在线时段（F7）-----------------------------------------------------------
 // 状态机在 alerts.checkAgent 里驱动：online → 确保有 open session；offline → 关闭。
@@ -1316,6 +1357,29 @@ const flushTraffic = () => {
   trafficDirty.clear();
 };
 
+// F8.6：恢复后检测到流量缺口时重置基线。
+// last_rx/last_tx 置 NULL 表示「下一条上报只建基线」——traffic.js 的
+// `last_rx !== null` 分支不成立，缺口期间累计的增量不会被一次性算进当月
+// （否则 max(baseRx - last_rx, 0) 会把整段缺口算成当月用量，可能误触配额告警）。
+// 内存缓存必须同步修改：否则下一次 flush 会把旧 last_rx 写回，覆盖刚做的修复。
+const markTrafficGap = (agentId, nowMs = Date.now()) => {
+  const s = trafficCache.get(agentId);
+  if (s) {
+    s.last_rx = null;
+    s.last_tx = null;
+    s.last_ts = nowMs;
+    s.updated_at = nowMs;
+    trafficDirty.add(agentId);
+  }
+  db.prepare('UPDATE traffic_state SET last_rx=NULL, last_tx=NULL, last_ts=?, updated_at=? WHERE agent_id=?')
+    .run(nowMs, nowMs, agentId);
+};
+
+// F8.1：应用内一致性快照。better-sqlite3 的 db.backup() 是异步在线备份
+// （逐页拷贝已提交内容），无需停服，也不受 rollback journal 写窗口影响。
+// 返回 Promise；调用方负责目录创建、目标名冲突检查与权限收紧。
+const backupTo = (dest) => db.backup(dest);
+
 const trafficFlushTimer = setInterval(flushTraffic, 60000);
 trafficFlushTimer.unref();
 process.once('exit', () => {
@@ -1476,6 +1540,12 @@ function getUiSettings() {
     backup_schedule: 'off',           // off / daily / weekly（weekly 在周一执行）
     backup_hour: 3,                   // 执行小时 0-23
     backup_keep_days: 14,             // 保留天数（0=不自动清理）
+    backup_keep_count: 10,            // 保留份数（0=不限，F8.4）
+    // F12 容量保险丝：行数 + 库文件双水位；100% 只停写历史明细，
+    // 不动 /report 接收、告警判定与实时数据（agents/traffic_state）。
+    capacity_enabled: true,
+    capacity_max_rows: 2000000,       // 默认 200 万行（按 S2 折叠后口径的约 10 倍余量）
+    capacity_max_mb: 2048,            // 默认库文件 2 GiB
     backup_compress: true             // gzip 压缩（实测体积约 20%，强烈建议开启）
   };
   try {
@@ -1675,6 +1745,25 @@ function setBackupState(s) {
   setConfig(BACKUP_STATE_KEY, JSON.stringify(merged));
 }
 
+// ---- F8.6：恢复后一致性审查 ----
+// diting.sh 在替换数据库前把 restore_audit_pending 写进「即将生效」的库；
+// 服务启动时读到它就跑一次审查（src/restore-audit.js），完成后清标记、
+// 把报告写入 restore_audit_last（备份页「最近一次恢复审查」面板读它）。
+const RESTORE_AUDIT_PENDING_KEY = 'restore_audit_pending';
+const RESTORE_AUDIT_LAST_KEY = 'restore_audit_last';
+
+function parseJsonConfig(key) {
+  try {
+    const o = JSON.parse(getConfig(key) || 'null');
+    return o && typeof o === 'object' ? o : null;
+  } catch (e) { return null; }
+}
+function getRestoreAuditPending() { return parseJsonConfig(RESTORE_AUDIT_PENDING_KEY); }
+function setRestoreAuditPending(v) { setConfig(RESTORE_AUDIT_PENDING_KEY, JSON.stringify(v || {})); }
+function clearRestoreAuditPending() { deleteConfig(RESTORE_AUDIT_PENDING_KEY); }
+function getRestoreAuditReport() { return parseJsonConfig(RESTORE_AUDIT_LAST_KEY); }
+function setRestoreAuditReport(r) { setConfig(RESTORE_AUDIT_LAST_KEY, JSON.stringify(r || {})); }
+
 // ---- AI 报告 CRUD ----
 function insertAiReport(r) {
   const info = stmts.insertAiReport.run({
@@ -1838,6 +1927,7 @@ seedThemeMarketSources();
 module.exports = {
   db, DB_PATH, getDbFileSize, hashToken, genToken,
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
+  listDeletedAgents, getAgentIncludingDeleted, restoreAgent, purgeDeletedAgents,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
   touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
   getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter,
@@ -1866,6 +1956,10 @@ module.exports = {
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
   getAiConfig, setAiConfig, getAiState, setAiState,
   getBackupState, setBackupState,
+  markTrafficGap,
+  backupTo,
+  getRestoreAuditPending, setRestoreAuditPending, clearRestoreAuditPending,
+  getRestoreAuditReport, setRestoreAuditReport,
   listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,
   deleteThemeMarketSource, OFFICIAL_THEME_MARKET,
   getThemeConfig, setThemeConfig, deleteThemeConfig,

@@ -16,6 +16,8 @@ const agentRelay = require('./src/agent-relay');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
 const rollup = require('./src/rollup');
+// F8.6：恢复后一致性审查（diting.sh 在替换数据库前写入 pending 标记）
+const restoreAudit = require('./src/restore-audit');
 const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss } = require('./src/validate');
@@ -594,6 +596,9 @@ function runPrune() {
     // revoked 行一并清（其 last_seen 停留在最后活动时刻，同样会被 TTL 覆盖）。
     const nSess = db.pruneSessions(Date.now() - SESSION_TTL * 2);
     if (nSess > 0) console.log(`[prune] removed ${nSess} expired sessions`);
+    // F11：软删节点到期物理清理（7 天缓冲；先清状态表与缓存，再删行触发 CASCADE）。
+    const nPurge = db.purgeDeletedAgents();
+    if (nPurge > 0) console.log(`[prune] purged ${nPurge} soft-deleted agents`);
     pruneFails = 0;
   } catch (e) {
     console.error('[prune] error', e.message);
@@ -604,6 +609,28 @@ function runPrune() {
       pruneFails = 0;
     }
   }
+}
+// F8.6：恢复后一致性审查必须先于 prune —— prune 会按当前 retention 直接删掉
+// 过期明细，而审查要先把「将删多少」算出来并提示；顺序反了用户就永远看不到预估。
+// 结构完整性失败时计划要求「拒绝启动」：坏库继续跑只会写入更多不一致数据，
+// 提示用户用 pre_restore_*.db 回滚。标记保留，修好后重启会再查一次。
+try {
+  const ra = restoreAudit.runRestoreAudit();
+  if (ra && ra.fatal) {
+    console.error('[restore-audit] 恢复后的数据库未通过完整性校验，拒绝启动。'
+      + ' 请从 pre_restore_*.db（或 diting.sh --restore）回滚后重启。');
+    process.exit(1);
+  }
+  if (ra) {
+    const s = ra.report.summary;
+    console.log(`[restore-audit] 恢复审查完成：${ra.report.backup.name || '(unknown)'}`
+      + ` ok=${s.ok} warn=${s.warn} skipped=${s.skipped} fail=${s.fail}`
+      + ` expired=${s.expired_rows}/${s.total_rows} orphans=${s.orphan_deleted}`
+      + ` purged=${s.purged_agents} gaps=${s.traffic_gap_fixed}`);
+  }
+} catch (e) {
+  // 审查是增强能力：自身异常不得让服务起不来。
+  console.error('[restore-audit] error', e.message);
 }
 runPrune();
 // unref：清理循环不应阻止进程退出（对集成测试尤其重要，否则测试进程会因该定时器挂起）

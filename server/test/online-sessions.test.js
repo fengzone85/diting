@@ -143,13 +143,17 @@ test('F7 聚合：跨天 session 按本地日切分；今天分母为已过去�
 
 // ---- 4. 删除 / 保留 --------------------------------------------------------
 
-test('F7 删除：deleteAgent 同事务清掉 online_sessions', () => {
+test('F7 删除：软删保留 online_sessions，purge 时清掉（F11 语义）', () => {
   const id = db.createAgent({ name: 'f7-del' }).id;
   db.db.prepare('INSERT INTO online_sessions(agent_id,started_at) VALUES(?,?)').run(id, Date.now());
   assert.strictEqual(sessionsOf(id).length, 1);
+  // F11：删除是软删（一条 UPDATE），在线时段保留 —— 7 天缓冲内恢复时在线率可延续。
   db.deleteAgent(id);
-  assert.strictEqual(sessionsOf(id).length, 0);
-  assert.strictEqual(db.getAgent(id), undefined);
+  assert.strictEqual(db.getAgent(id), undefined, '软删后 getAgent 应读不到该节点');
+  assert.strictEqual(sessionsOf(id).length, 1, '软删期间 online_sessions 应保留');
+  // 缓冲期到期 → purge 物理清理时一并清掉 online_sessions（该表无 FK）
+  db.purgeDeletedAgents(Date.now() + 8 * 86400000);
+  assert.strictEqual(sessionsOf(id).length, 0, 'purge 后 online_sessions 必须被清掉');
 });
 
 test('F7 保留：prune 只清已结束且超期的 session，进行中的保留', () => {

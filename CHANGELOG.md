@@ -2,6 +2,124 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-24 容量保险丝（F12）
+
+### 新增
+
+- **双水位**：`metrics` 行数与库文件字节（默认 2,000,000 行 / 2 GiB，先到者触发），
+  后台「设置 → 容量保险丝」可调整或关闭。
+- **80% 预警**：后台顶部黄条 + 一次 `capacity` 通知事件（通知组事件字典已新增该事件）。
+- **100% 硬限**：只暂停历史明细写入——`/report` 仍返回 200，流量累加、在线状态、
+  实时数据与告警全部继续；顶部黄条显示「历史写入已暂停」与跳过次数，并提供
+  「清理并恢复」（按当前保留天数清理过期明细，不额外删数据、不自动 VACUUM）。
+- `GET /api/admin/capacity` 返回水位状态；`POST /api/admin/capacity/cleanup` 执行清理
+  并写 `capacity_cleanup` 审计。
+- F8.6 恢复审查的第 8 项（容量水位）从此实际执行：恢复回旧库后立即重新评估，
+  若已超限则保险丝马上生效。
+
+### ⚠️ 行为变更
+
+- 默认启用：库达到 80% 后开始预警；达到 100% 后**历史明细不再落库**
+  （实时监控、告警与 `/report` 不受影响）。若暂不需要，可在「设置 → 容量保险丝」
+  关闭，或调高行数/体积阈值。
+
+## 2026-10-24 备份保留份数上限（F8.4）
+
+### ⚠️ 行为变更
+
+- **双重保留策略**：除既有「保留天数」（`backup_keep_days`，默认 14 天）外，新增
+  **保留份数** `backup_keep_count`（默认 10，`0` = 不限）。每次备份完成后先按天清理，
+  再按 mtime 删除最旧的 `monitor_*`（含 `.db.gz` 与上传件），直到不超过份数上限。
+- **升级后首次备份可能清理历史文件**：若现有 `monitor_*` 超过 10 份，下次备份完成时会
+  自动清到 10 份。需长期保留请先下载归档，或把「保留份数」调大 / 设为 `0`。
+- `pre_restore_*` 永不自动清理：它们是恢复失败时的回滚点，沿用宿主既有约定。
+- 可见目录（`BACKUP_VISIBLE_DIR`）的副本执行同样的份数清理，避免源目录与副本双份增长。
+- 备份页备份保留区域新增「保留份数」输入；脚本可用 `DB_BACKUP_KEEP_COUNT` 覆盖。
+
+## 2026-10-24 应用内快照与宿主备份一致性修复（F8.1 / F8.5）
+
+### ⚠️ 修复（数据安全）
+
+- **宿主 `--backup` 不再热 cp**：`diting.sh` 的宿主文件分支原先直接 `cp` 正在写入的
+  `monitor.db`。rollback journal 模式的提交是「写 journal → 改页 → 删 journal」，cp 落在
+  改页窗口会拷到半提交状态的库（原注释写「需先 flush」，但代码既无 flush 也无 checkpoint）。
+  现在优先 `sqlite3 VACUUM INTO`（读事务内导出已提交内容，顺带去掉空闲页）；无 sqlite3 时
+  先 `systemctl stop diting-server` 再拷贝，**无论成败都恢复服务**。
+- 容器分支保持不变（已有 `sqlite3 .backup`）；卷分支在容器停止时拷贝，本身安全。
+
+### 新增
+
+- **应用内一致性快照**：`POST /api/admin/backups` 经 `db.backupTo()`（better-sqlite3
+  `db.backup()` 在线备份）生成 `monitor_YYYYMMDD_HHMMSS.db`，无需停服；产物沿用宿主命名规则，
+  权限收紧为 0600，并写 `create_backup` 审计（含文件大小）。
+- **备份页「立即备份」按钮**：点击即在服务内生成快照，成功后刷新列表与备份监控。
+- API 文档补充 `POST /api/admin/backups`。
+
+### 说明
+
+- 应用内快照产物为未压缩 `.db`，与上传件一样受既有保留策略管理；需长期保留请下载归档。
+
+## 2026-10-24 备份完整性预检（F8.3）
+
+### ⚠️ 行为变更
+
+- **恢复前强制校验**：`POST /api/admin/backups/:name/restore` 对选中的 `.db` 先做
+  `PRAGMA integrity_check`（只读连接、独立子进程、10 秒超时）；失败或超时返回 400 并拒绝恢复，
+  不会写恢复请求文件。`.gz` 备份无法就地打开 → 标 `unknown` 放行，由 `diting.sh` 解压后
+  在同一流程里校验（宿主无 sqlite3 时仅校验魔数）。
+- **列表显示三态**：`GET /api/admin/backups` 的每项新增
+  `integrity: 'ok' | 'fail' | 'unknown'` 与 `integrity_reason`。为避免每次刷新都完整扫描
+  大库，列表每个请求最多抽查 1 个未缓存文件（`quick_check`），结果按 `size + mtime` 缓存；
+  其余显示「未校验」，多次刷新逐步覆盖。
+- **前端**：备份文件列表新增「完整性」列（正常 / 异常 / 未校验，异常悬停显示原因）；
+  恢复提示补充校验时机说明。
+
+## 2026-10-24 恢复后一致性审查（F8.6）
+
+### ⚠️ 行为变更
+
+- **恢复动作能查到了**：恢复会用备份整库覆盖当前库，后台点「恢复」时记的 `request_restore_backup`
+  会随旧库一起消失。现在 `diting.sh` 在恢复完成后向新库补记 `restore_backup`
+  （`ok` / `failed` / `cancelled`，含 `pre_restore` 回滚点），服务端审查完成后再记
+  `restore_completed`（来源备份、8 项结果摘要、待清理预估）。审计 `admin` 列记录发起者
+  （`admin(session) 1.2.3.4` / `host(cli)`），`via=script`。
+- **恢复后自动审查 8 项**：`diting.sh` 在替换数据库前把 `admin_config.restore_audit_pending`
+  写进「即将生效」的副本（无 sqlite3 时降级为备份目录 `.restore_audit_pending.json`），
+  服务启动时依次检查：结构完整性、retention 预演、折叠水位线、明细/小时重叠、流量缺口、
+  孤儿数据、软删过期、容量水位。S2 / F11 / F12 未落地时对应项标「跳过」而不是失败。
+- **流量缺口不计入当月用量**：`traffic_state.last_ts` 落后超过 `max(3 × 上报间隔, 1h)` 时，
+  把 `last_rx/last_tx` 重置为 NULL（下一条上报只建基线），避免整段缺口的累计增量被
+  `max(baseRx - last_rx, 0)` 一次性算进当月、误触配额告警；内存 `trafficCache` 同步重置，
+  防止下次 flush 写回旧基线。
+- **孤儿与过期软删立即清理**：`metrics` / `metrics_hour` / `traffic_state` / `alert_state` /
+  `alert_overrides` / `online_sessions` 中 agent 已不存在的行直接删除；`agents.deleted_at`
+  超过 7 天的节点在启动审查时即 purge。
+- **结构完整性失败拒绝启动**：提示从 `pre_restore_*.db` 回滚；标记保留，修好后重启会再查一次
+  （避免带着坏库继续写入）。审查自身异常只记日志，不影响启动。
+- **备份页新增「最近一次恢复审查」面板**：恢复时间、来源备份（含备份文件时间）、发起者、
+  各项检查结果与待清理预估；retention 一项额外给出过期数据的最早/最晚时间与**按保留周期分段的批次**；
+  `GET /api/admin/backups` 增加 `restore_audit` 字段（只读角色不返回，口径同审计日志）。
+- **后台顶部黄条**：恢复自较早的备份且过期数据占比超过 30% 时，后台所有页面顶部提示
+  「恢复自 N 天前的备份：X% 数据（Y 行）将在下次清理中被删除」，可跳转备份页或按报告忽略；
+  `GET /api/admin/restore-audit` 为黄条提供轻量数据源（避免为一个提示拉整个备份目录）。
+- **WAL 提示**：当前用 rollback journal，覆盖 `monitor.db` 安全；若将来启用 WAL，替换流程必须
+  同时删除 `-wal`/`-shm`（已写入 `diting.sh` 注释与宿主机分支）。
+
+## 2026-10-24 节点删除改为软删（7 天缓冲）
+
+### ⚠️ 行为变更
+
+- **删除节点不再立即物理删除**：节点立即从面板 / 公开页 / 告警 / AI 统计中消失，但 `agents` 行与
+  全部历史（`metrics` / `traffic_state`）保留 **7 天**；期间可在「最近删除」一键恢复——身份、配置、
+  历史原样，恢复后最多 10 分钟自动重新上报（agent 对 401/403 只做 10 分钟退避、不会退出）。
+- **删除确认文案**：列表 / 批量 / 详情三处改为「身份与历史保留 7 天后自动清理」口径，不再提示「无法恢复」。
+- **新增 API**：`GET /api/agents/deleted`（最近删除，含剩余天数）、`POST /api/agents/:id/restore`（恢复）。
+  `DELETE /api/agents/:id` 响应兼容（200 + `grace_days: 7`），但实际执行软删。
+- **7 天后物理清理**：每小时 prune 顺带执行 `purgeDeletedAgents()`——先显式清 `alert_state` /
+  `alert_overrides`（以及存在时的 `metrics_hour`）与内存流量缓存，再删 `agents` 行，
+  由 FK CASCADE 带走 `metrics` / `traffic_state`；整条清理在一个事务内，失败整体回滚。
+- **软删期间告警冷却与覆盖保留**：`alert_state` / `alert_overrides` 不动，恢复后不会立刻重复通知。
+- **新增 `agents.deleted_at` 列**（`ALTER TABLE ADD COLUMN`，存量数据 NULL = 未删除，毫秒级）。
 ## 2026-10-24 在线时段统计（F7）
 
 `agents.last_seen` 只有「最后一刻」，无法回答「过去 30 天在线率」。新增在线时段表与聚合，

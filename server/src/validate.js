@@ -170,7 +170,7 @@ const validateReport = (b) => {
 // 事件——否则默认 '*' 组会对同一次恢复重复投递。
 const NOTIFY_EVENTS = [
   'offline', 'online', 'cpu', 'mem', 'disk', 'temp', 'cert',
-  'expire', 'expired', 'quota', 'traffic_untrusted', 'ai_daily', 'login', 'system', 'test'
+  'expire', 'expired', 'quota', 'traffic_untrusted', 'ai_daily', 'login', 'system', 'test', 'capacity'
 ];
 const WEBHOOK_METHODS = ['GET', 'POST'];
 const WEBHOOK_CONTENT_TYPES = ['json', 'form'];

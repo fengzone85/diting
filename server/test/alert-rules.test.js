@@ -9,7 +9,8 @@
 //   4. 采样窗口：默认 5 样本 / 70% 比例；ALERT_SUSTAIN_SAMPLES 显式设置时退回
 //      「连续 N 次全超限」旧行为；
 //   5. API：覆盖 CRUD + 审计 + /agents 附带 effective；
-//   6. 删除 agent 时同事务清理覆盖行（本库 FK 不强制，见 db.js 建表注释）。
+//   6. 删除/清理语义（F11 软删）：软删保留覆盖行（恢复后冷却连续），
+//      purgeDeletedAgents() 在事务内显式清理。
 //
 // 运行前提与 integration.api.test.js 相同：PORT=0 / ADMIN_ALLOW_HTTP=1 /
 // 测试专用 ADMIN_TOKEN / DB_PATH 指向 /tmp 临时库（绝不触碰生产 monitor.db）。
@@ -231,14 +232,19 @@ test('未知节点：PUT 覆盖返回 404（不创建孤儿覆盖行）', async 
   assert.strictEqual(db.getAlertOverride('agt_not_exist'), null);
 });
 
-// ---- 6. 级联清理 ------------------------------------------------------------
+// ---- 6. 删除语义（F11 软删） ------------------------------------------------
 
-test('删除 agent 时同事务清理覆盖行（FK 不强制）', () => {
+test('软删保留覆盖行，物理清理时删除（F11）', () => {
   const a = db.createAgent({ name: 'cleanup-node' });
   db.upsertAlertOverride(a.id, { cpu_pct: 50 });
   assert.ok(db.getAlertOverride(a.id));
+  // F11：删除改为软删——覆盖行保留 7 天（恢复后告警冷却连续，不重复通知）。
   db.deleteAgent(a.id);
-  assert.strictEqual(db.getAlertOverride(a.id), null, '覆盖行应随 agent 删除');
+  assert.ok(db.getAlertOverride(a.id), '软删期间覆盖行应保留');
+  // 到期物理清理：显式删覆盖行，再删 agents 行（CASCADE 带走 metrics）。
+  db.db.prepare('UPDATE agents SET deleted_at=? WHERE id=?').run(Date.now() - 8 * 86400000, a.id);
+  db.purgeDeletedAgents();
+  assert.strictEqual(db.getAlertOverride(a.id), null, '物理清理后覆盖行应删除');
 });
 
 // ---- 7. 上线通知（S1/F1）---------------------------------------------------

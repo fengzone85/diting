@@ -90,6 +90,16 @@ export interface Agent {
   };
 }
 
+// F11：最近删除（软删节点，7 天缓冲期内可恢复）
+export interface DeletedAgent {
+  id: string;
+  name: string;
+  hostname?: string;
+  version?: string;
+  deleted_at: number;
+  days_left: number;
+}
+
 // ---- S1/F1 告警规则覆盖 ----
 export interface AlertThresholds {
   offline_sec: number;
@@ -305,6 +315,24 @@ export interface Settings {
   notify?: Record<string, unknown>;
 }
 
+// F12 容量保险丝状态（行数 + 库文件双水位）
+export interface CapacityStatus {
+  enabled: boolean;
+  level: 'ok' | 'warn' | 'full';
+  rows: number;
+  bytes: number;
+  max_rows: number;
+  max_bytes: number;
+  row_pct: number;
+  byte_pct: number;
+  pct: number;
+  paused: boolean;
+  skipped: number;
+  retention_days: number;
+  ts: number;
+  deleted?: number;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -469,6 +497,40 @@ export interface BackupFile {
   mtime: number;
   compressed: boolean;
   kind: 'monitor' | 'pre_restore';
+  // F8.3：列表抽查（quick_check）结果；恢复前会再做一次完整 integrity_check
+  integrity?: 'ok' | 'fail' | 'unknown';
+  integrity_reason?: string;
+}
+
+// F8.6：恢复后一致性审查（服务端启动时写入，本页只读展示）
+export interface RestoreAuditCheck {
+  id: string;
+  status: 'ok' | 'warn' | 'skipped' | 'fail';
+  value: Record<string, unknown>;
+}
+
+export interface RestoreAuditSummary {
+  ok: number;
+  warn: number;
+  skipped: number;
+  fail: number;
+  total_rows: number;
+  expired_rows: number;
+  orphan_deleted: number;
+  purged_agents: number;
+  traffic_gap_fixed: number;
+}
+
+export interface RestoreAuditReport {
+  ts: number;
+  backup: { name: string; ts: number; mtime?: number; by: string };
+  source: 'db' | 'file';
+  duration_ms: number;
+  retention_days: number | null;
+  fatal: boolean;
+  error: string;
+  checks: RestoreAuditCheck[];
+  summary: RestoreAuditSummary;
 }
 
 export interface BackupList {
@@ -476,6 +538,7 @@ export interface BackupList {
   available: boolean;
   files: BackupFile[];
   restore_request: { file?: string; name?: string; ts?: number } | null;
+  restore_audit?: RestoreAuditReport | null;
 }
 
 // 数据库备份监控状态（宿主侧 diting.sh 执行后回写服务端）
