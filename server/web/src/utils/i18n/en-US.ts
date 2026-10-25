@@ -1,5 +1,6 @@
 export const enUS: Record<string, string> = {
   // common
+  'node.buildInfoHint': 'Commit SHA / build time / platform are written at compile time and reported back on every heartbeat, so you can tell exactly which build a node runs (older agents do not report them and show "-"). Set a baseline version under "Node list → Set expected version" to compare against: match = up to date, mismatch = outdated, not comparable = unknown; a build tag (custom) excludes the node from automatic comparison.',
   'nav.agentArtifacts': 'Agent Binaries',
   'artifacts.title': 'Agent Binaries',
   'artifacts.hint': 'Custom agent binaries used by "one-click distribution". Stored content-addressed by the server (file name derived from sha256); identical content is deduplicated. Files are only used when you explicitly distribute them.',

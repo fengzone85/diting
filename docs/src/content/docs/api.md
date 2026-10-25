@@ -181,6 +181,47 @@ Content-Type: application/json
 - 吊销：`DELETE /api/admin/api-tokens/:id`，返回 `200 {ok,id}`；不存在或已吊销返回 `404`。
 - Token 管理端点仅 admin 可用；调用方自身若是受限 Token（`agent_ids` 非空）→ `403 forbidden_scope`。
 
+### 受控端构建信息（`agent_meta`）：采集与落库
+
+「节点跑的是哪个版本」从*仅 semver 字符串*升级为*版本 + commit SHA + 构建时间 + 平台*。
+本节说明**字段从哪来、怎么清洗、怎么落库**；判定与操作见下一节。
+
+#### ① 受控端上报（可选字段）
+
+受控端上报体新增**可选**字段 `agent_meta`：
+
+```json
+{ "agent_meta": { "version": "1.1.4", "build_sha": "c0d3cd8",
+                  "build_time": "2026-10-25T13:14:45Z", "platform": "linux-amd64" } }
+```
+
+| 字段 | 来源（三级兜底） | 清洗规则 |
+|---|---|---|
+| `version` | `main.version` ldflag | 去空格 |
+| `build_sha` | ① ldflag `main.buildSHA` → ② `debug.ReadBuildInfo()` 的 `vcs.revision` → ③ 空 | 小写化；必须 7–40 位 hex，否则置空 |
+| `build_time` | ① ldflag `main.buildTime` → ② `vcs.time` → ③ 空 | 必须 UTC RFC3339（`^\d{4}-\d{2}-\d{2}T[\d:]+Z$`），否则置空 |
+| `platform` | `runtime.GOOS + "-" + runtime.GOARCH` | 必须 `xxx-xxx` 字形，否则置空 |
+
+- 兜底②的价值：**存量 Release 产物已内嵌 `vcs.revision`**，即使没有重新发版也能拿到真实 commit；
+- 脏构建（`vcs.modified=true`）时 sha 与 tag 不对应 —— 仍**如实上报**，由管理员用 `build_tag` 标注兜底；
+- **老受控端不带该字段完全不受影响**（服务端对应列保持为空 = 未知，绝不拒绝上报）；
+- 采集面**零新增**：只描述「这个二进制是怎么来的」，不含任何主机指纹。
+
+#### ② 服务端落库
+
+`agents` 表新增 4 列（迁移幂等，`ALTER TABLE ADD COLUMN`）：
+
+| 列 | 含义 | 写入方 |
+|---|---|---|
+| `build_sha` | 编译期 commit（7–40 hex 或空） | agent 上报 |
+| `build_time` | 编译期 UTC RFC3339 或空 | agent 上报 |
+| `agent_platform` | `linux-amd64` / `windows-amd64` / … | agent 上报 |
+| `build_tag` | 管理员标注（`''` / `custom` / 自由标签） | 管理员 |
+
+- 服务端**再清洗一遍**（sha 严格 hex、time RFC3339、platform 白名单字形），不合规**丢弃为空串**而不是报错；
+- `setAgentBuild` 用「**值变化才写**」的 SQL —— 稳态 20s 一次上报不产生额外写事务；
+- `GET /api/agents` 与 `/api/admin/agent-versions` 都会带出这 4 个字段。
+
 ### 受控端版本可判定性（期望版本对照）
 
 把「节点跑的是哪个版本」从*仅 semver 字符串*升级为*版本 + commit SHA + 构建时间 + 平台 + 与期望版本的差距*。
@@ -204,7 +245,22 @@ X-Admin-Token: <admin_token>
 }
 ```
 
-状态判定口径（`server/src/agent-versions.js`）：
+状态判定口径（`server/src/agent-versions.js`），**按下列优先级依次判定**：
+
+```
+1. build_tag 非空                     → custom      人工标注优先于一切自动判定
+2. 未设期望版本                       → unknown     只展示，不判定
+3. 期望 sha 非空：
+     节点无 sha                       → unknown     老 agent 无法按 sha 判定
+     build_sha == 期望 sha            → up_to_date
+     否则                             → outdated
+4. 否则按版本号比（归一：去 v 前缀 + 小写）：
+     节点无版本                       → unknown
+     归一后相同（"1.1.4" == "v1.1.4"） → up_to_date
+     否则                             → outdated
+```
+
+各状态含义：
 
 | status | 含义 |
 |---|---|
