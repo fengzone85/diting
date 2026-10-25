@@ -255,16 +255,22 @@ function evictCache() {
 }
 
 // ---- 主流程 -----------------------------------------------------------------
-// 网络层失败（TypeError: fetch failed）重试一次：GitHub 出口偶发抖动，
-// 重试成本远低于让安装脚本回落。HTTP 状态错误不重试（4xx/5xx 重试无意义）。
-async function fetchWithRetry(url, timeoutMs, opts) {
-  try {
-    return await fetchUrl(url, timeoutMs, opts);
-  } catch (e) {
-    if (e instanceof RelayError) throw e;
-    await new Promise((r) => setTimeout(r, 800));
-    return fetchUrl(url, timeoutMs, opts);
+// 网络层失败（TypeError: fetch failed）重试：本机到 GitHub 出口**间歇性**超时
+// （实测同一 URL 时通时断），重试成本远低于让安装脚本回落 GitHub。
+// HTTP 状态错误不重试（4xx/5xx 重试无意义）；最终失败统一包成 502，别把
+// TypeError 漏成 500（调用方无法区分「上游挂了」和「服务端 bug」）。
+async function fetchWithRetry(url, timeoutMs, opts, attempts = 3) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetchUrl(url, timeoutMs, opts);
+    } catch (e) {
+      if (e instanceof RelayError) throw e;
+      lastErr = e;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
   }
+  throw new RelayError(502, 'upstream_unreachable', String(lastErr && lastErr.message || lastErr));
 }
 
 async function prepare(key, wantSha) {
