@@ -161,7 +161,7 @@ async function resolveTag() {
   // 2) 回落：HEAD latest/download/<已知资产>，从 Location 里解析 /download/<tag>/
   if (!tag) {
     try {
-      const r = await fetchUrl(`${DL_BASE}/latest/download/diting-agent-linux-amd64.sha256`, API_TIMEOUT_MS);
+      const r = await fetchUrl(`${DL_BASE}/latest/download/diting-agent-linux-amd64.sha256`, API_TIMEOUT_MS, { redirect: 'manual' });
       const loc = (r.headers && (r.headers.location || r.headers.Location)) || '';
       if (r.status >= 300 && r.status < 400 && loc) {
         const m = /\/releases\/download\/([^/]+)\//.exec(loc);
@@ -174,19 +174,24 @@ async function resolveTag() {
   return tag;
 }
 
-function fetchUrl(url, timeoutMs) {
+// redirect: 'follow'（默认，资产下载要跟随 GitHub → CDN 的 302）或
+// 'manual'（仅 tag 解析时需要读 Location 头）。
+function fetchUrl(url, timeoutMs, opts) {
   const f = fetcher || defaultFetcher;
-  return f(url, timeoutMs);
+  return f(url, timeoutMs, opts);
 }
 
-const defaultFetcher = async (url, timeoutMs) => {
+const defaultFetcher = async (url, timeoutMs, opts) => {
   if (typeof fetch !== 'function') {
     throw new RelayError(503, 'fetch_unavailable', 'Node 18+ required for upstream fetch');
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { redirect: 'manual', signal: ctrl.signal });
+    const r = await fetch(url, {
+      redirect: (opts && opts.redirect) || 'follow',
+      signal: ctrl.signal,
+    });
     const body = Buffer.from(await r.arrayBuffer());
     return { status: r.status, body, headers: Object.fromEntries(r.headers.entries()) };
   } finally {
@@ -250,6 +255,18 @@ function evictCache() {
 }
 
 // ---- 主流程 -----------------------------------------------------------------
+// 网络层失败（TypeError: fetch failed）重试一次：GitHub 出口偶发抖动，
+// 重试成本远低于让安装脚本回落。HTTP 状态错误不重试（4xx/5xx 重试无意义）。
+async function fetchWithRetry(url, timeoutMs, opts) {
+  try {
+    return await fetchUrl(url, timeoutMs, opts);
+  } catch (e) {
+    if (e instanceof RelayError) throw e;
+    await new Promise((r) => setTimeout(r, 800));
+    return fetchUrl(url, timeoutMs, opts);
+  }
+}
+
 async function prepare(key, wantSha) {
   const deadline = Date.now() + HEADER_DEADLINE_MS;
   const asset = ASSETS[key];
@@ -263,7 +280,7 @@ async function prepare(key, wantSha) {
   const hit = cacheGet(tag, name);
   if (hit) return { tag, buf: hit, fromCache: true };
 
-  const res = await fetchUrl(`${DL_BASE}/download/${encodeURIComponent(tag)}/${name}`, remaining());
+  const res = await fetchWithRetry(`${DL_BASE}/download/${encodeURIComponent(tag)}/${name}`, remaining());
   if (res.status === 404) throw new RelayError(404, 'asset_not_found', `${name} not in ${tag}`);
   if (res.status !== 200 || !res.body || !res.body.length) {
     throw new RelayError(502, 'upstream_failed', `upstream status ${res.status}`);
@@ -281,7 +298,7 @@ async function prepare(key, wantSha) {
   if (res.body.length > MAX_BYTES) throw new RelayError(502, 'too_large');
 
   // 1) 验签（整包已在内存）
-  const sigRes = await fetchUrl(`${DL_BASE}/download/${encodeURIComponent(tag)}/${name}.sig`, remaining());
+  const sigRes = await fetchWithRetry(`${DL_BASE}/download/${encodeURIComponent(tag)}/${name}.sig`, remaining());
   if (sigRes.status !== 200 || !sigRes.body || !sigRes.body.length) {
     throw new RelayError(502, 'sig_unavailable', `signature fetch status ${sigRes.status}`);
   }
