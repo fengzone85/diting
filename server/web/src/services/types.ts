@@ -36,6 +36,11 @@ export interface Agent {
   os?: string;
   hostname?: string;
   version?: string;
+  // V 阶段（版本可判定性）：构建元信息（agent 上报 agent_meta → 服务端落库）
+  build_sha?: string;    // 编译期 commit 短 sha（7–40 hex）；'' = 未知（老 agent 不上报）
+  build_time?: string;   // 编译期 UTC RFC3339；'' = 未知
+  agent_platform?: string; // 运行平台 linux-amd64 / windows-amd64 …
+  build_tag?: string;    // 管理员标注（'' | 'custom' | 自由标签）
   cpu_name?: string;
   kernel_version?: string;
   last_seen?: number;
@@ -98,6 +103,61 @@ export interface DeletedAgent {
   version?: string;
   deleted_at: number;
   days_left: number;
+}
+
+// ---- D 阶段：受控端二进制 artifact + 一键批量分发 ----
+// artifact：管理员上传的自定义受控端二进制（服务端按内容寻址存储）。
+export interface AgentArtifact {
+  id: string;
+  sha256: string;
+  platform: string;          // linux-amd64 / windows-amd64 / ...
+  filename: string;          // 磁盘文件名（服务端生成：<sha256>.bin|.exe）
+  size: number;
+  source_note: string;
+  created_at: number;
+}
+
+// 分发包生成结果：服务端只产出文件与一次性下载链接，**不主动连接节点**。
+export interface AgentDistributionResult {
+  ok: boolean;
+  pkg_id: string;
+  kind: 'tar.gz' | 'zip';
+  download_url: string;
+  one_time_token: string;
+  expires_at: number;
+  commands: { linux: string; windows: string };
+  manifest: {
+    pkg_id: string;
+    generated_at: string;
+    expires_at: string;
+    source: { kind: string; ref: string; note: string; sha256_cross_checked?: boolean };
+    target: { os: string; arch: string; platform: string };
+    binary: { name: string; sha256: string };
+    agent_ids: string[];
+    notice: string;
+  };
+}
+
+// ---- V 阶段：受控端版本可判定性 ----
+// 期望版本对照 + 每节点状态。status 判定口径见 server/src/agent-versions.js。
+export type AgentVersionStatus = 'up_to_date' | 'outdated' | 'unknown' | 'custom';
+
+export interface AgentVersionNode {
+  id: string;
+  name: string;
+  online: boolean;
+  version: string;
+  build_sha: string;
+  build_time: string;
+  platform: string;
+  build_tag: string;
+  status: AgentVersionStatus;
+}
+
+export interface AgentVersionSummary {
+  expected: { version: string; sha: string };
+  counts: { total: number; up_to_date: number; outdated: number; unknown: number; custom: number };
+  nodes: AgentVersionNode[];
 }
 
 // ---- S1/F1 告警规则覆盖 ----

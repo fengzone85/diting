@@ -2,6 +2,189 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-25 受控端二进制 artifact + 一键批量分发（D 阶段服务端闭环）
+
+方案 `dev-docs/AGENT_DISTRIBUTION_PLAN_2026-10-21.md` §3 的 **D 阶段服务端部分**
+（前端抽屉与 artifact 列表页未开工；「从官方 Release 拉取」来源亦未实现）。
+
+**只生成、不下发**：服务端只产出分发物（脚本 + 二进制 + 校验和 + manifest + README），
+**不主动连接节点、不下发任何指令**——节点上的执行动作始终由管理员发起，
+权限面与既有手动升级（`diting.sh --update-agent`）完全一致，不是新增提权面。
+
+### 说明
+
+- **自定义二进制 artifact**：上传即按内容寻址落盘（文件名 = `<sha256>.bin|.exe`，
+  **由服务端生成、不含任何用户输入** ⇒ 无路径穿越面），同内容天然去重；
+  落盘权限 0600，默认上限 100MB（`AGENT_ARTIFACT_MAX_MB` 可调）。
+- **分发包生成**：`POST /api/admin/agent-distribution` 产出 Linux `tar.gz` / Windows `zip`，
+  包内固定含 `update.sh`/`update.ps1`、二进制、`<二进制名>.sha256`、`manifest.json`、`README.txt`。
+  来源支持 `artifact`（用已上传的二进制）与 `release_url`（服务端下载并**强制校验** sha256，
+  走既有 SSRF 防护：钉 IP / 私网拦截 / 禁 3xx / 体积与超时上限）。
+- **脚本红线**：sha256 校验**在替换之前**（不匹配立即退出，不动现有二进制）→
+  备份 `diting-agent[.exe].bak-YYYYMMDD` → 原子替换（tmp + mv）→ 重启 → 健康检查
+  → 失败**自动回滚**。脚本**不写** `/etc/diting/agent.env`（Windows 侧**不动** `run_scheduled.bat`）
+  ⇒ 节点身份与自定义配置（`AGENT_ID`/`AGENT_TOKEN`/`PROBE_TARGETS`/`MONTH_ROTATE`）原样保留。
+- **一次性下载链接**：HMAC 签名（密钥由 `SESSION_SECRET` 派生——`ADMIN_TOKEN` 库中只有哈希、
+  明文不可得，不能当 HMAC 密钥），默认 30 分钟过期、**用后即焚**（重放 410）。
+  **绝不把 `X-Admin-Token` 放进 URL**。下载响应带 `attachment` + `nosniff` + 固定 `Content-Length`，
+  单 IP 限流 10 次/分钟。
+- **零新增依赖**：tar.gz 用 `node:zlib` 手写最小 ustar 容器，zip 复用既有 `adm-zip`；
+  二进制上传沿用 `express.raw`（与既有备份上传同一范式），不引入 multipart 解析器。
+
+### ⚠️ 行为变更
+
+- 库新增两张表：`agent_artifacts`（自定义二进制索引）与
+  `agent_distributions`（分发包索引与有效期）。
+- 磁盘新增两个目录（与 DB 同级，Docker 下随卷持久）：
+  `agent-artifacts/`、`agent-distributions/`；可用 `AGENT_ARTIFACT_DIR` /
+  `AGENT_DISTRIBUTION_DIR` 覆盖。
+- 上传接口用**原始 body**（`application/octet-stream`）而非 multipart，
+  平台与备注走 query 参数——理由：无 multipart 解析器 ⇒ 零新增依赖。
+
+### 验证
+
+- 新增 `server/test/agent-distribution.test.js` 14 例：平台白名单、空 body、
+  内容寻址与 0600 权限、同内容去重、列表与删除、目标平台/来源校验、
+  tar.gz 与 zip 包内容完整性（解压核对文件清单）、`release_url` 强制 sha256 匹配
+  与不匹配即拒、脚本红线（校验先于替换 / 含回滚 / 不写 env 与 bat）、
+  一次性 token（可下载 → 重放 410 → 篡改 403 → 过期 410 → 无 token 403）、
+  鉴权边界与审计留痕。
+- 服务端全量 **541/541**、eslint 0 error。
+
+## 2026-10-25 D 阶段收尾：official 来源 + 前端分发界面
+
+方案 `dev-docs/AGENT_DISTRIBUTION_PLAN_2026-10-21.md` §3 的 D 阶段至此**全部完成**
+（服务端闭环 + 双平台真机 + official 来源 + 前端界面）。
+
+### official 来源（从官方 Release 取二进制）
+
+- **复用签名中继的取件逻辑**（`agent-relay.prepare()`）而不是另写 GitHub 客户端：
+  那条路径已经做完「解 tag → 下载资产 → **ed25519 验签** → **架构校验（fail closed）** → 落盘缓存」，
+  其中验签与架构校验是安全逻辑，重复实现只会出现两套口径。
+- **额外一道交叉校验**：官方 release 里的 `<asset>.sha256` 与**本地计算**的 sha256 必须一致，
+  不一致即拒绝出包（防御 CDN 内容损坏 / 资产被替换）。
+  若该资产缺失（老 release）则退化为「只信验签」，并在 manifest 里标记 `sha256_cross_checked=false`。
+- 官方资产不可达 → `502 official_fetch_failed`，并提示改用 `release_url` 或先上传 `artifact`。
+- 实测：official 来源取到 `agent-go-v1.1.3`，sha256 `5a2c00e4…` 与线上官方产物一致。
+
+### 前端
+
+- **新页面「受控端二进制」**（`/admin/agent-artifacts`）：上传（原始 body + 平台 + 备注，带上传进度）、
+  列表（sha256 可复制 / 大小 / 备注 / 时间）、删除；同内容自动去重并提示。
+- **节点列表 → 批量分发抽屉**：选中节点后出现入口；选目标平台与来源
+  （官方 Release（已验签）/ 已上传二进制 / 指定 URL+sha256）、设有效期，
+  生成后直接给出 **Linux 与 Windows 两条命令** + 一次性下载链接（均可一键复制）。
+- 抽屉顶部固定展示安全口径：**服务端不连接节点、不下发指令，命令需管理员在节点上以 root/管理员执行**；
+  脚本先校验 sha256、备份、失败自动回滚，且不改节点身份与自定义配置。
+- 新增 i18n 中英文案（`artifacts.*` / `dist.*` / `nav.agentArtifacts`）。
+
+### 验证
+
+- 服务端：`official` 来源 3 例（验签通过才放行 + sha256 交叉校验 + 签名篡改即拒 + 平台不支持），
+  全量 **544/544**、eslint 0 error（连续三次可重复；测试已隔离 relay 磁盘缓存，
+  避免「命中缓存即跳过验签」造成的跨运行假失败）。
+- 前端：`vue-tsc` + `vite build` 通过、`vitest` **107/107**（+2 契约用例）、eslint 0 error。
+
+## 2026-10-25 真机验证（j4125）发现并修复的 4 个分发包缺陷
+
+D 阶段的分发脚本与打包逻辑在 **j4125 真机**跑通时暴露了 4 个单元测试没覆盖到的缺陷，
+均已修复并补上回归测试（这一条记录的是**修复**，与上一条的 D 阶段条目配套阅读）。
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `tar xzf` 报「归档包含 "01792918391" 而需要数字值 time_t」 | 手写 tar header 的 size/mtime 写成了十进制：`String(size).toString(8)` 对**字符串**调 `toString(8)` 是无效调用（参数被忽略） | 改为 `Number(size).toString(8)` / `Number(mtime).toString(8)`，并补「用系统 GNU tar 解包核对」的测试（原先只有自研解析器，永远发现不了） |
+| 2 | `./update.sh` 报「权限不够」 | tar 内脚本 mode 用了默认 0644 | 脚本以 0755 入包；生成命令改为 `sudo sh ./update.sh`（不依赖可执行位） |
+| 3 | 回滚命令报 `Text file busy`（ETXTBSY），**脚本内的回滚分支同样失效** | 回滚用 `cp -a` 覆盖**运行中**的二进制 | 回滚改为与升级路径一致的「写 `.rollback.tmp` + 原子 `mv`」；Windows 侧同样先 `Stop-Process` 再 `Move-Item` 替换（Windows 不允许替换运行中的 exe） |
+| 4 | 同一天第二次升级把前一次的备份覆盖掉，回滚链断裂 | 备份名只到日期（`.bak-YYYYMMDD`） | 备份名带时分秒：`.bak-YYYYMMDD-HHMMSS`，同日多次升级互不覆盖 |
+
+### 真机验证记录（j4125，Linux x86_64）
+
+- 升级前：`v1.1.3`（sha `5a2c00e4…`），升级后：`v1.1.4`（sha `d8722985…`），服务端侧 `agents.version` 同步变为 `1.1.4`；
+- **身份零改动**：`/etc/diting/agent.env` 逐字节未变（`AGENT_ID` / `AGENT_TOKEN` / 中文 `PROBE_TARGETS` / `MONTH_ROTATE=1`）；
+- 上报正常：升级后 `last_seen` 持续刷新、metrics 正常写入；
+- **回滚可用**：降到 v1.1.3 → 分发升级到 v1.1.4 → 回滚 → 服务端确认回到 `1.1.3` → 再分发升级，最终停在 v1.1.4；
+- 备份链完整：`diting-agent.bak-20261025-180305`（v1.1.3）等历史备份未被覆盖。
+
+### Windows 真机（wxwin-go）——已开通 SSH 后完成，同步修掉 2 个 Windows 专属缺陷
+
+wxwin-go（192.168.0.33 / tailscale `wx-feng`）原先只开放 SMB 445 与 RDP 3389（**无无头执行通道**）。
+已在该机装好 Win32-OpenSSH（离线 zip 安装，`install-sshd.ps1`）并配置公钥免密
+（注意：`feng` 属于 Administrators 组，sshd_config 的 `Match Group administrators` 段把公钥路径指向
+`C:\\ProgramData\\ssh\\administrators_authorized_keys`，写 `~/.ssh/authorized_keys` 无效），
+此后 Windows 侧的分发验证全部自动完成。
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 5 | `update.ps1` 直接 ParserError「字符串缺少终止符」 | Windows PowerShell 5.1 读取**无 BOM** 的 .ps1 时按 ANSI(GBK) 解析，脚本里的中文注释被解成乱码，某些字节被误当作字符串终止符 | 生成的 `.ps1` 一律以 **UTF-8 BOM** 开头（PS 5.1 与 7 均可正确按 UTF-8 解析） |
+| 6 | 中文提示在 SSH 会话里是乱码；备份名仍只到日期 | 控制台代码页非 UTF-8；Windows 侧备份名未同步 Linux 的精度 | 脚本开头设置 `[Console]::OutputEncoding = UTF8`；备份名统一为 `.bak-YYYYMMDD-HHMMSS` |
+
+真机记录（wxwin-go，Windows 11 24H2，x64）：
+
+- 版本：`v1.1.0` → **1.1.4**，服务端 `agents.version` 同步；
+- **身份零改动**：`run_scheduled.bat` 逐字节未变（`AGENT_ID` / `AGENT_TOKEN` / `INTERVAL=15` / `MONTH_ROTATE=1` /
+  中文 `PROBE_TARGETS`）——脚本只替换 exe，不碰 bat；
+- **回滚可用**：恢复 `diting-agent.exe.bak-20261025` 后服务端确认回到 `v1.1.0`，再分发升级回 1.1.4；
+- 备份链完整：`.bak-20261025-183943` 等历史备份未被覆盖。
+
+### V 阶段真机确认（n5100）——已完成
+
+- **方法**：用 V 分支代码在 `127.0.0.1:18099` 起一个**独立临时库**的临时服务端，在 n5100 上分别运行
+  **含 V 改动的 v1.1.4** 与**生产在跑的 v1.1.2** 两个二进制各上报一次
+  （agent 允许 `SERVER_URL` 指向 localhost 的 http，见 `config.go` 的 https 例外）。
+- **含 V 改动的 v1.1.4**：`agents` 表落库 `build_sha=914b18f`、`build_time=2026-10-25T08:52:32Z`、
+  `agent_platform=linux-amd64`、`version=1.1.4` ⇒ **agent_meta 端到端链路成立**（agent 上报 → 逐字段清洗 → 落库）。
+- **生产在跑的 v1.1.2**（不含 `agent_meta`）：上报 200 正常，构建 4 列保持为空 ⇒ **旧 agent 完全不受影响**。
+- **状态判定链路**（`GET /api/admin/agent-versions`）：
+  - 未设期望版本 → 两台均 `unknown`；
+  - 期望版本 `v1.1.4` → v1.1.4 节点 `up_to_date`、v1.1.2 节点 `outdated`
+    （**版本号归一生效**：`1.1.4` 与期望 `v1.1.4` 判为同一版本）；
+  - 期望 sha `914b18f` → v1.1.4 节点 `up_to_date`、**无 sha 的旧节点 `unknown`**
+    （按设计不做「无法判定 ⇒ outdated」的夸大判定）；
+  - 给节点打 `build_tag=custom` → 状态变 `custom`（人工标注优先于一切自动判定）。
+- **生产环境未受影响**：临时服务端用独立库与端口，验证后已停止并清理临时物料；
+  生产 `agents` 表在 V 合并部署前仍无这 4 列，j4125 / wxwin-go 上报的 `agent_meta`
+  目前被生产服务端忽略，**合并部署后自动生效**。
+
+## 2026-10-25 受控端版本可判定性（V 阶段：版本 + SHA + 构建时间 + 平台 + 期望版本对照）
+
+方案 `dev-docs/AGENT_DISTRIBUTION_PLAN_2026-10-21.md` §2 的 **V 阶段**（D 阶段「一键批量分发」未开工）。
+**只做「看」，不做「推」**：不新增 agent 出站目标、不解析 agent 上报响应、不建立服务端→agent 指令通道、agent 侧零依赖。
+
+### 说明
+
+- **受控端上报 `agent_meta`**（可选字段）：`version` / `build_sha` / `build_time` / `platform`。
+  取值全部零依赖：`main.version` + 新增 `main.buildSHA` / `main.buildTime` ldflag，缺失时回落
+  `debug.ReadBuildInfo()` 的 `vcs.revision` / `vcs.time`（存量 Release 产物已内嵌，兜底即生效）；
+  `platform` = `runtime.GOOS + "-" + runtime.GOARCH`。Makefile 与 CI 均注入 ldflag
+  （CI 在 checkout 后构建 ⇒ sha 与 tag 对应的 commit 一致）。
+- **服务端落库**：`agents` 表新增 4 列 `build_sha` / `build_time` / `agent_platform` / `build_tag`（迁移幂等）。
+  上报时逐字段清洗（`build_sha` 7–40 hex、`build_time` UTC RFC3339、`platform` 白名单字形），不合规丢弃为空串。
+  **仅变化才写**（对齐 `setAgentCores` 范式）——稳态 20s 一次上报不产生额外写事务。
+- **期望版本对照**（管理员配置的全局基准）：`GET /api/admin/agent-versions` 返回分布汇总与每节点状态
+  （`up_to_date` / `outdated` / `unknown` / `custom`）；`PUT /api/admin/agent-versions/expected` 设置或清除。
+  版本号先归一（去 `v` 前缀）再比较——现网存量格式不统一（`1.0.9` 与 `v1.0.8` 并存，直接比会误判）。
+  设了 `sha` 则以 sha 为准（版本号可撞号：fork 与官方可能同号）。
+- **人工标注**：`PUT /api/admin/agents/:id/build-tag` 把节点标成 `custom`（或自由标签），标注后不再参与自动对照。
+  服务端**不维护「官方 sha 白名单」**——fork 改一行代码 sha 就变，白名单必然过期，改由管理员自己标。
+- **前端**：节点列表版本徽标旁追加状态点（绿=已是期望版本 / 琥珀=落后 / 紫=定制 / 灰=未知）、
+  列表顶部版本分布汇总条 + 一键设期望版本、节点详情新增「构建信息」块
+  （版本 / 可复制 SHA / 构建时间 / 平台 / 可编辑标注）。
+
+### ⚠️ 行为变更
+
+- agent 上报负载新增**可选**字段 `agent_meta`；**旧受控端完全不受影响**（不带该字段 ⇒ 服务端对应列保持为空 = 未知）。
+- `agents` 表新增 4 列（`ALTER TABLE ADD COLUMN`，迁移幂等）；`/api/agents` 响应顺带带出这 4 个字段。
+- 老版本受控端（不上报 sha）在「按 sha 对照」模式下状态为 `unknown` 而非 `outdated`
+  ——宁可说「无法判定」，也不夸大成「确定落后」。
+- 期望版本只是**对照基准**，服务端不会因此向节点下发任何指令。
+
+### 验证
+
+- Go：`collector/agentmeta_test.go` 5 例（ldflag 透传 / 脏 sha 不采用 / buildinfo 兜底 / 非法时间置空 / JSON 字段形状）。
+- 服务端：`server/test/agent-versions.test.js` 16 例（agent_meta 解析与清洗 / 仅变化才写 / `/report` 落库 /
+  判定口径 / 三个端点 + 审计）。
+- 服务端全量 **527/527**；前端 `vue-tsc` + `vite build` 通过、`vitest` 105/105、eslint 0 error。
+
 ## 2026-10-24 diting.sh 支持原生 systemd 服务端控制
 
 原生化部署（`diting-server.service`）此前无法用脚本管理：菜单没有启停入口、`--status`

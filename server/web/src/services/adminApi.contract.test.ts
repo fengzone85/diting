@@ -104,7 +104,44 @@ describe('adminApi 契约：全部方法 → URL/Method', () => {
     });
   });
 
-  // ---- 告警规则覆盖 ----
+  // ---- V 阶段：受控端版本可判定性 ----
+  it('期望版本对照与构建标注', async () => {
+    await expectCall(() => adminApi.getAgentVersions(), { url: '/api/admin/agent-versions', method: 'GET' });
+    await expectCall(() => adminApi.setExpectedAgentVersion({ version: 'v1.0.9' }), {
+      url: '/api/admin/agent-versions/expected', method: 'PUT', body: { version: 'v1.0.9' },
+    });
+    await expectCall(() => adminApi.setExpectedAgentVersion({ version: '', sha: '' }), {
+      url: '/api/admin/agent-versions/expected', method: 'PUT', body: { version: '', sha: '' },
+    });
+    await expectCall(() => adminApi.setAgentBuildTag('agt_1', 'custom'), {
+      url: '/api/admin/agents/agt_1/build-tag', method: 'PUT', body: { tag: 'custom' },
+    });
+  });
+
+  // ---- D 阶段：受控端二进制 artifact + 一键批量分发 ----
+  it('自定义二进制 artifact 的上传 / 列表 / 删除', async () => {
+    await expectCall(() => adminApi.listAgentArtifacts(), { url: '/api/admin/agent-artifacts', method: 'GET' });
+    await expectCall(() => adminApi.deleteAgentArtifact('art_abc'), {
+      url: '/api/admin/agent-artifacts/art_abc', method: 'DELETE',
+    });
+  });
+
+  it('生成分发包', async () => {
+    await expectCall(() => adminApi.createAgentDistribution({
+      agent_ids: ['agt_1'],
+      target: { os: 'linux', arch: 'amd64' },
+      source: { kind: 'official' },
+    }), {
+      url: '/api/admin/agent-distribution', method: 'POST',
+      body: {
+        agent_ids: ['agt_1'],
+        target: { os: 'linux', arch: 'amd64' },
+        source: { kind: 'official' },
+      },
+    });
+  });
+
+// ---- 告警规则覆盖 ----
   it('告警规则（节点 / 分组）', async () => {
     await expectCall(() => adminApi.listAlertRules(), { url: '/api/admin/alert-rules', method: 'GET' });
     await expectCall(() => adminApi.setAgentAlertRule('agt_1', { cpu_pct: 80 }), {

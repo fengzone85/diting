@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
+import type { Agent, AgentArtifact, AgentDistributionResult, AgentVersionSummary, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -53,6 +53,54 @@ export const adminApi = {
     api.get<{ id: string; probe_targets: string; install: InstallCommands; modify: ModifyCommands }>(
       `/api/agents/${encodeURIComponent(id)}/commands${probeTargets ? `?probe_targets=${encodeURIComponent(probeTargets)}` : ''}`
     ),
+
+  // V 阶段：受控端版本可判定性（期望版本对照 + 分布汇总）。
+  // expected.version 为空 = 不做对照（所有节点状态都是 unknown）。
+  getAgentVersions: () => api.get<AgentVersionSummary>('/api/admin/agent-versions'),
+  setExpectedAgentVersion: (body: { version?: string; sha?: string }) =>
+    api.put<{ ok: boolean; expected: { version: string; sha: string } }>('/api/admin/agent-versions/expected', body),
+  setAgentBuildTag: (id: string, tag: string) =>
+    api.put<{ ok: boolean; id: string; build_tag: string }>(
+      `/api/admin/agents/${encodeURIComponent(id)}/build-tag`, { tag }
+    ),
+
+  // D 阶段：自定义受控端二进制 artifact + 一键批量分发。
+  // 上传走原始 body（application/octet-stream），与后端 express.raw 解析一致；
+  // 平台与备注走 query 参数（服务端没有 multipart 解析器）。
+  listAgentArtifacts: () => api.get<{ list: AgentArtifact[] }>('/api/admin/agent-artifacts'),
+  uploadAgentArtifact: (file: File, platform: string, sourceNote: string, onProgress?: (pct: number) => void) =>
+    new Promise<{ ok: boolean; artifact_id: string; sha256: string; platform: string; size: number; uploaded_at: number; deduped: boolean }>((resolve, reject) => {
+      const qs = new URLSearchParams({ platform, source_note: sourceNote || '' });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `/api/admin/agent-artifacts?${qs.toString()}`);
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded * 100) / e.total));
+      };
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {};
+        try { body = JSON.parse(xhr.responseText || '{}') as Record<string, unknown>; } catch { /* 非 JSON */ }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as unknown as { ok: boolean; artifact_id: string; sha256: string; platform: string; size: number; uploaded_at: number; deduped: boolean });
+        } else {
+          const msg = typeof body.error === 'string' ? body.error : '';
+          const err = new Error(msg || `${xhr.status}`);
+          (err as Error & { status: number }).status = xhr.status;
+          reject(err);
+        }
+      };
+      xhr.onerror = () => reject(new Error('network error'));
+      xhr.send(file);
+    }),
+  deleteAgentArtifact: (id: string) =>
+    api.del<{ ok: boolean; id: string }>(`/api/admin/agent-artifacts/${encodeURIComponent(id)}`),
+  createAgentDistribution: (body: {
+    agent_ids: string[];
+    target: { os: string; arch: string };
+    source: { kind: string; artifact_id?: string; release_url?: string; release_sha256?: string };
+    expires_in_minutes?: number;
+  }) => api.post<AgentDistributionResult>('/api/admin/agent-distribution', body),
 
   // S1/F1：告警规则覆盖（节点/分组）。NULL = 继承上层；DELETE = 整行回退。
   // 分组路径参数用 '-' 表示未分组默认组（空字符串无法作为路径段）。

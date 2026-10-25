@@ -104,6 +104,10 @@ type Metrics struct {
 	// 空 = 老 agent 或平台不支持（服务端退回旧的 delta 逻辑）。
 	NetEpoch string `json:"net_epoch,omitempty"`
 
+	// Meta 构建元信息（V.1）：版本/commit sha/构建时间/平台。nil = 老 agent 不带
+	// （JSON 字段省略，服务端按「未知」处理，不影响任何既有逻辑）。
+	Meta *AgentMeta `json:"agent_meta,omitempty"`
+
 	// 流量重置日（Komari month_rotate；0=绝对累计，1–31=周期重置日；服务端 agents.month_rotate 未设置时采用）
 	MonthRotate int `json:"month_rotate,omitempty"`
 

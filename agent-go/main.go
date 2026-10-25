@@ -25,6 +25,11 @@ const memLimit = 32 * 1024 * 1024
 // 在构建时注入版本号（-X 只能注入 string var，不能注入 const）。
 var version = "1.0.0"
 
+// 构建元信息（V.1）：由 Makefile / CI 以 -ldflags 注入，缺失时由
+// collector.BuildAgentMeta 从 debug.ReadBuildInfo() 的 vcs.* 兜底。
+var buildSHA = ""
+var buildTime = ""
+
 func main() {
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	debug.SetMemoryLimit(memLimit)
@@ -130,6 +135,8 @@ func runOnce(ctx context.Context, c collector.Collector, r *reporter.Reporter, p
 	tA := time.Now()
 	m.Probes = probes.Snapshot()
 	m.MonthRotate = cfg.MonthRotate
+	// V.1：构建元信息（静态值，每轮重复组装成本可忽略；缺 ldflag 时走 buildinfo 兜底）
+	m.Meta = collector.BuildAgentMeta(version, buildSHA, buildTime)
 	payload, err := json.Marshal(m)
 	if err != nil {
 		log.Printf("[error] marshal: %v", err)

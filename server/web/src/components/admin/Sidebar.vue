@@ -4,7 +4,7 @@
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import {
-  DashboardOne, Monitor, Wallet, Robot, Log, Key, SettingTwo, LayoutTwo,
+  DashboardOne, Monitor, Wallet, Robot, Log, Key, SettingTwo, LayoutTwo, Folder,
   Home, Logout, MenuFold, MenuUnfold, User,
 } from '@icon-park/vue-next';
 import { useI18n } from '../../composables/useI18n';
@@ -37,6 +37,7 @@ const groups = computed(() => [
     items: [
       { to: '/admin', label: t('nav.dashboard'), icon: DashboardOne },
       { to: '/admin/agents', label: t('nav.agents'), icon: Monitor },
+      { to: '/admin/agent-artifacts', label: t('nav.agentArtifacts'), icon: Folder },
       { to: '/admin/billing', label: t('nav.billing'), icon: Wallet },
     ],
   },

@@ -468,7 +468,7 @@ module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   resolveRole, agentScope, inAgentScope,
   safeEqual, signSession, verifySession, getSession, verifyAdminToken,
-  setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL,
+  setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL, SESSION_SECRET,
   revokeAllSessions, verifyTotpHeader, auditLog, actorLabel, clearSessionCache,
   verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
 };

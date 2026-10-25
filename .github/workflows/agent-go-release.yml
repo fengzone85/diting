@@ -41,9 +41,13 @@ jobs:
         working-directory: agent-go
         run: |
           V="${GITHUB_REF_NAME#agent-go-}"
+          # V.1：除版本号外注入 commit 短 sha 与 UTC 构建时间（agent_meta 上报用）。
+          # checkout 后 git 可用，sha 与 tag 对应的 commit 一致。
+          SHA="$(git rev-parse --short HEAD)"
+          BT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -trimpath \
-            -ldflags "-s -w -X main.version=${V}" \
+            -ldflags "-s -w -X main.version=${V} -X main.buildSHA=${SHA} -X main.buildTime=${BT}" \
             -o "dist/diting-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
 
       - name: SHA256

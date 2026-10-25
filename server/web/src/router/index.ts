@@ -21,6 +21,7 @@ const routes = [
       { path: '', component: () => import('../views/admin/DashboardView.vue') },
       { path: 'agents', component: () => import('../views/admin/AgentsView.vue') },
       { path: 'agents/:id', component: () => import('../views/admin/AgentDetailView.vue'), props: true },
+      { path: 'agent-artifacts', component: () => import('../views/admin/AgentArtifactsView.vue') },
       { path: 'billing', component: () => import('../views/admin/BillingView.vue') },
       { path: 'ai', component: () => import('../views/admin/AiView.vue') },
       { path: 'settings', component: () => import('../views/admin/SettingsView.vue') },
