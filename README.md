@@ -458,6 +458,12 @@ sudo bash diting.sh --update-server
 
 # 更新受控端（保留已注册身份）
 sudo bash diting.sh --update-agent
+
+# 服务端进程控制（自动识别原生 systemd / Docker 形态）
+sudo bash diting.sh --restart-server
+sudo bash diting.sh --stop-server
+sudo bash diting.sh --start-server
+sudo bash diting.sh --status          # 显示形态、端口、PID、工作目录
 ```
 
 ---

@@ -82,9 +82,9 @@ msg() {
 # ── 脚本版本（语义化）──────────────────────────────────────────────────────────
 # 每次修改本脚本行为，请同步 +1 版本号、更新日期与「本版要点」，方便用户对比是否
 # 需要更新，并在更新后直观了解改动内容。远端菜单会据此提示「发现新版」。
-SCRIPT_VERSION="1.1.8"
-SCRIPT_DATE="2026-10-19"
-SCRIPT_NOTES="受控端安装/更新链路支持 --month-rotate（MONTH_ROTATE，0=累计，1–31=流量重置日），update_agent 会保留已存值"
+SCRIPT_VERSION="1.1.9"
+SCRIPT_DATE="2026-10-24"
+SCRIPT_NOTES="服务端运行控制支持原生 systemd（新增 --start-server/--stop-server/--restart-server 与菜单「12) 服务端运行控制」，status 自动识别 systemd/Docker）"
 
 # 颜色：仅当 **stdout 是终端** 时着色；管道 / CI / 重定向下一律置空。
 # （附录 B 建议按 stderr 判定，但本脚本大量面向人的输出走 stdout——按 stderr 判会让
@@ -189,6 +189,11 @@ show_usage() {
   sudo bash diting.sh --status
   sudo bash diting.sh --uninstall
 
+  # 服务端进程控制（自动识别原生 systemd 与 Docker 形态）
+  sudo bash diting.sh --restart-server
+  sudo bash diting.sh --stop-server
+  sudo bash diting.sh --start-server
+
   # 数据库备份 / 恢复 / 管理
   sudo bash diting.sh --backup [输出路径]         # 备份数据库（默认存到 ${DB_BACKUP_DIR:-/var/backups/diting}）
   sudo bash diting.sh --restore <备份文件路径>    # 从备份恢复（自动先备份当前状态）
@@ -223,7 +228,10 @@ show_usage() {
   --update-server         更新服务端（git pull + 重建容器；升级前自动备份数据库）
   --force                 跳过保护性检查（升级前备份失败时仍继续，谨慎使用）
   --update-agent          更新受控端（systemd，保留原连接配置）
-  --status                查看服务端/受控端状态
+  --status                查看服务端/受控端状态（自动识别 systemd / Docker）
+  --start-server          启动服务端（原生 systemd 或 Docker，自动识别）
+  --stop-server           停止服务端
+  --restart-server        重启服务端（改完代码/配置后生效）
   --logs [行数|follow]    查看服务端日志（自动识别 systemd / Docker，默认最近 100 行）
   --uninstall             卸载服务端与受控端
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
@@ -858,19 +866,139 @@ update_agent() {
 }
 
 # ── 状态 / 卸载 ────────────────────────────────────────────────────────────────
+# ── 服务端运行控制（原生 systemd / Docker 双形态）──────────────────────────────
+# 脚本的「安装 / 更新」只覆盖 Docker 形态，但存量部署有原生化（systemd 单元
+# diting-server.service）的：此前菜单没有任何启停入口，status 也只查 compose，
+# 导致 `sudo bash diting.sh` 对运行中的原生服务端完全无效。
+# 这里补一层形态探测 + 统一控制：
+#   systemd → systemctl start/stop/restart diting-server
+#   docker  → docker compose up -d / stop / restart server
+# 探测顺序 systemd 优先：原生机器上通常也装了 docker（跑别的服务），
+# 反过来会让原生实例被误判成容器。
+server_deploy_mode() {
+    # 单元文件路径可覆盖：非标准安装位置、以及单测里隔离真实单元时用。
+    local unit_file="${DITING_SERVER_UNIT_FILE:-/etc/systemd/system/diting-server.service}"
+    if systemctl cat diting-server.service >/dev/null 2>&1; then
+        echo "systemd"
+        return 0
+    fi
+    if [[ -f "$unit_file" ]]; then
+        echo "systemd"
+        return 0
+    fi
+    if [[ -d "$SRC_DIR/server" ]]; then
+        echo "docker"
+        return 0
+    fi
+    echo ""
+}
+
+# 原生部署的 systemd 单元工作目录（Docker 形态输出空）。
+server_workdir() {
+    systemctl show -p WorkingDirectory --value diting-server.service 2>/dev/null | tr -d '\r\n' || true
+}
+
+# 原生部署的监听端口：优先读单元工作目录下的 .env（与 diting-server.service 同源），
+# 读不到时调用方回退 8081（server.js 默认值）。
+server_native_port() {
+    local wd
+    wd="$(server_workdir)"
+    [[ -n "$wd" && -f "$wd/.env" ]] || return 0
+    sed -n 's/^PORT=//p' "$wd/.env" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+# server_ctl start|stop|restart|status —— 按部署形态分派。
+# 注意：全部命令都用 `|| rc=$?` 接住，避免 set -e 在 systemctl 失败时直接退出脚本，
+# 让用户还能看到下面的错误提示。
+server_ctl() {
+    local act="${1:-status}" mode rc=0
+    mode="$(server_deploy_mode)"
+    case "$mode" in
+        systemd)
+            case "$act" in
+                start)   systemctl start diting-server || rc=$? ;;
+                stop)    systemctl stop diting-server || rc=$? ;;
+                restart) systemctl restart diting-server || rc=$? ;;
+                status)  systemctl status diting-server --no-pager -l 2>&1 | head -n 20 || rc=$? ;;
+            esac
+            ;;
+        docker)
+            [[ -d "$SRC_DIR/server" ]] || { echo -e "${RED}$(msg "ctl.not_found")${NC}" >&2; return 1; }
+            case "$act" in
+                start)   ( cd "$SRC_DIR/server" && docker compose up -d server ) || rc=$? ;;
+                stop)    ( cd "$SRC_DIR/server" && docker compose stop server ) || rc=$? ;;
+                restart) ( cd "$SRC_DIR/server" && docker compose restart server ) || rc=$? ;;
+                status)  ( cd "$SRC_DIR/server" && docker compose ps ) || rc=$? ;;
+            esac
+            ;;
+        *)
+            echo -e "${RED}$(msg "ctl.not_found")${NC}" >&2
+            return 1
+            ;;
+    esac
+    if [[ $rc -ne 0 ]]; then
+        echo -e "${RED}$(msg "ctl.failed")${NC}" >&2
+        return $rc
+    fi
+    [[ "$act" == "status" ]] || echo -e "${GREEN}$(msg "ctl.done_$act")${NC}"
+    return 0
+}
+
+# 交互子菜单：启动 / 停止 / 重启 / 查看状态（菜单项在 show_menu 里以「12」进入）。
+server_ctl_menu() {
+    local c
+    c="$(ui_menu "$(msg "ctl.header")" "$(msg "ctl.prompt")" \
+        "1" "$(msg "ctl.start")" \
+        "2" "$(msg "ctl.stop")" \
+        "3" "$(msg "ctl.restart")" \
+        "4" "$(msg "ctl.status")" \
+        "0" "$(msg "ctl.back")" )" || return
+    [[ -z "$c" ]] && return
+    case "$c" in
+        # 交互菜单每轮会 clear 重绘：不 pause 的话刚打印的结果/Token 会立刻被清掉。
+        1) server_ctl start; pause_return ;;
+        2) server_ctl stop; pause_return ;;
+        3) server_ctl restart; pause_return ;;
+        4) server_ctl status; pause_return ;;
+        *) return ;;
+    esac
+}
+
 status_all() {
     echo "$(msg "status.server_header")"
-    local running=0 installed=0
-    if ( cd "$SRC_DIR/server" && docker compose ps --filter status=running -q 2>/dev/null ) | grep -q .; then
-        running=1
-        ( cd "$SRC_DIR/server" && docker compose ps --format '  {{.Name}}  {{.Status}}' )
-    fi
-    [[ -d "$SRC_DIR/server" ]] && installed=1
-    if [[ $running -eq 0 && $installed -eq 1 ]]; then
-        echo "$(msg "status.server_not_running"), or: cd $SRC_DIR/server && docker compose up -d"
-    elif [[ $running -eq 0 && $installed -eq 0 ]]; then
-        echo "$(msg "status.server_not_installed")"
-    fi
+    local mode
+    mode="$(server_deploy_mode)"
+    case "$mode" in
+        systemd)
+            local state pid since wd port
+            state="$(systemctl is-active diting-server.service 2>/dev/null || true)"
+            echo "  形态: systemd (diting-server.service)"
+            if [[ "$state" == "active" ]]; then
+                pid="$(systemctl show -p MainPID --value diting-server.service 2>/dev/null || true)"
+                since="$(systemctl show -p ActiveEnterTimestamp --value diting-server.service 2>/dev/null || true)"
+                wd="$(server_workdir)"
+                port="$(server_native_port)"; port="${port:-8081}"
+                echo -e "  ${GREEN}active${NC}  端口 ${port}${pid:+  PID ${pid}}"
+                [[ -n "$since" ]] && echo "  启动于: ${since}"
+                [[ -n "$wd" ]] && echo "  工作目录: ${wd}"
+            else
+                echo -e "  ${RED}${state:-inactive}${NC} / 未运行 → 菜单「12) $(msg "menu.server_control")」或 --start-server"
+            fi
+            ;;
+        docker)
+            local running=0
+            if ( cd "$SRC_DIR/server" && docker compose ps --filter status=running -q 2>/dev/null ) | grep -q .; then
+                running=1
+                ( cd "$SRC_DIR/server" && docker compose ps --format '  {{.Name}}  {{.Status}}' )
+            fi
+            if [[ $running -eq 0 ]]; then
+                echo "$(msg "status.server_not_running")"
+            fi
+            ;;
+        *)
+            echo "$(msg "status.server_not_installed")"
+            ;;
+    esac
     echo "$(msg "status.agent_header")"
     if systemctl list-unit-files diting-agent.service >/dev/null 2>&1; then
         if systemctl is-active --quiet diting-agent; then
@@ -2536,7 +2664,9 @@ JS
     echo ""
     echo -e "${GREEN}$(msg "reset.ok")${NC}"
     echo ""
-    echo "  $new_token"
+    # 裸行输出：带前导空格时用户整行复制会把空格一起粘进登录框 → 401（无任何提示），
+    # 现场排查成本极高。Token 自身不含空白，单独一行最安全。
+    echo "$new_token"
     echo ""
     echo -e "${YELLOW}$(msg "reset.save")${NC}"
 
@@ -2630,8 +2760,9 @@ declare -A I18N_ZH=(
     [menu.switch_lang.done]="✓ 已保存，重启脚本或返回菜单即时生效"
     [menu.press_enter]="按回车返回菜单"
     [menu.clear_whitelist]="清除 IP 白名单（误配锁门时救援）"
+    [menu.server_control]="服务端运行控制（启动/停止/重启）"
     [menu.exit]="退出"
-    [menu.prompt]="请选择 [0-10]: "
+    [menu.prompt]="请选择 [0-12]: "
     [menu.exit_msg]="退出"
     [db_menu.header]="━━━ 数据库管理 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     [db_menu.backup]="备份数据库"
@@ -2648,9 +2779,21 @@ declare -A I18N_ZH=(
     [db_menu.schedule_prompt]="请选择 [0-3]: "
     [db_menu.restore_prompt]="备份文件路径: "
     [cancelled]="已取消"
-    [status.server_header]="== 服务端 (Docker) =="
-    [status.server_not_running]="  已安装但未运行 → 可选「5) 更新服务端」重建启动"
+    [status.server_header]="== 服务端 =="
+    [status.server_not_running]="  已安装但未运行 → 用「12) 服务端运行控制」启动，或 --start-server"
     [status.server_not_installed]="  未安装 → 请先「1) 安装服务端」"
+    [ctl.header]="━━━ 服务端运行控制 ━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    [ctl.start]="启动服务端"
+    [ctl.stop]="停止服务端"
+    [ctl.restart]="重启服务端"
+    [ctl.status]="查看服务端状态（systemctl status / compose ps）"
+    [ctl.back]="返回主菜单"
+    [ctl.prompt]="请选择: "
+    [ctl.done_start]="[OK]   服务端已启动"
+    [ctl.done_stop]="[OK]   服务端已停止"
+    [ctl.done_restart]="[OK]   服务端已重启"
+    [ctl.not_found]="[错误] 未找到可控制的服务端（无 diting-server.service，也无 Docker compose 项目）"
+    [ctl.failed]="[错误] 操作失败，请查看上方输出（systemd 部署可 journalctl -u diting-server 排查）"
     [status.agent_header]="== 受控端 (systemd) =="
     [status.agent_active]="  active"
     [status.agent_inactive]="  inactive / 未运行"
@@ -2719,8 +2862,9 @@ declare -A I18N_EN=(
     [menu.switch_lang.done]="✓ Saved; takes effect on menu redraw / restart"
     [menu.press_enter]="Press Enter to return to menu"
     [menu.clear_whitelist]="Clear IP Whitelist (rescue from lockout)"
+    [menu.server_control]="Server control (start/stop/restart)"
     [menu.exit]="Exit"
-    [menu.prompt]="Select [0-10]: "
+    [menu.prompt]="Select [0-12]: "
     [menu.exit_msg]="Exit"
 
     [db_menu.header]="━━━ Database ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -2738,9 +2882,21 @@ declare -A I18N_EN=(
     [db_menu.schedule_prompt]="Select [0-3]: "
     [db_menu.restore_prompt]="Backup file path: "
     [cancelled]="Cancelled"
-    [status.server_header]="== Server (Docker) =="
-    [status.server_not_running]="  Installed but not running → try '5) Update Server'"
+    [status.server_header]="== Server =="
+    [status.server_not_running]="  Installed but not running → use '12) Server control' or --start-server"
     [status.server_not_installed]="  Not installed → run '1) Install Server' first"
+    [ctl.header]="━━━ Server Control ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    [ctl.start]="Start server"
+    [ctl.stop]="Stop server"
+    [ctl.restart]="Restart server"
+    [ctl.status]="Show server status (systemctl status / compose ps)"
+    [ctl.back]="Back to Main Menu"
+    [ctl.prompt]="Select: "
+    [ctl.done_start]="[OK]   Server started"
+    [ctl.done_stop]="[OK]   Server stopped"
+    [ctl.done_restart]="[OK]   Server restarted"
+    [ctl.not_found]="[Error] No controllable server found (no diting-server.service, no Docker compose project)"
+    [ctl.failed]="[Error] Operation failed; see output above (systemd: journalctl -u diting-server)"
     [status.agent_header]="== Agent (systemd) =="
     [status.agent_active]="  active"
     [status.agent_inactive]="  inactive / not running"
@@ -2901,6 +3057,7 @@ show_menu() {
         "9" "$(msg "menu.reset_token")" \
         "10" "$(msg "menu.clear_whitelist")" \
         "11" "$(msg "menu.switch_lang")" \
+        "12" "$(msg "menu.server_control")" \
         "0" "$(msg "menu.exit")" )" || exit 1
     # 空回车（非 EOF）→ 重绘菜单；EOF 已在上一行以非零退出，
     # 避免 `printf '' | diting.sh` 被当成"用户主动退出"而静默成功。
@@ -2914,9 +3071,12 @@ show_menu() {
         6) status_all; pause_return ;;
         7) uninstall_all ;;
         8) db_manage_menu ;;
-        9) do_reset_admin_token ;;
-        10) do_clear_ip_whitelist ;;
+        # 两个救援动作都会打印关键信息（新 Token / 清除结果），必须暂停，
+        # 否则菜单清屏后用户什么都看不到——「重置 Token 没反应」的根因。
+        9) do_reset_admin_token; pause_return ;;
+        10) do_clear_ip_whitelist; pause_return ;;
         11) switch_lang ;;
+        12) server_ctl_menu ;;
         *) echo "$(msg "menu.exit_msg")"; exit 0 ;;
     esac
 }
@@ -2935,6 +3095,10 @@ while [[ $# -gt 0 ]]; do
         --update-server)  ACTION="update-server"; shift ;;
         --update-agent)   ACTION="update-agent"; shift ;;
         --status)         ACTION="status"; shift ;;
+        # 服务端进程控制（原生 systemd / Docker 自动识别；纯进程操作，不改源码/数据）
+        --start-server)   ACTION="start-server"; shift ;;
+        --stop-server)    ACTION="stop-server"; shift ;;
+        --restart-server) ACTION="restart-server"; shift ;;
         --uninstall)      ACTION="uninstall"; shift ;;
         # 兼容两种调用：--backup（默认目录）与 --backup <输出路径>。
         # 路径以 / 或 . 开头才当作输出路径，避免把后续选项（如 --status）误吞。
@@ -3003,6 +3167,9 @@ if [[ -n "$ACTION" ]]; then
         update-server) update_server ;;
         update-agent)  update_agent ;;
         status)       status_all ;;
+        start-server)   server_ctl start ;;
+        stop-server)    server_ctl stop ;;
+        restart-server) server_ctl restart ;;
         uninstall)    uninstall_all ;;
         backup)       do_backup "${A_BACKUP_PATH:-}" "${A_BACKUP_KEEP:-}" ;;
         backup-schedule) do_backup_schedule "${A_BACKUP_SCHEDULE:-status}" "${A_BACKUP_KEEP:-}" ;;
