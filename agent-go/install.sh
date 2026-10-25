@@ -69,12 +69,36 @@ esac
 BIN_NAME="diting-agent-linux-${GOARCH}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-echo -e "${YELLOW}[info] downloading ${RELEASE_BASE}/${BIN_NAME}${NC}"
-download "${RELEASE_BASE}/${BIN_NAME}" "${TMP}/${BIN_NAME}"
+
+# S5：优先走服务端签名中继（连不上 GitHub 的节点，如电信出口），失败回落 GitHub Release。
+# 中继只对「验签通过 + 架构匹配」的产物放行；SHA256 校验两条路径都保留。
+RELAY_URL="${SERVER_URL:-}"
+RELAY_URL="${RELAY_URL%/}/api/releases/agent/linux/${GOARCH}"
+SRC="github"
+fetch_bin() {
+    if [[ -n "${SERVER_URL:-}" ]] && download "${RELAY_URL}" "${TMP}/${BIN_NAME}" 2>/dev/null; then
+        SRC="relay"
+        echo -e "${GREEN}[info] 已从服务端中继下载${NC}"
+        return 0
+    fi
+    if [[ -n "${SERVER_URL:-}" ]]; then
+        echo -e "${YELLOW}[warn] 中继下载失败，回落 GitHub Release${NC}" >&2
+    fi
+    download "${RELEASE_BASE}/${BIN_NAME}" "${TMP}/${BIN_NAME}"
+}
+fetch_sha() {
+    if [[ "$SRC" == "relay" ]] && download "${RELAY_URL}?format=sha256" "${TMP}/${BIN_NAME}.sha256" 2>/dev/null; then
+        return 0
+    fi
+    download "${RELEASE_BASE}/${BIN_NAME}.sha256" "${TMP}/${BIN_NAME}.sha256"
+}
+
+echo -e "${YELLOW}[info] downloading ${BIN_NAME}${NC}"
+fetch_bin
 if [[ "${SP_AGENT_GO_SKIP_SHA256:-0}" == "1" ]]; then
     echo -e "${YELLOW}[warn] SHA256 skipped (not recommended)${NC}"
 else
-    download "${RELEASE_BASE}/${BIN_NAME}.sha256" "${TMP}/${BIN_NAME}.sha256"
+    fetch_sha
     EXPECTED="$(tr -d '[:space:]' < "${TMP}/${BIN_NAME}.sha256")"
     GOT="$(sha256_of "${TMP}/${BIN_NAME}")"
     [[ "$GOT" == "$EXPECTED" ]] || { echo -e "${RED}[error] SHA256 mismatch: want ${EXPECTED} got ${GOT}${NC}" >&2; exit 1; }

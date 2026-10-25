@@ -11,6 +11,8 @@ const compat = require('./src/compat');
 const { handleRpc } = require('./src/compat-rpc');
 const v1 = require('./src/v1');
 const install = require('./src/install');
+// S5：受控端二进制签名中继（GET /api/releases/agent/:os/:arch）
+const agentRelay = require('./src/agent-relay');
 const alerts = require('./src/alerts');
 const ai = require('./src/ai');
 const rollup = require('./src/rollup');
@@ -264,6 +266,7 @@ function _metricsHandler(req, res) {
 // ---- 安装向导 API（复刻 komari /api/install/*：status 探测 + complete 单步安装）----
 // 挂载在拦截闸之前，未安装时也要保证可达；complete 自带三层防重装（409/410）。
 app.use('/api/install', install.router);
+app.use('/api', agentRelay.router);
 
 // ---- 安装向导拦截（复刻 komari guideNoRoute：未安装时管理面 API 形同不存在）----
 // 未安装（库中无 Token 哈希）时，管理面端点返回 404 —— 对齐 komari 的
@@ -275,6 +278,8 @@ app.use('/api', (req, res, next) => {
   if (!install.needsInstall()) return next();
   if (req.path === '/install' || req.path.startsWith('/install/')) return next();
   if (req.path === '/setup' || req.path.startsWith('/setup/')) return next();
+  // S5：安装器先拉二进制再注册，install 模式下也必须能下载（端点自身无敏感信息）
+  if (req.path.startsWith('/releases/')) return next();
   const p = req.path;
   if (p === '/admin' || p.startsWith('/admin/') || p === '/login' || p === '/logout') {
     return res.status(404).json({ error: 'not_found', message: 'Not found in install mode（系统尚未安装，请访问 /install）' });
@@ -291,7 +296,9 @@ app.use('/api', (req, res, next) => {
       req.path === '/client-ip' ||
       req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
       req.path === '/records/load' || req.path === '/records/ping' ||
-      req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse') return next();
+      req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse' ||
+      // S5：二进制中继对未注册受控端开放（IP 白名单只保护管理面）
+      req.path.startsWith('/releases/agent/')) return next();
   ipWhitelist(req, res, next);
 });
 // 版本信息端点。审查 G5：精确版本 + 构建时间可被用于匹配 CVE，匿名请求只回
