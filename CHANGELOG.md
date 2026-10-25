@@ -29,6 +29,38 @@
   的流量；`rotate=0` 节点无影响。
 - 升级顺序：**先服务端后受控端**；老 agent（无 `net_epoch`）继续走原 delta 逻辑，行为不变。
 - 新增受控端环境变量 `NET_IFACE_FILTER` / `NET_IFACE_ONLY`。
+## 2026-10-24 受控端二进制签名中继（S5）
+
+连不上 GitHub 的节点（j4125 电信出口实测）现在可以从 diting 服务端拉 agent 二进制。
+方向仍是「agent 出站 → 服务端」，零入站规则不破。
+
+### 说明
+
+- 新端点 `GET /api/releases/agent/:os/:arch`（白名单 linux/windows × amd64/arm64；
+  `?format=sha256` 取哈希），默认 **关闭**（`RELAY_ENABLED=1` 开启，灰度后再默认开）。
+- 信任链：ed25519 验签（公钥**编译期常量**，禁止 env 覆盖）→ 架构校验（ELF `e_machine` /
+  PE `Machine`，读不出即拒发）→ **整包入内存验签通过后才发响应头**；未验签字节绝不流出。
+- `:os/:arch` 只做白名单查表、不参与拼 URL；上游固定 GitHub releases；先解析当前 release
+  **具体 tag**（API 优先，回落 302 Location 解析）再按 tag 缓存，避免滚动 latest 缓存发旧版。
+- 容量（monitor 同款）：并发槽 4（等槽 30s → 503）、二进制 ≤16MB、签名 ≤64B、
+  响应头死线 55s、传输死线 180s、每 IP 20 次/分钟；缓存目录 0700、只存验签通过产物。
+- 签名链路：新增 `scripts/sign-agent-release.sh` + 发版工作流签名步骤（私钥走 repo secret
+  `AGENT_RELEASE_SIGN_KEY`，未配置则跳过签名，中继会拒绝分发该版本）。
+- 安装脚本 `install.sh` / `install-go.ps1` 优先走中继、失败回落 GitHub，SHA256 校验两条路径都保留。
+
+### 验证
+
+- 新增 `server/test/agent-relay.test.js` 10 例：验签通过、签名错误/缺失、架构不符、资产缺失、
+  平台白名单与路径穿越、缓存命中与 tag 更新、sha256 通道、默认关闭、并发槽（含等槽超时不出队的
+  真实缺陷修复）、机器头识别。
+- 服务端全量 **511/511**；`scripts/sign-agent-release.sh` 用真实密钥签名后 Node 侧验签通过。
+
+### ⚠️ 注意
+
+- 公钥已随本分支固定（轮换需改 `PUBLIC_KEY_B64` 并同步 CI secret）；**当前 Release 尚未签名**，
+  开启中继前需先配置 secret 并重跑一次发版，否则中继会对所有版本返回 `sig_unavailable`。
+- 灰度：`RELAY_ENABLED` 默认 0；j4125 实机验证安装链后再默认开。回滚 = 关 env，安装脚本自动回落 GitHub。
+
 ## 2026-10-24 限流维度 IPv6 /64 归桶（S4）
 
 堵住一个配额绕过：IPv6 接口 ID 可任意变换，此前所有限流/封禁按**完整地址**计数，

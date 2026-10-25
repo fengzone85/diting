@@ -95,11 +95,38 @@ try {
 }
 
 # 1. Download exe + SHA256 verify
+# S5：优先走服务端签名中继（连不上 GitHub 的节点，如电信出口），失败回落 GitHub Release。
+# 中继只对「验签通过 + 架构匹配」的产物放行，方向仍是本机出站，零入站不破。
 $exe = Join-Path $InstallDir 'diting-agent.exe'
-Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
-Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe" -OutFile $exe -UseBasicParsing
+$relayUrl = "$($ServerUrl.TrimEnd('/'))/api/releases/agent/windows/amd64"
+$fromRelay = $false
+if ($ServerUrl) {
+    try {
+        Write-Host "Downloading $relayUrl ..."
+        Invoke-WebRequest $relayUrl -OutFile $exe -UseBasicParsing -TimeoutSec 180
+        $fromRelay = $true
+        Write-Host '[OK] downloaded via server relay'
+    } catch {
+        Write-Warning "relay download failed ($($_.Exception.Message)); falling back to GitHub"
+    }
+}
+if (-not $fromRelay) {
+    Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
+    Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe" -OutFile $exe -UseBasicParsing
+}
 # PS 5.1 在部分响应下 Content 为 Byte[]，无 .Trim()；统一按 ASCII 解码后去空白
-$sumResp = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing).Content
+$sumResp = $null
+if ($fromRelay) {
+    try {
+        $sumResp = (Invoke-WebRequest "$relayUrl?format=sha256" -UseBasicParsing -TimeoutSec 60).Content
+    } catch {
+        Write-Warning "relay sha256 fetch failed; falling back to GitHub"
+        $sumResp = $null
+    }
+}
+if ($null -eq $sumResp) {
+    $sumResp = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing).Content
+}
 if ($sumResp -is [byte[]]) { $sumResp = [System.Text.Encoding]::ASCII.GetString($sumResp) }
 $expected = ($sumResp -split '\s+')[0].Trim().ToLower()
 $actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()

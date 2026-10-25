@@ -217,3 +217,21 @@ DELETE FROM admin_config WHERE key IN ('admin_2fa_secret', 'admin_2fa_enabled');
 信任边界：每个 Agent 独立，互不通信
 攻击面：仅服务端 Web 端口
 ```
+
+### 受控端二进制签名中继（S5）
+
+`GET /api/releases/agent/:os/:arch`（默认关闭，`RELAY_ENABLED=1` 开启）让连不上 GitHub 的节点
+从 diting 服务端拉取 agent 二进制。方向仍是「agent 出站 → 服务端」，零入站规则不破。
+
+| 机制 | 说明 |
+|---|---|
+| 验签 | ed25519；公钥是**编译期常量**（`server/src/agent-relay.js` 的 `PUBLIC_KEY_B64`），不允许环境变量覆盖——公钥可被替换等于验签形同虚设。轮换 = 改这一行 + 换 CI secret，随发版走 |
+| 时序 | **整包读入内存 → 验签 → 架构校验 → 通过后才发响应头**。未验签字节绝不流出服务端 |
+| 架构校验 | ELF `e_machine` / PE `Machine` 与请求的 `:os/:arch` 比对（读不出机器头 = 拒发，fail closed） |
+| URL 安全 | `:os/:arch` 只用于白名单查表，**不参与拼 URL**；上游固定为 `github.com/fengzone85/diting/releases` |
+| 缓存 | 只缓存验签通过产物，按**具体 tag** 为键（滚动 `latest` 不解析 tag 就缓存会长期发旧版）；tag 解析结果缓存 6h |
+| 容量 | 并发槽 4（等槽 30s → 503，安装脚本回落 GitHub 重试）；二进制 ≤16MB、签名 ≤64B；响应头死线 55s、传输死线 180s；每 IP 20 次/分钟 |
+
+签名在 CI 完成：`scripts/sign-agent-release.sh` 对三平台产物生成 `.sig` 并随 Release 上传，
+私钥存于 repo secret `AGENT_RELEASE_SIGN_KEY`（不入库）。安装脚本（`install.sh` /
+`install-go.ps1`）优先走中继、失败回落 GitHub，**两条路径都保留 SHA256 校验**。

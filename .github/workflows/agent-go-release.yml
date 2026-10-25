@@ -49,6 +49,16 @@ jobs:
           F="diting-agent-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
           sha256sum "$F" | awk '{print $1}' > "$F.sha256"
 
+      # S5：ed25519 签名（供服务端中继验签）。私钥走 repo secret
+      # AGENT_RELEASE_SIGN_KEY（PEM 内容，勿入库）；未配置时跳过签名，
+      # 中继会因缺 .sig 而拒绝分发该版本（安装脚本回落 GitHub 直连）。
+      - name: Sign (ed25519)
+        if: ${{ secrets.AGENT_RELEASE_SIGN_KEY != '' }}
+        working-directory: agent-go
+        env:
+          AGENT_RELEASE_SIGN_KEY: ${{ secrets.AGENT_RELEASE_SIGN_KEY }}
+        run: bash ../scripts/sign-agent-release.sh dist
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:

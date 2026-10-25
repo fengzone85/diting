@@ -28,6 +28,8 @@ description: 服务端与受控端环境变量参考
 | `AI_API_KEY` | 否 | — | 配合 `AI_KEY_FROM_ENV=1` 使用：模型服务的 API Key |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |
+| `RELAY_ENABLED` | 否 | `0` | S5 受控端二进制签名中继开关。`1` 后开放 `GET /api/releases/agent/:os/:arch`（白名单：linux/windows × amd64/arm64），节点连不上 GitHub 时从服务端拉取 |
+| `RELAY_CACHE_DIR` | 否 | 系统临时目录 `diting-relay` | 中继磁盘缓存目录（0700，仅存验签通过产物，按具体 tag 为键，容量上限 256MB） |
 | `METRICS_ROLLUP_ENABLED` | 否 | `1` | 小时级历史折叠任务（S2）。`0` 完全关闭，小时表保留不删 |
 | `METRICS_DETAIL_DAYS` | 否 | `7` | 明细保留天数（3–30）：超过该天数的明细会被清理，长窗口查询自动改读小时聚合（S2 两级历史） |
 | `AUDIT_RETENTION_DAYS` | 否 | `90` | 管理员操作审计日志保留天数（下限 7）。独立于 `RETENTION_DAYS`：审计属安全记录，默认保留更久 |
