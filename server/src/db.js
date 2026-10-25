@@ -218,6 +218,35 @@ CREATE TABLE IF NOT EXISTS theme_market_sources (
   updated_at INTEGER NOT NULL
 );
 
+-- D 阶段：自定义受控端二进制 artifact（content-addressed 存储）。
+-- 文件名完全由服务端按内容哈希生成（<sha256>.bin|.exe），**不使用任何用户输入** ⇒ 无路径穿越面；
+-- sha256 唯一 ⇒ 同内容天然去重。
+CREATE TABLE IF NOT EXISTS agent_artifacts (
+  id          TEXT PRIMARY KEY,            -- 'art_' + 12 hex
+  sha256      TEXT NOT NULL UNIQUE,        -- 内容哈希
+  platform    TEXT NOT NULL,               -- linux-amd64 / windows-amd64 / ...
+  filename    TEXT NOT NULL,               -- 磁盘文件名
+  size        INTEGER NOT NULL,            -- 字节数
+  source_note TEXT NOT NULL DEFAULT '',    -- 管理员备注（如 "my fork build 2026-10-25"）
+  created_at  INTEGER NOT NULL
+);
+
+-- D 阶段：分发包元信息（包体落盘，库中只存索引与有效期）。
+-- 一次性下载 token 不入库（内存 Map，用后即焚）；过期包可按 expires_at 清理。
+CREATE TABLE IF NOT EXISTS agent_distributions (
+  pkg_id      TEXT PRIMARY KEY,            -- 'pkg_' + 16 hex
+  platform    TEXT NOT NULL,
+  source_kind TEXT NOT NULL,               -- artifact | release_url
+  source_ref  TEXT NOT NULL DEFAULT '',    -- artifact_id 或来源 URL（不含任何凭据）
+  sha256      TEXT NOT NULL DEFAULT '',    -- 包内二进制的 sha256（空 = 包内不含二进制）
+  filename    TEXT NOT NULL,               -- 磁盘文件名
+  size        INTEGER NOT NULL,
+  kind        TEXT NOT NULL,               -- tar.gz | zip
+  expires_at  INTEGER NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_distributions_created ON agent_distributions(created_at DESC);
+
 -- S2/F6 登录会话：cookie 内只带 sid，吊销状态以本表为准；
 -- session_revoked_before 水位线保留为全局 kill switch。
 CREATE TABLE IF NOT EXISTS sessions (
@@ -362,6 +391,18 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('pending')) db.exec('ALTER TABLE agents ADD COLUMN pending INTEGER DEFAULT 0');
 }
+// schema migration: agents 增加构建元信息列（V.1：版本可判定性）。
+//   build_sha     编译期 commit 短 sha（7–40 hex；'' = 未知）
+//   build_time    编译期 UTC RFC3339（'' = 未知）
+//   agent_platform 运行平台 linux-amd64 / windows-amd64 / ...
+//   build_tag     管理员标注（'' | 'custom' | 自由标签）——服务端不自动判定官方构建
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('build_sha')) db.exec("ALTER TABLE agents ADD COLUMN build_sha TEXT DEFAULT ''");
+  if (!existing.has('build_time')) db.exec("ALTER TABLE agents ADD COLUMN build_time TEXT DEFAULT ''");
+  if (!existing.has('agent_platform')) db.exec("ALTER TABLE agents ADD COLUMN agent_platform TEXT DEFAULT ''");
+  if (!existing.has('build_tag')) db.exec("ALTER TABLE agents ADD COLUMN build_tag TEXT DEFAULT ''");
+}
 // P1: agents 增加流量重置日列。三态 NULL=未设置（采纳 agent 上报）/0=累计/1–31=重置日；不给默认值。
 {
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
@@ -438,6 +479,12 @@ const stmts = {
   touch: db.prepare("UPDATE agents SET last_seen=?, os=?, hostname=?, version=COALESCE(NULLIF(?,''), version) WHERE id=?"),
   // 仅当核数变化时才写（静态属性，避免每次上报都触发写事务）；cores<=0 不写入
   setAgentCores: db.prepare('UPDATE agents SET cores=? WHERE id=? AND cores<>?'),
+  // V.3：构建元信息落库。WHERE 带「值变化才写」条件：这三个字段是静态值，
+  // 稳态下每 20s 一次的上报不该产生写事务（与 version 的 COALESCE 每次必写不同）。
+  setAgentBuild: db.prepare(`UPDATE agents SET build_sha=?, build_time=?, agent_platform=?
+    WHERE id=? AND (build_sha<>? OR build_time<>? OR agent_platform<>?)`),
+  // V.4：管理员标注（build_tag）——直接写，不带变化判断（人工操作，频率极低）
+  setAgentBuildTag: db.prepare('UPDATE agents SET build_tag=? WHERE id=?'),
   insertMetric: db.prepare(`INSERT INTO metrics
     (agent_id, ts, cpu, mem_used, mem_total, mem_pct, disk_used, disk_total, disk_pct,
      load1, load5, load15, net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, uptime,
@@ -1306,6 +1353,21 @@ const setAgentCores = (id, cores) => {
   return stmts.setAgentCores.run(n, id, n).changes;
 };
 
+// V.3：写入构建元信息（仅变化才写；返回是否真的改了行）。
+// 入参已由 validate.js 按口径清洗（sha 为 7–40 hex、time 为 RFC3339、platform 白名单字形）。
+const setAgentBuild = (id, buildSha, buildTime, platform) => {
+  const sha = String(buildSha || '');
+  const tm = String(buildTime || '');
+  const pf = String(platform || '');
+  return stmts.setAgentBuild.run(sha, tm, pf, id, sha, tm, pf).changes > 0;
+};
+
+// V.4：管理员标注构建标签（'' = 清除；'custom' 或自由标签，≤32 字符）。
+const setAgentBuildTag = (id, tag) => {
+  const t = String(tag == null ? '' : tag).trim().slice(0, 32);
+  return stmts.setAgentBuildTag.run(t, id).changes > 0;
+};
+
 // 兜底默认值：process_count 为 0（= 未采集/老 agent 不带该字段）。
 // 先展开默认值再展开 m，保证 m 中的真实值覆盖默认。
 // insertMetric 列默认值：新列（interval 等）与老调用方（测试/脚本）字段不齐全时
@@ -1949,6 +2011,69 @@ function updateThemeMarketSource(id, patch = {}) {
 const deleteThemeMarketSource = (id) =>
   db.prepare('DELETE FROM theme_market_sources WHERE id = ?').run(String(id)).changes > 0;
 
+// ---- D 阶段：受控端二进制 artifact 与分发包索引 ----
+// artifact 行只存元信息与磁盘文件名；文件内容由 distribution.js 按 sha256 内容寻址落盘。
+const artifactOut = (r) => (r ? {
+  id: r.id,
+  sha256: r.sha256,
+  platform: r.platform,
+  filename: r.filename,
+  size: r.size,
+  source_note: r.source_note || '',
+  created_at: r.created_at
+} : null);
+
+const listAgentArtifacts = () =>
+  db.prepare('SELECT * FROM agent_artifacts ORDER BY created_at DESC').all().map(artifactOut);
+
+const getAgentArtifact = (id) =>
+  artifactOut(db.prepare('SELECT * FROM agent_artifacts WHERE id = ?').get(String(id)));
+
+const getAgentArtifactBySha = (sha) =>
+  artifactOut(db.prepare('SELECT * FROM agent_artifacts WHERE sha256 = ?').get(String(sha)));
+
+function insertAgentArtifact(row) {
+  db.prepare(`INSERT INTO agent_artifacts (id, sha256, platform, filename, size, source_note, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(String(row.id), String(row.sha256), String(row.platform), String(row.filename),
+      Number(row.size) || 0, String(row.source_note || ''), Number(row.created_at) || Date.now());
+  return getAgentArtifact(row.id);
+}
+
+const deleteAgentArtifact = (id) =>
+  db.prepare('DELETE FROM agent_artifacts WHERE id = ?').run(String(id)).changes > 0;
+
+// 分发包索引：pkg_id + 落盘文件名 + 有效期。
+const distributionOut = (r) => (r ? {
+  pkg_id: r.pkg_id,
+  platform: r.platform,
+  source_kind: r.source_kind,
+  source_ref: r.source_ref || '',
+  sha256: r.sha256 || '',
+  filename: r.filename,
+  size: r.size,
+  kind: r.kind,
+  expires_at: r.expires_at,
+  created_at: r.created_at
+} : null);
+
+function insertAgentDistribution(row) {
+  db.prepare(`INSERT INTO agent_distributions
+              (pkg_id, platform, source_kind, source_ref, sha256, filename, size, kind, expires_at, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(String(row.pkg_id), String(row.platform), String(row.source_kind), String(row.source_ref || ''),
+      String(row.sha256 || ''), String(row.filename), Number(row.size) || 0, String(row.kind),
+      Number(row.expires_at) || 0, Number(row.created_at) || Date.now());
+  return getAgentDistribution(row.pkg_id);
+}
+
+const getAgentDistribution = (pkgId) =>
+  distributionOut(db.prepare('SELECT * FROM agent_distributions WHERE pkg_id = ?').get(String(pkgId)));
+
+// 过期包清理：先删库中索引，再由调用方删磁盘文件（顺序反了会留孤儿文件）。
+const pruneAgentDistributions = (now = Date.now()) =>
+  db.prepare('DELETE FROM agent_distributions WHERE expires_at < ?').run(Number(now)).changes;
+
 // 官方源种子。仓库已上线（fengzone85/diting-theme-market）并已收录首个主题，默认启用。
 const OFFICIAL_THEME_MARKET = {
   id: 'official',
@@ -1983,7 +2108,7 @@ module.exports = {
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
   listDeletedAgents, getAgentIncludingDeleted, restoreAgent, purgeDeletedAgents,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, setAgentCores, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
+  touchAgent, setAgentCores, setAgentBuild, setAgentBuildTag, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
   getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter, correctTraffic,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。
@@ -2016,6 +2141,8 @@ module.exports = {
   getRestoreAuditReport, setRestoreAuditReport,
   listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,
   deleteThemeMarketSource, OFFICIAL_THEME_MARKET,
+  listAgentArtifacts, getAgentArtifact, getAgentArtifactBySha, insertAgentArtifact, deleteAgentArtifact,
+  insertAgentDistribution, getAgentDistribution, pruneAgentDistributions,
   getThemeConfig, setThemeConfig, deleteThemeConfig,
   insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
   insertAiNodeReport, listAiNodeReports, pruneAiNodeReports,

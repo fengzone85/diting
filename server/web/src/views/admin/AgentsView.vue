@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
@@ -8,7 +8,7 @@ import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
-import type { InstallCommands, Agent, DeletedAgent } from '../../services/types';
+import type { InstallCommands, Agent, DeletedAgent, AgentVersionSummary, AgentVersionStatus, AgentArtifact, AgentDistributionResult } from '../../services/types';
 import { publicApi } from '../../services/publicApi';
 
 const { state } = useAdmin();
@@ -32,7 +32,166 @@ onMounted(() => {
   publicApi.version()
     .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })
     .catch(() => { agentLatest.value = ''; });
+  });
+
+// ---- V 阶段：版本可判定性（期望版本对照 + 分布汇总）----
+// 判定口径由服务端给出（server/src/agent-versions.js），前端只渲染状态点，
+// 不自行重算——避免前后端两套规则漂移（尤其是「老 agent 无 sha ⇒ unknown」）。
+const versionSummary = ref<AgentVersionSummary | null>(null);
+const versionNodeMap = computed(
+  () => new Map((versionSummary.value?.nodes || []).map((n) => [n.id, n]))
+);
+// 状态点配色：绿=已是期望版本 / 琥珀=落后 / 紫=管理员标注的定制构建 / 灰=未知
+const STATUS_DOT: Record<AgentVersionStatus, string> = {
+  up_to_date: 'bg-emerald-400',
+  outdated: 'bg-amber-400',
+  custom: 'bg-violet-400',
+  unknown: 'bg-slate-600',
+};
+const STATUS_LABEL: Record<AgentVersionStatus, string> = {
+  up_to_date: 'agents.versionUpToDate',
+  outdated: 'agents.versionOutdated',
+  custom: 'agents.versionCustom',
+  unknown: 'agents.versionUnknown',
+};
+const agentVersionStatus = (a: Agent): AgentVersionStatus =>
+  versionNodeMap.value.get(a.id)?.status || 'unknown';
+const statusDot = (a: Agent) => STATUS_DOT[agentVersionStatus(a)];
+const statusLabel = (a: Agent) => t(STATUS_LABEL[agentVersionStatus(a)]);
+
+// 版本汇总刷新：与列表刷新同频（10s），让「刚升级完的节点」状态及时跟上。
+let versionTimer: ReturnType<typeof setInterval> | null = null;
+async function loadVersions() {
+  try {
+    versionSummary.value = await adminApi.getAgentVersions();
+  } catch {
+    // 汇总失败不影响列表主体（老服务端无此端点时静默降级为「无状态点」）
+  }
+}
+
+// ---- 期望版本设置（一键对照基准）----
+const expectedOpen = ref(false);
+const expectedVersion = ref('');
+const expectedSha = ref('');
+const expectedBusy = ref(false);
+
+function openExpected() {
+  expectedVersion.value = versionSummary.value?.expected.version || '';
+  expectedSha.value = versionSummary.value?.expected.sha || '';
+  expectedOpen.value = true;
+}
+
+async function saveExpected() {
+  expectedBusy.value = true;
+  try {
+    await adminApi.setExpectedAgentVersion({
+      version: expectedVersion.value.trim(),
+      sha: expectedSha.value.trim(),
+    });
+    await loadVersions();
+    expectedOpen.value = false;
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agents.versionSaveFailed');
+  } finally {
+    expectedBusy.value = false;
+  }
+}
+
+async function clearExpected() {
+  expectedBusy.value = true;
+  try {
+    await adminApi.setExpectedAgentVersion({ version: '', sha: '' });
+    await loadVersions();
+    expectedOpen.value = false;
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agents.versionSaveFailed');
+  } finally {
+    expectedBusy.value = false;
+  }
+}
+
+onMounted(() => {
+  loadVersions();
+  versionTimer = setInterval(loadVersions, 10000);
 });
+// ---- D 阶段：一键批量分发抽屉 ----
+// 服务端只**生成分发物**（脚本 + 二进制 + 校验和 + manifest）与一条一次性下载命令；
+// **不主动连接节点、不下发任何指令**——命令需管理员在目标节点上以 root/管理员权限执行。
+const distOpen = ref(false);
+const distBusy = ref(false);
+const distError = ref('');
+const distResult = ref<AgentDistributionResult | null>(null);
+const distPlatform = ref('linux-amd64');
+const distSourceKind = ref<'official' | 'artifact' | 'release_url'>('official');
+const distArtifactId = ref('');
+const distUrl = ref('');
+const distSha = ref('');
+const distTtl = ref(30);
+const artifacts = ref<AgentArtifact[]>([]);
+
+const distOs = computed(() => (distPlatform.value.startsWith('windows') ? 'windows' : 'linux'));
+const distArch = computed(() => (distPlatform.value.endsWith('arm64') ? 'arm64' : 'amd64'));
+
+const distArtifacts = computed(() => artifacts.value.filter((a) => a.platform === distPlatform.value));
+
+function openDist() {
+  distOpen.value = true;
+  distError.value = '';
+  if (!distResult.value) loadArtifacts();
+}
+
+async function loadArtifacts() {
+  try {
+    const r = await adminApi.listAgentArtifacts();
+    artifacts.value = r.list || [];
+    if (!distArtifactId.value && distArtifacts.value.length) distArtifactId.value = distArtifacts.value[0].id;
+  } catch {
+    // 物料库拿不到不阻断（official / release_url 来源不需要它）
+  }
+}
+
+async function generateDist() {
+  distBusy.value = true;
+  distError.value = '';
+  distResult.value = null;
+  try {
+    const source: { kind: string; artifact_id?: string; release_url?: string; release_sha256?: string } =
+      { kind: distSourceKind.value };
+    if (distSourceKind.value === 'artifact') {
+      if (!distArtifactId.value) throw new Error(t('dist.noArtifact'));
+      source.artifact_id = distArtifactId.value;
+    } else if (distSourceKind.value === 'release_url') {
+      source.release_url = distUrl.value.trim();
+      if (distSha.value.trim()) source.release_sha256 = distSha.value.trim();
+    }
+    distResult.value = await adminApi.createAgentDistribution({
+      agent_ids: [...selected.value],
+      target: { os: distOs.value, arch: distArch.value },
+      source,
+      expires_in_minutes: Number(distTtl.value) || 30
+    });
+  } catch (e) {
+    distError.value = apiErrorMessage(e, 'dist.generateFailed');
+  } finally {
+    distBusy.value = false;
+  }
+}
+
+const distCopied = ref('');
+function copyDist(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    distCopied.value = t('common.copied');
+    setTimeout(() => (distCopied.value = ''), 2000);
+  });
+}
+
+onUnmounted(() => {
+  if (versionTimer) {
+    clearInterval(versionTimer);
+    versionTimer = null;
+  }
+  });
+
 
 // 「位置」列：库里只存 ISO 3166-1 alpha-2 国家码，用 Intl.DisplayNames 反查当前语言下的地区名
 const regionName = (code?: string) => {
@@ -364,6 +523,43 @@ async function batchRenew() {
       </div>
     </div>
 
+    <!-- V 阶段：版本分布汇总条（期望版本对照） -->
+    <div v-if="versionSummary" class="glass mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm">
+      <span class="text-slate-400">{{ t('agents.versionSummary', { n: versionSummary.counts.total }) }}</span>
+      <span class="text-emerald-300">{{ t('agents.versionUpToDate') }}: {{ versionSummary.counts.up_to_date }}</span>
+      <span class="text-amber-300">{{ t('agents.versionOutdated') }}: {{ versionSummary.counts.outdated }}</span>
+      <span class="text-violet-300">{{ t('agents.versionCustom') }}: {{ versionSummary.counts.custom }}</span>
+      <span class="text-slate-500">{{ t('agents.versionUnknown') }}: {{ versionSummary.counts.unknown }}</span>
+      <span class="text-slate-400">
+        {{ t('agents.versionExpected') }}: {{ versionSummary.expected.version || t('agents.versionNotSet') }}
+      </span>
+      <button class="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800" @click="openExpected">
+        {{ t('agents.versionSetExpected') }}
+      </button>
+    </div>
+
+    <!-- 期望版本设置：版本号可留空只填 sha；两者皆空 = 清除对照 -->
+    <div v-if="expectedOpen" class="glass mb-4 flex flex-wrap items-center gap-3 p-3">
+      <input
+        v-model="expectedVersion"
+        :placeholder="t('agents.versionExpectedPlaceholder')"
+        class="w-40 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+      />
+      <input
+        v-model="expectedSha"
+        :placeholder="t('agents.versionExpectedShaPlaceholder')"
+        class="w-52 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+      />
+      <button class="rounded-lg bg-sky-600 px-3 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-50" :disabled="expectedBusy" @click="saveExpected">
+        {{ t('common.save') }}
+      </button>
+      <button class="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50" :disabled="expectedBusy" @click="clearExpected">
+        {{ t('agents.versionClearExpected') }}
+      </button>
+      <button class="rounded-lg px-3 py-2 text-sm text-slate-400 hover:text-white" @click="expectedOpen = false">{{ t('common.cancel') }}</button>
+      <p class="w-full text-xs text-slate-500">{{ t('agents.versionExpectedHint') }}</p>
+    </div>
+
     <!-- B3: 工具栏 搜索 / 排序 / 批量 -->
     <div class="mb-4 flex flex-wrap items-center gap-3">
       <input v-model="search" :placeholder="t('agents.searchPlaceholder')" class="flex-1 min-w-[160px] rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white" />
@@ -408,6 +604,7 @@ async function batchRenew() {
       <button class="rounded-lg bg-rose-600 px-3 py-1 text-xs text-white hover:bg-rose-500" @click="batchRemove">{{ t('agents.batchDelete') }}</button>
       <button class="rounded-lg bg-amber-600 px-3 py-1 text-xs text-white hover:bg-amber-500" @click="batchResetToken">{{ t('agents.batchReset') }}</button>
       <button class="rounded-lg bg-emerald-600 px-3 py-1 text-xs text-white hover:bg-emerald-500" @click="batchRenew">{{ t('agents.batchRenew') }}</button>
+      <button class="rounded-lg bg-sky-600 px-3 py-1 text-xs text-white hover:bg-sky-500" @click="openDist">{{ t('dist.open') }}</button>
       <button class="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800" @click="selected = new Set()">{{ t('common.cancel') }}</button>
     </div>
 
@@ -463,7 +660,11 @@ async function batchRenew() {
                 <span v-else class="text-slate-500">—</span>
               </td>
               <td class="px-3 py-3 align-middle">
-                <span v-if="agentVersion(agent)" class="rounded bg-slate-700/50 px-1.5 py-0.5 text-[11px] text-slate-300">{{ agentVersion(agent) }}</span>
+                <div v-if="agentVersion(agent)" class="flex items-center gap-1.5">
+                  <span class="rounded bg-slate-700/50 px-1.5 py-0.5 text-[11px] text-slate-300">{{ agentVersion(agent) }}</span>
+                  <!-- V 阶段：版本状态点（绿=已是期望版本 / 琥珀=落后 / 紫=定制 / 灰=未知） -->
+                  <span class="h-1.5 w-1.5 rounded-full" :class="statusDot(agent)" :title="statusLabel(agent)"></span>
+                </div>
                 <span v-else class="text-slate-500">—</span>
                 <!-- 落后于最新 Release：整卡描边 + 徽标（比颜色更易读，色弱友好） -->
                 <span
@@ -544,4 +745,105 @@ async function batchRenew() {
       </div>
     </div>
   </div>
+
+    <!-- D 阶段：一键批量分发抽屉 -->
+    <div v-if="distOpen" class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/60 p-4" @click.self="distOpen = false">
+      <div class="glass my-8 w-full max-w-2xl p-6">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-white">{{ t('dist.title') }}</h2>
+          <button class="text-slate-400 hover:text-white" @click="distOpen = false">{{ t('common.close') }}</button>
+        </div>
+
+        <p class="mb-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-200">{{ t('dist.safetyHint') }}</p>
+
+        <div v-if="distError" class="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">{{ distError }}</div>
+        <div v-if="distCopied" class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{{ distCopied }}</div>
+
+        <div class="mb-4 grid gap-3 sm:grid-cols-2">
+          <label class="flex flex-col gap-1 text-xs text-slate-400">
+            {{ t('dist.targetPlatform') }}
+            <select v-model="distPlatform" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" @change="distArtifactId = ''">
+              <option value="linux-amd64">linux-amd64</option>
+              <option value="linux-arm64">linux-arm64</option>
+              <option value="windows-amd64">windows-amd64</option>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-400">
+            {{ t('dist.ttl') }}
+            <input v-model.number="distTtl" type="number" min="1" max="1440" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+          </label>
+        </div>
+
+        <div class="mb-4">
+          <div class="mb-2 text-xs text-slate-400">{{ t('dist.source') }}</div>
+          <div class="flex flex-wrap gap-2">
+            <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300" :class="distSourceKind === 'official' ? 'border-sky-500 bg-sky-500/10 text-sky-200' : ''">
+              <input v-model="distSourceKind" type="radio" value="official" class="h-3 w-3" /> {{ t('dist.sourceOfficial') }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300" :class="distSourceKind === 'artifact' ? 'border-sky-500 bg-sky-500/10 text-sky-200' : ''">
+              <input v-model="distSourceKind" type="radio" value="artifact" class="h-3 w-3" /> {{ t('dist.sourceArtifact') }}
+            </label>
+            <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300" :class="distSourceKind === 'release_url' ? 'border-sky-500 bg-sky-500/10 text-sky-200' : ''">
+              <input v-model="distSourceKind" type="radio" value="release_url" class="h-3 w-3" /> {{ t('dist.sourceUrl') }}
+            </label>
+          </div>
+        </div>
+
+        <div v-if="distSourceKind === 'artifact'" class="mb-4">
+          <label class="flex flex-col gap-1 text-xs text-slate-400">
+            {{ t('dist.artifact') }}
+            <select v-model="distArtifactId" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white">
+              <option v-if="!distArtifacts.length" value="">{{ t('dist.noArtifact') }}</option>
+              <option v-for="a in distArtifacts" :key="a.id" :value="a.id">
+                {{ a.sha256.slice(0, 16) }}… · {{ a.source_note || a.platform }}
+              </option>
+            </select>
+          </label>
+        </div>
+
+        <div v-if="distSourceKind === 'release_url'" class="mb-4 grid gap-3 sm:grid-cols-2">
+          <label class="flex flex-col gap-1 text-xs text-slate-400">
+            {{ t('dist.url') }}
+            <input v-model="distUrl" placeholder="https://…/diting-agent-linux-amd64" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+          </label>
+          <label class="flex flex-col gap-1 text-xs text-slate-400">
+            {{ t('dist.sha256') }}
+            <input v-model="distSha" placeholder="64 位 hex（强烈建议填写）" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+          </label>
+        </div>
+
+        <button class="w-full rounded-lg bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-50" :disabled="distBusy" @click="generateDist">
+          {{ distBusy ? t('dist.generating') : t('dist.generate') }}
+        </button>
+
+        <div v-if="distResult" class="mt-4 space-y-3">
+          <div class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+            {{ t('dist.resultHint', { n: selected.size }) }}
+            <div class="mt-1">{{ t('dist.expiresAt', { at: new Date(distResult.expires_at).toLocaleString() }) }}</div>
+          </div>
+          <div class="rounded-lg border border-slate-700 p-3">
+            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+              <span>Linux</span>
+              <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.commands.linux)">{{ t('common.copy') }}</button>
+            </div>
+            <pre class="overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-300">{{ distResult.commands.linux }}</pre>
+          </div>
+          <div class="rounded-lg border border-slate-700 p-3">
+            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+              <span>Windows</span>
+              <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.commands.windows)">{{ t('common.copy') }}</button>
+            </div>
+            <pre class="overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-300">{{ distResult.commands.windows }}</pre>
+          </div>
+          <div class="rounded-lg border border-slate-700 p-3">
+            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+              <span>{{ t('dist.downloadUrl') }}</span>
+              <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.download_url)">{{ t('common.copy') }}</button>
+            </div>
+            <p class="break-all font-mono text-[11px] text-slate-400">{{ distResult.download_url }}</p>
+            <p class="mt-2 text-[11px] text-amber-300">{{ t('dist.oneTimeWarn') }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
 </template>

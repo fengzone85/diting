@@ -173,6 +173,34 @@ function copy(text: string) {
   });
 }
 
+// ---- V 阶段：构建信息（版本 / commit sha / 构建时间 / 平台 / 人工标注）----
+// build_tag 由管理员手动标注（'custom' 或自由标签）：服务端不自动判定「是否官方构建」
+// ——fork 改一行代码 sha 就变，官方 sha 白名单必然过期，不如让管理员自己标。
+const buildTag = ref('');
+const buildTagDirty = ref(false);
+const buildTagBusy = ref(false);
+
+watch(agent, (a) => {
+  // 10s 轮询会替换 state.agents 的对象引用；用户正在输入时不覆盖（脏标志保护）。
+  if (buildTagDirty.value) return;
+  buildTag.value = a?.build_tag || '';
+}, { immediate: true });
+
+async function saveBuildTag() {
+  buildTagBusy.value = true;
+  try {
+    await adminApi.setAgentBuildTag(agentId.value, buildTag.value.trim());
+    buildTagDirty.value = false;
+    await loadAdmin();
+    message.value = t('agent.buildTagSaved');
+    setTimeout(() => (message.value = ''), 2000);
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'agent.buildTagSaveFailed');
+  } finally {
+    buildTagBusy.value = false;
+  }
+}
+
 // B7: 单 agent 历史趋势图
 const chartRange = ref<'1h' | '6h' | '24h' | '7d' | '30d'>('6h');
 const cpuTrend = ref<ChartPoint[]>([]);
@@ -467,6 +495,38 @@ function formatDate(ts?: number) {
               </span>
             </div>
             <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.lastSeen') }}</span><span class="text-slate-200">{{ formatDate(agent?.last_seen) }}</span></div>
+          </div>
+        </div>
+
+        <!-- V 阶段：构建信息块（版本可判定性） -->
+        <div class="glass p-6">
+          <h2 class="mb-4 text-lg font-semibold">{{ t('agent.buildInfo') }}</h2>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-slate-400">{{ t('node.buildSha') }}</span>
+              <span class="flex items-center gap-2">
+                <span class="font-mono text-slate-200">{{ agent?.build_sha || '-' }}</span>
+                <button v-if="agent?.build_sha" class="text-xs text-sky-400 hover:text-sky-300" @click="copy(agent.build_sha)">{{ t('common.copy') }}</button>
+              </span>
+            </div>
+            <div class="flex justify-between"><span class="text-slate-400">{{ t('node.buildTime') }}</span><span class="text-slate-200">{{ agent?.build_time || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-slate-400">{{ t('node.platform') }}</span><span class="text-slate-200">{{ agent?.agent_platform || '-' }}</span></div>
+            <div class="flex items-center justify-between gap-3">
+              <span class="shrink-0 text-slate-400">{{ t('node.buildTag') }}</span>
+              <span class="flex flex-1 items-center justify-end gap-2">
+                <input
+                  v-model="buildTag"
+                  :placeholder="t('node.buildTagPlaceholder')"
+                  maxlength="32"
+                  class="w-40 rounded-lg border border-slate-700 bg-slate-900/50 px-2 py-1 text-xs text-white"
+                  @input="buildTagDirty = true"
+                />
+                <button class="rounded-lg bg-sky-600 px-2 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50" :disabled="buildTagBusy" @click="saveBuildTag">
+                  {{ t('common.save') }}
+                </button>
+              </span>
+            </div>
+            <p class="pt-1 text-xs text-slate-500">{{ t('node.buildTagHint') }}</p>
           </div>
         </div>
       </div>

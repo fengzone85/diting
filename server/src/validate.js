@@ -91,6 +91,22 @@ const validateReport = (b) => {
       const s = str(b.net_epoch, 80);
       return /^[0-9a-fA-F@/_-]*$/.test(s) ? s : '';
     })(),
+    // V.1 构建元信息（agent_meta，可选）。缺失即全空 = 「未知」，绝不因缺字段拒绝上报。
+    // 三个字段各自严格清洗：sha 必须 7–40 hex（防注入进后续 URL/脚本拼接）、
+    // time 必须 UTC RFC3339、platform 白名单字形 goos-goarch。
+    agent_meta: (() => {
+      const a = b.agent_meta;
+      if (!a || typeof a !== 'object' || Array.isArray(a)) return null;
+      const sha = String(a.build_sha || '').toLowerCase();
+      const tm = String(a.build_time || '');
+      const pf = String(a.platform || '').toLowerCase();
+      return {
+        version: str(a.version, 32),
+        build_sha: /^[0-9a-f]{7,40}$/.test(sha) ? sha : '',
+        build_time: /^\d{4}-\d{2}-\d{2}T[\d:]+Z$/.test(tm) ? tm : '',
+        platform: /^[a-z0-9]{2,10}-[a-z0-9]{2,10}$/.test(pf) ? pf : '',
+      };
+    })(),
     disk_r_rate: num(b.disk_r_rate, 0, 1e15),
     disk_w_rate: num(b.disk_w_rate, 0, 1e15),
     uptime: num(b.uptime, 0, 1e12),

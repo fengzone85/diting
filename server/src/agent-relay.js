@@ -399,4 +399,7 @@ const _test = {
   RelayError,
 };
 
-module.exports = { router, ASSETS, _test };
+module.exports = { router, ASSETS, _test,
+  // 供「受控端一键分发」复用：取官方 release 资产（**已验签 + 已做架构校验**）。
+  // 复用而非另写 GitHub 客户端，是为了不重复实现签名校验这一段安全逻辑。
+  prepare, resolveTag };

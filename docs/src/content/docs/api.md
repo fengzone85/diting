@@ -60,11 +60,18 @@ Content-Type: application/json
   "probes": { "CM": { "ms": 12.3, "ok": true, "loss": 0 },
               "WEB": { "ms": 118.4, "ok": true, "loss": 0, "type": "http", "code": 200, "cert_days": 63 } },
   "disks": [ { "mount": "/", "used": 71.0, "total": 100 } ],
+  "agent_meta": { "version": "1.1.3", "build_sha": "c76d2f2a1b2c3d4",
+                  "build_time": "2026-10-19T13:06:32Z", "platform": "linux-amd64" },
   "os": "Debian GNU/Linux 13", "hostname": "srv1"
 }
 ```
 
 > 字段以 `agent-go/collector/` 实际输出为准；响应体仅用于错误日志，Agent **从不解析、从不执行**。
+>
+> `agent_meta` 是**可选**的构建元信息（描述「这个二进制是怎么来的」，不含任何主机指纹）：
+> 老版本受控端不上报该字段，服务端对应列保持为空（= 未知），**不会导致上报被拒**。
+> 服务端逐字段清洗：`build_sha` 必须 7–40 位 hex，`build_time` 必须 UTC RFC3339，
+> `platform` 必须形如 `linux-amd64`，不合规的一律丢弃为空串。
 
 ## 管理接口
 
@@ -125,6 +132,14 @@ Content-Type: application/json
 | GET | `/api/admin/capacity` | 容量保险丝状态（行数/库字节水位、是否暂停历史写入、跳过次数） |
 | POST | `/api/admin/capacity/cleanup` | 按当前保留天数清理过期明细并重新评估（写 `capacity_cleanup` 审计） |
 | GET | `/api/admin/audit-logs` | 管理员操作审计日志 |
+| GET | `/api/admin/agent-versions` | 受控端版本分布汇总 + 每节点版本状态（期望版本对照） |
+| PUT | `/api/admin/agent-versions/expected` | 设置 / 清除「期望版本」（全局配置，节点白名单 Token → 403） |
+| PUT | `/api/admin/agents/:id/build-tag` | 标注 / 清除单个节点的构建（`custom` 或自由标签，≤32 字符） |
+| POST | `/api/admin/agent-artifacts` | 上传自定义受控端二进制（原始 body，见下） |
+| GET | `/api/admin/agent-artifacts` | 自定义二进制列表 |
+| DELETE | `/api/admin/agent-artifacts/:id` | 删除自定义二进制 |
+| POST | `/api/admin/agent-distribution` | 生成分发包（脚本 + 二进制 + 校验和 + manifest）与一次性下载链接 |
+| GET | `/api/admin/agent-distribution/:pkg_id/download?t=<token>` | 下载分发包（只认一次性 token，不需管理员凭据） |
 | GET | `/api/admin/2fa/status` | 2FA 状态 |
 | POST | `/api/admin/2fa/setup` `/enable` `/disable` | 绑定 / 启用 / 关闭 2FA |
 | GET / POST | `/api/admin/api-tokens` | API Token 列表（脱敏，无明文/哈希）/ 签发 |
@@ -165,6 +180,163 @@ Content-Type: application/json
 - `expires_in_days` 为 1–3650 的整数，缺省 / 0 表示永不过期；越界或非整数 → `400 invalid_expires_in_days`。
 - 吊销：`DELETE /api/admin/api-tokens/:id`，返回 `200 {ok,id}`；不存在或已吊销返回 `404`。
 - Token 管理端点仅 admin 可用；调用方自身若是受限 Token（`agent_ids` 非空）→ `403 forbidden_scope`。
+
+### 受控端版本可判定性（期望版本对照）
+
+把「节点跑的是哪个版本」从*仅 semver 字符串*升级为*版本 + commit SHA + 构建时间 + 平台 + 与期望版本的差距*。
+**只做「看」，不做「推」**：期望版本是对照基准，服务端不会因此向节点下发任何指令。
+
+```http
+GET /api/admin/agent-versions
+X-Admin-Token: <admin_token>
+```
+
+```json
+{
+  "expected": { "version": "v1.0.9", "sha": "" },
+  "counts": { "total": 3, "up_to_date": 2, "outdated": 1, "unknown": 0, "custom": 0 },
+  "nodes": [
+    { "id": "agt_xxx", "name": "j4125", "online": true,
+      "version": "1.0.9", "build_sha": "c76d2f2a1b2c3d4",
+      "build_time": "2026-10-19T13:06:32Z", "platform": "linux-amd64",
+      "build_tag": "", "status": "up_to_date" }
+  ]
+}
+```
+
+状态判定口径（`server/src/agent-versions.js`）：
+
+| status | 含义 |
+|---|---|
+| `custom` | 管理员标注了 `build_tag`（`custom` 或自由标签）——人工标注优先于一切自动判定 |
+| `up_to_date` | 设了期望且可比对：期望 `sha` 非空 → `build_sha` 相同；否则版本号归一（去 `v` 前缀）后相同 |
+| `outdated` | 设了期望且可比对，但不匹配 |
+| `unknown` | 未设期望版本，或该节点没有任何可比对的版本信息（**含「期望按 sha 比但节点没有 sha」的老受控端**——宁可说无法判定，也不夸大成落后） |
+
+```http
+PUT /api/admin/agent-versions/expected
+Content-Type: application/json
+
+{ "version": "v1.0.9", "sha": "" }
+```
+
+- `version` ≤32 字符；`sha` 必须 7–40 位 hex，非法值**丢弃**（不报错，避免脏值进库）。
+- 两者皆空 = 清除期望（回到「只展示、不对照」，所有节点状态为 `unknown`）。
+- 全局配置 → 仅全局作用域管理员可写，节点白名单 Token 返回 `403 forbidden_scope`。
+
+```http
+PUT /api/admin/agents/:id/build-tag
+Content-Type: application/json
+
+{ "tag": "custom" }
+```
+
+- `tag` 允许 `''`（清除）、`custom`、或自由标签（服务端截断到 32 字符）。
+- 用途：fork 定制或自行编译的节点标上 `custom` 后不再参与期望版本对照。
+- 未知节点 → `404`；越权节点 → `403 forbidden_node`。
+
+三个端点均写审计日志（`agent_expected_version` / `agent_build_tag`）。
+
+### 受控端二进制 artifact 与一键批量分发
+
+服务端只**生成分发物**（脚本 + 二进制 + 校验和 + manifest + README），
+**不主动连接节点、不下发指令**——节点上的执行动作始终由管理员发起，
+权限面与既有手动升级（`diting.sh --update-agent`）完全一致。
+
+#### 上传自定义二进制
+
+```http
+POST /api/admin/agent-artifacts?platform=linux-amd64&source_note=my%20fork%20build
+X-Admin-Token: <admin_token>
+Content-Type: application/octet-stream
+
+<二进制原始字节>
+```
+
+```json
+{ "ok": true, "artifact_id": "art_1a2b3c4d5e6f", "sha256": "…64 hex…",
+  "platform": "linux-amd64", "size": 8123456, "uploaded_at": 1790000000000, "deduped": false }
+```
+
+- 请求体是**原始字节**（不是 multipart）：服务端没有 multipart 解析器，
+  零新增依赖；平台与备注走 query 参数。上传时**必须**用非 `application/json` 的
+  Content-Type（全局 `express.json` 限 16KB）。
+- 平台白名单：`linux-amd64` / `linux-arm64` / `windows-amd64` / `darwin-amd64` / `darwin-arm64`。
+- 文件名由服务端按内容哈希生成（`<sha256>.bin` 或 `<sha256>.exe`），
+  **不使用任何用户输入**；同内容天然去重（`deduped: true`）。
+- 单文件上限 100MB（`AGENT_ARTIFACT_MAX_MB` 可调），超限 `413`。
+
+#### 生成分发包
+
+```http
+POST /api/admin/agent-distribution
+X-Admin-Token: <admin_token>
+Content-Type: application/json
+
+{
+  "agent_ids": ["agt_xxx"],
+  "target": { "os": "linux", "arch": "amd64" },
+  "source": { "kind": "artifact", "artifact_id": "art_1a2b3c4d5e6f" },
+  "expires_in_minutes": 30
+}
+```
+
+```json
+{
+  "ok": true,
+  "pkg_id": "pkg_0123456789abcdef",
+  "kind": "tar.gz",
+  "download_url": "https://panel.example.com/api/admin/agent-distribution/pkg_0123456789abcdef/download?t=…",
+  "one_time_token": "…64 hex…",
+  "expires_at": 1790001800000,
+  "commands": {
+    "linux": "curl -fsSL '…/download?t=…' -o diting-agent-dist.tar.gz && tar xzf diting-agent-dist.tar.gz && sudo sh ./update.sh",
+    "windows": "iwr '…/download?t=…' -OutFile diting-agent-dist.zip; Expand-Archive … ; .\\update.ps1"
+  },
+  "manifest": { "…": "…" }
+}
+```
+
+- `source.kind`：
+  - `artifact` —— 用已上传的二进制（平台必须与 `target` 一致，否则 `400 artifact_platform_mismatch`）；
+  - `release_url` —— 服务端下载（走 SSRF 防护：钉 IP / 私网拦截 / 禁 3xx / 体积与超时上限），
+    **必须**同时提供 `release_sha256`，不匹配即 `400 release_sha256_mismatch` 并丢弃；
+    校验通过后转存为 artifact。
+  - `official` —— 从**官方 Release** 取受控端二进制：复用签名中继的取件逻辑
+    （**ed25519 验签 + 架构校验 fail closed**），再用官方 release 里的 `<asset>.sha256`
+    与**本地计算**的 sha256 做交叉校验；两者不一致即拒绝出包。
+    官方资产不可达时返回 `502 official_fetch_failed`，可改用 `release_url` 或先上传 `artifact`。
+- 产物：Linux → `tar.gz`（内含 `update.sh`），Windows → `zip`（内含 `update.ps1`）。
+- 包内固定含：`update.sh`/`update.ps1`、二进制、`<二进制名>.sha256`、`manifest.json`、`README.txt`。
+- Windows 包的 `update.ps1` 以 **UTF-8 BOM** 开头（PowerShell 5.1 会把无 BOM 的 .ps1 按 ANSI 解析，中文注释会导致 ParserError）；
+- 脚本红线：**sha256 校验在替换之前**（不匹配立即退出，不动现有二进制）、
+  备份为 `diting-agent[.exe].bak-YYYYMMDD-HHMMSS`（带时分秒，同日多次升级互不覆盖）、
+  原子替换（写临时文件 + `mv`/`Move-Item`，**不直接覆盖运行中的二进制**——
+  Linux 会 ETXTBSY、Windows 会文件锁定）、健康检查失败**自动回滚**；
+  **不写** `/etc/diting/agent.env`（Windows 侧**不动** `run_scheduled.bat`）
+  ⇒ 节点身份与自定义配置（`AGENT_ID` / `AGENT_TOKEN` / `PROBE_TARGETS` / `MONTH_ROTATE`）原样保留。
+
+#### 面板入口
+
+- **受控端二进制**（`/admin/agent-artifacts`）：上传 / 列表 / 删除自定义二进制
+  （内容寻址、同内容去重），供「批量分发」挑选；
+- **节点列表 → 批量分发**（选中节点后出现）：选目标平台 + 来源（官方 / 已上传 / 指定 URL）
+  → 生成分发包，页面直接给出 Linux / Windows 两条命令与一次性下载链接。
+  **命令需管理员在目标节点上以 root / 管理员权限执行**，服务端不主动连接节点。
+
+#### 下载（一次性 token）
+
+```http
+GET /api/admin/agent-distribution/:pkg_id/download?t=<one_time_token>
+```
+
+- 该端点**不要求管理员凭据**，只认一次性 HMAC 签名 token（密钥由 `SESSION_SECRET` 派生）。
+- 默认 30 分钟过期（`expires_in_minutes` 1–1440），**用后即焚**：重放返回 `410 token_used`；
+  篡改签名 `403 invalid_token`；过期 `410 expired`；未知包 `404`。
+- 响应头：`Content-Type: application/octet-stream`、`Content-Disposition: attachment`、
+  `X-Content-Type-Options: nosniff`、固定 `Content-Length`；单 IP 限流 10 次/分钟。
+- **绝不要把 `X-Admin-Token` 放进 URL**（URL 会进 shell 历史与 access log）。
+  若 nginx 记录了 query，请对 `?t=` 做打码。
 
 ## 公开只读接口（脱敏）
 
