@@ -16,6 +16,9 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    # secrets 不能出现在 if 里：先在中转 env 里求值，步骤内再读 env
+    env:
+      SIGN_KEY_PRESENT: ${{ secrets.AGENT_RELEASE_SIGN_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -52,8 +55,11 @@ jobs:
       # S5：ed25519 签名（供服务端中继验签）。私钥走 repo secret
       # AGENT_RELEASE_SIGN_KEY（PEM 内容，勿入库）；未配置时跳过签名，
       # 中继会因缺 .sig 而拒绝分发该版本（安装脚本回落 GitHub 直连）。
+      #
+      # 注意：GitHub 明确禁止在 if 条件里直接引用 secrets 上下文（会让整个工作流
+      # 校验失败、0 jobs 跑不起来）。正确做法是 job 级 env 中转，再用 env 判断。
       - name: Sign (ed25519)
-        if: ${{ secrets.AGENT_RELEASE_SIGN_KEY != '' }}
+        if: ${{ env.SIGN_KEY_PRESENT == 'true' }}
         working-directory: agent-go
         env:
           AGENT_RELEASE_SIGN_KEY: ${{ secrets.AGENT_RELEASE_SIGN_KEY }}
