@@ -58,7 +58,8 @@ test('Docker 卷形态：仍要求 Docker，失败则中止', () => {
 });
 
 test('数据类命令不再裸调 ensure_docker（否则原生部署全废）', () => {
-  for (const fn of ['do_backup', 'do_restore', 'do_db_stats', 'do_clear_ip_whitelist']) {
+  // F8.6 起 do_restore 是审计外壳，恢复主体在 _restore_apply（库形态判定也在这）。
+  for (const fn of ['do_backup', '_restore_apply', 'do_db_stats', 'do_clear_ip_whitelist']) {
     const body = fnBody(fn);
     assert.ok(!/^\s*ensure_docker \|\| (return|exit) 1\s*$/m.test(body),
       `${fn} 不该无条件 ensure_docker`);
@@ -71,6 +72,13 @@ test('安装 / 更新服务端仍要求 Docker', () => {
     assert.match(fnBody(fn), /ensure_docker \|\| (return|exit) 1/,
       `${fn} 是 Docker 部署路径，应保留 ensure_docker`);
   }
+});
+
+test('F8.1 宿主备份：VACUUM INTO 优先，无 sqlite3 时停服拷贝并恢复服务', () => {
+  const body = fnBody('do_backup');
+  assert.match(body, /VACUUM INTO/, '有 sqlite3 时应生成一致性快照而不是热 cp');
+  assert.match(body, /systemctl stop/, '无 sqlite3 时应先停服再拷贝（无写入 = 安全）');
+  assert.match(body, /systemctl start/, '拷贝后必须把服务拉起来（失败也不能留在停止态）');
 });
 
 test('diting.sh 语法校验通过', () => {

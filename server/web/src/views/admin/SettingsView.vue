@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
-import type { Settings, BackupFile, AlertThresholds, AlertOverride } from '../../services/types';
+import type { Settings, BackupFile, AlertThresholds, AlertOverride, RestoreAuditCheck, RestoreAuditReport, CapacityStatus } from '../../services/types';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 import NotifyPanel from '../../components/admin/NotifyPanel.vue';
@@ -55,7 +55,12 @@ interface UiSettings {
   backup_schedule?: 'off' | 'daily' | 'weekly';
   backup_hour?: number;
   backup_keep_days?: number;
+  backup_keep_count?: number;
   backup_compress?: boolean;
+  // F12 容量保险丝（行数 + 库文件双水位；100% 只暂停历史明细）
+  capacity_enabled?: boolean;
+  capacity_max_rows?: number;
+  capacity_max_mb?: number;
 }
 
 // 备份监控状态（宿主侧 diting.sh 执行后回写服务端，本页只读展示）
@@ -110,7 +115,11 @@ function resetLocal() {
       backup_schedule: 'off',
       backup_hour: 3,
       backup_keep_days: 14,
+      backup_keep_count: 10,
       backup_compress: true,
+      capacity_enabled: true,
+      capacity_max_rows: 2000000,
+      capacity_max_mb: 2048,
       // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）。
       // 必须在这里给默认值：模板 v-model="local.ui.alert!.cpu_pct" 会被立即求值，
       // 若 settings 尚未到达（冷加载）或拉取失败（429/5xx），alert 为 undefined
@@ -213,8 +222,12 @@ function cloneSettings(src: Settings): SettingsForm {
       backup_schedule: ui.backup_schedule || 'off',
       backup_hour: Number.isFinite(Number(ui.backup_hour)) ? Number(ui.backup_hour) : 3,
       backup_keep_days: Number.isFinite(Number(ui.backup_keep_days)) ? Number(ui.backup_keep_days) : 14,
+      backup_keep_count: Number.isFinite(Number(ui.backup_keep_count)) ? Number(ui.backup_keep_count) : 10,
       // 注意：后端默认 true，未配置时也应显示开启，故用 !== false 判断
       backup_compress: ui.backup_compress !== false,
+      capacity_enabled: ui.capacity_enabled !== false,
+      capacity_max_rows: Number.isFinite(Number(ui.capacity_max_rows)) ? Number(ui.capacity_max_rows) : 2000000,
+      capacity_max_mb: Number.isFinite(Number(ui.capacity_max_mb)) ? Number(ui.capacity_max_mb) : 2048,
     },
     notify: { ...notify },
   };
@@ -253,6 +266,32 @@ const backupDir = ref('');
 const backupAvailable = ref(true);
 const backupBusy = ref('');
 const backupMsg = ref('');
+// F8.6：最近一次恢复审查（恢复后由服务端启动流程写入，这里只读展示）
+const restoreAudit = ref<RestoreAuditReport | null>(null);
+// F12：容量保险丝状态与一键清理
+const capacityStatus = ref<CapacityStatus | null>(null);
+const capacityBusy = ref(false);
+const capacityMsg = ref('');
+
+async function loadCapacity() {
+  try { capacityStatus.value = await adminApi.getCapacity(); } catch { capacityStatus.value = null; }
+}
+
+async function cleanupCapacity() {
+  if (!confirm(t('settings.capacityCleanupConfirm'))) return;
+  capacityBusy.value = true;
+  capacityMsg.value = '';
+  try {
+    const r = await adminApi.cleanupCapacity();
+    capacityStatus.value = r;
+    capacityMsg.value = t('settings.capacityCleaned').replace('{n}', String(r.deleted || 0));
+    if (r.paused) capacityMsg.value = `${capacityMsg.value} ${t('settings.capacityStillFull')}`;
+  } catch (e) {
+    capacityMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    capacityBusy.value = false;
+  }
+}
 
 async function loadBackups() {
   try {
@@ -260,6 +299,7 @@ async function loadBackups() {
     backupFiles.value = r.files || [];
     backupDir.value = r.dir || '';
     backupAvailable.value = r.available !== false;
+    restoreAudit.value = r.restore_audit || null;
   } catch {
     backupFiles.value = [];
     backupAvailable.value = false;
@@ -316,6 +356,21 @@ async function onPickBackup(ev: Event) {
   }
 }
 
+// F8.1：应用内一致性快照（better-sqlite3 在线备份，不需要停服）
+async function createSnapshot() {
+  backupBusy.value = 'create';
+  backupMsg.value = '';
+  try {
+    const r = await adminApi.createBackup();
+    backupMsg.value = t('settings.backupCreated').replace('{name}', r.name);
+    await Promise.all([loadBackups(), loadBackupState()]);
+  } catch (e) {
+    backupMsg.value = (e as Error).message || t('settings.backupOpFailed');
+  } finally {
+    backupBusy.value = '';
+  }
+}
+
 async function restoreBackup(f: BackupFile) {
   if (!confirm(t('settings.backupRestoreConfirm').replace('{name}', f.name))) return;
   backupBusy.value = f.name;
@@ -331,7 +386,7 @@ async function restoreBackup(f: BackupFile) {
   }
 }
 
-onMounted(() => { loadBackupState(); loadBackups(); });
+onMounted(() => { loadBackupState(); loadBackups(); loadCapacity(); });
 
 function fmtBytes(n?: number): string {
   const v = Number(n || 0);
@@ -358,6 +413,102 @@ const backupStale = computed(() => {
   // 超过 48 小时没成功备份即视为「可能未运行」
   return Date.now() - ts > 48 * 3600 * 1000;
 });
+
+// ---- F8.6：恢复审查展示 ----
+function restoreCheckName(c: RestoreAuditCheck): string {
+  const key = `settings.restoreAuditCheck_${c.id}`;
+  const out = t(key);
+  return out === key ? c.id : out;
+}
+function restoreStatusName(c: RestoreAuditCheck): string {
+  const key = `settings.restoreAuditStatus_${c.status}`;
+  const out = t(key);
+  return out === key ? c.status : out;
+}
+function restoreStatusClass(status: string): string {
+  if (status === 'ok') return 'text-emerald-400';
+  if (status === 'warn') return 'text-amber-400';
+  if (status === 'fail') return 'text-rose-400';
+  return 'opacity-60';
+}
+function restoreCheckText(c: RestoreAuditCheck): string {
+  const v = (c.value || {}) as Record<string, unknown>;
+  const num = (k: string) => Number(v[k] || 0);
+  switch (c.id) {
+    case 'integrity':
+      return String(v.result ?? '');
+    case 'retention':
+      return t('settings.restoreAuditRetentionValue', {
+        expired: num('expired_rows'),
+        total: num('total_rows'),
+        pct: Math.round(Number(v.ratio || 0) * 100),
+        days: num('retention_days'),
+      });
+    case 'folding':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditFoldingValue', {
+            before: String(v.watermark_before ?? '-'),
+            after: String(v.watermark_after ?? '-'),
+            catchUp: String(v.catch_up || '-'),
+          });
+    case 'overlap':
+      return v.reason ? String(v.reason) : t('settings.restoreAuditDeletedValue', { n: num('deleted') });
+    case 'traffic_gap':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditGapValue', { fixed: num('fixed'), checked: num('checked') });
+    case 'orphans':
+      return t('settings.restoreAuditDeletedValue', { n: num('deleted') });
+    case 'soft_deleted':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditPurgedValue', { expired: num('expired'), purged: num('purged') });
+    case 'capacity':
+      return v.reason
+        ? String(v.reason)
+        : t('settings.restoreAuditCapacityValue', { rows: num('rows'), over: v.over ? 'yes' : 'no' });
+    default:
+      return '';
+  }
+}
+
+interface RestoreRetentionBucket {
+  rows: number;
+  from_ts: number;
+  to_ts: number;
+}
+
+// 过期数据的范围与批次（按保留周期分段），让「将删多少」落到具体时间段。
+const restoreRetention = computed(() => {
+  const c = (restoreAudit.value?.checks || []).find((x) => x.id === 'retention');
+  if (!c) return null;
+  const v = (c.value || {}) as {
+    earliest_ts?: number;
+    latest_ts?: number;
+    buckets?: RestoreRetentionBucket[];
+    truncated?: boolean;
+  };
+  if (!v.earliest_ts) return null;
+  return {
+    earliest: v.earliest_ts,
+    latest: v.latest_ts || 0,
+    buckets: v.buckets || [],
+    truncated: !!v.truncated,
+  };
+});
+
+// F8.3：备份完整性徽标（未知 = 尚未抽查 / gzip 需解压后校验）
+function integrityClass(status?: string): string {
+  if (status === 'ok') return 'text-emerald-400';
+  if (status === 'fail') return 'text-rose-400';
+  return 'opacity-60';
+}
+function integrityText(status?: string): string {
+  const key = `settings.backupIntegrity_${status || 'unknown'}`;
+  const out = t(key);
+  return out === key ? t('settings.backupIntegrity_unknown') : out;
+}
 
 async function save() {
   saving.value = true;
@@ -660,6 +811,12 @@ async function resetGroupAlert() {
               :hint="t('settings.backupKeepDaysHint')"
             />
             <FormInput
+              v-model="local.ui.backup_keep_count"
+              :label="t('settings.backupKeepCount')"
+              type="number"
+              :hint="t('settings.backupKeepCountHint')"
+            />
+            <FormInput
               v-model="local.ui.backup_compress"
               :label="t('settings.backupCompress')"
               type="checkbox"
@@ -706,6 +863,80 @@ async function resetGroupAlert() {
           </div>
         </div>
 
+        <!-- F8.6：最近一次恢复审查（恢复后服务端启动时生成，只读） -->
+        <div class="mt-6 border-t border-white/10 pt-4">
+          <h3 class="mb-1 font-semibold">{{ t('settings.restoreAuditTitle') }}</h3>
+          <p class="mb-3 text-xs opacity-60">{{ t('settings.restoreAuditHint') }}</p>
+          <div v-if="!restoreAudit" class="text-sm opacity-60">{{ t('settings.restoreAuditNone') }}</div>
+          <template v-else>
+            <dl class="mb-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditTime') }}</dt>
+                <dd class="text-right">{{ fmtTime(restoreAudit.ts) }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditFrom') }}</dt>
+                <dd class="break-all text-right">{{ restoreAudit.backup?.name || '-' }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditBy') }}</dt>
+                <dd class="break-all text-right">{{ restoreAudit.backup?.by || '-' }}</dd>
+              </div>
+              <div class="flex justify-between gap-4">
+                <dt class="opacity-70">{{ t('settings.restoreAuditDuration') }}</dt>
+                <dd class="text-right">{{ restoreAudit.duration_ms }} ms</dd>
+              </div>
+            </dl>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="text-xs opacity-60">
+                  <tr>
+                    <th class="py-2 pr-4">{{ t('settings.restoreAuditCheck') }}</th>
+                    <th class="py-2 pr-4">{{ t('settings.restoreAuditStatus') }}</th>
+                    <th class="py-2">{{ t('settings.restoreAuditDetail') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in restoreAudit.checks || []" :key="c.id" class="border-t border-white/10">
+                    <td class="py-2 pr-4 whitespace-nowrap">{{ restoreCheckName(c) }}</td>
+                    <td class="py-2 pr-4 whitespace-nowrap" :class="restoreStatusClass(c.status)">
+                      {{ restoreStatusName(c) }}
+                    </td>
+                    <td class="py-2 break-all opacity-80">{{ restoreCheckText(c) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-if="restoreRetention" class="mt-3 rounded border border-white/10 p-2 text-xs">
+              <div class="opacity-70">
+                {{ t('settings.restoreAuditExpiredRange', {
+                  from: fmtTime(restoreRetention.earliest),
+                  to: fmtTime(restoreRetention.latest),
+                }) }}
+              </div>
+              <div v-for="(b, i) in restoreRetention.buckets" :key="i" class="mt-1 opacity-70">
+                {{ t('settings.restoreAuditBatch', {
+                  n: i + 1,
+                  from: fmtTime(b.from_ts),
+                  to: fmtTime(b.to_ts),
+                  rows: b.rows,
+                }) }}
+              </div>
+              <div v-if="restoreRetention.truncated" class="mt-1 opacity-50">
+                {{ t('settings.restoreAuditBatchTruncated') }}
+              </div>
+            </div>
+            <p class="mt-3 text-xs opacity-60">
+              {{ t('settings.restoreAuditSummary', {
+                expired: restoreAudit.summary?.expired_rows ?? 0,
+                total: restoreAudit.summary?.total_rows ?? 0,
+                orphans: restoreAudit.summary?.orphan_deleted ?? 0,
+                purged: restoreAudit.summary?.purged_agents ?? 0,
+              }) }}
+            </p>
+          </template>
+        </div>
+
         <!-- 备份文件列表：下载 / 恢复 / 删除 -->
         <div class="mt-6 border-t border-white/10 pt-4">
           <div class="mb-3 flex flex-wrap items-center gap-3">
@@ -717,6 +948,18 @@ async function resetGroupAlert() {
             >
               {{ t('common.refresh') }}
             </button>
+          </div>
+
+          <!-- F8.1：应用内快照（在线备份，不需要停服） -->
+          <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+            <button
+              :disabled="!!backupBusy || backupUploading"
+              class="rounded border border-emerald-400/40 px-3 py-1 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+              @click="createSnapshot"
+            >
+              {{ backupBusy === 'create' ? t('settings.backupCreating') : t('settings.backupCreateNow') }}
+            </button>
+            <span class="opacity-60">{{ t('settings.backupCreateHint') }}</span>
           </div>
 
           <!-- 上传外部备份：服务端只认 SQLite / gzip，文件名由服务端生成 -->
@@ -749,6 +992,7 @@ async function resetGroupAlert() {
                   <th class="py-2 pr-4">{{ t('settings.backupFile') }}</th>
                   <th class="py-2 pr-4">{{ t('settings.backupTime') }}</th>
                   <th class="py-2 pr-4">{{ t('settings.backupSize') }}</th>
+                  <th class="py-2 pr-4">{{ t('settings.backupIntegrity') }}</th>
                   <th class="py-2 text-right">{{ t('common.actions') }}</th>
                 </tr>
               </thead>
@@ -762,6 +1006,9 @@ async function resetGroupAlert() {
                   </td>
                   <td class="py-2 pr-4 whitespace-nowrap">{{ fmtTime(f.mtime) }}</td>
                   <td class="py-2 pr-4 whitespace-nowrap">{{ fmtBytes(f.size_bytes) }}</td>
+                  <td class="py-2 pr-4 whitespace-nowrap" :class="integrityClass(f.integrity)" :title="f.integrity_reason || ''">
+                    {{ integrityText(f.integrity) }}
+                  </td>
                   <td class="py-2 text-right whitespace-nowrap">
                     <button
                       class="mr-2 rounded border border-white/20 px-2 py-1 text-xs hover:bg-white/10"
@@ -788,6 +1035,76 @@ async function resetGroupAlert() {
               </tbody>
             </table>
             <p class="mt-3 text-xs opacity-60">{{ t('settings.backupRestoreHint') }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- F12：容量保险丝（metrics 行数 + 库文件双水位） -->
+      <div class="glass p-6 lg:col-span-2">
+        <h2 class="mb-1 text-lg font-semibold">{{ t('settings.capacityTitle') }}</h2>
+        <p class="mb-4 text-xs opacity-70">{{ t('settings.capacityHint') }}</p>
+
+        <div v-if="capacityStatus" class="mb-4 rounded-lg border border-white/10 p-3 text-sm">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span
+              class="rounded px-2 py-0.5 text-xs"
+              :class="capacityStatus.level === 'full'
+                ? 'bg-rose-500/20 text-rose-300'
+                : capacityStatus.level === 'warn'
+                  ? 'bg-amber-500/20 text-amber-300'
+                  : 'bg-emerald-500/20 text-emerald-300'"
+            >
+              {{ t(`settings.capacityLevel_${capacityStatus.level}`) }}
+            </span>
+            <span v-if="capacityStatus.paused" class="text-xs text-rose-300">{{ t('settings.capacityPaused') }}</span>
+          </div>
+          <div class="grid grid-cols-1 gap-1 text-xs opacity-80 sm:grid-cols-2">
+            <div>
+              {{ t('settings.capacityRowsValue', {
+                rows: capacityStatus.rows,
+                max: capacityStatus.max_rows,
+                pct: Math.round(capacityStatus.row_pct * 100),
+              }) }}
+            </div>
+            <div>
+              {{ t('settings.capacityBytesValue', {
+                cur: fmtBytes(capacityStatus.bytes),
+                max: fmtBytes(capacityStatus.max_bytes),
+                pct: Math.round(capacityStatus.byte_pct * 100),
+              }) }}
+            </div>
+          </div>
+          <div v-if="capacityStatus.skipped" class="mt-1 text-xs text-amber-300">
+            {{ t('settings.capacitySkipped', { n: capacityStatus.skipped }) }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+          <div>
+            <FormInput v-model="local.ui.capacity_enabled" :label="t('settings.capacityEnabled')" type="checkbox" />
+            <FormInput
+              v-model="local.ui.capacity_max_rows"
+              :label="t('settings.capacityMaxRows')"
+              type="number"
+              :hint="t('settings.capacityMaxRowsHint')"
+            />
+            <FormInput
+              v-model="local.ui.capacity_max_mb"
+              :label="t('settings.capacityMaxMb')"
+              type="number"
+              :hint="t('settings.capacityMaxMbHint')"
+            />
+          </div>
+          <div class="flex flex-col justify-end gap-2">
+            <button
+              :disabled="capacityBusy"
+              class="self-start rounded border border-amber-400/40 px-3 py-1 text-xs text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+              @click="cleanupCapacity"
+            >
+              {{ capacityBusy ? t('settings.capacityCleaning') : t('settings.capacityCleanup') }}
+            </button>
+            <p class="text-xs opacity-60">{{ t('settings.capacityCleanupHint') }}</p>
+            <p v-if="capacityMsg" class="text-xs text-sky-300">{{ capacityMsg }}</p>
           </div>
         </div>
       </div>

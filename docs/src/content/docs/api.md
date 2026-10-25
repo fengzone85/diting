@@ -79,7 +79,9 @@ Content-Type: application/json
 | GET | `/api/agents/:id/online-history` | 在线时段历史（`?days=30`，返回 daily + outages + uptime_pct） |
 | POST | `/api/agents` | 创建节点 |
 | PUT | `/api/agents/:id` | 编辑节点 |
-| DELETE | `/api/agents/:id` | 删除节点 |
+| DELETE | `/api/agents/:id` | 删除节点（软删：7 天缓冲，期间可恢复） |
+| GET | `/api/agents/deleted` | 最近删除（软删节点 + 剩余天数） |
+| POST | `/api/agents/:id/restore` | 恢复软删节点（7 天缓冲期内） |
 | POST | `/api/agents/:id/reset-token` | 重置 Token |
 | POST | `/api/agents/:id/renew` | 续期（计费周期顺延） |
 | GET | `/api/billing` | 计费总览 |
@@ -112,11 +114,15 @@ Content-Type: application/json
 | GET | `/api/setup/status` | 初始化向导状态 |
 | POST | `/api/setup/generate` | 首次访问生成管理员 Token（独立限流） |
 | POST | `/api/setup/register` | 受控端自助注册（需 `SETUP_TOKEN`，独立限流） |
-| GET | `/api/admin/backups` | 备份文件列表 |
+| GET | `/api/admin/backups` | 备份文件列表（含 `integrity` 三态、`restore_audit` 最近一次恢复审查报告；只读角色不返回报告） |
+| POST | `/api/admin/backups` | 应用内一致性快照（`db.backup()` 在线备份，产物 `monitor_*.db`，权限 0600，写 `create_backup` 审计） |
+| GET | `/api/admin/restore-audit` | 最近一次恢复审查报告（后台顶部黄条数据源；含 retention 最早/最晚与分批次） |
 | GET | `/api/admin/backups/:name/download` | 下载指定备份 |
 | DELETE | `/api/admin/backups/:name` | 删除指定备份 |
-| POST | `/api/admin/backups/:name/restore` | 请求宿主侧恢复（由 cron 每 5 分钟消费） |
+| POST | `/api/admin/backups/:name/restore` | 请求宿主侧恢复（提交前对 `.db` 做 10s `integrity_check`，失败 400；由 cron 每 5 分钟消费；发起者随请求文件写入，恢复后由脚本补记 `restore_backup` / `restore_completed` 审计） |
 | GET | `/api/admin/backup-status` | 备份配置与备份监控状态 |
+| GET | `/api/admin/capacity` | 容量保险丝状态（行数/库字节水位、是否暂停历史写入、跳过次数） |
+| POST | `/api/admin/capacity/cleanup` | 按当前保留天数清理过期明细并重新评估（写 `capacity_cleanup` 审计） |
 | GET | `/api/admin/audit-logs` | 管理员操作审计日志 |
 | GET | `/api/admin/2fa/status` | 2FA 状态 |
 | POST | `/api/admin/2fa/setup` `/enable` `/disable` | 绑定 / 启用 / 关闭 2FA |

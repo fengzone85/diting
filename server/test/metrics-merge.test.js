@@ -182,8 +182,13 @@ test('S2.4 prune：小时行按 RETENTION_DAYS 清理；删除节点显式清 me
   assert.strictEqual(rows.length, 1, '超保留期的小时行应被删');
   assert.ok(rows[0].hour_ts > now - 3 * 86400000);
 
+  // F11：删除改为软删（7 天缓冲）→ 小时行保留，物理清理发生在 purge。
   db.deleteAgent(id);
-  assert.strictEqual(db.db.prepare('SELECT COUNT(*) c FROM metrics_hour WHERE agent_id=?').get(id).c, 0, '删除节点必须清掉小时行');
+  assert.strictEqual(db.db.prepare('SELECT COUNT(*) c FROM metrics_hour WHERE agent_id=?').get(id).c, 1,
+    '软删后小时行应保留（F11：物理清理移到 purgeDeletedAgents）');
+  db.purgeDeletedAgents(Date.now() + 8 * 86400000);
+  assert.strictEqual(db.db.prepare('SELECT COUNT(*) c FROM metrics_hour WHERE agent_id=?').get(id).c, 0,
+    'purge 后小时行必须被清掉');
 });
 
 test('S2.5 跨节点合并：每 agent 独立分组，输出含 agent_id', () => {

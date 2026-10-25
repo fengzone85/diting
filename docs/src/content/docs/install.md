@@ -69,6 +69,7 @@ sudo bash diting.sh --backup /tmp/my-backup.db
 sudo bash diting.sh --restore /var/backups/diting/monitor_20260723_141022.db
 
 # 备份并指定保留天数（默认 14 天，超出自动清理最旧的 monitor_*.db；0=不清理）
+# 另有份数上限（默认 10 份，环境变量 DB_BACKUP_KEEP_COUNT，0=不限），按时间清最旧
 sudo bash diting.sh --backup --keep-days 30
 
 # 列出已有备份（含占用总量、时间跨度、定时状态）
@@ -90,6 +91,7 @@ sudo bash diting.sh --backup --no-compress
 |---|---|
 | `--backup [路径]` | 备份（路径须以 `/` 或 `./` 开头；默认存 `/var/backups/diting/`） |
 | `--keep-days N` | 备份保留天数（默认 14，超期自动清理；`0` = 不清理） |
+| `DB_BACKUP_KEEP_COUNT` | 备份保留份数上限（默认 10，`0` = 不限；后台「保留份数」同义） |
 | `--compress` / `--no-compress` | 是否 gzip 压缩（**默认压缩**，体积约 20%） |
 | `--restore <文件>` | 从备份恢复，`.db` 与 `.db.gz` 均可 |
 | `--backup-list` | 列出备份（占用总量、时间跨度、定时状态） |
@@ -142,8 +144,8 @@ sudo bash diting.sh --backup --no-compress
 若提示未检测到 `crontab`，先安装 cron（Debian/Ubuntu: `apt-get install -y cron`）。
 
 **周期可在后台调整**：cron 固定每日触发一次，是否真正执行由后台
-「设置 → 数据库备份」的周期（`off` / `daily` / `weekly`）决定；保留天数与是否压缩
-也由脚本实时读取。因此改这三项**无需重建定时任务**，即时生效。
+「设置 → 数据库备份」的周期（`off` / `daily` / `weekly`）决定；保留天数、保留份数与
+是否压缩也由脚本实时读取。因此改这四项**无需重建定时任务**，即时生效。
 但**执行小时**在 install 时写死进 cron（默认凌晨 3 点，见 `diting.sh:1234-1260`），
 后台改「执行小时」不改变实际备份时刻——需改时刻请 `crontab -e` 手动改那一行。
 

@@ -142,9 +142,12 @@ test('静态：备份后要把目录与产物交给服务端用户（否则后�
 
 test('静态：默认值不再硬编码，且各入口都做了初始化', () => {
   assert.match(src, /^DB_BACKUP_DIR="\$\{DB_BACKUP_DIR:-\}"$/m, '默认值应为空，交给 _init_backup_dir 解析');
-  for (const fn of ['do_backup', 'do_restore', 'do_backup_schedule', 'do_backup_list', 'update_server']) {
+  for (const fn of ['do_backup', 'do_backup_schedule', 'do_backup_list', 'update_server']) {
     assert.match(fnBody(fn), /_init_backup_dir/, `${fn} 应调用 _init_backup_dir`);
   }
+  // F8.6 起 do_restore 只是「审计外壳」，恢复主体在 _restore_apply（仍要初始化目录）
+  assert.match(fnBody('do_restore'), /_restore_apply/, 'do_restore 应委托恢复主体');
+  assert.match(fnBody('_restore_apply'), /_init_backup_dir/, '_restore_apply 应调用 _init_backup_dir');
 });
 
 test('diting.sh 语法校验通过', () => {

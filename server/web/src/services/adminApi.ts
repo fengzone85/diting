@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
+import type { Agent, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -40,6 +40,11 @@ export const adminApi = {
   updateAgent: (id: string, payload: Partial<Agent>) =>
     api.put<Agent>(`/api/agents/${encodeURIComponent(id)}`, payload),
   deleteAgent: (id: string) => api.del<void>(`/api/agents/${encodeURIComponent(id)}`),
+  // F11：最近删除（7 天缓冲）
+  listDeletedAgents: () =>
+    api.get<{ items: DeletedAgent[]; grace_days: number }>('/api/agents/deleted'),
+  restoreAgent: (id: string) =>
+    api.post<{ ok: boolean }>(`/api/agents/${encodeURIComponent(id)}/restore`, {}),
   resetToken: (id: string) =>
     api.post<{ ok: boolean; token: string; install: InstallCommands }>(`/api/agents/${encodeURIComponent(id)}/reset-token`, {}),
   renewAgent: (id: string) =>
@@ -160,6 +165,17 @@ export const adminApi = {
 
   // 数据库备份监控（宿主侧 diting.sh 回写状态，服务端只做展示与策略下发）
   getBackupStatus: () => api.get<{ config: Record<string, unknown>; state: BackupState }>('/api/admin/backup-status'),
+
+  // F12：容量保险丝状态与一键清理（清理 = 按当前保留天数删过期明细）
+  getCapacity: () => api.get<CapacityStatus>('/api/admin/capacity'),
+  cleanupCapacity: () => api.post<CapacityStatus>('/api/admin/capacity/cleanup'),
+
+  // F8.6：最近一次恢复审查（后台顶部黄条用，避免拉整个备份目录）
+  getRestoreAudit: () => api.get<{ report: RestoreAuditReport | null }>('/api/admin/restore-audit'),
+
+  // F8.1：应用内一致性快照（不用停服，产物与宿主脚本同名规则）
+  createBackup: () =>
+    api.post<{ ok: boolean; name: string; size_bytes: number; mtime: number }>('/api/admin/backups'),
 
   // 备份文件管理（需要宿主备份目录已挂进容器）
   listBackups: () => api.get<BackupList>('/api/admin/backups'),
