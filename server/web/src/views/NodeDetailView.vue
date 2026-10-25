@@ -12,7 +12,7 @@ import AiNodeAnalysisDialog from '../components/ai/AiNodeAnalysisDialog.vue';
 import { publicApi } from '../services/publicApi';
 import { useApp } from '../composables/useApp';
 import { t } from '../composables/useI18n';
-import type { Probes, ProbeAvailability, ChartPoint, SparklinePoint } from '../services/types';
+import type { Probes, ProbeAvailability, OnlineHistory, ChartPoint, SparklinePoint } from '../services/types';
 import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, formatNumber, formatCurrency, formatRemaining } from '../utils/format';
 import {
   Cpu,
@@ -45,6 +45,8 @@ const agentId = computed(() => route.params.id as string);
 const probes = ref<Probes>({});
 // F4：可用率/证书元信息（与 probes 同一次请求返回，窗口 = currentRange）
 const availability = ref<Record<string, ProbeAvailability>>({});
+// F7：30 天在线时段（daily 热力条 + 最近停机）
+const online = ref<OnlineHistory | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -318,6 +320,33 @@ function probeCertClass(target: string): string {
   return 'text-emerald-400';
 }
 
+// ---- F7：在线率卡 ----------------------------------------------------------
+function onlineDayClass(pct: number | null): string {
+  if (pct == null) return 'bg-slate-600/40';
+  if (pct >= 99) return 'bg-emerald-400/80';
+  if (pct >= 95) return 'bg-amber-400/80';
+  return 'bg-rose-400/80';
+}
+
+function onlineBarHeight(pct: number | null): number {
+  // 0% 也保留一条可见的短柱，否则「全绿里夹一天全停」在视觉上会消失
+  return pct == null ? 6 : Math.max(8, Math.min(100, pct));
+}
+
+function onlinePctClass(pct: number | null): string {
+  if (pct == null) return 'text-muted';
+  if (pct >= 99) return 'text-emerald-400';
+  if (pct >= 95) return 'text-amber-400';
+  return 'text-rose-400';
+}
+
+function fmtDateTime(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// 探测三态（master 的 V1.2 改造）：ok 可为 null（解析超时 = 无采样），ms 同理
 function probeSeries(points: { ts: number; ms: number | null; ok: boolean | null; loss: number | null }[]): ChartPoint[] {
   if (!points) return [];
   return points
@@ -354,6 +383,8 @@ async function load() {
     sparkRows30d.value = sl30?.[agentId.value] || [];
     // 对齐 Komari：初始拉当前 range，后端按 max_points 降采样返回。
     await loadProbes(currentRange.value);
+    // 在线时段独立于图表 range（固定 30 天）；失败不阻断整页
+    online.value = await publicApi.onlineHistory(agentId.value, 30).catch(() => null);
   } catch (e) {
     error.value = (e as Error).message || t('common.error');
   } finally {
@@ -673,6 +704,51 @@ onMounted(load);
           <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" :current="tempCurrent" />
           <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
         </div>
+        </div>
+
+        <!-- F7：在线率（30 天热力条 + 最近停机） -->
+        <div v-if="online" class="glass p-5">
+          <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-base font-semibold text-content">
+              <svg class="h-4 w-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              {{ t('node.onlineTitle') }}
+            </h3>
+            <span v-if="online.uptime_pct != null" class="text-sm text-muted">
+              {{ t('node.online30d') }}
+              <span class="ml-1 text-lg font-semibold" :class="onlinePctClass(online.uptime_pct)">{{ online.uptime_pct.toFixed(1) }}%</span>
+            </span>
+          </div>
+
+          <div class="mb-4 flex h-10 items-end gap-[3px]">
+            <div
+              v-for="d in online.daily"
+              :key="d.date"
+              class="group relative flex-1 rounded-sm"
+              :class="onlineDayClass(d.pct)"
+              :style="{ height: `${onlineBarHeight(d.pct)}%` }"
+            >
+              <span class="pointer-events-none absolute -top-7 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black/80 px-2 py-0.5 text-[10px] text-white group-hover:block">
+                {{ d.date }} · {{ d.pct == null ? '—' : `${d.pct.toFixed(1)}%` }}
+              </span>
+            </div>
+          </div>
+
+          <div class="text-xs">
+            <div class="mb-1 text-muted">{{ t('node.outages') }}</div>
+            <div v-if="!online.outages.length" class="text-emerald-400/80">{{ t('node.noOutages') }}</div>
+            <div v-else class="space-y-1">
+              <div
+                v-for="o in online.outages.slice(0, 5)"
+                :key="o.started_at"
+                class="flex items-center justify-between gap-3 rounded-lg bg-surface/60 px-3 py-1.5"
+              >
+                <span class="text-secondary">{{ fmtDateTime(o.started_at) }}</span>
+                <span :class="o.ended_at == null ? 'text-rose-400' : 'text-muted'">
+                  {{ o.ended_at == null ? t('node.outageOngoing') : formatDuration(o.duration_sec) }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-if="(agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null || agent.hostname || agent.group) || diskPredict" class="grid grid-cols-1 gap-6 md:grid-cols-2">

@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, Overview, Sparklines, Probes, ProbesDetailed, PublicMeta } from './types';
+import type { Agent, Overview, Sparklines, Probes, ProbesDetailed, OnlineHistory, PublicMeta } from './types';
 
 // agent 快照的 probes 是 JSON 字符串 `{"目标":{ts,ms,ok,loss}}`（单对象），解析后返回对象形态
 function parseProbes(raw: unknown): Record<string, { ts?: number; ms?: number; ok?: boolean; loss?: number }> {
@@ -36,6 +36,9 @@ export const publicApi = {
     params.set('availability', '1');
     return api.get<ProbesDetailed>(`/api/public/agents/${encodeURIComponent(id)}/probes?${params.toString()}`);
   },
+  // F7：在线率卡（daily 热力条 + 最近停机）、节点卡 30 天在线率
+  onlineHistory: (id: string, days = 30) =>
+    api.get<OnlineHistory>(`/api/public/agents/${encodeURIComponent(id)}/online-history?days=${days}`),
   meta: () => api.get<PublicMeta>('/api/public/meta'),
   // 版本/构建时间/commit hash：页脚公开展示（2026-10-21 用户指定放开匿名完整版本）
   version: () => api.get<{
