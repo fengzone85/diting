@@ -12,9 +12,14 @@ FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
+# V 阶段起受控端会上报 build_sha / build_time（版本可判定性）。容器构建里没有 .git，
+# debug.ReadBuildInfo() 的 vcs.revision 为空 ⇒ 必须由构建参数显式注入，
+# 否则面板上这台节点的「构建信息」永远显示为「-」。
 ARG VERSION=dev
+ARG BUILD_SHA=""
+ARG BUILD_TIME=""
 RUN CGO_ENABLED=0 go build -trimpath \
-      -ldflags "-s -w -X main.version=${VERSION}" \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.buildSHA=${BUILD_SHA} -X main.buildTime=${BUILD_TIME}" \
       -o /out/diting-agent .
 
 FROM scratch
