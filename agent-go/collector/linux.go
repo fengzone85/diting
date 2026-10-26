@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+// rateFromCounter 由「累计计数器」的两次采样算速率（单位/秒）。
+//
+// 只有**严格递增**才计算：计数器回退（设备重建 / 热插拔 / 虚拟机磁盘重置 /
+// /proc 重挂载）时 uint64 相减会下溢成 ~1.8e19，服务端虽把值钳到 1e15，
+// 图表仍会出现「1000 TB/s」这类尖刺。相等（无增量）与 dt<=0 一律记 0。
+func rateFromCounter(cur, prev uint64, dtSeconds float64) float64 {
+	if dtSeconds <= 0 || cur < prev {
+		return 0
+	}
+	return float64(cur-prev) / dtSeconds
+}
+
 // linuxCollector 是 Linux 平台的采集器实现。
 // 内部持有前次样本（CPU/网络/磁盘 IO），用于算差值。
 type linuxCollector struct {
@@ -88,27 +100,23 @@ func (c *linuxCollector) Collect() (*Metrics, error) {
 	var rxRate, txRate float64
 	if c.prevNet != nil && !c.prevNetTime.IsZero() {
 		dt := now.Sub(c.prevNetTime).Seconds()
-		if dt > 0 {
-			if rx > c.prevNet.rx {
-				rxRate = float64(rx-c.prevNet.rx) / dt
-			}
-			if tx > c.prevNet.tx {
-				txRate = float64(tx-c.prevNet.tx) / dt
-			}
-		}
+		rxRate = rateFromCounter(rx, c.prevNet.rx, dt)
+		txRate = rateFromCounter(tx, c.prevNet.tx, dt)
 	}
 	c.prevNet = &netSample{rx, tx}
 	c.prevNetTime = now
 
 	// 磁盘 IO
+	//
+	// 与网络分支用同一个 rateFromCounter：此前这里是裸相减，而磁盘计数器比网络更容易
+	// 回退（设备重建 / 热插拔 / 虚拟机磁盘重置），uint64 下溢会算出 ~1.8e19，
+	// 服务端虽把值钳到 1e15，图表上仍会出现「1000 TB/s」级尖刺。
 	dr, dw := diskIO()
 	var diskRRate, diskWRate float64
 	if c.prevDiskIO != nil && !c.prevDiskIOTime.IsZero() {
 		dt := now.Sub(c.prevDiskIOTime).Seconds()
-		if dt > 0 {
-			diskRRate = float64(dr-c.prevDiskIO.read) / dt
-			diskWRate = float64(dw-c.prevDiskIO.write) / dt
-		}
+		diskRRate = rateFromCounter(dr, c.prevDiskIO.read, dt)
+		diskWRate = rateFromCounter(dw, c.prevDiskIO.write, dt)
 	}
 	c.prevDiskIO = &diskIOSample{dr, dw}
 	c.prevDiskIOTime = now

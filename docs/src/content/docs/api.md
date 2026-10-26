@@ -317,7 +317,10 @@ Content-Type: application/octet-stream
 - 请求体是**原始字节**（不是 multipart）：服务端没有 multipart 解析器，
   零新增依赖；平台与备注走 query 参数。上传时**必须**用非 `application/json` 的
   Content-Type（全局 `express.json` 限 16KB）。
-- 平台白名单：`linux-amd64` / `linux-arm64` / `windows-amd64` / `darwin-amd64` / `darwin-arm64`。
+- **artifact 平台标签**白名单：`linux-amd64` / `linux-arm64` / `windows-amd64` / `darwin-amd64` / `darwin-arm64`。
+  注意 `darwin-*` **仅可作标签**（允许把你自建的 macOS 产物登记进来），
+  `target.os` 只接受 `linux` / `windows` —— 受控端只有这两个平台的采集实现（`NewCollector`），
+  macOS 无法构建，因此不会生成 macOS 分发包。
 - 文件名由服务端按内容哈希生成（`<sha256>.bin` 或 `<sha256>.exe`），
   **不使用任何用户输入**；同内容天然去重（`deduped: true`）。
 - 单文件上限 100MB（`AGENT_ARTIFACT_MAX_MB` 可调），超限 `413`。

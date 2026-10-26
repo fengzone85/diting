@@ -28,10 +28,16 @@ build-linux:
 build-windows:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o dist/diting-agent-windows-amd64.exe .
 
-## build-darwin 编译 macOS
+## build-darwin 编译 macOS —— **不支持**
+# 原因：NewCollector 只有 linux.go / windows.go 两个 build-tag 实现，
+# macOS 既没有 /proc 也没有对应的 sysctl 采集实现 ⇒ 交叉编译必然失败
+# （undefined: collector.NewCollector）。此前该目标会直接报这个编译错误，
+# 容易被误读为「配置问题」；这里显式失败并把原因讲清。
+# 服务端侧同步：distribution.js 的 TARGET_OS 只接受 linux / windows，
+# darwin 仅可用于 artifact 的平台标签（详见 docs/api.md）。
 build-darwin:
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o dist/diting-agent-darwin-amd64 .
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o dist/diting-agent-darwin-arm64 .
+	@echo "错误：受控端不支持 macOS（NewCollector 仅有 linux / windows 实现）" >&2
+	@exit 1
 
 ## tidy 整理依赖
 tidy:
