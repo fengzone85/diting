@@ -144,17 +144,26 @@ function parseCookies(req) {
 function getSession(req) {
   return verifySession(parseCookies(req)[COOKIE_NAME]);
 }
-function setSessionCookie(res, payload) {
-  const cookie = signSession(payload);
+// Cookie 属性**唯一**构造点：登录与注销必须逐字一致，否则浏览器会视为「另一个 cookie」，
+// 拒绝用注销响应覆盖登录时下发的那一个。
+//
+// 真实缺陷（2026-10-26 核实）：注销原先硬编码 `Secure;`，而登录在
+// `ADMIN_ALLOW_HTTP=1`（http 部署，如内网直接用 http://IP:8081）下不附加 Secure
+// ⇒ 点「退出登录」后浏览器只收到一个带 Secure 的空 cookie，原来那个不带 Secure 的
+// 会话 cookie **原封不动留在浏览器里**，会话实际仍然有效（服务端也没被通知清 cookie）。
+// 用 http 部署时这就是一个「点了退出却没退出」的安全问题。
+function sessionCookieAttrs(maxAgeSec) {
   // ADMIN_ALLOW_HTTP=1（仅本地开发直连 http 时启用）下不附加 Secure，
   // 使浏览器可在 http 上下文持有登录态；生产环境不设该变量，cookie 仍强制 Secure。
   const secure = process.env.ADMIN_ALLOW_HTTP === '1' ? '' : 'Secure; ';
-  const attrs = `HttpOnly; ${secure}SameSite=Strict; Path=/; Max-Age=${Math.floor(SESSION_TTL / 1000)}`;
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${attrs}`);
+  return `HttpOnly; ${secure}SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`;
+}
+function setSessionCookie(res, payload) {
+  const cookie = signSession(payload);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${sessionCookieAttrs(Math.floor(SESSION_TTL / 1000))}`);
 }
 function clearSessionCookie(res) {
-  const attrs = `HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`;
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; ${attrs}`);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; ${sessionCookieAttrs(0)}`);
 }
 
 // 协议白名单：仅允许经反向代理且原始请求为 HTTPS 时携带管理类凭证。
