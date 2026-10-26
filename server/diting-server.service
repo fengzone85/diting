@@ -1,0 +1,23 @@
+[Unit]
+Description=diting monitor server
+After=network.target
+
+[Service]
+Type=simple
+User=feng
+# 显式声明环境文件（§7.4 目标形态）：此前只靠 WorkingDirectory + server.js 的
+# dotenv 隐式加载，单元自身不感知这些变量——将来若在 ExecStart 前加包装脚本
+# （或按 G9 用 EnvironmentFile 传端口）就会读不到。
+# `-` 前缀表示文件缺失时不阻断启动（server.js 的 dotenv 仍有兜底）。
+EnvironmentFile=-/data/simple-probe/diting/server/.env
+WorkingDirectory=/data/simple-probe/diting/server
+ExecStart=/usr/local/bin/node server.js
+# Restart=always（2026-10-26 由 on-failure 改）：on-failure 只覆盖「非零退出」，
+# 而 SIGTERM 被杀属于 clean exit，systemd 不会拉起 —— 任何一次误 kill 都会造成生产中断。
+# 与受控端模板 agent-go/diting-agent.service 的 Restart=always 对齐。
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

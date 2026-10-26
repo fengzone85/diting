@@ -212,7 +212,19 @@ function shQuote(s) {
 function psQuote(s) {
   return `'${String(s).replace(/'/g, `''`)}'`;
 }
+// 探测目标归一化（真机根因见 buildModifyCommands 的注释）：
+// 多行视作逗号分隔 → 合并连续逗号 → 去首尾逗号。安装与修改两条命令共用，
+// 避免「安装时清洗、修改时不清洗」这种半修复。
+function normalizeProbeTargets(v) {
+  return String(v == null ? '' : v)
+    .replace(/[\r\n]+/g, ',')
+    .replace(/,{2,}/g, ',')
+    .replace(/^,+|,+$/g, '')
+    .trim();
+}
+
 function buildInstallCommands(serverUrl, agentId, agentToken, interval, probeTargets, monthRotate = 0) {
+  probeTargets = normalizeProbeTargets(probeTargets);
   const iv = interval || AGENT_INTERVAL_DEFAULT;
   const mr = Number.isInteger(monthRotate) && monthRotate >= 0 && monthRotate <= 31 ? monthRotate : 0;
   const ptArg = probeTargets ? ` --probe-targets ${shQuote(probeTargets)}` : '';
@@ -240,7 +252,12 @@ sudo ./diting.sh --install-agent --repo ${REPO_BASE} --server ${shQuote(serverUr
 // 免 Token 的「修改探测目标」命令：已有受控端换 DNS 时，无需重装 / 无需 Token。
 // Linux 写 systemd drop-in 并重启；Windows 改 run_scheduled.bat 的 PROBE_TARGETS 行后重启计划任务。
 function buildModifyCommands(serverUrl, agentId, probeTargets) {
-  const pt = probeTargets || '';
+  // 探测目标必须是**单行**（逗号分隔列表）。
+  // 真机教训（2026-10-26）：值里一旦带换行，写进 Windows 的 run_scheduled.bat 后
+  // 那一行会与上一行合并 —— cmd 只把 CRLF 当行分隔，孤立的 LF 不分行，
+  // 于是 `set PROBE_TARGETS=…` 成了 `set MONTH_ROTATE=…` 的值的一部分，从未生效。
+  // 症状极隐蔽：面板显示已配置、bat 里也肉眼可见该行，但受控端始终报内置默认目标。
+  const pt = normalizeProbeTargets(probeTargets);
   const linux = `sudo mkdir -p /etc/systemd/system/diting-agent.service.d
 sudo tee /etc/systemd/system/diting-agent.service.d/probe.conf >/dev/null <<'EOF'
 [Service]
@@ -251,18 +268,23 @@ sudo systemctl restart diting-agent`;
   // 无 PROBE_TARGETS 行时插入到「启动行（exe）之前」——旧实现 Add-Content
   // 追到文件末尾（启动行之后），该 set 永远不会生效。Go 安装器保证该行存在，
   // 此处仅作存量/手改 bat 的兜底。
+  // 写回时**显式**用 CRLF + UTF-8(no BOM) + `Get-Content -Encoding UTF8`：
+  //   - Set-Content 在 PS 5.1 默认 ANSI，会把既有 UTF-8 中文二次编码（双编码），
+  //     导致受控端上报的 label 变乱码；
+  //   - 且它写出的行分隔符不受控，历史上正是这条路径把 LF 混进 bat。
   const win = `$id=${psQuote(agentId)}; $pt=${psQuote(pt)}
 $bat=Join-Path $env:ProgramData "diting-agent\\run_scheduled.bat"
-$lines=@(Get-Content $bat)
+$nl=[string][char]13+[string][char]10
+$lines=@(Get-Content -Encoding UTF8 $bat)
 if ($lines -match '^set PROBE_TARGETS=') {
-  ($lines -replace '^set PROBE_TARGETS=.*', "set PROBE_TARGETS=$pt") | Set-Content $bat
+  $out=@($lines -replace '^set PROBE_TARGETS=.*', "set PROBE_TARGETS=$pt")
 } else {
   $idx=[array]::FindIndex($lines, [Predicate[string]]{param($l) $l -match 'diting-agent(-windows-amd64)?\\.exe'})
   if ($idx -gt 0) { $out=@($lines[0..($idx-1)]) + @("set PROBE_TARGETS=$pt") + @($lines[$idx..($lines.Count-1)]) }
   elseif ($idx -eq 0) { $out=@("set PROBE_TARGETS=$pt") + @($lines) }
   else { $out=@($lines) + @("set PROBE_TARGETS=$pt") }
-  $out | Set-Content $bat
 }
+[IO.File]::WriteAllText($bat, (($out -join $nl) + $nl), (New-Object Text.UTF8Encoding($false)))
 Stop-ScheduledTask -TaskName "HostMonitorAgent-$id"; Start-ScheduledTask -TaskName "HostMonitorAgent-$id"`;
   return { linux_cmd: linux, windows_cmd: win, probe_targets: pt };
 }
@@ -2484,3 +2506,6 @@ router.get('/admin/audit-logs', adminOnly, agentScope, agentGlobalOnly, (req, re
 module.exports = router;
 // 供单测直接断言（router 本身不便测纯函数）：体检 L-4
 module.exports.diffKeys = diffKeys;
+// 供单测断言「命令生成」这类纯函数（含防换行注入的关键约束）
+module.exports.buildModifyCommands = buildModifyCommands;
+module.exports.buildInstallCommands = buildInstallCommands;
