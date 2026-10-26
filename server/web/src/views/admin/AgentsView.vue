@@ -5,6 +5,7 @@ import { useAdmin, loadAdmin } from '../../composables/useAdmin';
 import { adminApi } from '../../services/adminApi';
 import { formatBytes, formatDuration } from '../../utils/format';
 import { apiErrorMessage } from '../../utils/apiError';
+import { isOlderVersion } from '../../utils/version';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
@@ -22,12 +23,9 @@ const agentVersion = (a: Agent) => (a.version ? `v${String(a.version).replace(/^
 // S5.3-4 版本差：受控端最新 Release tag（服务端 6h 缓存）。未知时为空 → 不渲染「可升级」徽标，
 // 绝不把「查不到最新版」误显示成「已是最新」。
 const agentLatest = ref('');
-const normVer = (v: string) => String(v || '').replace(/^v/i, '').trim();
-const isOutdated = (a: Agent) => {
-  const latest = normVer(agentLatest.value);
-  const cur = normVer(a.version || '');
-  return !!latest && !!cur && latest !== cur;
-};
+// 只有**确实低于**线上最新发布版才提示「可升级」。
+// 早先用 `latest !== cur`，本地自建构建（如 1.1.4 > 线上 1.1.3）会被误报。
+const isOutdated = (a: Agent) => isOlderVersion(a.version || '', agentLatest.value);
 onMounted(() => {
   publicApi.version()
     .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })

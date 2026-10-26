@@ -5,6 +5,7 @@ import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
 import { t } from '../../composables/useI18n';
 import { apiErrorMessage } from '../../utils/apiError';
+import { isOlderVersion } from '../../utils/version';
 import { publicApi } from '../../services/publicApi';
 import { BILLING_CYCLES, CURRENCIES } from '../../utils/billing';
 import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
@@ -231,12 +232,9 @@ async function changeRange(r: '1h' | '6h' | '24h' | '7d' | '30d') {
 
 // S5.3-4：受控端最新 Release tag，用于「有新版本」提示（服务端 6h 缓存，失败静默）
 const agentLatest = ref('');
-const normVer = (v: string) => String(v || '').replace(/^v/i, '').trim();
-const versionOutdated = computed(() => {
-  const latest = normVer(agentLatest.value);
-  const cur = normVer(agent.value?.version || '');
-  return !!latest && !!cur && latest !== cur;
-});
+// 只有**确实低于**线上最新发布版才提示「有新版本」（详见 utils/version.ts 的说明：
+// `latest !== cur` 会把本地自建构建 1.1.4 相对线上 1.1.3 误报成「有新版本」）。
+const versionOutdated = computed(() => isOlderVersion(agent.value?.version || '', agentLatest.value));
 
 onMounted(async () => {
   // 本页是编辑表单：进入时暂停全局 10s 自动刷新（与 SettingsView/TemplateView 一致）。
