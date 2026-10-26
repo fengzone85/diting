@@ -142,7 +142,12 @@ Write-Host '[OK] SHA256 verified'
 # When --ProbeTargets is omitted, write the server-side default target list so
 # the line ALWAYS exists (otherwise the modify command would append it after
 # the exe launch line, where it would never take effect).
+# 归一化：多行视作逗号分隔（一行一个目标是常见写法）。
+# 关键：值里**绝不能**留换行 —— run_scheduled.bat 的换行是 CRLF，
+# 若某行内部混入孤立 LF，cmd 不会把它当行分隔，该行会与上一行合并，
+# 于是 `set PROBE_TARGETS=…` 永远不生效（2026-10-26 真机定位到的真实故障）。
 $ptValue = if ($ProbeTargets) { $ProbeTargets } else { 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8' }
+$ptValue = ($ptValue -replace "[`r`n]+", ',' -replace ',{2,}', ',').Trim([char[]]" ,")
 $ptLine = "set PROBE_TARGETS=$ptValue"
 $bat = Join-Path $InstallDir 'run_scheduled.bat'
 $cont = @"
