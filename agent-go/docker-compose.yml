@@ -5,7 +5,13 @@ services:
     # 二选一：
     #   源码构建：docker compose up -d --build（在仓库 agent-go/ 目录下执行）
     #   官方镜像：注释 build、用下面这行（随 agent-go-v* tag 发布）
-    build: .
+    build:
+      context: .
+      # 注入构建元信息（面板「构建信息」块显示；容器里没有 .git，不注入则显示为「-」）
+      args:
+        VERSION: "${AGENT_VERSION:-dev}"
+        BUILD_SHA: "${AGENT_BUILD_SHA:-}"
+        BUILD_TIME: "${AGENT_BUILD_TIME:-}"
     # image: ghcr.io/fengzone85/diting-agent:latest
     container_name: diting-agent
     restart: unless-stopped
