@@ -10,17 +10,10 @@ const { asyncHandler } = require('./util');
 // 审查 C4：公开兼容层的重聚合（720h 全窗、未认证即可触发）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
 
-const OFFLINE_SEC = () => Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
-const offlineMs = () => OFFLINE_SEC() * 1000;
-// 精确心跳语义：基于 last_seen 与可配置阈值判断 online，
-// 并额外透出 ttl（距判定离线的剩余毫秒，负数表示已离线多久），供高级主题精确渲染。
-function isOnline(a) {
-  const ttl = offlineMs() - (Date.now() - (a.last_seen || 0));
-  return ttl > 0;
-}
-function onlineTtl(a) {
-  return offlineMs() - (Date.now() - (a.last_seen || 0));
-}
+// 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
+// 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
+// 或给某节点设了覆盖，就会出现「兼容接口说在线、告警说离线」的自相矛盾。
+const online = require('./online');
 
 // 历史曲线时间窗（与 api.js RANGES 保持一致）
 const RANGES_C = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 };
@@ -76,7 +69,7 @@ function businessVisible() {
 }
 
 // diting agent -> 社区主题 node 列表项（/api/nodes）
-function toNode(a, showBusiness) {
+function toNode(a, showBusiness, octx) {
   const m = db.getLatestMetric(a.id) || {};
   const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
@@ -112,8 +105,8 @@ function toNode(a, showBusiness) {
     traffic_limit_type: 'max',
     created_at: new Date(a.created_at).toISOString(),
     updated_at: new Date(a.last_seen || a.created_at).toISOString(),
-    online: isOnline(a),
-    ttl: onlineTtl(a)
+    online: online.isOnline(a, undefined, octx),
+    ttl: online.onlineTtl(a, undefined, octx)
   };
 }
 
@@ -154,6 +147,8 @@ function publicOpen() {
 function getNodesLatestStatus() {
   if (!publicOpen()) return {};
   const agents = db.getMonitoredAgents();
+  // 批量场景一次性预取阈值上下文（3 次查询，与节点数无关），避免逐节点 N×2 查库
+  const octx = online.buildCtx();
   const data = {};
   for (const a of agents) {
     const m = db.getLatestMetric(a.id);
@@ -180,8 +175,8 @@ function getNodesLatestStatus() {
       process: 0,
       connections: 0,
       connections_udp: 0,
-      online: isOnline(a),
-      ttl: onlineTtl(a),
+      online: online.isOnline(a, undefined, octx),
+      ttl: online.onlineTtl(a, undefined, octx),
       uptime: Number(m.uptime) || 0
     };
   }
@@ -194,15 +189,16 @@ function getNodesLatestStatus() {
 function snapshot() {
   if (!publicOpen()) return { data: { online: [], data: {} }, status: 'success' };
   const agents = db.getMonitoredAgents();
-  const online = [];
+  const octx = online.buildCtx();
+  const onlineIds = [];
   const data = {};
   for (const a of agents) {
-    const on = isOnline(a);
-    if (on) online.push(a.id);
+    const on = online.isOnline(a, undefined, octx);
+    if (on) onlineIds.push(a.id);
     const rt = toRealtime(db.getLatestMetric(a.id));
-    if (rt) data[a.id] = { ...rt, online: on, ttl: onlineTtl(a) };
+    if (rt) data[a.id] = { ...rt, online: on, ttl: online.onlineTtl(a, undefined, octx) };
   }
-  return { data: { online, data }, status: 'success' };
+  return { data: { online: onlineIds, data }, status: 'success' };
 }
 
 const guard = (req, res, next) => {
@@ -269,7 +265,8 @@ router.get('/nodes', guard, (req, res) => {
   // 注意：不能用 agents.map(toNode)——map 会把数组下标当作第二个参数 showBusiness 传入，
   // 下标 0 会被当成 false，导致第一个节点的业务字段被静默隐藏。
   const show = businessVisible();
-  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show)) });
+  const octx = online.buildCtx();
+  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show, octx)) });
 });
 
 // GET /api/recent —— 省略 uuid 时返回空数组（避免 /api/recent/ 触发 404，便于调试）。
@@ -283,8 +280,8 @@ router.get('/recent/:uuid', guard, (req, res) => {
   if (!a) return res.json({ status: 'success', message: '', data: [] });
   const rt = toRealtime(db.getLatestMetric(a.id));
   if (!rt) return res.json({ status: 'success', message: '', data: [] });
-  const on = isOnline(a);
-  res.json({ status: 'success', message: '', data: [{ ...rt, online: on, ttl: onlineTtl(a) }] });
+  const on = online.isOnline(a);
+  res.json({ status: 'success', message: '', data: [{ ...rt, online: on, ttl: online.onlineTtl(a) }] });
 });
 
 // GET /api/records/load —— 负载历史（官方主题详情页历史曲线依赖）。
@@ -415,7 +412,7 @@ router.get('/node/:uuid', guard, (req, res) => {
   }));
   res.json({
     status: 'success', message: '',
-    data: { node, realtime: rt, history, online: isOnline(a) }
+    data: { node, realtime: rt, history, online: online.isOnline(a) }
   });
 });
 
@@ -434,4 +431,4 @@ router.post('/rpc2', (req, res) => {
   rpcMiddleware(req, res);
 });
 
-module.exports = { router, snapshot, publicOpen, toNode, toRealtime, isOnline, getNodesLatestStatus };
+module.exports = { router, snapshot, publicOpen, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };

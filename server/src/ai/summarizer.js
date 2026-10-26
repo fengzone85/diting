@@ -15,6 +15,10 @@
 
 const db = require('../db');
 const { daysUntil, cycleLabel } = require('../util');
+// 阈值口径统一：逐节点解析「节点 > 分组 > 全局」，与告警同源。
+// 此前本文件只用全局 db.resolveAlertThresholds() —— 给某节点设了覆盖后，
+// 会出现「AI 日报说在线、告警说离线」这种自相矛盾。
+const online = require('../online');
 const {
   stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk,
   compareWindows, aggregateProbes, trafficInfo, costInfo
@@ -178,8 +182,10 @@ function summarize(options) {
   const periodHours = Number(opts.periodHours) || 24;
   const sinceTs = Date.now() - periodHours * 3600000;
 
-  // 审查 C-1/E2：阈值单一取值（UI 显式值 > env > 默认），与 alerts.js 同源，
-  // 消除此前"看板直读 env、告警/摘要走 UI 默认合并值"的分裂。
+  // 审查 C-1/E2：阈值单一取值，与 alerts.js 同源。
+  // 这里的全局值只用于**摘要顶层**的 thresholds 汇总；每个节点的在线 / 超阈值判定在
+  // 下方 map 里按「节点 > 分组 > 全局」逐节点解析（见 octx），否则节点设了覆盖值时
+  // 会出现「日报说在线、告警说离线」。
   const _at = db.resolveAlertThresholds();
   const intervalSec = Number(process.env.AGENT_INTERVAL || DEFAULT_AGENT_INTERVAL);
   const offlineSec = _at.offline_sec;
@@ -226,8 +232,17 @@ function summarize(options) {
   // 月流量「距月末天数」按 AI 配置的时区偏移算（默认 +8），与报告时间口径一致
   const tzOffsetHours = Number.isFinite(Number(aiCfg.tz_offset_hours)) ? Number(aiCfg.tz_offset_hours) : 8;
   const sumOpts = { intervalSec, offlineSec, cpuAlert, memAlert, diskSeriesByAgent, trendDays, silentDays, tzOffsetHours };
+  // 批量场景一次预取阈值上下文（3 次查询，与节点数无关）
+  const octx = online.buildCtx();
   const out = agents.map((a) => {
-    const s = summarizeAgent(a, byAgent[a.id] || [], sumOpts);
+    // 逐节点阈值：与告警同源，避免「日报说在线、告警说离线」
+    const eff = online.thresholdsFor(a, octx);
+    const s = summarizeAgent(a, byAgent[a.id] || [], {
+      ...sumOpts,
+      offlineSec: eff.offlineSec,
+      cpuAlert: eff.cpuAlert,
+      memAlert: eff.memAlert
+    });
     // compare 不参与 baseline_risk（避免风险等级因新增字段发生行为突变）
     if (doCompare) {
       Object.assign(s, compareWindows(byAgent[a.id] || [], prevByAgent[a.id] || [], { periodHours }));

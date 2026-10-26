@@ -9,6 +9,8 @@ const { heavyQuery } = require('./heavy-db');
 const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
+// 在线判定统一口径（节点覆盖 > 分组覆盖 > 全局，与告警同源）
+const online = require('./online');
 const backups = require('./backups');
 const capacity = require('./capacity');
 const { daysUntil, asyncHandler } = require('./util');
@@ -458,12 +460,14 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
 router.get('/admin/agent-versions', adminOnly, agentScope, (req, res) => {
   const expected = agentVersions.readExpected(db);
   // 节点白名单 Token 只看到授权范围内的节点（汇总随之只统计可见节点）。
+  // 在线判定统一走 src/online.js（此前这里硬编码 5 分钟，与告警的 60s 默认口径完全不同）
+  const octx = online.buildCtx();
   const nodes = db.getAgents()
     .filter((a) => inAgentScope(req, a.id))
     .map((a) => ({
       id: a.id,
       name: a.name,
-      online: !!(a.last_seen && (Date.now() - a.last_seen) < 300000),
+      online: online.isOnline(a, undefined, octx),
       version: a.version || '',
       build_sha: a.build_sha || '',
       build_time: a.build_time || '',
@@ -678,10 +682,10 @@ router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'not found' });
   const latest = db.getLatestMetric(a.id);
-  const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
-  const online = a.last_seen && (Date.now() - a.last_seen) < offlineSec * 1000;
+  // 与 /agents 列表同源（逐节点阈值），避免列表说在线、详情说离线
+  const isOnlineNow = online.isOnline(a);
   const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
-  res.json(Object.assign({}, a, { group: a.grp || '', online: !!online, latest: latestOut, hostname: shortHost(a.hostname), ...computeBilling(a) }));
+  res.json(Object.assign({}, a, { group: a.grp || '', online: isOnlineNow, latest: latestOut, hostname: shortHost(a.hostname), ...computeBilling(a) }));
 });
 
 // ---- Admin: metrics time-series ----
@@ -719,17 +723,19 @@ router.get('/agents/:id/online-history', adminOrReadonly, agentScope, (req, res)
 router.get('/overview', adminOrReadonly, agentScope, (req, res) => {
   // S2/F5：全局统计不向节点白名单 Token 开放。
   if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
-  const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
+  // 在线判定统一走 src/online.js（此前只看 env，概览的「在线数」会与列表绿点不一致）。
+  // 局部计数变量改名 onlineCount：不能再叫 online，否则会遮蔽模块级的 online。
+  const octx = online.buildCtx();
   const now = Date.now();
   const agents = db.getMonitoredAgents();
-  let online = 0, cpuSum = 0, memSum = 0, cnt = 0;
+  let onlineCount = 0, cpuSum = 0, memSum = 0, cnt = 0;
   let trafficUsedBytes = 0; // 本月累计流量（在线节点 latest 的收+发）
   let totalQuotaGB = 0;
   const groups = {}; // 分组 -> { total, online }
   for (const a of agents) {
-    const isOn = a.last_seen && now - a.last_seen < offlineSec * 1000;
+    const isOn = online.isOnline(a, now, octx);
     if (isOn) {
-      online++;
+      onlineCount++;
       const m = db.getLatestMetric(a.id);
       if (m) { cpuSum += m.cpu || 0; memSum += m.mem_pct || 0; cnt++; trafficUsedBytes += (m.net_rx_month || 0) + (m.net_tx_month || 0); }
     }
@@ -741,8 +747,8 @@ router.get('/overview', adminOrReadonly, agentScope, (req, res) => {
   }
   res.json({
     total: agents.length,
-    online,
-    offline: agents.length - online,
+    online: onlineCount,
+    offline: agents.length - onlineCount,
     avg_cpu: cnt ? +(cpuSum / cnt).toFixed(1) : 0,
     avg_mem: cnt ? +(memSum / cnt).toFixed(1) : 0,
     traffic_used_bytes: Math.round(trafficUsedBytes),
@@ -788,16 +794,16 @@ function publicDisabled(res) { return res.status(403).json({ error: 'public view
 router.get('/public/overview', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
-  const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
+  const octx = online.buildCtx();
   const now = Date.now();
   const agents = db.getMonitoredAgents();
-  let online = 0;
+  let onlineCount = 0;
   let cpuSum = 0, memSum = 0, cpuCount = 0, memCount = 0;
   const groups = {};
   for (const a of agents) {
-    const isOn = a.last_seen && now - a.last_seen < offlineSec * 1000;
+    const isOn = online.isOnline(a, now, octx);
     if (isOn) {
-      online++;
+      onlineCount++;
       const m = db.getLatestMetric(a.id);
       if (m) {
         if (typeof m.cpu === 'number') { cpuSum += m.cpu; cpuCount++; }
@@ -809,7 +815,7 @@ router.get('/public/overview', (req, res) => {
     ge.total++; if (isOn) ge.online++;
   }
   res.json({
-    total: agents.length, online, offline: agents.length - online,
+    total: agents.length, online: onlineCount, offline: agents.length - onlineCount,
     cpu_avg: cpuCount > 0 ? +(cpuSum / cpuCount).toFixed(1) : null,
     mem_avg: memCount > 0 ? +(memSum / memCount).toFixed(1) : null,
     groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
@@ -841,19 +847,21 @@ router.get('/public/agents', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const showBiz = ui.public_show_business !== false;
-  const offlineSec = Number(process.env.OFFLINE_THRESHOLD_SEC || 60);
+  // 在线判定统一走 src/online.js（此前只看 OFFLINE_THRESHOLD_SEC，
+  // 公开首页的在线绿点会与告警/面板判定不一致）；批量场景预取上下文避免逐节点查库。
+  const octx = online.buildCtx();
   const now = Date.now();
   const uptime30d = getUptime30d();
   const list = db.getMonitoredAgents().map((a) => {
     const latest = db.getLatestMetric(a.id);
-    const online = a.last_seen && (now - a.last_seen) < offlineSec * 1000;
-    const m = online && latest ? latest : null;
+    const isOn = online.isOnline(a, now, octx);
+    const m = isOn && latest ? latest : null;
     const base = {
       id: a.id, name: a.name, group: a.grp || '',
       // F7：30 天在线率（%，1 位小数）；null = 窗口内还没有任何 session 记录
       uptime_30d: uptime30d[a.id] ?? null,
       country: a.country || '',
-      online: !!online,
+      online: !!isOn,
       cpu: m ? m.cpu : null,
       mem_pct: m ? m.mem_pct : null,
       mem_total: m ? m.mem_total : 0,

@@ -7,8 +7,10 @@ const express = require('express');
 const db = require('./db');
 const router = express.Router();
 
-const offlineMs = () => Number(process.env.OFFLINE_THRESHOLD_SEC || 60) * 1000;
-const isOnline = (a) => (Date.now() - (a.last_seen || 0)) <= offlineMs();
+// 在线判定统一走 src/online.js（节点覆盖 > 分组覆盖 > 全局，与告警同源）。
+// 改造前这里只看 OFFLINE_THRESHOLD_SEC env —— 面板调过阈值或给节点设了覆盖后，
+// 会出现「v1 接口说在线、告警说离线」的分裂。
+const online = require('./online');
 
 // 统一响应信封：{ code, message, data }
 function ok(res, data) { res.json({ code: 0, message: '', data }); }
@@ -40,7 +42,7 @@ function businessVisible() {
 
 // 节点基础信息（标准字段语义，缺失统一 null / 空对象，不猜默认值）
 // showBusiness 由调用方（列表/详情 handler）传入，避免每个节点各读一次 ui_settings。
-function toNode(a, showBusiness) {
+function toNode(a, showBusiness, octx) {
   const m = db.getLatestMetric(a.id) || {};
   const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
@@ -55,7 +57,7 @@ function toNode(a, showBusiness) {
     connections: { tcp: null, udp: null }, // diting 不采集连接数
     process: Number.isFinite(Number(m.process_count)) && Number(m.process_count) > 0 ? Number(m.process_count) : null,
     temperature: m.temp != null ? Number(m.temp) : null,
-    online: isOnline(a),
+    online: online.isOnline(a, undefined, octx),
     region: a.country || null,
     group: a.grp || null,
     remark: show ? (a.note || null) : null,              // 公开备注（受 public_show_business 控制）
@@ -135,7 +137,9 @@ router.get('/sites', (req, res) => {
 // GET /api/v1/nodes —— 节点列表（不含实时负载）
 router.get('/nodes', (req, res) => {
   const show = businessVisible();
-  ok(res, db.getMonitoredAgents().map((a) => toNode(a, show)));
+  // 批量：一次预取阈值上下文，避免逐节点查库
+  const octx = online.buildCtx();
+  ok(res, db.getMonitoredAgents().map((a) => toNode(a, show, octx)));
 });
 
 // GET /api/v1/nodes/:uuid —— 单节点详情（基础信息 + 实时 + 能力声明）
@@ -206,4 +210,4 @@ router.get('/nodes/:uuid/capability', (req, res) => {
   ok(res, Object.assign({}, CAPABILITY, { probes_targets: (a.probe_targets || '').split(',').filter(Boolean) }));
 });
 
-module.exports = { router, toNode, toRealtime, isOnline, publicOpen, CAPABILITY };
+module.exports = { router, toNode, toRealtime, isOnline: online.isOnline, publicOpen, CAPABILITY };
