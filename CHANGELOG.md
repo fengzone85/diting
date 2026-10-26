@@ -63,6 +63,11 @@ ttl 正负、无 last_seen、`compat.toNode` 与统一口径同源），已验�
   改为显式报错并说明原因；`docs/api.md` 澄清 `darwin-*` 只能作 artifact 平台标签、
   `target.os` 只接受 `linux`/`windows`（分发目标白名单本来就是这么限制的）。
 
+### 受控端发版
+
+- **`agent-go-v1.1.5`**（2026-10-26）—— 含上述两项磁盘 IO 修正。
+  从 `v1.1.3` 直接跳到 `v1.1.5`：`v1.1.4` 只在本机做真机验证、未打 tag 发布，故不复用该号。
+
 ### 测试
 
 `collector/diskio_test.go`（4 例，假 `/proc/diskstats` 数据，含分区分支、NVMe 整盘不被误杀、
