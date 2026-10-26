@@ -2,6 +2,39 @@
 
 > **注意**：本文件自 **2026-09-07** 起恢复维护（下方该日期及以后的条目为新增）；2026-08-03 前的条目为当时快照，可能与现状有出入，个别条目下方附了「勘误 / 后续修订」。完整变更请以 `git log` 为准。
 
+## 2026-10-26 「在线」判定口径统一（6 处来源 → 1 个模块）
+
+来源：同一次 trae 审查核实。改造前「在线」判定的阈值散落 6 处、共 4 种口径：
+
+| 位置 | 原口径 | |
+|---|---|---|
+| `alerts.js` | 节点 > 分组 > 全局 | ✅ |
+| `api.js /agents` | 节点 > 分组 > 全局（S1/F1 已统一） | ✅ |
+| `api.js /agents/:id` | 只看 `OFFLINE_THRESHOLD_SEC` | ✗ |
+| `api.js /overview` | 只看 env | ✗ |
+| `api.js /public/overview` | 只看 env | ✗ |
+| `api.js /public/agents` | 只看 env | ✗ |
+| `api.js /admin/agent-versions` | **硬编码 5 分钟** | ✗ |
+| `compat.js`（社区主题兼容层） | 只看 env | ✗ |
+| `v1.js` | 只看 env | ✗ |
+| `ai/summarizer.js` | 只看全局 `db.resolveAlertThresholds()` | ✗ |
+
+**后果**：面板调过离线阈值、或给节点/分组设了覆盖后会出现
+「列表说在线、详情说离线」「公开页绿点与告警不一致」「AI 日报说在线、告警说离线」。
+本机 `.env` 是 `OFFLINE_THRESHOLD_SEC=120`，而 `/admin/agent-versions` 写死 5 分钟 ——
+同一台节点在两处能得出相反结论且差 2.5 倍。
+
+**修复**：新增 `server/src/online.js` 作为唯一口径（`buildCtx` / `thresholdsFor` / `isOnline` / `onlineTtl`），
+内部复用 `alerts.resolveAgentThresholds` ⇒ 与告警**同源**；上述 6 处全部改走它，
+`compat.isOnline` / `v1.isOnline` 对外导出的就是同一个函数引用（结构上不可能再分裂）。
+`buildCtx()` 一次预取全局阈值 + 两张覆盖表（3 次查询、与节点数无关），公开端点不会退化成 N+1。
+
+**对本机无感**：`.env` 的 120 秒、无 UI 设置、无节点/分组覆盖 ⇒ 仅
+`/admin/agent-versions` 由错误的 5 分钟纠正为 120 秒，其余数值不变。
+
+**测试**：`server/test/online.test.js` 8 例（同一引用、默认 60s、env、节点覆盖优先、分组覆盖、
+ttl 正负、无 last_seen、`compat.toNode` 与统一口径同源），已验证先红后绿。
+
 ## 2026-10-26 受控端磁盘 IO 口径修正（分区重复计数 + 计数器回退尖刺）
 
 来源：核实 `trae/agent-HhWYr7` 分支的审查报告时确认的两处真实缺陷（该分支补丁未落地）。
