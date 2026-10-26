@@ -567,13 +567,31 @@ S2 第一段只折叠不删；本段把「明细只留 7 天」和「长窗口�
   由**计划任务**启动（SSH 会话断开会连带回收子进程，直接 `Start-Process` 不可用）。
 - 验证完成后**两台节点的探测配置均已恢复原状**（j4125 的 `agent.env` 与 wxwin-go 的 `run_scheduled.bat` 已回滚，临时物料已删）。
 
-### ⚠️ 已知问题（本次真机验证顺带发现，非本条引入）
+### ⚠️ Windows 受控端 `PROBE_TARGETS` 不生效 —— 已定位根因并修复（同日）
 
-- **Windows 受控端的 `PROBE_TARGETS` 配置不生效**：`run_scheduled.bat` 里 `set PROBE_TARGETS=移动:…,公共:8.8.8.8`
-  看似被设置，但受控端上报的探测目标始终是内置默认值 `CM/CT/CU/GG` ⇒ **管理员在 bat 里改探测目标一直是无效的**。
-  初步线索：bat 文件为「UTF-8 with BOM + 中文双编码」，cmd 侧按 GBK 还原后才得到正确中文，
-  但该行是否真正进入子进程环境变量尚未定位到根因（待单独排期）。
-- 本条只记录现象与影响面，**不在本次改动范围内修复**。
+**现象**：`run_scheduled.bat` 里 `set PROBE_TARGETS=移动:…,公共:8.8.8.8` 肉眼可见、面板也显示已配置，
+但受控端上报的探测目标始终是内置默认 `CM/CT/CU/GG`。
+
+**根因（在生产文件上直测）**：该 bat 495 字节里 **CRLF 9 个、LF-only 1 个**，那个孤立 LF 正好落在
+`set MONTH_ROTATE=1` 与 `set PROBE_TARGETS=…` 之间。**cmd 只把 CRLF 当行分隔**，孤立的 LF 不分行
+⇒ 两行被并成一条命令 ⇒ `PROBE_TARGETS` 成了 `MONTH_ROTATE` 值的一部分，从未被设置。
+LF 来自服务端「修改探测目标」命令：值里带换行（管理员习惯一行一个目标）经 `Set-Content` 写进 bat。
+
+**修复**（`1b661ef`）：
+- 新增 `normalizeProbeTargets()`：多行视作逗号分隔 → 合并连续逗号 → 去首尾逗号；
+  `buildInstallCommands` 与 `buildModifyCommands` **共用**（避免半修复）。
+- Windows 写回改为显式 `Get-Content -Encoding UTF8` +
+  `[IO.File]::WriteAllText(..., ($out -join CRLF) + CRLF, UTF8Encoding($false))`：
+  保证 CRLF，并一并修掉 `Set-Content`（PS 5.1 默认 ANSI）造成的**中文双编码**。
+- `install-go.ps1` 的 `--ProbeTargets` 同样归一化；导出两个命令生成函数供单测断言。
+- 新增 `server/test/probe-targets-normalize.test.js` 5 例（含「禁用 Set-Content」的断言）。
+
+**⚠️ 行为变更**：wxwin-go 修好后**探测目标从默认 `CM/CT/CU/GG` 变为实际配置的
+`移动/电信/联通/公共`** —— 历史上这台 Windows 节点的探测其实一直在打默认目标，面板上的配置是「假生效」。
+真机复验：修复后上报 label 为 移动/电信/联通/公共，`CRLF=11 / LF-only=0`，无 BOM。
+
+**操作提示**：若把「修改探测目标」命令**存成 .ps1 文件**再执行（而不是直接粘贴到 PowerShell），
+文件必须是 **UTF-8 with BOM** ——否则 PowerShell 5.1 按 ANSI 解析，中文会变成双编码写进 bat。
 
 ## 2026-10-22 安装向导（对照 komari）+ 管理员 Token 入库哈希 + 安装器端口 / 升级备份
 
