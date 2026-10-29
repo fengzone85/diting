@@ -26,7 +26,8 @@ const CAPABILITY = {
   process: true,
   virtualization: false,
   arch: false,
-  cpu_cores: false,
+  // agents.cores 真实存在且已写库（S1/T18），此处声明 false 会让 adapter/模板主动隐藏核数
+  cpu_cores: true,
   cpu_name: false,
   temperature: true,
   disks: true,
@@ -49,7 +50,17 @@ function toNode(a, showBusiness, octx) {
     uuid: a.id,
     name: a.name,
     os: a.os || null,
-    kernel: a.hostname || null,          // 如实填 hostname（diting 无独立内核版本）
+    // 内核版本是红线字段（diting 不采集）：此前错误地用 hostname 冒充，主题会当成内核版本显示。
+    // 保持 null，绝不回填。
+    kernel: null,
+    // 主机名原本就经 kernel 字段泄露，现独立成字段（暴露面不变，语义正确）
+    hostname: a.hostname || null,
+    // CPU 核心数：agents.cores 真实采集值（0 = 未上报 → null，不猜默认值）
+    cpu_cores: Number(a.cores) || null,
+    // 以下三项为 PR2（管理员手工录入粗粒度硬件档案）预留形状，PR1 恒 null
+    cpu_name: null,
+    arch: null,
+    virtualization: null,
     gpu: { model: null, count: null, detailed_info: [] },
     ram: { total: Number(m.mem_total) || null, used: Number(m.mem_used) || null },
     swap: { total: Number(m.swap_total) || null, used: Number(m.swap_used) || null },

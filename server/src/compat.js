@@ -68,6 +68,21 @@ function businessVisible() {
   return ui.public_show_business !== false;
 }
 
+// 计费口径换算（diting ↔ Komari，见 plans/2026-10-26-komari-compat-fields.md §3.1）：
+//   price: diting 0（未设置）→ Komari -1（主题显示「—」）；diting <0（白嫖）→ 0；diting >0 原值
+//   cycle: diting null/空/非数 → 30；0（白嫖/一次性）必须原样保留，不能被 || 30 吞掉
+function komariPrice(a) {
+  const p = Number(a.price);
+  if (!Number.isFinite(p) || p === 0) return -1;
+  return p < 0 ? 0 : p;
+}
+function komariBillingCycle(a) {
+  const raw = a.billing_cycle;
+  if (raw === null || raw === undefined || raw === '') return 30;
+  const c = Number(raw);
+  return Number.isFinite(c) ? c : 30;
+}
+
 // diting agent -> 社区主题 node 列表项（/api/nodes）
 function toNode(a, showBusiness, octx) {
   const m = db.getLatestMetric(a.id) || {};
@@ -78,22 +93,25 @@ function toNode(a, showBusiness, octx) {
     cpu_name: '',
     virtualization: '',
     arch: '',
-    cpu_cores: 0,
+    cpu_cores: Number(a.cores) || 0,
     cpu_physical_cores: 0,
     os: a.os || '',
-    kernel_version: a.hostname || '',
+    // 内核版本是红线字段（diting 不采集）：此前错误地用 hostname 冒充，主题会把它当内核版本显示。
+    // 保持空串，绝不回填 hostname。
+    kernel_version: '',
     gpu_name: 'None',
     region: flagEmoji(a.country),
     mem_total: Number(m.mem_total) || 0,
     swap_total: Number(m.swap_total) || 0,
     disk_total: Number(m.disk_total) || 0,
     weight: 0,
-    price: -1,
-    billing_cycle: 30,
+    // 业务字段：受 public_show_business 控制，关闭时回退到主题约定的「未设置」值
+    price: show ? komariPrice(a) : -1,
+    billing_cycle: show ? komariBillingCycle(a) : 30,
     // 协议占位：仅表示「支持该标记」，diting 没有自动续费周期任务。
     // 主题据此渲染「自动续费」徽标，不代表服务端会真的自动延期。
     auto_renewal: true,
-    currency: '$',
+    currency: show ? (a.currency || '¥') : '$',
     // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值
     expired_at: show && a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
     group: a.grp || '',
@@ -129,7 +147,7 @@ function toRealtime(m) {
     },
     connections: { tcp: 0, udp: 0 },
     uptime: Number(m.uptime) || 0,
-    process: 0,
+    process: Number(m.process_count) || 0,
     message: '',
     updated_at: new Date(m.ts).toISOString()
   };
@@ -165,14 +183,14 @@ function getNodesLatestStatus() {
       load: Number(m.load1) || 0,
       load5: Number(m.load5) || 0,
       load15: Number(m.load15) || 0,
-      temp: 0,
+      temp: Number(m.temp) || 0,
       disk: Number(m.disk_used) || 0,
       disk_total: Number(m.disk_total) || 0,
       net_in: Number(m.net_rx_rate) || 0,
       net_out: Number(m.net_tx_rate) || 0,
       net_total_up: Number(m.net_tx_month) || 0,
       net_total_down: Number(m.net_rx_month) || 0,
-      process: 0,
+      process: Number(m.process_count) || 0,
       connections: 0,
       connections_udp: 0,
       online: online.isOnline(a, undefined, octx),
@@ -245,10 +263,12 @@ router.get('/public', guard, (req, res) => {
       // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
       // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
       chartDashboardTemplate: {
+        // gpu / gpuMemory / connections 已移除：diting 不采集（红线），这三张卡永远没有
+        // series（compat-metrics.js 刻意只断映射不删定义），保留只会让主题渲染空图，
+        // 用户还得改主题才能去掉。process / temperature 有真实数据源，保留。
         cards: [
           'cpu', 'load', 'memory', 'disk', 'network',
-          'gpu', 'gpuMemory', 'temperature', 'connections', 'process',
-          'traffic', 'ping', 'pingLoss'
+          'temperature', 'process', 'traffic', 'ping', 'pingLoss'
         ]
       }
     }
