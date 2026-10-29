@@ -96,7 +96,11 @@ function readManifest(dir, shortHint, bundled = false) {
       configuration: conf && conf.type === 'managed' ? conf : null,
       diting: {
         compatibility: typeof diting.compatibility === 'string' ? diting.compatibility : '',
-        needsRelaxedCsp: diting.needsRelaxedCsp === true
+        // Komari 生态的主题包不会写 diting.* 字段，而社区主题普遍含内联脚本与外部
+        // 图标/汇率请求：套用服务端严格 CSP 会直接阻断（实测 Glassmorphism 内联脚本
+        // 被拦、图标与图表异常）。Komari 格式的包一律放宽 CSP；放宽只覆盖该主题页的
+        // 响应头，admin/API 页仍走全局严格策略。
+        needsRelaxedCsp: diting.needsRelaxedCsp === true || file === 'komari-theme.json'
       },
       manifestFile: file,
       // manifest.json 是旧格式（komari 早期 / 自研 demo）：version/compatibility 校验按豁免处理

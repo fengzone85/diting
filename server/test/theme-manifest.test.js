@@ -121,6 +121,15 @@ test('readManifest：needsRelaxedCsp 仅 true 时生效', () => {
   assert.strictEqual(theme.readManifest(dir2, 'norelax', false).diting.needsRelaxedCsp, false);
 });
 
+test('readManifest：komari-theme.json 格式默认放宽 CSP（社区主题不写 diting 字段）', () => {
+  // 真实社区主题（如 Glassmorphism v3.4.4）的 komari-theme.json 只有 name/short/version/
+  // configuration，没有 diting.*；但产物含内联脚本 + 外部图标/汇率请求，严格 CSP 会阻断。
+  const dir = mkTheme('kmdefault', { 'komari-theme.json': { ...BASE, short: 'kmdefault' } });
+  const m = theme.readManifest(dir, 'kmdefault', false);
+  assert.strictEqual(m.manifestFile, 'komari-theme.json');
+  assert.strictEqual(m.diting.needsRelaxedCsp, true);
+});
+
 // ---- 3. 严格 manifest 校验 --------------------------------------------------
 
 test('validateManifest：short/name 必填且格式受限', () => {
