@@ -29,7 +29,11 @@ const online = require('../src/online');
 const compat = require('../src/compat');
 const v1 = require('../src/v1');
 
-const NOW = Date.UTC(2026, 9, 26, 12, 0, 0);
+// 用真实当前时间，不能写死成某个历史日期：
+// 本文件绝大多数用例把 NOW 显式传给 isOnline/onlineTtl，但 compat.toNode / v1.toNode
+// 内部固定走 Date.now()，两者一旦相差几天，「200s 前上报应在线」就必然失败
+// （写死 2026-10-26 后，该回归用例在之后每天都是红的）。
+const NOW = Date.now();
 // createAgent 返回的是创建时的行快照；改了 last_seen / 覆盖表之后必须重读，
 // 否则断言用的是旧 last_seen（会被判成很久没上报）。
 const reload = (id) => db.getAgent(id);

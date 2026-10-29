@@ -888,6 +888,8 @@ router.get('/public/agents', (req, res) => {
       has_counter: db.hasTrafficCounter(a.id),
       uptime: m ? m.uptime : 0,
       os: (m && m.os) ? m.os : (a.os || ''),
+      // CPU 核心数（agents.cores，S1/T18 采集；0 = 未上报，前端据此显示「—」）
+      cores: Number(a.cores) || 0,
       probes: m ? (m.probes || '') : '',
       hostname: online ? shortHost(a.hostname) : '',
       disks: m ? parseDisks(m.disks) : []
