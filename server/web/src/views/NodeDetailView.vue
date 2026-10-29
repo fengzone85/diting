@@ -160,6 +160,10 @@ const hwDynamic = computed(() => {
   const a = agent.value;
   if (!a) return [];
   const items: { label: string; value: string; icon: any }[] = [];
+  // CPU 核心数（agents.cores，S1/T18 起真实采集；0 = 未上报 → 不渲染该条目）
+  if (Number((a as any).cores) > 0) {
+    items.push({ label: t('node.cpuCores'), value: String((a as any).cores), icon: Cpu });
+  }
   // 架构（无 IP 时显示，diting 当前未上报 arch → -）
   items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
   // 虚拟化
