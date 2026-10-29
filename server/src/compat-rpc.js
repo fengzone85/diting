@@ -85,8 +85,10 @@ const RECORD_FIELD_MAP = {
   'memory.total': 'mem_total',
   'ram.used': 'mem_used',
   'ram.total': 'mem_total',
-  'swap.used': 'mem_used',
-  'swap.total': 'mem_total',
+  // swap 此前误指向 mem_used/mem_total（与 compat-metrics 的 L-5 同类问题），主题的
+  // swap 曲线会画成内存曲线，此处一并修正。
+  'swap.used': 'swap_used',
+  'swap.total': 'swap_total',
   'disk.used': 'disk_used',
   'disk.total': 'disk_total',
   'net.in.rate': 'net_rx_rate',
@@ -97,6 +99,40 @@ const RECORD_FIELD_MAP = {
   'traffic.down': 'net_rx_month',
   'uptime': 'uptime',
   'temperature': 'temp'
+};
+
+// Komari getRecords(type=load) 的扁平字段名 → diting metrics 列名。
+// 主题 LoadChart 按 flatRecord 读取（cpu / ram / ram_total / load / temp / disk / net_in ...）。
+const LOAD_FIELD_MAP = {
+  cpu: 'cpu',
+  ram: 'mem_used',
+  ram_total: 'mem_total',
+  swap: 'swap_used',
+  swap_total: 'swap_total',
+  load: 'load1',
+  temp: 'temp',
+  disk: 'disk_used',
+  disk_total: 'disk_total',
+  net_in: 'net_rx_rate',
+  net_out: 'net_tx_rate',
+  net_total_up: 'net_tx_month',
+  net_total_down: 'net_rx_month',
+  process: 'process_count',
+  uptime: 'uptime'
+};
+// load_type → 需要输出的字段组（all = 全部；gpu 不采集，任何分组都不输出）
+const LOAD_TYPE_GROUPS = {
+  cpu: ['cpu'],
+  ram: ['ram', 'ram_total'],
+  swap: ['swap', 'swap_total'],
+  load: ['load'],
+  temp: ['temp'],
+  disk: ['disk', 'disk_total'],
+  network: ['net_in', 'net_out', 'net_total_up', 'net_total_down'],
+  process: ['process'],
+  connections: [],
+  gpu: [],
+  all: Object.keys(LOAD_FIELD_MAP)
 };
 
 // 审查 C4：异步化——内部 getProbeRecords/getMetricsRange 的重聚合走 worker 线程
@@ -164,14 +200,29 @@ async function getRecords(params = {}) {
     };
   }
 
-  if (!entityId) return { count: 0, recordsByClient: {}, from: fromIso, to: nowIso };
+  if (!entityId) return metricKeys ? { count: 0, recordsByClient: {}, from: fromIso, to: nowIso } : [];
   const rows = await getMetricsRange(entityId, { hours, maxPoints });
 
-  // 若指定了 metric_keys，只返回这些字段（点分命名）；否则返回全部已映射字段
-  const wantKeys = metricKeys && metricKeys.length ? metricKeys : Object.keys(RECORD_FIELD_MAP);
+  // Komari 契约：getRecords(type=load) 返回 []flatRecord（**裸数组**，字段扁平命名为
+  // cpu / ram / ram_total / load / temp / disk / net_in ...）。社区主题 LoadChart 直接把它
+  // 当数组渲染，此前返回 { count, records, ... } 信封会被判定为「暂无负载数据」。
+  // 带 metric_keys 的调用（点分命名，diting 自有的兼容用法）保持原信封不变。
+  if (!metricKeys || !metricKeys.length) {
+    const fields = LOAD_TYPE_GROUPS[params.load_type] || LOAD_TYPE_GROUPS.all;
+    return rows.map((m) => {
+      const rec = { client: entityId, time: new Date(m.ts).toISOString() };
+      for (const f of fields) {
+        const col = LOAD_FIELD_MAP[f];
+        if (col) rec[f] = Number(m[col]) || 0;
+      }
+      return rec;
+    });
+  }
+
+  // 指定了 metric_keys：只返回这些字段（点分命名）
   const mapped = rows.map(m => {
     const rec = { time: new Date(m.ts).toISOString() };
-    for (const k of wantKeys) {
+    for (const k of metricKeys) {
       const col = RECORD_FIELD_MAP[k];
       if (col != null) rec[k] = Number(m[col]) || 0;
     }
@@ -288,7 +339,16 @@ registerMethod('public:getClientRecentRecords', (params = {}) => {
 registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params));
 registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
-registerMethod('public:queryMetrics', queryMetrics);
+// 返回结构对齐 Komari：publicQueryMetrics 返回的是 []publicMetricSeries（裸数组），
+// 而 compat-metrics.queryMetrics 内部用的是 { start, end, series } 信封。社区主题
+// （Glassmorphism 等）按数组解析 result，收到对象会直接判定「无数据」→ 图表恒空。
+// 内部函数保持信封（compat-metrics.test.js 依赖），只在 RPC 边界拆出 series 数组。
+function queryMetricsSeries(params) {
+  const out = queryMetrics(params);
+  if (Array.isArray(out)) return out;
+  return out && Array.isArray(out.series) ? out.series : [];
+}
+registerMethod('public:queryMetrics', queryMetricsSeries);
 registerMethod('public:getPingMetricStats', getPingMetricStats);
 
 // Komari 官方社区主题（Glassmorphism）底层 MetricsService 调用的原生方法名
@@ -303,7 +363,7 @@ registerMethod('metrics:query', (params) => {
     const [metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty] = params;
     p = { metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty };
   }
-  return queryMetrics(p);
+  return queryMetricsSeries(p);
 });
 registerMethod('metrics:ping', (params = {}) => {
   const p = Array.isArray(params) ? (params[0] || {}) : params;
