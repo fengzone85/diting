@@ -379,7 +379,14 @@ arch ∈ `ARCHS ∪ {''}`；virtualization ∈ `VIRTUALIZATIONS ∪ {''}`；每�
 >   2. **`/themes/<short>/` 带尾斜杠 404**（被 `/themes/<id>/(.*)` 路由吃掉后越界误判）；
 >   3. **`public:queryMetrics` 返回 `{start,end,series}` 信封**，而 Komari 返回 `[]publicMetricSeries` 裸数组；
 >   4. **`common:getRecords(type=load)` 返回 `{records}` 信封**，Komari 返回 `[]flatRecord`（扁平字段 cpu/ram/…）；顺带修正 `RECORD_FIELD_MAP` 里 swap 误指内存列。
-> - **联调遗留（未解决）**：主题详情页图表区仍显示「暂无负载数据 / 暂无延迟数据」。已排除 CSP、尾斜杠、两个 RPC 信封三/四种原因；`queryMetrics` 现返回 9 条有 60 点的 series、`getRecords(load)` 返回扁平数组，但主题仍判定为空 —— 待对照 Komari `metricstore` 的 series 元数据（`type`/`interval_seconds`/`tags`）与图表渲染条件继续排查。
+> - **联调遗留（2026-10-29 进展）**：负载图 6 张（CPU/负载、内存与 Swap、磁盘、实时网络、网络连接、进程）**已全部渲染**。
+>   关键结论：`public:queryMetrics` 必须保持 `{ start, end, series }` 信封 —— 主题 LoadChart 直接读 `o.series`；
+>   先前按 Komari Go 侧结构改成 `[]publicMetricSeries` 裸数组，实测反而让六张负载图全空（已回退）。
+>   即「以真实主题行为为准」，不能只看后端 Go 结构。
+> - **仍未解决**：延迟图（PingChart）恒「暂无延迟数据」。已确认 `public:getPingMetricStats` 的 stats（4 task，total>0）
+>   与 `queryMetrics(ping.latency_ms)` 的 series（3 task，各 30–60 点）两侧 task 集合可对齐，
+>   但主题内部 `Ye()/Ce()/Pe()` 归一化链（位于 v3-services 与其它 chunk，压缩后同名函数跨 chunk 重名干扰静态分析）
+>   仍返回空 —— 建议直接对照 Glassmorphism 源码仓库的 PingChart 实现继续，而不是继续猜压缩产物。
 
 **PR2**
 - [ ] admin 可录入厂商+代际+架构+虚拟化；留空合法
