@@ -2075,7 +2075,7 @@ const getAgentDistribution = (pkgId) =>
 const pruneAgentDistributions = (now = Date.now()) =>
   db.prepare('DELETE FROM agent_distributions WHERE expires_at < ?').run(Number(now)).changes;
 
-// 官方源种子。仓库已上线（fengzone85/diting-theme-market）并已收录首个主题，默认启用。
+// 官方源种子。仓库已上线（fengzone85/diting-theme-market）；种子默认 disabled（见下）。
 const OFFICIAL_THEME_MARKET = {
   id: 'official',
   name: 'Diting Official',
