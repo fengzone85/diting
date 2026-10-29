@@ -7,8 +7,9 @@
 //      外部图标/汇率请求 → 必须默认放宽该主题页的 CSP，否则内联脚本被拦、图标/图表异常；
 //   2. 主题根链接常带尾斜杠（/themes/<short>/），此前被 /themes/<id>/(.*) 路由吃掉后
 //      越界检查误判 → 404；
-//   3. Komari 的 public:queryMetrics 返回 []publicMetricSeries（裸数组），diting 曾返回
-//      { start, end, series } 信封 → 主题按数组解析，图表恒「暂无数据」。
+//   3. public:queryMetrics 必须保持 { start, end, series } 信封：Glassmorphism 的 LoadChart
+//      直接读 `o.series`；曾按 Komari Go 侧改成 []publicMetricSeries 裸数组，实测六张负载图
+//      反而全空，已回退（以真实主题行为为准）。
 // ============================================================
 process.env.PORT = '0';
 process.env.ADMIN_ALLOW_HTTP = '1';
@@ -76,7 +77,7 @@ test('主题资源仍可访问', async () => {
   await request(app).get(`/themes/${SHORT}/assets/app.js`).expect(200);
 });
 
-test('RPC public:queryMetrics 返回裸数组（Komari 契约，信封会导致图表恒空）', async () => {
+test('RPC public:queryMetrics 返回 { series } 信封（主题按 o.series 解析）', async () => {
   const { id } = db.createAgent({ name: 'km-node' });
   db.insertMetric(id, { ts: Date.now(), cpu: 12.5, mem_total: 8192, mem_used: 1024 });
 
@@ -85,10 +86,12 @@ test('RPC public:queryMetrics 返回裸数组（Komari 契约，信封会导致�
     .send({ jsonrpc: '2.0', id: 1, method: 'public:queryMetrics', params: { metric_keys: ['cpu.usage'], entity_id: id, hours: 1 } })
     .expect(200);
 
-  assert.ok(Array.isArray(res.body.result), 'result 必须是数组（不是 { start, end, series } 信封）');
-  assert.ok(res.body.result.length >= 1, '应至少返回一条 series');
-  assert.strictEqual(res.body.result[0].metric_key, 'cpu.usage');
-  assert.ok(Array.isArray(res.body.result[0].points), 'series 应含 points 数组');
+  // 实测 Glassmorphism 的 LoadChart 读 `o.series`；改回 Komari Go 侧的裸数组会让六张负载图全空
+  const r = res.body.result;
+  assert.ok(r && Array.isArray(r.series), 'result 必须含 series 数组（信封形态）');
+  assert.ok(r.series.length >= 1, '应至少返回一条 series');
+  assert.strictEqual(r.series[0].metric_key, 'cpu.usage');
+  assert.ok(Array.isArray(r.series[0].points), 'series 应含 points 数组');
 });
 
 test('RPC metrics:query（位置参数形态）与 public:queryMetrics 同构', async () => {
@@ -101,7 +104,7 @@ test('RPC metrics:query（位置参数形态）与 public:queryMetrics 同构', 
       params: [['cpu.usage'], id, null, 1, null, null, 500, 'avg', true]
     })
     .expect(200);
-  assert.ok(Array.isArray(res.body.result), 'metrics:query 也必须返回数组');
+  assert.ok(Array.isArray(res.body.result.series), 'metrics:query 也应返回 { series } 信封');
 });
 
 test('RPC common:getRecords(type=load) 返回扁平数组（LoadChart 契约）', async () => {

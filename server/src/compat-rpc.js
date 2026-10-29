@@ -339,16 +339,11 @@ registerMethod('public:getClientRecentRecords', (params = {}) => {
 registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params));
 registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
-// 返回结构对齐 Komari：publicQueryMetrics 返回的是 []publicMetricSeries（裸数组），
-// 而 compat-metrics.queryMetrics 内部用的是 { start, end, series } 信封。社区主题
-// （Glassmorphism 等）按数组解析 result，收到对象会直接判定「无数据」→ 图表恒空。
-// 内部函数保持信封（compat-metrics.test.js 依赖），只在 RPC 边界拆出 series 数组。
-function queryMetricsSeries(params) {
-  const out = queryMetrics(params);
-  if (Array.isArray(out)) return out;
-  return out && Array.isArray(out.series) ? out.series : [];
-}
-registerMethod('public:queryMetrics', queryMetricsSeries);
+// 返回结构：保持 { start, end, series } 信封。实测 Glassmorphism v3.4.4 的 LoadChart 直接读
+// `o.series`（`We(o.series)`），若按 Komari Go 侧的 []publicMetricSeries 裸数组返回，`o.series`
+// 为 undefined → 全部图表判定「暂无数据」。（曾按官方 Go 结构改成裸数组，实测反而六张负载图全空，
+// 已回退——以真实主题行为为准。）
+registerMethod('public:queryMetrics', queryMetrics);
 registerMethod('public:getPingMetricStats', getPingMetricStats);
 
 // Komari 官方社区主题（Glassmorphism）底层 MetricsService 调用的原生方法名
@@ -363,7 +358,7 @@ registerMethod('metrics:query', (params) => {
     const [metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty] = params;
     p = { metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty };
   }
-  return queryMetricsSeries(p);
+  return queryMetrics(p);
 });
 registerMethod('metrics:ping', (params = {}) => {
   const p = Array.isArray(params) ? (params[0] || {}) : params;
