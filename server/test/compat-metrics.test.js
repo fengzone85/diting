@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const db = require('../src/db');
-const { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics } = require('../src/compat-metrics');
+const { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics, probeTaskId } = require('../src/compat-metrics');
 
 // ── 造数据：两个 agent，各若干行 ───────────────────────────────
 // 注意：metrics.agent_id 对 agents 有外键约束，必须先建 agent 行再插 metrics。
@@ -143,9 +143,12 @@ test('L-7: 多节点查询时每个节点各自拿到数据（不再被全局配
   const e2 = out.series.filter(s => s.entity_id === A2);
   assert.ok(e1.length > 0, 'A1 应有 ping series');
   assert.ok(e2.length > 0, 'A2 应有 ping series（旧实现会被全局配额挤空）');
-  // 各自 task 名正确
-  assert.strictEqual(e1[0].task_id, '移动');
-  assert.strictEqual(e2[0].task_id, '电信');
+  // 各自 task 正确：task_id 是稳定的数字标识（对齐 Komari，主题按数字关联 series），
+  // 中文名放 name/task_name
+  assert.strictEqual(e1[0].task_name, '移动');
+  assert.strictEqual(e1[0].task_id, probeTaskId('移动'));
+  assert.strictEqual(e2[0].task_name, '电信');
+  assert.strictEqual(e2[0].task_id, probeTaskId('电信'));
 });
 
 test('L-7: 单节点查询返回该节点自己的探针数据', () => {

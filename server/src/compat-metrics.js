@@ -3,6 +3,19 @@
 // 设计为独立模块，便于后续插件追加自定义指标。
 const db = require('./db');
 
+// 探针任务的对外标识：diting 内部用 label（中文名，如「电信」）作 task 标识，而 Komari 的
+// task 标识是**数字**（PingTaskInfo.id / stats.task_id / series.task_id 三处同源）。社区主题
+// PingChart 会把 task_id 数值化后当 id 用（`normalizeMetricTaskId`），若拿到的是中文名，
+// backend task 列表与 series/stats 的 id 就对不上（选中态、图例、series 全部落空，表现为
+// 「有 tab 但没图」）。这里用确定性哈希把 label 映射为稳定正整数：同一 label 在所有节点
+// 得到同一个 id，且不依赖主题内部的哈希实现。
+function probeTaskId(label) {
+  const s = String(label == null ? '' : label);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return (h % 1000000) + 1; // 1..1e6，避开 0（0 会被主题当成「无任务」）
+}
+
 // 注意：前端 LoadChart/PingChart 的 le 白名单与 listMetricDefinitions 返回值按【Komari 官方点分命名】匹配
 // （如 cpu.usage / load.average / memory.used），因此此处 name 必须与点分命名对齐，否则 Nt() 过滤后为空导致全不渲染。
 const METRIC_DEFINITIONS = [
@@ -144,7 +157,8 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
         series.push({
           metric_key: pk,
           entity_id: entityId,
-          task_id: taskName,
+          task_id: probeTaskId(taskName),
+          task_name: taskName,
           name: taskName,
           unit: pk === 'ping.latency_ms' ? 'ms' : '%',
           retention_days: 30,
@@ -197,4 +211,4 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   return { start, end, series, count: series.length };
 }
 
-module.exports = { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics };
+module.exports = { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics, probeTaskId };
