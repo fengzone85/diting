@@ -339,7 +339,11 @@ app.use('/api', compat.router);
 // 注入到主题的 inline <script>，并仅对本次响应覆盖 CSP 头。子资源（JS/CSS/图片）沿用文档策略，
 // 无需单独设头。nonce 每次请求随机生成，不可复用，不可预测。
 function themeRelaxedCsp(nonce) {
-  return `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://ipwho.is https://ipapi.co https://api.ip.sb; font-src 'self' data:`;
+  // connect-src 白名单是「社区主题实际会直连的外部只读服务」：图标（Iconify 三源）、
+  // IP 地理定位（ipwho.is / ipapi.co / api.ip.sb）、汇率换算（open.er-api.com /
+  // api.frankfurter.app，Glassmorphism 用来显示本币价格）。这些都是只读 GET，
+  // 不引入新的数据外发面；脚本源仍限定 'self' + 一次性 nonce。
+  return `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://ipwho.is https://ipapi.co https://api.ip.sb https://open.er-api.com https://api.frankfurter.app; font-src 'self' data:`;
 }
 // 把 nonce 注入主题的每一个 inline <script>（没有 src 的那些），外部模块脚本不受影响。
 function injectNonce(html, nonce) {
@@ -400,6 +404,10 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
   const subPath = req.params[1] || '';
   const baseDir = resolveThemeRoot(id);
   if (!baseDir) return next();
+  // 裸根（带尾斜杠 /themes/<id>/）：subPath 为空时 path.join(baseDir,'') 会把尾斜杠
+  // 归一化掉，导致下面的 startsWith(baseDir + sep) 越界检查误判 → 404。
+  // 交给紧随其后的 /themes/<id>/? 路由处理（实测社区主题根链接带尾斜杠时会 404）。
+  if (!subPath) return next();
   const fp = path.join(baseDir, subPath);
   if (!fp.startsWith(baseDir + path.sep)) return res.status(404).end();
   // 真实静态资源（带后缀）：存在则返回，否则 404 交给后续处理链。

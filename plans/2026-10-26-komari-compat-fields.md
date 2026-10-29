@@ -367,11 +367,19 @@ arch ∈ `ARCHS ∪ {''}`；virtualization ∈ `VIRTUALIZATIONS ∪ {''}`；每�
 - [x] `/api/v1/nodes/:uuid/capability` 的 `cpu_cores` 为 `true`
 - [x] 原生前端节点页显示「核心数」
 - [ ] 挂一个 Komari 社区皮肤：节点卡片显示核数/进程数/温度/价格，**不需改主题源码**
+  → 2026-10-29 **部分达成**（komari-theme-Glassmorphism v3.4.4 真实产物）：卡片价格/周期/CPU/内存/磁盘/流量正常，详情页硬件卡显示「(4 vCPU)」，内核版本不再显示主机名；**图表区仍空**，见下「联调遗留」。
 
 > 验证记录（2026-10-29）：
 > - 自动化：`server/test/compat-fields.test.js`（9 项）新增，全量 `npm test` 622/622 通过；前端 `vue-tsc -b && vite build` 通过。
 > - 真实数据：以生产库副本在 8091 起隔离实例，三台节点实测 —— `/api/nodes` `cpu_cores=4`、`kernel_version=''`、`j4125 price 0→-1`、`billing_cycle=-1` 原样保留、`currency` 取真实值（n5100 `$`）；`/api/v1/nodes` `kernel=null`、`hostname` 独立有值、`process` 真实（298/120/282）；`capability.cpu_cores=true`；`cards` 已去除三张空图；`/api/public/agents` `cores=4`；`/api/recent` `process` 真实。
-> - 未做：浏览器内可视化确认（本仓库无 playwright 依赖，仅构建+类型检查通过）；真实 Komari 社区皮肤联调（需下载皮肤并部署静态资源）。
+> - 浏览器可视化（2026-10-29 补做，playwright 1.64 + chromium）：原生详情页 `/node/:id` 硬件卡显示「核心数 4」，内核版本显示「—」；CPU 型号/天梯条仍为空（PR2 范围）。
+> - **真实社区皮肤联调（2026-10-29）**：安装 komari-theme-Glassmorphism v3.4.4 正式产物到运行时主题目录（`<DB 同级>/themes/Glassmorphism`），未改主题源码（仅部署时把 dist/index.html 的绝对 `/assets/` 前缀重写为 `/themes/<short>/assets/`，属部署适配）。
+>   联调中发现并修复 4 处服务端缺陷：
+>   1. **Komari 格式主题默认不放宽 CSP** → 内联脚本被拦、Iconify/汇率请求被阻（`komari-theme.json` 不含 `diting.*` 字段）；
+>   2. **`/themes/<short>/` 带尾斜杠 404**（被 `/themes/<id>/(.*)` 路由吃掉后越界误判）；
+>   3. **`public:queryMetrics` 返回 `{start,end,series}` 信封**，而 Komari 返回 `[]publicMetricSeries` 裸数组；
+>   4. **`common:getRecords(type=load)` 返回 `{records}` 信封**，Komari 返回 `[]flatRecord`（扁平字段 cpu/ram/…）；顺带修正 `RECORD_FIELD_MAP` 里 swap 误指内存列。
+> - **联调遗留（未解决）**：主题详情页图表区仍显示「暂无负载数据 / 暂无延迟数据」。已排除 CSP、尾斜杠、两个 RPC 信封三/四种原因；`queryMetrics` 现返回 9 条有 60 点的 series、`getRecords(load)` 返回扁平数组，但主题仍判定为空 —— 待对照 Komari `metricstore` 的 series 元数据（`type`/`interval_seconds`/`tags`）与图表渲染条件继续排查。
 
 **PR2**
 - [ ] admin 可录入厂商+代际+架构+虚拟化；留空合法
