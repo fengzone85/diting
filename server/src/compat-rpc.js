@@ -3,7 +3,7 @@
 // 方法表采用 Map 注册制，预留 plugin:<id>:* 命名空间供未来插件扩展。
 const db = require('./db');
 const { toNode, toRealtime, publicOpen, getNodesLatestStatus } = require('./compat');
-const { METRIC_DEFINITIONS, queryMetrics } = require('./compat-metrics');
+const { METRIC_DEFINITIONS, queryMetrics, probeTaskId } = require('./compat-metrics');
 // 审查 C4：RPC 里的重聚合（getPingRecords 720h 全窗）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
 
@@ -65,7 +65,9 @@ async function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
       Object.entries(probes).forEach(([name, val]) => {
         records.push({
           client: r.agent_id,
-          task_id: name,
+          // task 标识用数字 id（与 series/stats/tasks 三处同源），中文名放 task_name
+          task_id: probeTaskId(name),
+          task_name: name,
           time: new Date(r.ts).toISOString(),
           value: (val && typeof val.ms === 'number') ? val.ms : -1
         });
@@ -158,7 +160,7 @@ async function getRecords(params = {}) {
     const agg = {};
     records.forEach(r => {
       const k = r.client + ' ' + r.task_id;
-      if (!agg[k]) agg[k] = { entity_id: r.client, task_id: r.task_id, name: r.task_id, values: [] };
+      if (!agg[k]) agg[k] = { entity_id: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [] };
       const a = agg[k];
       a.total = (a.total || 0) + 1;
       if (typeof r.value === 'number' && r.value >= 0) a.values.push(r.value);
@@ -193,7 +195,9 @@ async function getRecords(params = {}) {
       records,
       recordsByClient: byClient,
       stats,
-      tasks: [],
+      // Komari 的 RecordsResp.tasks 带任务清单（id/name/interval），主题的延迟图在
+      // 「指标接口不可用」时会回退到这条 legacy 链路，tasks 恒空会让它直接显示空态。
+      tasks: getPublicPingTasks({ entity_id: entityId }).tasks,
       basic_info: [],
       from: fromIso,
       to: nowIso
@@ -251,10 +255,15 @@ function getPublicPingTasks(params = {}) {
       const probes = JSON.parse(r.probes || '{}');
       Object.keys(probes).forEach(name => {
         if (!taskMap.has(name)) {
+          // id/task_id 用数字（Komari 的 PingTaskInfo.id 是数字），中文名放 name/task_name：
+          // 主题用 id 做选中态与 series 关联，给中文名会导致「有 tab 没图」。
+          const tid = probeTaskId(name);
           taskMap.set(name, {
             entity_id: r.agent_id,
             client: r.agent_id,
-            task_id: name,
+            id: tid,
+            task_id: tid,
+            task_name: name,
             name: name,
             type: 'icmp',
             interval_seconds: 0,
@@ -277,7 +286,7 @@ function getPingMetricStats(params = {}) {
   records.forEach(r => {
     if (entityId && r.client !== entityId) return;
     const k = r.client + '\x00' + r.task_id;
-    if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_id, values: [] };
+    if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [] };
     if (typeof r.value === 'number' && r.value >= 0) agg[k].values.push(r.value);
   });
   const stats = Object.values(agg).map(a => {
@@ -307,7 +316,7 @@ function getPingMetricStats(params = {}) {
       latest: vals.length ? vals[vals.length - 1] : 0
     };
   });
-  return { count: stats.length, stats, tasks: [], basic_info: [] };
+  return { count: stats.length, stats, tasks: getPublicPingTasks({ entity_id: entityId }).tasks, basic_info: [] };
   });
 }
 
