@@ -4,8 +4,8 @@
 </h1>
 
 <p align="center">
-  <strong>自托管 Docker 监控 · 受控端零入站 · 无指令通道</strong><br>
-  <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · Komari 主题兼容 · 100 台规模设计</sub><br>
+  <strong>自托管 VPS 监控 · 受控端零入站 · 无指令通道</strong><br>
+  <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · 主题市场 · Komari 主题兼容 · 100 台规模设计</sub><br>
   <a href="README_EN.md">English</a> · <a href="https://fengzone85.github.io/diting/">文档</a> · <a href="https://github.com/fengzone85/diting/issues">反馈</a>
 </p>
 
@@ -22,6 +22,10 @@
 
 ---
 
+**谛听（Diting）** 是一个自托管的 VPS 监控面板：每台受控机跑一个单文件 Go agent，只做出站 HTTPS 上报——
+**不开任何入站端口、不接受任何服务端指令**；服务端用 Node.js + SQLite 渲染 Vue3 管理端，配套告警、审计、
+AI 日报、计费到期、备份恢复与 Komari 社区主题兼容层。
+
 ## ✨ 核心特性
 
 <table>
@@ -34,19 +38,22 @@
 - **审计日志** — 管理端所有写操作全量留痕，可回溯
 - **签名 Session Cookie** — 替代前端裸存 Token，防 XSS 窃取
 - **TOTP 两步验证** — 危险操作需动态码
-- **严格 CSP** — 无 `unsafe-inline`、无外链脚本
+- **严格 CSP** — 无 `unsafe-inline`、无外链脚本（第三方主题走一次性 nonce 白名单）
 - **恒定时间 Token 比较** — 防时序侧信道
-- **IP 白名单** — 支持 IPv4/IPv6/CIDR</td>
+- **IP 白名单** — 支持 IPv4/IPv6/CIDR
+- **发布链签名** — 受控端产物 `sha256` + ed25519 `.sig`，中继验签通过才转发</td>
 
 <td width="50%">
 
 ### 📊 监控与告警
 - **实时指标** — CPU/内存/硬盘/负载/流量/温度/Swap，多盘聚合
-- **网络质量探测** — 延迟 + 丢包率（loss），到固定公共 DNS
+- **网络质量探测** — 延迟 + 丢包率 + HTTP/TLS 证书到期，到固定公共目标
+- **两级历史** — 小时行折叠 + 明细加权合并读，30 天窗口不爆库
+- **容量保险丝** — 行数/库大小双水位，超限只停明细、告警与实时数据照常
 - **AI 日报** — 服务端定时汇总昨日异常，自动投递日报
 - **月流量累计** — 持久化，跨重启、跨月不丢
 - **计费与到期** — 月/季/年费、自动续期、批量续期
-- **告警通知** — QQ 邮箱 + Telegram 并行，带冷却去重
+- **告警通知** — QQ 邮箱 + Telegram + Webhook，采样窗口判定 + 冷却去重
 - **Prometheus `/metrics`** — Grafana 友好（强制 HTTPS）
 - **公开状态页** — 游客脱敏视图，无需 Token</td>
 </tr>
@@ -59,17 +66,22 @@
 - **Docker Agent** — Go 多阶段构建的 scratch 镜像，65–150MB（含守护进程）
 - **Agent 零耦合** — 彼此不知互存在
 - **数据最小化** — 不采内核/GPU/公网IP/连接数
-- **多盘支持** — 自动识别物理磁盘（过滤 tmpfs/proc/伪盘）</td>
+- **多盘支持** — 自动识别物理磁盘（过滤 tmpfs/proc/伪盘）
+- **批量分发** — 服务端生成分发包，管理员在节点本地执行、只换二进制保身份
+- **版本可判定** — 期望版本/期望 sha 对照，`outdated` / `unknown` 一目了然
+- **签名中继** — 拉不到 GitHub 的节点从自有服务端取二进制</td>
 
 <td width="50%">
 
 ### ⚡ 管理端与生态
 - **Vue3 SPA** — Vite + Tailwind v4 + TS，玻璃拟态/明亮双主题
-- **Komari 主题兼容** — 官方社区皮肤即插即用（`/?theme=<id>`）
+- **主题市场** — ZIP 安装 / URL 导入 / 更新 / 回滚，安全解压 + SSRF 防护
+- **Komari 主题兼容** — 官方社区皮肤免改即用（`/?theme=<id>`）
 - **WebSocket 实时推送** — 离线/恢复/告警实时下发
 - **仪表盘自定义** — 拖拽排序、分组、卡片/列表两种模式
+- **备份管理** — 在线快照、上传/下载/恢复、完整性抽查
 - **统一 diting.sh** — 部署+更新+卸载+数据库管理+救援（重置 Token / 清除 IP 白名单），whiptail TUI，无 GUI 回退文本菜单
-- **自助注册** — `SETUP_TOKEN` 一键建客户端
+- **自助注册** — `SETUP_TOKEN` 一键建客户端，可要求管理员确认并限制数量
 - **100 台规模设计** — 后端降采样 + SQL 聚合，非事后调优</td>
 </tr>
 </table>
@@ -117,7 +129,11 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 > 两种校验口径：`SP_INSTALL_SHA256`（脚本自身）未提供时 `--update-script` 不校验，
 > 但会把本次下载文件的 SHA256 打印到终端，便于留档与下次强校验；受控端安装器
 > （Go 的 `.sha256`）则是**未提供即拒绝安装**。
-> 发布流程：打 tag → 编译/打包 → `sha256sum` 各产物 → 写入 Release notes。
+> 发布流程：打 tag → CI 跑测试 → 编译三平台产物 → 生成 `.sha256` 与 ed25519 `.sig` → 写入 Release notes。
+
+**拉不到 GitHub 的节点（如电信出口）：** 服务端设 `RELAY_ENABLED=1` 后，`--install-agent`
+会**优先**从 `<SERVER_URL>/api/releases/agent/linux/<arch>` 取二进制（服务端先整包验签再转发，
+未通过绝不外流），失败自动回落 GitHub Release；两条路径都照样强制 SHA256 校验。
 
 ---
 
@@ -136,8 +152,10 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 │  ├─ SPA             / · /login · /admin · /node/:id         │
 │  ├─ Komari 兼容层    /api/v1/* · /api/clients(WS) · /api/rpc2│
 │  ├─ 公开脱敏视图     /api/public/*（游客可见，字段脱敏）      │
+│  ├─ 受控端中继       /api/releases/agent/:os/:arch（验签）   │
+│  ├─ 主题挂载/市场     THEMES_DIR（DB 同级，随数据卷持久）     │
 │  ├─ Prometheus      /metrics（强制 HTTPS）                  │
-│  └─ 能力模块         AI 日报 · 审计日志 · 计费/到期 · 告警    │
+│  └─ 能力模块         AI 日报 · 审计 · 计费/到期 · 告警/通知组 │
 │        SQLite（Token 存 SHA-256 哈希，非明文）               │
 └────────────────────────────────────────────────────────────┘
              │
@@ -150,7 +168,8 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 - 服务端绑定 `127.0.0.1:8081`，由 Nginx + TLS 反代对外暴露 443
 - 数据库存储 Token 哈希（SHA-256），非明文
 - 登录态用签名 `HttpOnly + Secure + SameSite=Strict` Cookie
-- 第三方 Komari 主题通过兼容层接入，无需改动本项目代码
+- 第三方 Komari 主题通过兼容层接入，**运行时重写 HTML 引用**，磁盘上的主题文件不做任何修改
+- 签名中继只转发「ed25519 验签通过 + 架构匹配」的产物，按具体 tag 缓存，`:os/:arch` 走白名单查表
 
 ---
 
@@ -158,35 +177,48 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 
 ```
 diting/
-├── diting.sh                # 一键部署/更新/卸载/数据库管理/救援（whiptail TUI）
+├── diting.sh                # 一键部署/更新/卸载/数据库管理/备份/救援（whiptail TUI）
 ├── docker-compose.yml       # 快速启动（测试用）
 ├── server/                  # 服务端（Node.js 22 + Express + SQLite）
-│   ├── server.js            # 入口 + 路由 + WebSocket + SPA fallback
+│   ├── server.js            # 入口 + 路由 + WebSocket + SPA/主题 HTML 重写 + prune 调度
 │   ├── src/
-│   │   ├── api.js           # REST API（客户端/设置/告警/计费/审计）
+│   │   ├── api.js           # REST API（客户端/设置/告警/计费/审计/备份/主题市场）
 │   │   ├── auth.js          # 鉴权 + Session + IP 白名单
-│   │   ├── db.js            # SQLite + 迁移 + 配置
-│   │   ├── alerts.js        # 阈值检查 + 邮件/Telegram 通知
-│   │   ├── totp.js          # RFC 6238 TOTP（零依赖）
-│   │   ├── validate.js      # 输入校验 + CSS 清洗
-│   │   ├── util.js          # 通用工具（daysUntil / cycleLabel / …）
+│   │   ├── db.js            # SQLite + 迁移 + 配置（含 heavy-db 门面）
+│   │   ├── online.js        # 在线判定唯一口径（复用告警阈值解析）
+│   │   ├── alerts.js        # 阈值/证书检查 + 采样窗口判定
+│   │   ├── notify.js        # 邮件 / Telegram / Webhook + 通知组路由（SSRF 防护）
+│   │   ├── traffic.js       # 月流量累计与月重置口径
+│   │   ├── rollup.js        # 明细 → 小时行折叠（水位线 metrics_rolled）
+│   │   ├── metrics-merge.js # 小时行 + 明细行加权合并读
+│   │   ├── capacity.js      # 容量保险丝（行数/库字节双水位）
+│   │   ├── backups.js       # 备份列表 / 下载 / 恢复触发
+│   │   ├── theme.js         # 主题目录解析（安装目录 → 内置目录）
+│   │   ├── theme-market.js  # 主题市场：catalog / ZIP 安全解压 / 安装 / 回滚
+│   │   ├── agent-relay.js   # 受控端签名中继（ed25519 验签后转发）
+│   │   ├── distribution.js  # 批量分发：生成分发包与只换二进制的脚本
+│   │   ├── agent-versions.js# 期望版本/sha 对照与状态判定
 │   │   ├── compat.js        # Komari 主题 REST 兼容层
 │   │   ├── compat-metrics.js# Komari /api/records/load|ping 适配
 │   │   ├── compat-rpc.js    # Komari /api/rpc2 适配
 │   │   ├── v1.js            # 标准 /api/v1/* 端点（与 Komari 同形）
+│   │   ├── totp.js          # RFC 6238 TOTP（零依赖）
+│   │   ├── validate.js      # 输入校验 + CSS 清洗
 │   │   └── ai/              # AI 日报（provider/prompt/report/schedule/summarizer）
 │   ├── web/                 # Vue3 + Vite + Tailwind v4 + TypeScript SPA
 │   │   └── src/             # 公开页 / 管理页 / 组件 / composables / services
-│   ├── public/              # SPA 构建产物 + setup 向导 + 主题
-│   │   └── themes/          # 第三方皮肤（自研 + Komari 兼容）
-│   └── test/security.test.js   # 安全单元测试
+│   ├── public/              # SPA 构建产物 + setup 向导 + 内置主题（只读）
+│   │   └── themes/          # 随发行版分发的皮肤；运行时安装的皮肤在 THEMES_DIR
+│   └── test/                # node:test 单测与集成用例（安全/兼容/告警/中继/分发…）
 ├── agent-go/                # Go 受控端（Linux / Windows / Docker 共用一套代码）
-│   ├── main.go              # 主循环 + 自适应采样
+│   ├── main.go              # 主循环（自适应档位在 adaptive.go）
+│   ├── install.sh           # Linux 一键安装（优先服务端中继，失败回落 GitHub）
 │   ├── install-go.ps1       # Windows 一键安装（计划任务）
 │   ├── collector/           # 采集子模块（cpu/mem/disk/diskio/network/probe/…）
-│   ├── reporter/            # 上报 + 压缩 + 重试
+│   ├── reporter/            # 上报 + 重试（不带压缩死选项）
 │   └── config/              # 环境变量解析
-├── docs/                    # 用户技术文档（13 篇）
+├── scripts/sign-agent-release.sh   # 发布产物 ed25519 签名
+├── docs/                    # 文档站（Astro，13 篇）
 └── nginx/monitor.conf.example   # TLS 反代 + 限流示例
 ```
 
@@ -200,32 +232,58 @@ diting/
 
 | 变量 | 必填 | 默认值 | 说明 |
 |---|---|---|---|
-| 变量 | 必填 | 默认值 | 说明 |
-|---|---|---|---|
 | `PORT` | 否 | `8081` | HTTP 监听端口 |
+| `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
 | `ADMIN_TOKEN` | 否 | — | **已废弃，仅存量迁移用**：新装由浏览器 `/install` 安装向导创建管理员 Token，**库中只存 sha256 哈希**，明文只在完成页显示一次。存量部署保留此变量，启动时会把旧明文迁进库并打印「已废弃」告警；迁移后可删。重置用 `sudo bash diting.sh --reset-admin-token`（写库即时生效，无需重启） |
 | `SESSION_SECRET` | 推荐 | 随机 | Session Cookie 签名密钥（固定则重启不失效） |
 | `SESSION_TTL_MS` | 否 | `43200000` | 登录态有效期（毫秒，默认 12 小时） |
 | `READONLY_TOKEN` | 否 | — | 只读 Token（仅查看，不可写；建议 ≥16 位，占位符 / 过短会启动告警）。全局静态凭证，不可吊销 / 无审计 / 不能限节点；需要这些能力请用 API Token（见下「只读账号与 API Token」） |
-| `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌 |
-| `DB_PATH` | 否 | `/data/monitor.db` | SQLite 路径 |
+| `SETUP_TOKEN` | 否 | — | 受控端自助注册令牌（首次使用即入库，此后以库为准） |
+| `SETUP_REQUIRE_APPROVAL` | 否 | `1` | 自助注册的节点默认「待管理员确认」；设 `0` 退回自动通过 |
+| `SETUP_MAX_AGENTS` | 否 | `50` | 自助注册可创建的节点数上限 |
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
-| `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
+| `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒）；节点/分组级可在后台覆盖，全部判定共用 `online.js` 一个口径 |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7-3650） |
+| `METRICS_DETAIL_DAYS` | 否 | `7` | 分钟级明细保留天数（3-30）；更早的数据由小时行承载 |
 | `PROBES_DOWNSAMPLE` | 否 | `1` | 延迟波形后端时间桶聚合（`0` 关闭，交前端处理） |
 | `PROBES_MAX_POINTS` | 否 | `5000` | 每标签点数上限（硬上限 50000） |
+| `CERT_WARN_DAYS` | 否 | `14` | HTTPS 探测目标证书剩余天数告警阈值（24h 冷却） |
 | `ALERT_CPU_PCT` | 否 | `90` | CPU 告警阈值（%） |
 | `ALERT_MEM_PCT` | 否 | `90` | 内存告警阈值（%） |
 | `ALERT_COOLDOWN_SEC` | 否 | `1800` | 告警冷却时间（秒） |
+| `ALERT_WINDOW_SAMPLES` / `ALERT_TRIGGER_RATIO` | 否 | `5` / `0.7` | 阈值告警按采样窗口判定：窗口内 ≥70% 样本越界才触发/恢复（替代旧的连续 N 次） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | 否 | `smtp.qq.com` / `465` / `true` | SMTP 服务器与加密 |
 | `SMTP_USER` / `SMTP_PASS` | 否 | — | SMTP 用户名 / 密码（QQ 邮箱用授权码） |
 | `ALERT_FROM` / `ALERT_TO` | 否 | — | 告警发件人 / 收件人 |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | 否 | — | Telegram Bot 告警（与邮件并行） |
-| `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
 | `PUBLIC_URL` | 推荐 | — | 服务器公网地址（生成受控端一键安装命令用；也可在后台「设置 → Agent 连接地址」配置，见上方升级注意） |
 | `TRUST_PROXY` | 否 | `loopback` | 可信反向代理地址（见下「反向代理与 `TRUST_PROXY`」） |
+| `ADMIN_ALLOW_HTTP` | 否 | — | 设为 `1` 允许 HTTP（仅内网测试） |
+| `THEMES_DIR` | 否 | DB 同级 `themes/` | 运行时安装主题目录（随数据卷持久）；`public/themes` 仍只读 |
+| `BACKUP_DIR` / `RESTORE_TRIGGER` | 否 | `/data/backups` / `<BACKUP_DIR>/restore.request` | 后台「备份」页读写的宿主目录；原生部署要改成宿主路径 |
+| `RELAY_ENABLED` / `RELAY_CACHE_DIR` | 否 | `0` / 系统临时目录 | 受控端签名中继开关与产物缓存目录 |
+| `AI_KEY_FROM_ENV` / `AI_API_KEY` | 否 | `0` / — | 设 `1` 时 AI Key 只从环境变量读、不落库 |
+| `AI_TREND_DAYS` | 否 | `7` | 磁盘「多久写满」趋势窗口（2-14，`0` 回退旧算法） |
 
-> AI 日报、计费、审计、Komari 主题均由后台「设置」页管理，无需环境变量。完整清单见 `server/.env.example`。
+**高级 / 回退开关**（默认值即可，排障时才动）：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `ALERT_SUSTAIN_SAMPLES` | — | 设 `N` 回退旧的「连续 N 次越界」判定 |
+| `ONLINE_NOTIFY_GRACE_SEC` | `180` | 离线超过该秒数才发「恢复」通知（`0` 关闭） |
+| `ALERT_CONCURRENCY` / `NOTIFY_CONCURRENCY` | `8` / `8` | 告警判定与通知投递并发（上限 32） |
+| `NOTIFY_GROUPS` | `1` | `0` 退回通知组之前的「邮件 + Telegram 直发」路径 |
+| `ALLOW_PRIVATE_WEBHOOK` / `ALLOW_INSECURE_WEBHOOK` | — | 放行私网 / `http` Webhook（默认只允许 https + 公网地址） |
+| `AUDIT_RETENTION_DAYS` | `90` | 审计日志保留天数（下限 7） |
+| `BACKUP_UPLOAD_MAX_MB` | `1024` | 后台上传备份文件大小上限 |
+| `METRICS_ROLLUP_ENABLED` | `1` | `0` 关闭小时折叠（回退单表，老库才需要） |
+| `STRICT_SESSION_DB` | — | `1` 时会话库异常即拒绝登录（默认 fail-open，避免锁死管理员） |
+| `AI_COMPARE` | `1` | `0` 关闭日报的周期对比采样（省一次查询） |
+| `HEAVY_QUERY_TIMEOUT_MS` / `HEAVY_WORKER_IDLE_MS` / `HEAVY_QUERY_BUDGET_MS` | `60000` / `5000` / `10000` | 重聚合查询的 worker 超时、空闲回收与慢查询告警预算 |
+| `AGENT_ARTIFACT_DIR` / `AGENT_DISTRIBUTION_DIR` / `AGENT_ARTIFACT_MAX_MB` | DB 同级 `agent-artifacts` / `agent-distributions` / `100` | 批量分发的二进制与分发包存放目录、单文件上限 |
+| `AGENT_RAW_REPO` / `AGENT_GIT_REPO` | 本项目 master | 安装命令里引用的脚本/镜像来源（自建镜像或 fork 时改） |
+
+> AI 日报、计费、审计、通知组、主题市场均由后台「设置」页管理，无需环境变量。完整清单见 `server/.env.example`。
 
 ### 反向代理与 `TRUST_PROXY`
 
@@ -252,15 +310,16 @@ diting/
 | `SERVER_URL` | ✅ | — | 服务端 URL（非 localhost 必须为 HTTPS） |
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
-| `INTERVAL` | 否 | `20`（Docker 镜像 / Windows 为 `15`） | 上报间隔（秒） |
+| `INTERVAL` | 否 | `20`（Docker 镜像 / Windows 安装器为 `15`） | 固定模式上报间隔（秒，最小 5）；`ADAPTIVE` 开启时作为基准 |
+| `ADAPTIVE` | 否 | on | 纯本地自适应采样：变化快档 `FAST_INTERVAL` ↔ 平稳慢档 `SLOW_INTERVAL`，不解析任何服务端响应 |
+| `FAST_INTERVAL` / `SLOW_INTERVAL` | 否 | `10` / `60` | 自适应快/慢档间隔（秒）；慢档需服务端 `OFFLINE_THRESHOLD_SEC` 大于它 |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
+| `MONTH_ROTATE` | 否 | `0` | 流量重置日：`0` = 绝对累计，`1-31` = 每月该日归零（兼容 Komari `AGENT_MONTH_ROTATE`） |
 | `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]` TCP 或 `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」 |
 | `PROBE_TIMEOUT_MS` | 否 | `900` | TCP 单次握手死线（毫秒） |
-| `PROBE_RESOLVE_MS` | 否 | `900` | 主机名解析死线（毫秒）；超时为「无采样」，不算丢包 |
+| `PROBE_RESOLVE_MS` | 否 | `900` | 主机名解析死线（毫秒）；超时为「无采样」，不算丢包（上报 `ok=null`） |
 | `NET_IFACE_FILTER` | 否 | `1` | 网络计数接口过滤（S1）：`0` 回退旧口径（全部非 lo 接口）。默认排除 docker/veth/br-/bond/vlan/隧道等虚拟接口，避免网桥/容器的生命周期计数被当成本期流量 |
 | `NET_IFACE_ONLY` | 否 | — | 接口白名单（逗号分隔的完整接口名）：非空时只统计这些接口、忽略全部内置排除规则。隧道即唯一上行的节点（如 WireGuard 出口 VPS）必须用它，否则流量会被归零 |
-| `ADAPTIVE` | Go | on | 自适应采样：变化快 10s ↔ 慢 60s（Go Agent） |
-
 | `DEBUG` | 否 | off | 详细日志（永不打印 Token） |
 
 ---
@@ -274,11 +333,11 @@ v1.0 起管理端从旧的单页脚本全面重写为 **Vue3 + Vite + Tailwind v
 | `/` | 公开页：客户端卡片视图（玻璃拟态 / 明亮双主题）、分组、拖拽排序 |
 | `/node/:id` | 节点详情：指标图表 + 硬件/系统/存储/网络四张信息卡 |
 | `/login` | Admin Token + TOTP 两步验证 |
-| `/admin` | 后台：Dashboard / Agents / AgentDetail / Ai（日报）/ AuditLog / Billing / Settings / Template |
+| `/admin` | 后台：Dashboard / Agents / AgentDetail / Ai（日报）/ ApiTokens / AuditLog / Billing / AgentArtifacts（分发包）/ Sessions（登录会话）/ Settings / Template |
 
 - **前端分层**：`services/{api,adminApi,publicApi}.ts` + `composables/` + `components/`，类型由 `types.ts` 统一提供
 - **实时**：WebSocket 推送离线/恢复/告警，公共页 10s 轮询（后台标签暂停、并发去重）
-- **设置页**：站点信息、UI、告警阈值、通知、社交链接、主题切换（自研 + 第三方 Komari 皮肤）
+- **设置页**：站点信息、UI、告警阈值、通知组、社交链接、主题市场与主题切换、备份策略与文件列表、容量水位
 
 构建（产物直出 `server/public/`，服务端无需重启）：
 
@@ -342,26 +401,50 @@ cd server/web && npm install && npm run build
 
 ---
 
-## 🎨 Komari 主题兼容
+## 💾 备份、容量与数据生命周期
 
-`server/src/compat.js` 实现 Komari 官方社区主题兼容层，第三方皮肤可**零修改**运行：
+**两级历史**：分钟级明细只保留 `METRICS_DETAIL_DAYS`（默认 7 天），整点封口后由 `rollup.js` 折叠成 `metrics_hour` 小时行（带采样数 `n`）；长窗口查询走 `metrics-merge.js` 加权合并读（均值按 `n` 加权、峰值取 MAX），水位线 `metrics_rolled` 保证不会出现「既不在小时表、又被 prune 删掉」的盲区。`RETENTION_DAYS`（默认 30）只管小时行。
 
-- **REST**：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
-- **实时**：`/api/clients`（WebSocket，发 `get` 取 snapshot）、`/api/clients/sse`（SSE 备选）
-- **RPC2**：`/api/rpc2`（POST / WS）
-- 本项目另暴露标准 `/api/v1/*`（与 Komari 同形，供自研 SPA 复用）
+**容量保险丝**：metrics 行数与库文件字节双水位。到 80% 发一次 `capacity` 告警并显示黄条；到 100% 只跳过历史明细落库——`/report` 照常 200，实时数据与告警判定不受影响。清理是**显式**操作（后台一键，复用 retention prune），不自动删数据、不自动 VACUUM。
 
-主题挂载到 `server/public/themes/<id>/`，访问 `/?theme=<id>` 启用。含内联脚本的社区主题由服务端注入一次性 CSP nonce 后放宽该响应的 `script-src`（见 `server.js` 的 `THEME_NEEDS_NONCE`）。
+**备份**（后台「设置 → 备份」）：
+
+- 宿主侧执行：`sudo bash diting.sh --backup`；`--backup-schedule install` 开每日自动备份（带保留轮转）
+- 应用内一致性快照：走 SQLite 在线备份 API，不需要停服
+- 文件管理：列表 / 下载 / 删除 / 上传外部备份（只认 SQLite 或 gzip，文件名由服务端生成）/ 恢复
+- 恢复：后台点「恢复」只投递请求文件（`RESTORE_TRIGGER`），由宿主侧 `diting.sh --process-restore` 执行；恢复前自动留一份 `pre_restore_*`
+- 完整性徽标：通过 / 损坏 / 未知（未知 = 尚未抽查）
+
+---
+
+## 🎨 Komari 主题兼容与主题市场
+
+`server/src/compat.js` 实现 Komari 社区主题兼容层，官方主题 ZIP **一行不改**即可运行：
+
+- **REST**：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/nodes/:uuid`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
+- **实时**：`/api/clients`（WebSocket，发 `get` 取 snapshot）、`/api/clients/sse`（SSE 备选）、`/api/rpc2`（POST / WS）
+- **响应外壳**：`/api/*` 统一 `{status,message,data}` 外壳；records 返回扁平数组、task id 用数字——主题内部的归一化链按 Komari 形状取值，外壳或 id 类型不符就会静默判成「暂无数据」
+- **字段映射**：`cpu_cores` 真实透出；`kernel_version` / `arch` / `virtualization` 明确返回空（能力位 `false` + `null`），模板自动隐藏对应模块，而不是显示假值
+- **静态资源**：根绝对路径引用由服务端在**响应时重写**（磁盘上的主题文件不动），并自动补尾斜杠路由
+- **CSP**：含内联脚本的主题注入一次性 nonce，只放宽该响应的 `script-src`
+
+**安装与更新**：后台「设置 → 主题市场」可从主题源一键安装、用 URL 导入 ZIP、检查更新、回滚到上一版本；也可手动放进 `THEMES_DIR`（默认 DB 同级 `themes/`，随数据卷持久；`public/themes` 内置目录只读，同名时安装版优先）。访问 `/?theme=<id>` 启用，主题自带配置项在设置页可视化编辑。
+
+**解压与下载边界**：逐 entry 按实际字节封顶（不信任 header 声明的 size）、拒绝路径穿越/绝对路径/符号链接、安装单飞锁串行、下载钉住 DNS 并拦截私网（复用通知模块的 SSRF 规则）。
+
+> 兼容性用两种技术栈的正式产物交叉验证：Vue 系 Glassmorphism v3.4.4 与 React 系 PurCarte v1.2.5——负载六图、节点详情、记录接口已验证可渲染；延迟图已消除「暂无延迟数据」空态，统计卡与曲线仍在与主题内部组件联调。原则是**改服务端去适配主题**，不改主题模板——社区主题升级后直接换 ZIP 即可。
 
 ---
 
 ## 🔔 告警
 
-- **离线告警**：超过 `OFFLINE_THRESHOLD_SEC` 未上报
-- **阈值告警**：CPU/内存超过设定值
-- **通知通道**：QQ 邮箱（SMTP）+ Telegram Bot（并行，任一失败不影响另一通道）
-- **冷却去重**：默认 30 分钟内不重复发送同类告警
-- **数据清理告警**：`prune` 连续 3 次失败时发送邮件
+- **离线告警**：超过阈值未上报（节点 > 分组 > 全局，逐级覆盖；判定与列表/公开页/兼容层共用 `online.js`）
+- **阈值告警**：CPU/内存按采样窗口判定——窗口内 ≥`ALERT_TRIGGER_RATIO`（默认 70%）样本越界才触发/恢复，避免瞬时尖刺
+- **证书告警**：HTTPS 探测目标剩余天数 ≤ `CERT_WARN_DAYS`（默认 14）时提醒
+- **通知通道**：QQ 邮箱（SMTP）+ Telegram Bot + Webhook，按**通知组**路由；任一通道失败不影响其它通道
+- **Webhook 出站约束**：默认只允许 https + 公网地址（DNS 钉扎 + 私网拦截），自建局域网接收端需显式开 `ALLOW_PRIVATE_WEBHOOK` / `ALLOW_INSECURE_WEBHOOK`
+- **冷却去重**：默认 30 分钟内不重复发送同类告警；恢复通知需离线超过 `ONLINE_NOTIFY_GRACE_SEC`（默认 180 秒）
+- **系统告警**：`prune` 连续 3 次失败、容量水位到 80%
 - **测试按钮**：后台「📨 测试告警」或 API `POST /api/test-alert`
 
 ---
@@ -412,11 +495,23 @@ curl -X POST https://your-server/api/admin/api-tokens \
 `agent-go/` 是唯一受控端实现（原 Python 版已于 2026-10 下线）：
 
 - **单文件部署**：编译产物一个二进制，丢上机器即可（systemd / 计划任务）
-- **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 10s ↔ 60s 自动调整（需服务端 `OFFLINE_THRESHOLD_SEC ≥ 120`）
+- **自适应采样**：`ADAPTIVE=on`（默认）按本地变化率在 `FAST_INTERVAL`(10s) ↔ `SLOW_INTERVAL`(60s) 自动调整（慢档需服务端 `OFFLINE_THRESHOLD_SEC` 大于它，建议 120）
 - **月流量**：只上报绝对计数器 `net_rx/net_tx` + `month_rotate`，月累计由服务端 `traffic_state` 计算，agent 无本地状态
+- **探测三态**：`ok=true`（通）/ `ok=false`（不通）/ `ok=null`（解析或握手超时 = 本次无采样，不算丢包）
+- **磁盘 IO 口径（v1.1.5 起）**：`/proc/diskstats` 里整盘计数已含其下分区，采集器改为只取整盘（用 sysfs `partition` 判定，不靠「名字带数字」猜，避免误杀 NVMe），并复用网络侧的「计数器回退即 0」保护。**升级到 v1.1.5 后磁盘读写数值会变小并出现一次台阶式下降，这是修正（旧值是分区重复计数虚高），历史数据未回填。**
 - **资源占用**：常驻内存约 10MB，不依赖 Python / Docker
 - **Windows**：同一份代码编译的 exe（`agent-go/install-go.ps1` 一键注册计划任务），`load1/5/15` 固定 `0.0`
 - **Docker**：多阶段构建的 scratch 镜像，`--network host` 下取真实流量
+
+---
+
+## 📦 发布、分发与版本判定
+
+- **发布链**：打 `agent-go-vX.Y.Z` tag 触发 CI，先跑测试再出三平台产物（linux-amd64 / linux-arm64 / windows-amd64），每个二进制配 `.sha256` 与 ed25519 `.sig`
+- **安装校验**：`install.sh` / `install-go.ps1` 强制比对 `.sha256`，缺失即拒绝安装（fail closed）；服务端中继路径同样如此
+- **批量分发**（后台「分发」页）：上传新二进制后服务端生成分发包（tar.gz / zip + 脚本），脚本**只替换二进制**，绝不写 `agent.env` / `run_scheduled.bat`，`AGENT_ID` / `AGENT_TOKEN` / `PROBE_TARGETS` 原样保留；下载链接是一次性 HMAC 签名（默认 30 分钟、用后即焚），校验失败即回滚
+- **版本判定**：设置「期望版本 / 期望 sha」后，后台按 `up_to_date` / `outdated` / `unknown` / `custom` 四态显示；老版本 agent 不带 `build_sha` 且无法比对时判 `unknown` 而非 `outdated`
+- **红线不变**：分发执行始终由管理员在节点本地发起，服务端只生成文件，**不新增长期指令通道、不新增 Agent 出站目标**
 
 ---
 
@@ -424,9 +519,12 @@ curl -X POST https://your-server/api/admin/api-tokens \
 
 **以 100 台受控端为设计前提**（不是事后调优），所有会随规模放大的接口都做了底层优化：
 
+- **两级历史**：分钟级明细 7 天 + 小时行 30 天，长窗口读的是 `metrics_hour` 而不是几百万明细行
 - **后端降采样**：sparklines 默认 1000 点/标签；延迟波形 `PROBES_MAX_POINTS=5000`、长区间时间桶聚合
 - **SQL 层聚合**：首页集群平均 CPU/内存趋势在 DB 端计算，不再前端拉全量聚合
 - **字段裁剪**：metrics 全量查询只取 `ts/agent_id/probes`，避免 30d × 100 台数十 MB 雪崩
+- **重查询隔离**：跨全表的聚合查询走 worker 线程（超时回退主线程），不阻塞 `/report` 与实时接口
+- **容量保险丝**：行数/库字节双水位，涨到上限只停明细落库，监控与告警继续可用
 - **轮询优化**：公共页 10s 间隔、后台标签暂停、并发去重
 - **实证**：测试库 62 台 / 336 万行 metrics、100+ 节点下页面响应 < 500ms
 - **教训**：对 metrics 表的全量 `.all()` 在 2GB 堆下曾 OOM（已修复），此后一律字段裁剪 + 时间桶降采样
@@ -441,7 +539,9 @@ curl -X POST https://your-server/api/admin/api-tokens \
 - [ ] 启用 TOTP 两步验证（设置 → 账户安全）
 - [ ] 配置 IP 白名单（**可选**，支持 IPv4/IPv6/CIDR）——默认留空 = 不限制；启用后来源 IP 不在名单内会 403，配错会把管理员锁在门外（误配时用 `sudo bash diting.sh --clear-ip-whitelist` 救援，改库即时生效）
 - [ ] 定期备份数据库（`sudo bash diting.sh --backup`，或 `--backup-schedule install` 开每日自动备份）
-- [ ] 配置告警通知（邮件 / Telegram）
+- [ ] **演练一次恢复**（备份不可恢复等于没有备份）
+- [ ] 配置告警通知（邮件 / Telegram / Webhook）
+- [ ] 第三方主题只从可信源安装（主题在浏览器里执行，等同前端代码）
 - [ ] 定期查阅审计日志（后台 → 审计日志）
 - [ ] 使用 Cloudflare Tunnel 或 Tailscale 隐藏源站 IP（可选）
 
@@ -464,7 +564,16 @@ sudo bash diting.sh --restart-server
 sudo bash diting.sh --stop-server
 sudo bash diting.sh --start-server
 sudo bash diting.sh --status          # 显示形态、端口、PID、工作目录
+
+# 备份与恢复
+sudo bash diting.sh --backup              # 立即备份
+sudo bash diting.sh --backup-list         # 列出备份
+sudo bash diting.sh --restore <文件>      # 从备份恢复
+sudo bash diting.sh --process-restore     # 执行后台「恢复」投递的请求
 ```
+
+> 更新受控端时，安装器会**保留已注册身份**（`agent.env` / `run_scheduled.bat` 逐字节不动）并自动留
+> `.bak-YYYYMMDD-HHMMSS`。批量场景用后台「分发」生成分发包，在节点上以 root 执行即可。
 
 ---
 
@@ -484,6 +593,7 @@ sudo bash diting.sh --status          # 显示形态、端口、PID、工作目�
 | [安全设计](https://fengzone85.github.io/diting/security/) | 安全特性与加固 |
 | [隧道指南](https://fengzone85.github.io/diting/tunnel-guide/) | Cloudflare Tunnel / Tailscale |
 | [常见问题](https://fengzone85.github.io/diting/faq/) | FAQ |
+| [CHANGELOG](CHANGELOG.md) | 版本变更与行为变更（含磁盘 IO 口径修正等） |
 
 ---
 
@@ -513,7 +623,7 @@ sudo bash diting.sh --status          # 显示形态、端口、PID、工作目�
 
 **① 无指令通道（Agent → Server 单向）**
 - Agent 只 `POST` 到 `/api/report`，响应体仅用于错误日志（`e.read()`），**从不解析、从不执行**。Agent 不监听任何端口，没有 `subprocess`/`Popen`/`eval`/`exec`。
-- 服务端唯一面向 Agent 的端点是 `POST /report`；`agentAuth` 只校验 Token 并存储指标，返回 `{ok:true}`。代码库里没有任何 WebSocket / SSE / 任何下行推送；仪表盘靠浏览器轮询刷新，与 Agent 无关。
+- Agent 运行期唯一访问的端点是 `POST /report`；`agentAuth` 只校验 Token 并存储指标，返回 `{ok:true}`。服务端另有 `GET /api/releases/agent/:os/:arch`（签名中继），但那是由**管理员执行的安装脚本**在装/升级时拉取一次，Agent 运行期从不访问；批量分发同理——服务端只生成分发包与脚本，执行由管理员在节点本地发起。代码库里没有任何面向 Agent 运行期的 WebSocket / SSE / 下行推送；仪表盘靠浏览器轮询刷新，与 Agent 无关。
 - 这是**刻意不实现**指令通道，而非「还没做」。双向 WebSocket 监控正好相反：更强，但信任边界已破。
 
 **② Agent 之间零耦合**
@@ -621,7 +731,7 @@ Token 在数据库中以 **SHA-256 哈希**（`token_hash`）存储，从不明�
 ### 1. 集中式主动探测（对任意目标的 ICMP/TCP/HTTP ping，可指派到特定节点）
 要让 Agent ping/探测某目标，服务端必须向它下推任务——这需要指令通道。一旦指令通道存在，信任边界即破：失陷的服务端可让每个 Agent 探测任意公网目标，把机群变成分布式探测跳板。我们严格保持 Agent→Server 单向，因此不提供「服务端编排探测」。
 
-> **补注（2026-07-09）：我们加了一个安全的等价物——「Agent 侧网络质量自测」。** 思路是用「Agent 自 ping / TCP 探测几个*写死在本地配置里的固定公共基础设施*（默认移动门户 `www.10086.cn:443` + 电信/联通 DNS + 8.8.8.8）」替代「服务端下推任意探测目标」。因为探测目标写在 Agent 本地配置、服务端**运行期从不**下推任何目标，指令通道不存在，信任边界完好。见下方「网络质量自测（固定公共目标）」。它遵守「不做」原则：无指纹、无新指令通道、Agent 零耦合。
+> **补注（2026-07-09）：我们加了一个安全的等价物——「Agent 侧网络质量自测」。** 思路是用「Agent 自己做 TCP/HTTP 探测定几个*写死在本地配置里的固定公共基础设施*（默认移动门户 `www.10086.cn:443` + 电信/联通 DNS + 8.8.8.8）」替代「服务端下推任意探测目标」。因为探测目标写在 Agent 本地配置、服务端**运行期从不**下推任何目标，指令通道不存在，信任边界完好。见下方「网络质量自测（固定公共目标）」。它遵守「不做」原则：无指纹、无新指令通道、Agent 零耦合。
 
 ### 2. 主机指纹（内核版本 / GPU 型号 / 公网IP / TCP 连接数等）
 此类指纹一旦服务端被拖库（尤其外泄），直接暴露每台机器的攻击面——老内核版本可被定向 CVE 匹配、公网IP 给直接目标、GPU 可用于挖矿权衡。我们只采基础状态（含温度/Swap/开机等非指纹指标），因此即便泄露也无定向攻击价值。
@@ -638,12 +748,12 @@ Token 在数据库中以 **SHA-256 哈希**（`token_hash`）存储，从不明�
 
 ## 网络质量自测（固定公共目标）
 
-Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的公共基础设施**（默认：联通/电信/移动 DNS + 8.8.8.8），把每个目标的往返延迟与可达性上报给服务端。它是我们拒绝实现的「集中式主动探测」功能的安全等价物：
+Agent 从**自身主机**主动做 TCP / HTTP(S) 探测**写死在本地配置里的公共基础设施**（默认：移动门户 + 联通/电信 DNS + 8.8.8.8），把每个目标的往返延迟与可达性上报给服务端。它是我们拒绝实现的「集中式主动探测」功能的安全等价物：
 
 - **目标本地写死**：经 `PROBE_TARGETS` 环境变量配置，格式 `label:host[:port]`（TCP）或 `label:http(s)://host/path`（HTTP，https 附带证书剩余天数），逗号分隔；默认即可用，置空则关闭。服务端**从不**向 Agent 下推任何探测目标——与指令通道型监控的根本分野。
 - **无指令通道**：服务端无法命令任何 Agent 探测任意主机，因此机群永远不会变成分布式探测跳板。核心支柱（无指令通道 / Agent 零耦合 / 数据最小化）完整保留。
-- **仅延迟与可达性**：每个目标只上报 `ms`（往返毫秒，不可达为 `null`）和 `ok`（布尔）——不含任何主机指纹。
-- **ICMP 优先，TCP 兜底**：优先系统 `ping`（`-c 1`；经 `iputils-ping` 的 `cap_net_raw` 可非 root 工作）；若 `ping` 不可用或被拦，回退到对目标端口（默认 53）的 TCP 握手——即便无特权也可工作。目标并行探测，每个采集周期仅增加约 1–2 秒。
+- **仅延迟与可达性**：每个目标只上报 `ms`（往返毫秒）与 `ok`（三态：通 / 不通 / `null` = 解析或握手超时、本次无采样），https 额外带 `cert_days`——不含任何主机指纹。
+- **非特权即可工作**：TCP 走普通握手（三次尝试，900ms 单次死线），HTTP 是一次完整请求（5s 死线、只读 4KiB 后丢弃、不跟随重定向）；不依赖 `ping` 的 raw socket 特权。目标并行探测，每个采集周期仅增加约 1–2 秒。
 - **展示**：客户端卡片显示一行「网络」（如 `移动 18ms · 电信 23ms · 联通 ✕`）；详情页渲染多序列 ECharts 时序图「网络质量（到探测目标的延迟，ms）」。
 
 > 注：该能力只测「本机 → 固定公网IP」的网络质量。它与「让服务端编排 Agent 探测任意目标」完全不同，后者仍是我们刻意不实现的功能（见上方「集中式主动探测」）。
@@ -670,9 +780,11 @@ Agent 从**自身主机**主动 ping / TCP 探测**写死在本地配置里的�
 - 网络质量探测目标写死在本地 `PROBE_TARGETS`（`label:host[:port]` TCP / `label:http(s)://host/path` HTTP，默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」）；安装时由一键命令写入本地一次，**运行期服务端无任何下发通道**；
 - 更新受控端必须**由运维在受控机本地执行**（`sudo bash diting.sh --update-agent`，保留已注册身份），而非 Agent 自己从远端拉脚本。
 
+> **批量分发不是自更新。** 服务端「分发」页生成的分发包与脚本，下载链接是一次性 HMAC 签名、执行由管理员在节点上发起、只替换二进制且校验失败即回滚；Agent 本身仍不知道「有新版本」这件事，也不会自己去取。差别就在这一步人工确认。
+
 > 一句话：本项目用「功能减法」（无指令通道、无指纹、Agent 互不感知）换取「安全加法」。攻击者无法利用根本不存在的东西。需要更新时，请走本地运维通道，而非远端自更新。
 >
-> **供应链完整性（L-6）**：受控端安装器从 Release 下载二进制后强制比对随附 `.sha256`；**缺少校验和时拒绝安装（fail closed）**，不会静默信任下载内容。详见《受控端部署》。
+> **供应链完整性（L-6）**：受控端安装器从 Release 下载二进制后强制比对随附 `.sha256`；**缺少校验和时拒绝安装（fail closed）**，不会静默信任下载内容。发布产物另带 ed25519 `.sig`，中继侧验签后才转发。详见《受控端部署》。
 
 > 补充：GPU 型号（`nvidia-smi` / `lspci` 取得的硬件标识）属于**主机指纹**，与本项目「不采内核/GPU/公网IP」原则冲突，因此**不做 GPU 监控**。
 
