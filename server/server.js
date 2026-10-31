@@ -357,6 +357,22 @@ function themeRelaxedCsp(nonce) {
 function injectNonce(html, nonce) {
   return html.replace(/<script(?![^>]*\bsrc=)/g, `<script nonce="${nonce}"`);
 }
+// Komari 生态主题的构建产物普遍用根绝对路径引用资源（`/assets/index-xxx.js`、`href="/favicon.ico"`、
+// `src="/admin-app/..."`），而 diting 把主题挂在 /themes/<short>/ 下。原样投放会让这些请求落到
+// diting 自己的 /assets 上（404 或串到 SPA 资源）。
+// 原则：**不改模板产物**（可随时用官方 zip 覆盖/升级），改由服务端在投放 index.html 时按主题目录
+// 的实际一级条目重写根绝对引用——只有首段能在主题包内找到（assets/、images/、favicon.ico、admin-app/…）
+// 才加 `/themes/<short>/` 前缀；主题自己的 SPA 路由链接（如 `/instance/<uuid>`）保持原样。
+function adaptThemeHtml(html, dir, short) {
+  let entries;
+  try { entries = new Set(fs.readdirSync(dir)); } catch (_) { return html; }
+  const base = `/themes/${short}/`;
+  return html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
+    const rest = url.slice(1);
+    const seg = rest.split(/[/?#]/)[0];
+    return entries.has(seg) ? `${attr}="${base}${rest}"` : match;
+  });
+}
 // 主题根目录：安装目录（THEMES_DIR，随数据卷持久）优先，其次只读内置目录（public/themes）。
 // 由 src/theme.js 统一解析，避免两处目录策略漂移。
 function resolveThemeRoot(id) {
@@ -430,14 +446,14 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
   // 回退到主题根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
   const indexPath = path.join(baseDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), baseDir, id);
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
     res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
-    res.setHeader('Cache-Control', 'no-store, must-revalidate');
-    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+    return res.send(injectNonce(html, nonce));
   }
-  res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  return res.sendFile(indexPath);
+  return res.send(html);
 });
 
 // 裸主题根路径（如 /themes/<short>）：返回主题 index.html。
@@ -447,14 +463,14 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   if (!baseDir) return next();
   const indexPath = path.join(baseDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), baseDir, id);
+  res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
     res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
-    res.setHeader('Cache-Control', 'no-store, must-revalidate');
-    return res.send(injectNonce(fs.readFileSync(indexPath, 'utf8'), nonce));
+    return res.send(injectNonce(html, nonce));
   }
-  res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  return res.sendFile(indexPath);
+  return res.send(html);
 });
 
 // 旧初始化页（/setup.html）已由 SPA 内安装向导 /install 取代（复刻 komari 安装向导：
@@ -536,13 +552,14 @@ app.get('*', (req, res, next) => {
     if (fp && fs.existsSync(fp)) {
       // 第三方社区主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
       // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
+      const html = adaptThemeHtml(fs.readFileSync(fp, 'utf8'), themeRoot, theme);
+      res.setHeader('Cache-Control', 'no-store, must-revalidate');
       if (THEME_NEEDS_NONCE.has(theme)) {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.setHeader('Content-Security-Policy', themeRelaxedCsp(nonce));
-        res.setHeader('Cache-Control', 'no-store, must-revalidate');
-        return res.send(injectNonce(fs.readFileSync(fp, 'utf8'), nonce));
+        return res.send(injectNonce(html, nonce));
       }
-      return res.sendFile(fp);
+      return res.send(html);
     }
   }
   // 无后缀 + 非 SPA 前缀 + default 主题（如 /nope）：同样返回 Vue 入口，由前端

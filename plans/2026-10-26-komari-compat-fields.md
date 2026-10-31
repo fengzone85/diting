@@ -383,10 +383,15 @@ arch ∈ `ARCHS ∪ {''}`；virtualization ∈ `VIRTUALIZATIONS ∪ {''}`；每�
 >   关键结论：`public:queryMetrics` 必须保持 `{ start, end, series }` 信封 —— 主题 LoadChart 直接读 `o.series`；
 >   先前按 Komari Go 侧结构改成 `[]publicMetricSeries` 裸数组，实测反而让六张负载图全空（已回退）。
 >   即「以真实主题行为为准」，不能只看后端 Go 结构。
-> - **仍未解决**：延迟图（PingChart）恒「暂无延迟数据」。已确认 `public:getPingMetricStats` 的 stats（4 task，total>0）
->   与 `queryMetrics(ping.latency_ms)` 的 series（3 task，各 30–60 点）两侧 task 集合可对齐，
->   但主题内部 `Ye()/Ce()/Pe()` 归一化链（位于 v3-services 与其它 chunk，压缩后同名函数跨 chunk 重名干扰静态分析）
->   仍返回空 —— 建议直接对照 Glassmorphism 源码仓库的 PingChart 实现继续，而不是继续猜压缩产物。
+> - **延迟图进展（2026-10-29，`88fc57e`）**：clone 主题源码仓库（`komari-theme.json` 3.4.4，与部署产物同版本），
+>   按 `src/components/PingChart.vue` 定位到根因 —— 主题把 task id 当**数字**用（`PingTaskInfo.id` / `stats.task_id` /
+>   `series.task_id` 三处同源，`normalizeMetricTaskId()` 统一转数字，`latestValues` 用 `rec.task_id === task.id` 关联）。
+>   diting 用中文 label 且 backend task 无 `id` → 「有 tab 没图」。已修：新增 `probeTaskId(label)`（确定性哈希 → 稳定正整数），
+>   ping 的 series/records/stats/tasks 四处标识统一为数字 + `task_name` 保留中文；`getRecords(type=ping)` 的 `tasks` 补成真实清单。
+>   结果：「暂无延迟数据」空态**已消除**、tab 与全选按钮正常渲染，stats/tasks 的 id 一一对应。
+> - **仍未解决**：延迟图的统计卡与曲线仍未绘制。服务端三项 RPC（getPingMetricStats / queryMetrics / getPublicPingTasks）
+>   的结构与 id 已全部对齐，卡点在主题组件内部的渲染条件（`latestValues` / `chartData`），需在主题侧调试
+>   （浏览器断点或改源码重建），非 diting 单方可解。
 
 **PR2**
 - [ ] admin 可录入厂商+代际+架构+虚拟化；留空合法
