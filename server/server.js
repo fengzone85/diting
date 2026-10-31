@@ -191,6 +191,14 @@ try {
   }
 } catch { /* .env 不存在（纯环境变量部署）时跳过 */ }
 
+// 会话密钥未固定：auth.js 会退化为随机生成，重启后全部登录态失效；
+// distribution.js 的 TOKEN_KEY 也由 SESSION_SECRET 派生，已发出的一次性安装/下载链接会同时作废。
+// 首装由 diting.sh 生成；原生/手工部署可能缺失。这里只告警、不自动落盘（容器内 .env 不持久），
+// 与上面 .env 权限告警同为「不阻断启动」的运维提示。
+if (!process.env.SESSION_SECRET) {
+  console.warn('[warn] SESSION_SECRET 未设置：本次启动使用随机密钥，重启后所有登录态与已发出的一次性安装/下载链接都会失效。请在 .env 中固定（openssl rand -hex 32）。');
+}
+
 app.use(express.json({ limit: '16kb' }));
 
 // ---- Prometheus /metrics 导出（P3：可观测性）----
