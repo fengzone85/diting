@@ -342,7 +342,8 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
       : await heavyQuery('loadAll', since, perAgentPoints(maxCount, since));
     const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
     const records = rows.map(toLoadRecord);
-    return { status: 'success', message: '', count: records.length, records };
+    // 同 /records/ping：Komari REST 标准外壳要求结果包在 data 里
+    return { status: 'success', message: '', data: { count: records.length, records } };
   });
   res.json(payload);
 }));
@@ -397,10 +398,18 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       }
     }
     records.sort((a, b) => new Date(a.time) - new Date(b.time));
+    // Komari REST 标准外壳：{ status, message, data:<result> }（Go 侧 jsonRpc.Bind →
+    // renderStandard，见 komari/web/rpc/jsonrpc/bridge.go）。此前把 count/records 放在顶层，
+    // React 系主题（PurCarte v1.2.5）读 `resp.data.records` 得到 undefined → 延迟图恒
+    // 「暂无数据」。records/tasks 必须包在 data 里。
     return {
-      status: 'success', message: '', count: records.length,
-      records: records.slice(-maxCount),
-      tasks: [...tasks.values()]
+      status: 'success',
+      message: '',
+      data: {
+        count: records.length,
+        records: records.slice(-maxCount),
+        tasks: [...tasks.values()]
+      }
     };
   });
   res.json(payload);

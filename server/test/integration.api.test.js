@@ -304,12 +304,24 @@ test('P4：一键安装命令贯通 MONTH_ROTATE', async () => {
   });
 });
 
+test('Komari REST 外壳：/api/records/load 结果包在 data 里', async () => {
+  const res = await request(app).get('/api/records/load?hours=1');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.status, 'success');
+  // 与 ping 同口径：React 系主题读 resp.data.records，顶层结构会让负载图恒「暂无数据」。
+  assert.ok(res.body.data, '应含 data 外壳');
+  assert.ok(Array.isArray(res.body.data.records), 'records 应为数组');
+  assert.strictEqual(typeof res.body.data.count, 'number');
+});
+
 test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);
-  assert.ok(res.body.records.length >= 1, 'records 不应为空');
-  assert.ok(res.body.tasks.some((t) => t.name === '移动'), 'tasks 应包含「移动」');
-  const rec = res.body.records.find((r) => r.value === 12);
+  // Komari REST 标准外壳：结果必须包在 data 里（PurCarte 等 React 主题读 resp.data.records）
+  assert.ok(res.body.data, '应含 data 外壳');
+  assert.ok(res.body.data.records.length >= 1, 'records 不应为空');
+  assert.ok(res.body.data.tasks.some((t) => t.name === '移动'), 'tasks 应包含「移动」');
+  const rec = res.body.data.records.find((r) => r.value === 12);
   assert.ok(rec, '应存在 value=12 的延迟记录');
 });
 
@@ -317,7 +329,7 @@ test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空
 test('F4：/api/records/ping 的 tasks 透传 type/code/cert_days', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);
-  const t = res.body.tasks.find((x) => x.name === '移动');
+  const t = res.body.data.tasks.find((x) => x.name === '移动');
   assert.ok(t, 'tasks 应包含「移动」');
   assert.strictEqual(t.type, 'http', 'type 应透传');
   assert.strictEqual(t.code, 200, 'code 应透传');
