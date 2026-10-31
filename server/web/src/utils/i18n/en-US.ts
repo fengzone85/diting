@@ -866,6 +866,7 @@ export const enUS: Record<string, string> = {
   'ai.apiKey': 'API Key',
   'ai.apiKeyPlaceholder': 'Configured; leave blank to keep',
   'ai.apiKeyInput': 'Enter API Key',
+  'ai.apiKeyFromEnv': 'Provided by the AI_API_KEY environment variable (AI_KEY_FROM_ENV=1). This field is read-only and is never saved to the database.',
   'ai.scheduleFreq': 'Schedule frequency',
   'ai.daily': 'Daily',
   'ai.weekly': 'Weekly',

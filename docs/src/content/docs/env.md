@@ -24,7 +24,7 @@ description: 服务端与受控端环境变量参考
 | `AGENT_INTERVAL` | 否 | `20` | 期望上报间隔（用于离线判定与超阈值分钟数换算） |
 | `AI_TREND_DAYS` | 否 | `7` | AI 日报磁盘趋势窗口（天）。范围 2–14，自动收敛到不超过 `RETENTION_DAYS`；`0` = 关闭趋势、回退旧的「24 小时首末两点」算法 |
 | `AI_COMPARE` | 否 | `1` | 周期对比：为摘要附加「当期 − 前一等长窗口」的同单位差值（`compare` 字段），让模型能说「较前一日上升 X」而不是只能看当前值。设为 `0` 关闭（省一次同规模采样查询） |
-| `AI_KEY_FROM_ENV` | 否 | `0` | 设为 `1` 时 AI 的 API Key 只从 `AI_API_KEY` 环境变量读取、不落库（后台表单中的 Key 字段失效） |
+| `AI_KEY_FROM_ENV` | 否 | `0` | 设为 `1` 时 AI 的 API Key 只从 `AI_API_KEY` 环境变量读取、不落库；后台表单中的 Key 字段变只读，启动时自动清除库中残留明文。⚠️ 未启用时 AI Key 与 `smtp_pass`、`telegram_bot_token` 一样以明文 JSON 存于 SQLite（`admin_config`），拖库/备份泄露即暴露 |
 | `AI_API_KEY` | 否 | — | 配合 `AI_KEY_FROM_ENV=1` 使用：模型服务的 API Key |
 | `OFFLINE_THRESHOLD_SEC` | 否 | `60` | 离线判定阈值（秒） |
 | `RETENTION_DAYS` | 否 | `30` | 指标保留天数（7–3650） |

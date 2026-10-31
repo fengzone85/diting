@@ -1822,7 +1822,19 @@ function setAiConfig(incoming) {
   const merged = Object.assign({}, cur, incoming || {});
   // api_key 留空表示「保持不变」，避免保存时空字符串误清空已存密钥（同 setNotifyConfig 模式）
   if (incoming && incoming.api_key === '' && cur.api_key) merged.api_key = cur.api_key;
+  // AI_KEY_FROM_ENV=1：密钥只来自环境变量。入口（api.js PUT /ai/config）已拦，
+  // 这里再剔除一次，防止其他调用方（脚本/未来代码）把明文写回库。
+  if (process.env.AI_KEY_FROM_ENV === '1') delete merged.api_key;
   setConfig(AI_CONFIG_KEY, JSON.stringify(merged));
+}
+// 清除库中残留的明文 AI Key（切到 AI_KEY_FROM_ENV=1 之前写入的历史值）。
+// 返回是否真的删除了字段；非 env 模式由调用方决定不调用（避免误删仍在用的配置）。
+function clearAiApiKey() {
+  const raw = getAiConfigRaw();
+  if (!raw || !Object.prototype.hasOwnProperty.call(raw, 'api_key')) return false;
+  delete raw.api_key;
+  setConfig(AI_CONFIG_KEY, JSON.stringify(raw));
+  return true;
 }
 // AI 调度状态：last_run_ts 防同日重复、进程重启后从 DB 恢复；last_status/last_error 供前端展示。
 function getAiState() {
@@ -2136,7 +2148,7 @@ module.exports = {
   isSetupTokenCleared, markSetupTokenCleared, unmarkSetupTokenCleared,
   resolveAlertThresholds, observedIntervalSec,
   getUiSettings, setUiSettings, getNotifyConfig, setNotifyConfig, getRetentionDays,
-  getAiConfig, setAiConfig, getAiState, setAiState,
+  getAiConfig, setAiConfig, clearAiApiKey, getAiState, setAiState,
   getBackupState, setBackupState,
   markTrafficGap,
   backupTo,
