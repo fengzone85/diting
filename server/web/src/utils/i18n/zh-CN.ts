@@ -868,6 +868,7 @@ export const zhCN: Record<string, string> = {
   'ai.apiKey': 'API Key',
   'ai.apiKeyPlaceholder': '已配置，留空保持不变',
   'ai.apiKeyInput': '请输入 API Key',
+  'ai.apiKeyFromEnv': '当前由环境变量 AI_API_KEY 提供（AI_KEY_FROM_ENV=1），此处不可编辑，保存也不会写入数据库。',
   'ai.scheduleFreq': '调度频率',
   'ai.daily': '每天',
   'ai.weekly': '每周',

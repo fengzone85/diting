@@ -262,7 +262,7 @@ diting/
 | `THEMES_DIR` | 否 | DB 同级 `themes/` | 运行时安装主题目录（随数据卷持久）；`public/themes` 仍只读 |
 | `BACKUP_DIR` / `RESTORE_TRIGGER` | 否 | `/data/backups` / `<BACKUP_DIR>/restore.request` | 后台「备份」页读写的宿主目录；原生部署要改成宿主路径 |
 | `RELAY_ENABLED` / `RELAY_CACHE_DIR` | 否 | `0` / 系统临时目录 | 受控端签名中继开关与产物缓存目录 |
-| `AI_KEY_FROM_ENV` / `AI_API_KEY` | 否 | `0` / — | 设 `1` 时 AI Key 只从环境变量读、不落库 |
+| `AI_KEY_FROM_ENV` / `AI_API_KEY` | 否 | `0` / — | 设 `1` 时 AI Key 只从环境变量读、不落库（后台表单 Key 字段变只读，启动时自动清除库中旧明文）。⚠️ 未启用时 AI Key 与 SMTP 密码、Telegram Bot Token 一样以明文存于 SQLite |
 | `AI_TREND_DAYS` | 否 | `7` | 磁盘「多久写满」趋势窗口（2-14，`0` 回退旧算法） |
 
 **高级 / 回退开关**（默认值即可，排障时才动）：

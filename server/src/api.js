@@ -2185,7 +2185,9 @@ router.put('/ai/config', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   if (typeof b.provider === 'string') allowed.provider = b.provider.slice(0, 40);
   if (typeof b.base_url === 'string') allowed.base_url = b.base_url.slice(0, 200);
   if (typeof b.model === 'string') allowed.model = b.model.slice(0, 80);
-  if (typeof b.api_key === 'string') allowed.api_key = b.api_key.slice(0, 200);
+  // AI_KEY_FROM_ENV=1 时密钥只来自环境变量：入口直接拒绝写入，避免"保存成功但没存"的误解。
+  // db.setAiConfig 还有第二层剔除，防止非 HTTP 调用方绕过。
+  if (typeof b.api_key === 'string' && process.env.AI_KEY_FROM_ENV !== '1') allowed.api_key = b.api_key.slice(0, 200);
   if (typeof b.schedule_freq === 'string' && ['daily', 'weekly', 'every6h', 'every12h'].includes(b.schedule_freq)) allowed.schedule_freq = b.schedule_freq;
   if (typeof b.schedule_time === 'string' && /^\d{1,2}:\d{2}$/.test(b.schedule_time)) allowed.schedule_time = b.schedule_time;
   if (typeof b.tz_offset_hours === 'number' && Number.isFinite(b.tz_offset_hours)) allowed.tz_offset_hours = Math.max(-12, Math.min(14, b.tz_offset_hours));

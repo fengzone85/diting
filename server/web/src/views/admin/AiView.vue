@@ -203,7 +203,14 @@ function changePage(delta: number) {
           <FormInput v-model="config.provider" :label="t('ai.provider')" placeholder="openai" />
           <FormInput v-model="config.base_url" label="Base URL" placeholder="https://api.openai.com/v1" />
           <FormInput v-model="config.model" :label="t('ai.model')" placeholder="gpt-4o-mini" />
-          <FormInput v-model="config.api_key" :label="t('ai.apiKey')" type="password" :placeholder="config.has_key ? t('ai.apiKeyPlaceholder') : t('ai.apiKeyInput')" />
+          <FormInput
+            v-model="config.api_key"
+            :label="t('ai.apiKey')"
+            type="password"
+            :disabled="config.key_from_env"
+            :hint="config.key_from_env ? t('ai.apiKeyFromEnv') : undefined"
+            :placeholder="config.key_from_env ? '' : (config.has_key ? t('ai.apiKeyPlaceholder') : t('ai.apiKeyInput'))"
+          />
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="mb-1 block text-sm text-slate-400">{{ t('ai.scheduleFreq') }}</label>
