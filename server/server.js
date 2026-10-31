@@ -656,6 +656,19 @@ runPrune();
 // unref：清理循环不应阻止进程退出（对集成测试尤其重要，否则测试进程会因该定时器挂起）
 setInterval(runPrune, 3600 * 1000).unref();
 
+// AI Key 明文残留清理（审查修复 P1-3）：切到 AI_KEY_FROM_ENV=1 后，历史配置里的明文
+// api_key 仍留在 admin_config；provider 侧已只读环境变量，但库泄露仍会暴露旧 Key。
+// 只在 env 模式执行；无残留时零日志、零写入（否则每条集成测试都会产出噪音并改写配置）。
+if (process.env.AI_KEY_FROM_ENV === '1') {
+  try {
+    if (db.clearAiApiKey()) {
+      console.warn('[warn] AI_KEY_FROM_ENV=1：已清除数据库中的明文 api_key（历史残留）。');
+    }
+  } catch (e) {
+    console.error('[warn] 清理 ai_config.api_key 失败:', e.message);
+  }
+}
+
 const PORT = Number(process.env.PORT || 8081);
 const server = app.listen(PORT, () => {
   console.log(`[monitor] server listening on :${PORT}`);
