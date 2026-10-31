@@ -20,10 +20,12 @@ jobs:
             server/package-lock.json
             server/web/package-lock.json
 
+      # npm ci 而非 install：lockfile 与 package.json 不一致时直接失败，
+      # 避免 CI 装到与本地不同的版本（install 会静默改写 lockfile）。
       - name: Install server dependencies
         working-directory: server
-        run: npm install --no-audit --no-fund
-      - name: Run npm audit (dependency vulnerabilities)
+        run: npm ci --no-audit --no-fund
+      - name: Run npm audit (server)
         working-directory: server
         run: npm audit --audit-level=high
       - name: Run server unit tests
@@ -32,10 +34,28 @@ jobs:
 
       - name: Install web dependencies
         working-directory: server/web
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+      # 前端依赖此前没有扫描入口（server 侧早已有 audit），此处补齐。
+      - name: Run npm audit (web)
+        working-directory: server/web
+        run: npm audit --audit-level=high
       - name: Run web type check
         working-directory: server/web
         run: npm run typecheck
       - name: Run web unit tests (with coverage gate)
         working-directory: server/web
         run: npm run test:cov
+
+  # 受控端（agent-go）此前只在 tag 发布流水线跑测试，master 的 push/PR 没有 Go 门禁。
+  # go.mod 零第三方依赖（无 require、无 go.sum），整个 job 约 20s。
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Go 1.22
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run Go tests
+        working-directory: agent-go
+        run: go test ./...
