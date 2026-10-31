@@ -84,7 +84,7 @@ function komariBillingCycle(a) {
 }
 
 // diting agent -> 社区主题 node 列表项（/api/nodes）
-function toNode(a, showBusiness, octx) {
+function toNode(a, showBusiness, octx, now) {
   const m = db.getLatestMetric(a.id) || {};
   const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
   return {
@@ -123,8 +123,9 @@ function toNode(a, showBusiness, octx) {
     traffic_limit_type: 'max',
     created_at: new Date(a.created_at).toISOString(),
     updated_at: new Date(a.last_seen || a.created_at).toISOString(),
-    online: online.isOnline(a, undefined, octx),
-    ttl: online.onlineTtl(a, undefined, octx)
+    // now 可选：批量/测试场景传入同一时刻，避免同一快照里各节点 ttl 因 Date.now() 漂移。
+    online: online.isOnline(a, now, octx),
+    ttl: online.onlineTtl(a, now, octx)
   };
 }
 
