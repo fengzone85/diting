@@ -577,6 +577,8 @@ install_server() {
             printf 'PORT=%s\n' "$port" >> .env
         fi
         echo -e "${GREEN}[OK]   已存在 .env：凭据保持不变，PORT=${port}${NC}"
+        # 存量 .env 可能缺 SESSION_SECRET（旧版本/手工拷贝），补一次（幂等）。
+        ensure_session_secret
     fi
 
     echo -e "${YELLOW}[信息] 构建并启动服务端（首次需编译 better-sqlite3，约 1-2 分钟）…${NC}"
@@ -783,6 +785,8 @@ update_server() {
     # 密钥迁移（D7）：compose 已不再注入 ADMIN_TOKEN，停容器前先把 .env 明文转哈希入库，
     # 否则升级后服务端读不到凭据，会误判为"未安装"。
     migrate_env_admin_token
+    # 存量升级同样要补 SESSION_SECRET：否则 --upgrade 后每次重启丢登录态、分发链接作废。
+    ensure_session_secret
 
     # 先停掉旧容器并释放端口，避免「端口已被占用」导致新容器起不来
     echo -e "${YELLOW}[信息] 停止旧容器并释放端口…${NC}"
@@ -1215,6 +1219,32 @@ JS
         echo -e "${GREEN}[OK]   已清空 .env 的 ADMIN_TOKEN 行（$envc）${NC}"
     fi
     return $rc
+}
+
+# 补齐存量部署的 SESSION_SECRET（只处理 Docker 形态）。
+# 为什么需要：install_server 的首装分支会生成 SESSION_SECRET，但 else 分支（既有 .env）
+# 与 update_server 都不会补。旧部署该行为空/缺失时，服务端每次重启随机生成签名密钥，
+# 后果不止登录态失效——distribution.js 由 SESSION_SECRET 派生 TOKEN_KEY，已发出的一次性
+# 安装/下载链接会同时作废。
+# 原生/systemd 形态不在此处理：脚本的安装/更新只覆盖 Docker（见 server_deploy_mode 注释），
+# 原生部署由 server.js 启动时的「SESSION_SECRET 未设置」告警提示管理员手工补齐。
+# 幂等：已有非空值一律不动。
+ensure_session_secret() {
+    local envf="$SRC_DIR/server/.env" cur sess
+    [[ -f "$envf" ]] || return 0
+    cur="$(sed -n 's/^SESSION_SECRET=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1 || true)"
+    [[ -n "$cur" ]] && return 0
+    sess="$(openssl rand -hex 32)"
+    if grep -q '^SESSION_SECRET=' "$envf"; then
+        sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=${sess}#" "$envf"
+    else
+        printf 'SESSION_SECRET=%s\n' "$sess" >> "$envf"
+    fi
+    # .env 含密钥：收敛到 600，避免补齐动作把文件权限变宽。
+    chmod 600 "$envf" 2>/dev/null || true
+    echo -e "${GREEN}[OK]   已补齐 SESSION_SECRET（存量 .env 原值为空）${NC}"
+    echo -e "${YELLOW}[提示] 重启后此前发出的一次性安装/下载链接将失效，需在后台重新生成${NC}"
+    return 0
 }
 
 # 把 .env 里的明文 ADMIN_TOKEN 迁进库（只存哈希）。
