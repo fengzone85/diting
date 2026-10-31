@@ -18,8 +18,10 @@ import (
 
 const (
 	timeout = 10 * time.Second
-	// authBackoff 是 401/403 的退避时长（对齐 agent.py:68）
-	authBackoff = 10 * time.Minute
+	// defaultAuthBackoff 是 401/403 的默认退避时长（对齐 agent.py:68）。
+	// 实际值放在 Reporter.authBackoff 字段里：生产用默认，测试可注入毫秒级值，
+	// 否则验证这条分支要真等 10 分钟。
+	defaultAuthBackoff = 10 * time.Minute
 )
 
 // Reporter 负责 HTTP 上报。
@@ -30,6 +32,9 @@ type Reporter struct {
 	interval  time.Duration // 上报间隔，用于退避计算
 	userAgent string        // User-Agent 头（diting-agent-go/<version>）
 	client    *http.Client
+	// authBackoff 是 401/403 的退避时长（默认 10 分钟）。
+	// 独立成字段而非包级常量：测试才能用毫秒级值覆盖这条分支。
+	authBackoff time.Duration
 }
 
 // NewReporter 创建上报器。
@@ -41,12 +46,13 @@ type Reporter struct {
 // 也有限）。若未来要重新引入需服务端配套 gunzip 中间件。
 func NewReporter(serverURL, agentID, token string, interval time.Duration, version string) *Reporter {
 	return &Reporter{
-		serverURL: serverURL + "/api/report",
-		agentID:   agentID,
-		token:     token,
-		interval:  interval,
-		userAgent: "diting-agent-go/" + version,
-		client:    &http.Client{Timeout: timeout},
+		serverURL:   serverURL + "/api/report",
+		agentID:     agentID,
+		token:       token,
+		interval:    interval,
+		userAgent:   "diting-agent-go/" + version,
+		client:      &http.Client{Timeout: timeout},
+		authBackoff: defaultAuthBackoff,
 	}
 }
 
@@ -86,7 +92,7 @@ func (r *Reporter) Report(ctx context.Context, payload []byte) error {
 		// 401/403 不重试，长退避后返回
 		if err == errAuthRejected {
 			select {
-			case <-time.After(authBackoff):
+			case <-time.After(r.authBackoff):
 			case <-ctx.Done():
 				return ctx.Err()
 			}
