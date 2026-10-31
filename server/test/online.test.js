@@ -133,8 +133,10 @@ test('回归核心：compat.toNode 的 online 与 online.isOnline 同源（阈�
   setLastSeen(a.id, NOW - 200 * 1000);
   setGroupOverride('g-compat', 600);            // 分组放宽 → 应判在线
   const row = db.getAgent(a.id);
-  const node = compat.toNode(row, false);
-  assert.strictEqual(node.online, online.isOnline(row), 'toNode 的 online 必须与统一口径一致');
+  // 传同一个 NOW：此前两次调用各自 Date.now()，跨毫秒时 ttl 会差 1ms 而随机失败。
+  const octx = online.buildCtx();
+  const node = compat.toNode(row, false, octx, NOW);
+  assert.strictEqual(node.online, online.isOnline(row, NOW, octx), 'toNode 的 online 必须与统一口径一致');
   assert.strictEqual(node.online, true, '分组 600s 覆盖下 200s 应算在线（旧实现只看 env=60 会判离线）');
-  assert.strictEqual(node.ttl, online.onlineTtl(row), 'toNode 的 ttl 同样必须同源');
+  assert.strictEqual(node.ttl, online.onlineTtl(row, NOW, octx), 'toNode 的 ttl 同样必须同源');
 });
