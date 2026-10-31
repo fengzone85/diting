@@ -5,7 +5,7 @@
 //   - 关键指标显著变化 → 快档（实时捕捉异常）
 //   - 平稳 → 慢档（省流量）
 //   - 首报/采集失败 → 快档（快速建基线 / 快速恢复）
-//   - 防抖：进入快档后至少保持 3 轮，避免边界抖动反复切换
+//   - 防抖：触发快档后至少再保持 3 轮（触发轮 + 3 轮，共 4 轮），避免边界抖动反复切换
 //
 // 注意：慢档间隔必须小于服务端 OFFLINE_THRESHOLD_SEC（建议慢档 60s 配阈值 120s），
 // 否则平稳期会因 last_seen 间隔过大被误判离线。
@@ -25,12 +25,12 @@ func adaptiveInterval(prev, cur *collector.Metrics, fast, slow time.Duration, fa
 	if cur == nil {
 		return fast
 	}
-	// 首报 → 快档建基线，并要求至少 3 轮快档
+	// 首报 → 快档建基线，并要求随后 3 轮保持快档（首报轮 + 3 轮）
 	if prev == nil {
 		*fastStreak = 3
 		return fast
 	}
-	// 防抖：快档未满 3 轮，继续快档
+	// 防抖：触发后 3 轮内继续快档（第 4 轮起才允许回慢档）
 	if *fastStreak > 0 {
 		*fastStreak--
 		return fast
@@ -41,7 +41,7 @@ func adaptiveInterval(prev, cur *collector.Metrics, fast, slow time.Duration, fa
 		*fastStreak = 3
 		return fast
 	}
-	// 内存使用相对变化 > 15%
+	// 内存变化量占总内存 > 15%（相对的是总量，不是上一轮用量）
 	if cur.MemTotal > 0 {
 		dMem := math.Abs(float64(cur.MemUsed) - float64(prev.MemUsed))
 		if dMem/float64(cur.MemTotal) > 0.15 {
