@@ -1,7 +1,9 @@
 # 方案：审查清单纠偏与修复（2026-10-31）
 
-> **状态**：审查已定稿（四轮复核完成），待实施。**尚未改动任何代码。**
-> **基线**：`git rev-parse --short HEAD` = `c21398a`（工作区另有 4 项未提交改动：`server.js`、`compat.js`、`integration.api.test.js`、`plans/2026-10-26-komari-compat-fields.md`，不影响本方案结论）。
+> **状态**：**已实施**（2026-10-31，master `d93edee`）。P1-1/P1-2/P1-3、P2-1/P2-2、P3-reporter/P3-web 全部落地并推送；
+> db.js 拆分按评估结论改为「不拆 + 结构守护」（见 §3 P3 表）。web 覆盖率由 60.09/53 提升到 93.75/85.04，
+> 服务端 654 项、web 294 项、Go 全包测试通过。
+> **基线**：审查时提交为 `c21398a`（当时工作区另有 4 项未提交改动，已随 Komari 分支一并收尾）。
 > **目标**：把外部审查报告的 7 项清单转成可执行修复项，并修正其数据口径、定级与遗漏。
 > **约束**：不改主题模板（既定原则：适配在服务端做）；不动受控端指纹红线。
 
@@ -194,7 +196,7 @@ server/src/routes/
 |---|---|
 | reporter 可测性重构 | `authBackoff` 改为 `Reporter` 字段（默认仍 10min），测试注入 1ms；补 200 / 401 / 403 / 500 重试耗尽 / ctx 取消 5 例 |
 | SettingsView 拆分 | **按文件真实 `<h2>` 分组**（AI/主题/安全不在本文件，分别在 `AiView.vue`/`TemplateView.vue` 及 Sessions/ApiTokens/AuditLog 视图）：① 备份+容量（`:786-1043`，template 约 258 行，收益最高）；② 告警阈值 + 分组覆盖（`:671-730`）；③ 通知（`:731-773`）；④ 站点 UI + 社交链接（`:620-670`、`:774-785`）。**不变量**：子组件不得各自持有 local 状态，否则破坏 `useSettingsForm.test.ts` 守护的 watch 注册顺序，以及 `resetLocal()`(:103)/`cloneSettings()`(:206) 的同步规则——状态仍由父组件单一持有，子组件只收 props + emit |
-| db.js 域拆分 | **前置条件**：17 条独立 `ALTER TABLE` + 2 处 `for…of cols` 循环迁移（`:350`、`:438`）必须保持现有执行顺序（建议 schema 与迁移留在单一文件，仅拆查询/写函数）；先拆只读查询验证一轮，再拆写路径 |
+| db.js 域拆分 | **不做**（2026-10-31 评估）：metrics 读路径只有 5 行薄封装（重查询已在 `heavy-queries.js` / `metrics-merge.js`），其余函数共享同一个 `stmts`（113 处引用），拆出需工厂注入 `(db, stmts)`，只减行数不降耦合；且 17 条独立 `ALTER TABLE` + 2 处 `for…of` 循环迁移的顺序、`dbworker.js` 只读连接都是硬约束。**替代方案**：保留 `server/test/db-schema.test.js` 结构守护（19 张表 / 迁移列 / 缺列老库升级 / 只读接口冒烟），防住「改 schema 忘补迁移列」这类真实事故 |
 
 ### P4 `govulncheck`
 
