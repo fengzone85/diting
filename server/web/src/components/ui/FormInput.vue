@@ -6,6 +6,8 @@ interface Props {
   placeholder?: string;
   // 字段下方的灰色小字说明（用于配置项的注意事项/排障提示）
   hint?: string;
+  // 只读展示（如 AI Key 由环境变量提供时禁止编辑）
+  disabled?: boolean;
 }
 
 defineProps<Props>();
@@ -32,23 +34,26 @@ function onInput(e: Event) {
       v-if="type === 'textarea'"
       :value="modelValue as string"
       rows="3"
-      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
       :placeholder="placeholder"
+      :disabled="disabled"
       @input="onInput"
     />
     <input
       v-else-if="type === 'checkbox'"
       :checked="modelValue as boolean"
       type="checkbox"
-      class="h-4 w-4 rounded border-slate-700 bg-slate-900/50 text-sky-500 focus:ring-sky-500"
+      class="h-4 w-4 rounded border-slate-700 bg-slate-900/50 text-sky-500 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+      :disabled="disabled"
       @change="onInput"
     />
     <input
       v-else
       :value="modelValue"
       :type="type || 'text'"
-      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
       :placeholder="placeholder"
+      :disabled="disabled"
       @input="onInput"
     />
     <p v-if="hint" class="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-500">{{ hint }}</p>
