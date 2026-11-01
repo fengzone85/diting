@@ -9,6 +9,9 @@ const db = require('./db');
 const { asyncHandler } = require('./util');
 // 审查 C4：公开兼容层的重聚合（720h 全窗、未认证即可触发）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
+// task id 必须与 RPC（getPublicPingTasks / getPingMetricStats / queryMetrics）同源：
+// 主题可能混用 REST 与 RPC 两侧数据，id 口径不同就永远关联不上。
+const { probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
 
 // 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
 // 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
@@ -366,7 +369,6 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       : await heavyQuery('probesAll', since, Math.max(200, perAgentPoints(maxCount, since)));
     const tasks = new Map();      // task_id -> {id,name,interval,loss}
     const records = [];           // {task_id,time,value}
-    let tid = 0;
     for (const m of probeRows) {
       let probes = null;
       try { probes = m.probes ? JSON.parse(m.probes) : null; } catch (_) { probes = null; }
@@ -393,7 +395,7 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       for (const it of items) {
         if (it.value == null || !Number.isFinite(it.value)) continue;
         let t = tasks.get(it.name);
-        if (!t) { t = { id: ++tid, name: it.name, interval: 1, loss: it.loss || 0, type: it.type || 'tcp', code: it.code ?? null, cert_days: it.cert_days ?? null }; tasks.set(it.name, t); }
+        if (!t) { t = { id: probeTaskId(it.name), name: it.name, interval: PROBE_TASK_INTERVAL, loss: it.loss || 0, type: it.type || 'tcp', code: it.code ?? null, cert_days: it.cert_days ?? null }; tasks.set(it.name, t); }
         records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
       }
     }

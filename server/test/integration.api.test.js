@@ -325,6 +325,22 @@ test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空
   assert.ok(rec, '应存在 value=12 的延迟记录');
 });
 
+// 主题延迟图可能同时读 REST(/records/ping) 与 RPC(getPublicPingTasks/queryMetrics)：
+// 两侧 task id 口径必须完全相同，否则主题里永远关联不上（此前 REST 用 1/2/3 顺序 id，
+// RPC 用哈希 id，正是延迟图恒空的一个原因）。
+test('task id 同源：/api/records/ping 的 id 与 RPC 探针任务一致', async () => {
+  const { probeTaskId } = require('../src/compat-metrics');
+  const res = await request(app).get('/api/records/ping?hours=1');
+  assert.strictEqual(res.status, 200);
+  const t = res.body.data.tasks.find((x) => x.name === '移动');
+  assert.ok(t, 'tasks 应包含「移动」');
+  assert.strictEqual(t.id, probeTaskId('移动'), 'REST 侧必须用与 RPC 相同的稳定哈希 id');
+  assert.ok(
+    res.body.data.records.some((r) => r.task_id === t.id),
+    'records 的 task_id 必须与 tasks.id 对齐',
+  );
+});
+
 // F4 收口：compat 层除 type/code 外也要透传 cert_days（社区主题消费时可显示证书到期）。
 test('F4：/api/records/ping 的 tasks 透传 type/code/cert_days', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');

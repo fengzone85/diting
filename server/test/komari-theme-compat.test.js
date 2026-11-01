@@ -134,3 +134,35 @@ test('RPC common:getRecords 的 load_type 过滤生效', async () => {
   assert.ok('cpu' in first, 'load_type=cpu 时应含 cpu');
   assert.ok(!('ram' in first), 'load_type=cpu 时不应含 ram');
 });
+
+test('延迟任务口径：tasks / stats / series 的 task_id 与 interval 三处一致', async () => {
+  const { id } = db.createAgent({ name: 'km-ping' });
+  db.insertMetric(id, {
+    ts: Date.now(), cpu: 1, mem_total: 100, mem_used: 10,
+    probes: JSON.stringify({ 移动: { ms: 12, ok: true }, 联通: { ms: 24, ok: true } }),
+  });
+
+  const rpc = (method, params) => request(app)
+    .post('/api/rpc2')
+    .send({ jsonrpc: '2.0', id: 9, method, params })
+    .expect(200);
+
+  const tasks = (await rpc('public:getPublicPingTasks', { entity_id: id })).body.result.tasks;
+  const t = tasks.find((x) => x.name === '移动');
+  assert.ok(t, '应返回「移动」探针任务');
+  // 0 会被主题当成「无间隔任务」跳过渲染；1 与真实 60s 周期不符 → 统一 60
+  assert.strictEqual(t.interval, 60, 'tasks.interval 应为 60');
+  assert.strictEqual(t.interval_seconds, 60, 'tasks.interval_seconds 应为 60');
+  assert.ok(t.task_id > 0, 'task_id 必须是正整数（0 表示无任务）');
+
+  const stats = (await rpc('public:getPingMetricStats', { entity_id: id })).body.result.stats;
+  const s = stats.find((x) => x.name === '移动');
+  assert.strictEqual(s.task_id, t.task_id, 'stats 与 tasks 的 task_id 必须一致');
+  assert.strictEqual(s.interval, 60, 'stats.interval 应为 60');
+
+  const series = (await rpc('public:queryMetrics', {
+    entity_id: id, metric_keys: ['ping.latency_ms'], hours: 1,
+  })).body.result.series;
+  const ser = series.find((x) => x.task_name === '移动');
+  assert.strictEqual(ser.task_id, t.task_id, 'series 与 tasks 的 task_id 必须一致');
+});
