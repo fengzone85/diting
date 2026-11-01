@@ -3,6 +3,12 @@
 // 设计为独立模块，便于后续插件追加自定义指标。
 const db = require('./db');
 
+// 探针任务对外上报的「执行间隔」（秒）。diting 没有独立 ping task 表，探针结果存在
+// metrics.probes 里，因此没有真实任务间隔；但社区主题会用它做时间轴与「任务是否有效」
+// 的判断，给 0 会被当成无间隔任务而跳过渲染。按 Komari 默认探测周期 60s 统一上报，
+// 且 REST(/records/ping) 与 RPC(任务/统计/指标) 三侧必须一致。
+const PROBE_TASK_INTERVAL = 60;
+
 // 探针任务的对外标识：diting 内部用 label（中文名，如「电信」）作 task 标识，而 Komari 的
 // task 标识是**数字**（PingTaskInfo.id / stats.task_id / series.task_id 三处同源）。社区主题
 // PingChart 会把 task_id 数值化后当 id 用（`normalizeMetricTaskId`），若拿到的是中文名，
@@ -211,4 +217,4 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   return { start, end, series, count: series.length };
 }
 
-module.exports = { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics, probeTaskId };
+module.exports = { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL };
