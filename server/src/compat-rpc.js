@@ -3,7 +3,8 @@
 // 方法表采用 Map 注册制，预留 plugin:<id>:* 命名空间供未来插件扩展。
 const db = require('./db');
 const { toNode, toRealtime, publicOpen, getNodesLatestStatus } = require('./compat');
-const { METRIC_DEFINITIONS, queryMetrics, probeTaskId } = require('./compat-metrics');
+// PROBE_TASK_INTERVAL 与 task id 一样必须三侧同源，统一在 compat-metrics 定义。
+const { METRIC_DEFINITIONS, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
 // 审查 C4：RPC 里的重聚合（getPingRecords 720h 全窗）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
 
@@ -183,8 +184,8 @@ async function getRecords(params = {}) {
         valid: vals.length,
         loss: 0,
         loss_approximate: false,
-        interval: 0,
-        interval_seconds: 0,
+        interval: PROBE_TASK_INTERVAL,
+        interval_seconds: PROBE_TASK_INTERVAL,
         type: 'icmp',
         avg, min, max, p50, p99, p99_p50_ratio, stddev,
         latest: vals.length ? vals[vals.length - 1] : 0
@@ -266,8 +267,8 @@ function getPublicPingTasks(params = {}) {
             task_name: name,
             name: name,
             type: 'icmp',
-            interval_seconds: 0,
-            interval: 0
+            interval_seconds: PROBE_TASK_INTERVAL,
+            interval: PROBE_TASK_INTERVAL
           });
         }
       });
@@ -307,8 +308,8 @@ function getPingMetricStats(params = {}) {
       valid: vals.length,
       loss: 0,
       loss_approximate: false,
-      interval: 0,
-      interval_seconds: 0,
+      interval: PROBE_TASK_INTERVAL,
+      interval_seconds: PROBE_TASK_INTERVAL,
       type: 'icmp',
       avg, min, max, p50, p99,
       p99_p50_ratio: p50 ? p99 / p50 : 0,
