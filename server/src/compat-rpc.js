@@ -151,7 +151,11 @@ async function getRecords(params = {}) {
 
   // ping 类型：从 probes 抽延迟
   if (params.type === 'ping' || (metricKeys && metricKeys.some(k => k.startsWith('ping')))) {
-    const records = await getProbeRecords({ hours, maxCount: maxPoints });
+    // 必须按实体过滤：getProbeRecords 走的是跨全部节点的 probesAll 采样，
+    // 主题在单节点详情页请求延迟记录时，若不过滤会把其它节点的数据一起返回
+    //（实测请求 j4125 拿到的是 n5100 的记录），按 client 关联 tasks 时全部落空。
+    const records = (await getProbeRecords({ hours, maxCount: maxPoints }))
+      .filter(r => !entityId || r.client === entityId);
     const byClient = {};
     records.forEach(r => {
       (byClient[r.client] = byClient[r.client] || []).push(r);

@@ -15,6 +15,7 @@
 | **task id 口径** | `GET /api/records/ping` 用 1/2/3 顺序 id；RPC 用哈希 id（如 32055）。主题混用两个数据源时永远关联不上 | REST 与 RPC 三处统一走 `probeTaskId(name)`（确定性哈希，同一名称在所有节点得到同一 id） |
 | **任务间隔** | RPC 返回 `interval: 0` / `interval_seconds: 0`；REST 返回 `interval: 1`。0 会被当成「无间隔任务」跳过渲染 | 三处统一 `60`（`PROBE_TASK_INTERVAL`，Komari 默认探测周期） |
 | **REST 外壳** | 顶层 `{ count, records }` | `{ status, message, data: { count, records, tasks } }` |
+| **延迟记录实体过滤**（2026-11-02 补修） | `common:getRecords(type='ping')` 内部走跨全部节点的 `probesAll` 采样且**未按 uuid 过滤**——实测请求 j4125 返回的是 n5100 的探针记录，主题按 client 关联 tasks 时全部落空 | 按 `entityId` 过滤 `records` 与 `stats`，两个实体互不串台 |
 
 ## 3. 更早已对齐的项
 

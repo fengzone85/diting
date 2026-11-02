@@ -166,3 +166,21 @@ test('延迟任务口径：tasks / stats / series 的 task_id 与 interval 三�
   const ser = series.find((x) => x.task_name === '移动');
   assert.strictEqual(ser.task_id, t.task_id, 'series 与 tasks 的 task_id 必须一致');
 });
+
+test('延迟记录按实体过滤：请求 A 不得混入 B 的探针记录', async () => {
+  const a1 = db.createAgent({ name: 'filter-a' });
+  const a2 = db.createAgent({ name: 'filter-b' });
+  const now = Date.now();
+  db.insertMetric(a1.id, { ts: now, cpu: 1, mem_total: 100, mem_used: 10, probes: JSON.stringify({ A测: { ms: 10, ok: true } }) });
+  db.insertMetric(a2.id, { ts: now, cpu: 1, mem_total: 100, mem_used: 10, probes: JSON.stringify({ B测: { ms: 20, ok: true } }) });
+
+  const res = await request(app)
+    .post('/api/rpc2')
+    .send({ jsonrpc: '2.0', id: 10, method: 'common:getRecords', params: { type: 'ping', uuid: a1.id, hours: 1, max_count: 1000 } })
+    .expect(200);
+
+  const r = res.body.result;
+  assert.ok(Array.isArray(r.records) && r.records.length >= 1, '应返回本实体记录');
+  assert.ok(r.records.every((x) => x.client === a1.id), 'records 不得混入其它实体的记录');
+  assert.ok(r.stats.every((x) => x.entity_id === a1.id), 'stats 同样必须按实体过滤');
+});
