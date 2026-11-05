@@ -48,14 +48,21 @@ function getMetricsRange(agentId, { hours = 1, maxPoints = 100 } = {}) {
   return heavyQuery('loadOne', agentId, since, Math.max(1, maxPoints));
 }
 
-async function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
+async function getProbeRecords({ hours = 1, maxCount = 100, entityId } = {}) {
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxCount = clamp(Math.floor(Number(maxCount) || 0), 0, 5000);
   const since = Date.now() - hours * 3600 * 1000;
+  const points = Math.max(200, maxCount);
   // 只取 ts+agent_id+probes 三列并按 agent 时间桶降采样（每 agent 最多 maxCount 点），
   // 规避 SELECT * 全表物化 + 330 万行读进内存触发 OOM。probes 周期采样不丢"出现过哪些 task"语义。
   // 审查 C4：跨节点全窗聚合（未认证 RPC 即可触发）移 worker 线程。
-  const rows = (await heavyQuery('probesAll', since, Math.max(200, maxCount)) || [])
+  // 指定实体时必须走单节点采样：跨节点 probesAll 的结果还要全局 slice(0, maxCount)，
+  // 其它节点的记录排在前面会把目标实体挤空（实测请求 j4125 返回 count=0，全是 n5100 的记录）。
+  // Komari 官方同样按 uuid 取该实体记录（web/rpc/jsonrpc/common.record.go:177）。
+  const raw = entityId
+    ? await heavyQuery('probesOne', entityId, since, points)
+    : await heavyQuery('probesAll', since, points);
+  const rows = (raw || [])
     .filter(r => r.probes != null)
     .slice(0, maxCount * 10);
 
@@ -65,7 +72,8 @@ async function getProbeRecords({ hours = 1, maxCount = 100 } = {}) {
       const probes = JSON.parse(r.probes || '{}');
       Object.entries(probes).forEach(([name, val]) => {
         records.push({
-          client: r.agent_id,
+          // probesOne 只返回 ts+probes，不含 agent_id；实体已知故由调用方补上。
+          client: entityId || r.agent_id,
           // task 标识用数字 id（与 series/stats/tasks 三处同源），中文名放 task_name
           task_id: probeTaskId(name),
           task_name: name,
@@ -151,11 +159,9 @@ async function getRecords(params = {}) {
 
   // ping 类型：从 probes 抽延迟
   if (params.type === 'ping' || (metricKeys && metricKeys.some(k => k.startsWith('ping')))) {
-    // 必须按实体过滤：getProbeRecords 走的是跨全部节点的 probesAll 采样，
-    // 主题在单节点详情页请求延迟记录时，若不过滤会把其它节点的数据一起返回
-    //（实测请求 j4125 拿到的是 n5100 的记录），按 client 关联 tasks 时全部落空。
-    const records = (await getProbeRecords({ hours, maxCount: maxPoints }))
-      .filter(r => !entityId || r.client === entityId);
+    // 实体过滤已下推到 getProbeRecords 的单节点采样（probesOne）：此前「跨节点采样后
+    // 再按 client 过滤」会让目标实体的记录先被全局 slice 挤空，最终只剩空数组。
+    const records = await getProbeRecords({ hours, maxCount: maxPoints, entityId });
     const byClient = {};
     records.forEach(r => {
       (byClient[r.client] = byClient[r.client] || []).push(r);
@@ -200,9 +206,9 @@ async function getRecords(params = {}) {
       records,
       recordsByClient: byClient,
       stats,
-      // Komari 的 RecordsResp.tasks 带任务清单（id/name/interval），主题的延迟图在
-      // 「指标接口不可用」时会回退到这条 legacy 链路，tasks 恒空会让它直接显示空态。
-      tasks: getPublicPingTasks({ entity_id: entityId }).tasks,
+      // Komari 官方 RecordsResp.tasks 除任务清单外还带窗口统计（loss/avg/min/max/...），
+      // 主题 PingChart 直接对 loss 调 toFixed(2)，缺字段会让整个组件渲染抛错。
+      tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }).tasks, records),
       basic_info: [],
       from: fromIso,
       to: nowIso
@@ -281,12 +287,58 @@ function getPublicPingTasks(params = {}) {
   return { count: taskMap.size, tasks: Array.from(taskMap.values()) };
 }
 
+// Komari 官方 getRecords(type=ping).tasks 每项带窗口统计字段
+// （web/rpc/jsonrpc/common.record.go:362-383）；其中 loss 会被 PingChart 直接用于
+// toFixed(2)，缺字段会让整个延迟图组件渲染抛错。diting 此前直接复用 getPublicPingTasks()
+// 的任务清单（纯元数据、无 loss），故在窗口记录上补齐官方统计。
+function buildPingTasks(baseTasks, records) {
+  return (baseTasks || []).map(t => {
+    const pts = records.filter(r => r.task_id === t.task_id);
+    const total = pts.length;
+    const vals = pts
+      .map(r => r.value)
+      .filter(v => typeof v === 'number' && v >= 0)
+      .sort((a, b) => a - b);
+    const sum = vals.reduce((s, v) => s + v, 0);
+    const avg = vals.length ? sum / vals.length : 0;
+    const min = vals.length ? vals[0] : 0;
+    const max = vals.length ? vals[vals.length - 1] : 0;
+    const p50 = vals.length ? vals[Math.floor(vals.length * 0.5)] : 0;
+    const p99 = vals.length ? vals[Math.floor(vals.length * 0.99)] : 0;
+    const jitterBase = Math.max(Math.min(p50, 50), 10);
+    let latest = -1;
+    for (let i = pts.length - 1; i >= 0; i--) {
+      if (typeof pts[i].value === 'number' && pts[i].value >= 0) { latest = pts[i].value; break; }
+    }
+    return Object.assign({}, t, {
+      default_on: true,
+      loss: total ? (total - vals.length) / total * 100 : 0,
+      min, max, avg, latest, total, p50, p99,
+      p99_p50_ratio: p50 > 0 && p99 >= p50 ? (p99 - p50) / jitterBase : 0
+    });
+  });
+}
+
+// Komari 官方 flatRecord（web/rpc/jsonrpc/common.go:514-534）：扁平命名字段。
+// GPU 不采集故刻意不输出，主题会把缺失值当 null，避免伪造 0 值。
+function toFlatRecent(agentId, m) {
+  const rec = { client: agentId, time: new Date(m.ts).toISOString() };
+  for (const [field, col] of Object.entries(LOAD_FIELD_MAP)) {
+    if (col) rec[field] = Number(m[col]) || 0;
+  }
+  rec.connections = Number(m.connections) || 0;
+  rec.connections_udp = Number(m.connections_udp) || 0;
+  return rec;
+}
+
 function getPingMetricStats(params = {}) {
   // Komari 社区主题 PingChart 调用 public:getPingMetricStats，期望返回 stats 数组。
   // 结构与 metrics:ping 里的 stats 一致：按 (client,task_id) 聚合延迟统计。
   const entityId = params.entity_id || params.uuid;
   const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
-  return getProbeRecords({ hours, maxCount: clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000 }).then((records) => {
+  const maxCount = clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000;
+  // 与 getRecords(type=ping) 同源：按实体走单节点采样，避免跨节点切片把本实体挤空。
+  return getProbeRecords({ hours, maxCount, entityId }).then((records) => {
   const agg = {};
   records.forEach(r => {
     if (entityId && r.client !== entityId) return;
@@ -321,7 +373,7 @@ function getPingMetricStats(params = {}) {
       latest: vals.length ? vals[vals.length - 1] : 0
     };
   });
-  return { count: stats.length, stats, tasks: getPublicPingTasks({ entity_id: entityId }).tasks, basic_info: [] };
+  return { count: stats.length, stats, tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }).tasks, records), basic_info: [] };
   });
 }
 
@@ -332,11 +384,14 @@ registerMethod('rpc.getMethods', () => Array.from(METHODS.keys()));
 
 registerMethod('common:getNodes', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
 registerMethod('common:getNodesLatestStatus', getNodesLatestStatus);
+// Komari 官方返回 { count, records: []flatRecord }（web/rpc/jsonrpc/common.go:536-542），
+// 默认主题 LoadChart 的实时页签读 e.records 并按扁平字段取值；此前返回嵌套结构的裸数组 → 空图。
 registerMethod('common:getNodeRecentStatus', (params = {}) => {
   const a = db.getAgent(params.uuid);
-  if (!a) return [];
-  const rt = toRealtime(db.getLatestMetric(a.id));
-  return rt ? [rt] : [];
+  if (!a) return { count: 0, records: [] };
+  const m = db.getLatestMetric(a.id);
+  if (!m) return { count: 0, records: [] };
+  return { count: 1, records: [toFlatRecent(a.id, m)] };
 });
 registerMethod('common:getRecords', getRecords);
 
