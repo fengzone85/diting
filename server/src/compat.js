@@ -255,7 +255,9 @@ router.use((req, res, next) => {
 // 主题「manifest 默认值 + 管理员保存值」的合并结果（方案 C6）。
 function publicSettings() {
   const ui = db.getUiSettings();
-  const theme = ui.public_theme || 'Mochi';
+  // 官方默认主题名为 "default"（database/utils.go:42-44）；此前回退 'Mochi' 是历史值。
+  // 未配置/默认皮肤时统一回官方值，已配置具体主题时不受影响（Phase 3 C1 决策）。
+  const theme = ui.public_theme || 'default';
   let themeSettings = {};
   if (theme && theme !== 'default') {
     const t = themeStore.getTheme(theme);
@@ -338,7 +340,24 @@ router.get('/recent/:uuid', guard, (req, res) => {
 });
 
 // GET /api/records/load —— 负载历史（官方主题详情页历史曲线依赖）。
-// 参数：uuid / client（节点）、hours（默认24）、max_count（默认1000）。
+// 参数：uuid / client（节点）、hours（默认4，官方 API 文档 13.7）、max_count、load_type。
+// 官方 load_type 白名单（public.go:156-160）；指定非 all 时只投影对应字段并在 data 回显 load_type。
+const LOAD_TYPE_FIELDS = {
+  cpu: ['cpu'],
+  ram: ['ram', 'ram_total'],
+  swap: ['swap', 'swap_total'],
+  load: ['load'],
+  temp: ['temp'],
+  disk: ['disk', 'disk_total'],
+  network: ['net_in', 'net_out', 'net_total_up', 'net_total_down'],
+  process: ['process'],
+  connections: ['connections']
+};
+function projectLoadRecord(rec, fields) {
+  const out = { client: rec.client, time: rec.time };
+  for (const f of fields) if (f in rec) out[f] = rec[f];
+  return out;
+}
 function toLoadRecord(m) {
   return {
     client: m.agent_id,
@@ -355,16 +374,22 @@ function toLoadRecord(m) {
     net_out: Number(m.net_tx_rate) || 0,
     net_total_up: Number(m.net_tx_month) || 0,
     net_total_down: Number(m.net_rx_month) || 0,
+    temp: Number(m.temp) || 0,
+    process: Number(m.process_count) || 0,
     connections: 0
   };
 }
 router.get('/records/load', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
-  const hours = Math.min(Number(req.query.hours) || 24, 720);
+  // 官方 REST /api/records/load 默认 hours=4（API 文档 13.7）；此前 diting 为 24。
+  const hours = Math.min(Number(req.query.hours) || 4, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
+  const rawLoadType = typeof req.query.load_type === 'string' ? req.query.load_type : '';
+  const loadType = Object.prototype.hasOwnProperty.call(LOAD_TYPE_FIELDS, rawLoadType) ? rawLoadType : '';
   // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
   // 审查 C4：缓存未命中时的重聚合移 worker 线程（否则数秒阻塞事件循环）
-  const payload = await cachedRecordsAsync(`load|${uuid || '*'}|${hours}|${maxCount}`, async () => {
+  // 缓存键纳入 load_type，避免不同投影结果串味。
+  const payload = await cachedRecordsAsync(`load|${uuid || '*'}|${hours}|${maxCount}|${loadType}`, async () => {
     const since = Date.now() - hours * 3600 * 1000;
     // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
     // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
@@ -373,9 +398,17 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
       ? await heavyQuery('loadOne', uuid, since, maxCount)
       : await heavyQuery('loadAll', since, perAgentPoints(maxCount, since));
     const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
-    const records = rows.map(toLoadRecord);
-    // 同 /records/ping：Komari REST 标准外壳要求结果包在 data 里
-    return { status: 'success', message: '', data: { count: records.length, records } };
+    let records = rows.map(toLoadRecord);
+    const data = { count: records.length, records };
+    // 官方：指定非 all 的 load_type 时投影字段并在 data 回显 load_type（public.go:169-177）。
+    if (loadType) {
+      records = records.map(r => projectLoadRecord(r, LOAD_TYPE_FIELDS[loadType]));
+      data.records = records;
+      data.count = records.length;
+      data.load_type = loadType;
+    }
+    // Komari REST 标准外壳要求结果包在 data 里
+    return { status: 'success', message: '', data };
   });
   res.json(payload);
 }));
@@ -385,7 +418,8 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
 // 转译为官方结构：每个被探测目标为一个 task，value=该时刻延迟(ms)，loss=丢包率。
 router.get('/records/ping', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
-  const hours = Math.min(Number(req.query.hours) || 24, 720);
+  // 官方 REST /api/records/ping 默认 hours=4（API 文档 13.8 / public.go:334-341）。
+  const hours = Math.min(Number(req.query.hours) || 4, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
   // 与 /records/load 同理：游客可直连，720h 全量最坏要扫百万行，30s 缓存兜底
   // 审查 C4：重聚合移 worker 线程
@@ -425,10 +459,36 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
         if (it.value == null || !Number.isFinite(it.value)) continue;
         let t = tasks.get(it.name);
         if (!t) { t = { id: probeTaskId(it.name), name: it.name, interval: PROBE_TASK_INTERVAL, loss: it.loss || 0, type: it.type || 'tcp', code: it.code ?? null, cert_days: it.cert_days ?? null }; tasks.set(it.name, t); }
-        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
+        // 官方 recordsResp 含 client（public.go:300-305）；单节点采样行可能不带 agent_id。
+        records.push({
+          task_id: t.id,
+          time: new Date(m.ts).toISOString(),
+          value: it.value,
+          client: m.agent_id || uuid || ''
+        });
       }
     }
     records.sort((a, b) => new Date(a.time) - new Date(b.time));
+    const out = records.slice(-maxCount);
+    // 官方 public:getPingRecords 的 basic_info 按 client 聚合窗口内丢包率与延迟极值
+    // （public.go:306-311,382-393）。
+    const byClient = new Map();
+    for (const r of out) {
+      if (!byClient.has(r.client)) byClient.set(r.client, { client: r.client, total: 0, loss: 0, min: 0, max: 0 });
+      const s = byClient.get(r.client);
+      s.total++;
+      if (r.value < 0) s.loss++;
+      else {
+        if (s.min === 0 || r.value < s.min) s.min = r.value;
+        if (r.value > s.max) s.max = r.value;
+      }
+    }
+    const basic_info = Array.from(byClient.values()).map(s => ({
+      client: s.client,
+      loss: s.total ? s.loss / s.total * 100 : 0,
+      min: s.min,
+      max: s.max
+    }));
     // Komari REST 标准外壳：{ status, message, data:<result> }（Go 侧 jsonRpc.Bind →
     // renderStandard，见 komari/web/rpc/jsonrpc/bridge.go）。此前把 count/records 放在顶层，
     // React 系主题（PurCarte v1.2.5）读 `resp.data.records` 得到 undefined → 延迟图恒
@@ -437,9 +497,10 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       status: 'success',
       message: '',
       data: {
-        count: records.length,
-        records: records.slice(-maxCount),
-        tasks: [...tasks.values()]
+        count: out.length,
+        records: out,
+        tasks: [...tasks.values()],
+        basic_info
       }
     };
   });
@@ -482,7 +543,8 @@ router.get('/node/:uuid', guard, (req, res) => {
 // 主题端 AccountContext 直接把整个响应体当 account 使用：account = await resp.json()，
 // 故必须扁平返回，否则 account.logged_in 为 undefined。
 router.get('/me', (req, res) => {
-  res.json({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' });
+  // 官方 guest 账户用户名为 "Guest"（web/rpc/jsonrpc/public.go:91 / API 文档 3.2）。
+  res.json({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' });
 });
 
 // GET /api/task/ping —— 官方公开 Ping 任务清单（router.go:62 → public:getPublicPingTasks）。

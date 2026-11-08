@@ -214,7 +214,14 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
     }
   }
 
-  return { start, end, series, count: series.length };
+  // 官方 public:queryMetrics 响应信封（public.metric.go:337-343）。
+  // server_downsample_default / default_points 为官方必备字段，default_points=500（:20）。
+  return {
+    start, end, series,
+    server_downsample_default: true,
+    default_points: 500,
+    count: series.length
+  };
 }
 
 module.exports = { METRIC_DEFINITIONS, METRIC_FIELD_MAP, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL };

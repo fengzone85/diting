@@ -132,11 +132,13 @@ const LOAD_TYPE_GROUPS = {
 };
 
 // 审查 C4：异步化——内部 getProbeRecords/getMetricsRange 的重聚合走 worker 线程
-async function getRecords(params = {}) {
+async function getRecords(params = {}, defaultHours = 1) {
   // 兼容前端 LoadChart 实际传参：entity_id + metric_keys + hours + max_points
-  // 也兼容旧调用：uuid + type + hours + maxPoints
+  // 也兼容旧调用：uuid + type + hours + maxPoints。
+  // defaultHours 由注册包装层按官方方法分流：common:getRecords=1、public:getRecordsByUUID=4，
+  // metrics:* 为 diting 自造方法无官方基准、保持 1（方案 §7 Phase 3 分流表）。
   const entityId = params.entity_id || params.uuid || (Array.isArray(params.entity_ids) ? params.entity_ids[0] : undefined);
-  const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
+  const hours = clamp(Math.floor(Number(params.hours || params.h || defaultHours) || 0), 0, 720);
   const maxPoints = clamp(Math.floor(Number(params.max_points || params.maxPoints || 100) || 0), 0, 5000);
   const metricKeys = Array.isArray(params.metric_keys) ? params.metric_keys : null;
   const nowIso = new Date().toISOString();
@@ -442,6 +444,18 @@ function getPingMetricStats(params = {}) {
   });
 }
 
+// 官方 common:getNodes{uuid}、getNodesLatestStatus{uuid,uuids[]} 的节点过滤
+// （web/rpc/jsonrpc/common.go:217-221,287-291）。diting 仍返回 uuid→node 的 map，
+// 只在 map 上做过滤（形状差异登记，不改既有主题依赖）。
+function nodeFilter(params = {}) {
+  const ids = [];
+  if (typeof params.uuid === 'string' && params.uuid) ids.push(params.uuid);
+  if (Array.isArray(params.uuids)) {
+    for (const x of params.uuids) if (typeof x === 'string' && x) ids.push(x);
+  }
+  return ids.length ? new Set(ids) : null;
+}
+
 // ===== 方法表注册 =====
 registerMethod('rpc.ping', () => 'pong');
 // diting 自造原名，主题服务层直接调用，必须保留；官方名另行补在下方。
@@ -473,8 +487,17 @@ registerMethod('rpc.help', (params = {}) => {
 });
 registerMethod('rpc.getHelp', (params = {}) => METHODS.get('rpc.help')(params));
 
-registerMethod('common:getNodes', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
-registerMethod('common:getNodesLatestStatus', getNodesLatestStatus);
+registerMethod('common:getNodes', (params = {}) => {
+  const wanted = nodeFilter(params);
+  const agents = db.getMonitoredAgents().filter(a => !wanted || wanted.has(a.id));
+  return Object.fromEntries(agents.map(a => [a.id, toNode(a)]));
+});
+registerMethod('common:getNodesLatestStatus', (params = {}) => {
+  const wanted = nodeFilter(params);
+  const all = getNodesLatestStatus();
+  if (!wanted || !all || typeof all !== 'object') return all;
+  return Object.fromEntries(Object.entries(all).filter(([id]) => wanted.has(id)));
+});
 // Komari 官方返回 { count, records: []flatRecord }（web/rpc/jsonrpc/common.go:536-542），
 // 默认主题 LoadChart 的实时页签读 e.records 并按扁平字段取值；此前返回嵌套结构的裸数组 → 空图。
 registerMethod('common:getNodeRecentStatus', (params = {}) => {
@@ -484,15 +507,16 @@ registerMethod('common:getNodeRecentStatus', (params = {}) => {
   if (!m) return { count: 0, records: [] };
   return { count: 1, records: [toFlatRecent(a.id, m)] };
 });
-registerMethod('common:getRecords', getRecords);
+// 官方 common:getRecords 默认 hours=1（common.record.go:56-59）。
+registerMethod('common:getRecords', (params = {}) => getRecords(params, 1));
 // 官方 Common RPC（komari/web/rpc/jsonrpc/README.md）：与 public:* 共用同一真源。
-registerMethod('common:getMe', () => ({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' }));
+registerMethod('common:getMe', () => ({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('common:getPublicInfo', getPublicInfo);
 registerMethod('common:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 // 主题服务层实际会调用的自造名，补齐避免静默 -32601。
 registerMethod('common:getBackendVersion', () => ({ hash: '-', version: 'diting-compat' }));
 
-registerMethod('public:getMe', () => ({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' }));
+registerMethod('public:getMe', () => ({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('public:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 registerMethod('public:getPublicSettings', getPublicInfo);
 registerMethod('public:getNodesInformation', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
@@ -502,7 +526,8 @@ registerMethod('public:getClientRecentRecords', (params = {}) => {
   const rt = toRealtime(db.getLatestMetric(a.id));
   return rt ? [rt] : [];
 });
-registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params));
+// 官方 public:getRecordsByUUID 默认 hours=4（public.go:148-151），与 common:getRecords 不同。
+registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params, 4));
 registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 // 官方记录端点（router.go:61），与 /api/records/ping 是两条不同绑定。
 registerMethod('public:getPingRecords', getPublicPingRecords);
@@ -530,7 +555,8 @@ registerMethod('metrics:query', (params) => {
 });
 registerMethod('metrics:ping', (params = {}) => {
   const p = Array.isArray(params) ? (params[0] || {}) : params;
-  return getRecords({ ...p, type: 'ping' });
+  // metrics:* 是 diting 自造方法，官方源码无此命名空间、无 hours 基准，保持 1（Phase 3 登记）。
+  return getRecords({ ...p, type: 'ping' }, 1);
 });
 
 // 别名注册：第三方社区主题（如 Komari 官方 Glassmorphism）常以「无命名空间」形式
