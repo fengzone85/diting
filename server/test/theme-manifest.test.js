@@ -140,15 +140,25 @@ test('validateManifest：short/name 必填且格式受限', () => {
   assert.strictEqual(validators.validateManifest([{ short: 'a' }]).error, 'manifest_invalid');
 });
 
-test('validateManifest：configuration.type 仅接受 managed', () => {
+test('validateManifest：官方 managed/raw/redirect 与未声明 type 均可安装', () => {
+  // 官方主题开发指南：configuration.type 支持 managed/raw/redirect，未声明按 managed。
+  // D3：raw/redirect 只接受安装，不执行主题自带 HTML、不跳转、不生成表单字段。
+  for (const type of ['managed', 'raw', 'redirect']) {
+    const r = validators.validateManifest({ short: 'a', name: 'A', configuration: { type } });
+    assert.strictEqual(r.ok, true, `${type} 应放行`);
+    assert.strictEqual(r.value.configuration.type, type);
+    if (type !== 'managed') {
+      assert.deepStrictEqual(r.value.configuration.fields, [], `${type} 不生成表单字段`);
+    }
+  }
+  const implicit = validators.validateManifest({ short: 'a', name: 'A', configuration: { data: [] } });
+  assert.strictEqual(implicit.ok, true, '未声明 type 按 managed 处理');
+  assert.strictEqual(implicit.value.configuration.type, 'managed');
   assert.strictEqual(
-    validators.validateManifest({ short: 'a', name: 'A', configuration: { type: 'raw' } }).error,
+    validators.validateManifest({ short: 'a', name: 'A', configuration: { type: 'unknown' } }).error,
     'configuration_type_unsupported'
   );
-  assert.strictEqual(
-    validators.validateManifest({ short: 'a', name: 'A', configuration: { type: 'redirect' } }).error,
-    'configuration_type_unsupported'
-  );
+
   const ok = validators.validateManifest({
     short: 'a',
     name: 'A',
@@ -165,6 +175,30 @@ test('validateManifest：configuration.type 仅接受 managed', () => {
   assert.strictEqual(ok.value.configuration.fields.length, 3);
   assert.deepStrictEqual(ok.value.configuration.fields[1].options, ['a', 'b']);
   assert.strictEqual(ok.value.configuration.fields[0].name, '主色');
+});
+
+test('validateManifest：官方无 key 展示项被跳过，官方字段类型保留', () => {
+  // 官方 managed 示例里的 title/textbox 只有 name、没有 key；此前会让整个 ZIP 安装被拒。
+  const r = validators.validateManifest({
+    short: 'a', name: 'A',
+    configuration: {
+      type: 'managed',
+      data: [
+        { name: '基础设置', type: 'title' },
+        { name: '选择器说明', type: 'textbox' },
+        { key: 'featured_nodes', type: 'nodes', default: '[]' },
+        { key: 'featured_ping_tasks', type: 'pingtasks', default: '[]' },
+        { key: 'footer_html', type: 'richtext', default: '' },
+        { key: 'switch_A', type: 'switch', default: true }
+      ]
+    }
+  });
+  assert.strictEqual(r.ok, true, '无 key 的 title/textbox 不得让整包安装失败');
+  assert.strictEqual(r.value.configuration.fields.length, 4);
+  assert.deepStrictEqual(
+    r.value.configuration.fields.map(f => f.type),
+    ['nodes', 'pingtasks', 'richtext', 'switch']
+  );
 });
 
 test('validateManifest：字段 key / select options / 数量上限', () => {

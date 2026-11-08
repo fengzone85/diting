@@ -2,7 +2,7 @@
 // 第三方主题 JSON-RPC 2.0 网关：为社区主题（如 Glassmorphism）提供查询接口。
 // 方法表采用 Map 注册制，预留 plugin:<id>:* 命名空间供未来插件扩展。
 const db = require('./db');
-const { toNode, toRealtime, publicOpen, getNodesLatestStatus } = require('./compat');
+const { toNode, toRealtime, publicOpen, publicSettings, getNodesLatestStatus } = require('./compat');
 // PROBE_TASK_INTERVAL 与 task id 一样必须三侧同源，统一在 compat-metrics 定义。
 const { METRIC_DEFINITIONS, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
 // 审查 C4：RPC 里的重聚合（getPingRecords 720h 全窗）移 worker 线程
@@ -16,23 +16,8 @@ function registerMethod(name, handler) {
 }
 
 function getPublicInfo() {
-  const ui = db.getUiSettings();
-  return {
-    cors_origin_check_enabled: false,
-    custom_body: '',
-    custom_head: '',
-    description: '',
-    disable_password_login: true,
-    oauth_enable: false,
-    oauth_provider: '',
-    ping_record_preserve_time: 48,
-    private_site: false,
-    record_enabled: false,
-    record_preserve_time: 720,
-    sitename: ui.site_title || 'diting',
-    theme: ui.public_theme || 'Mochi',
-    theme_settings: {}
-  };
+  // 与 GET /api/public 共用单一真源（C5）：theme_settings 不再是恒空的写死字段。
+  return publicSettings();
 }
 
 function clamp(v, min, max) {
@@ -287,6 +272,41 @@ function getPublicPingTasks(params = {}) {
   return { count: taskMap.size, tasks: Array.from(taskMap.values()) };
 }
 
+/**
+ * 官方 GET /api/task/ping（router.go:62 → public:getPublicPingTasks）的 7 字段裸数组：
+ * id/weight/name/clients/default_on/type/interval（public.go:213-221，不暴露 target）。
+ * 官方方法无参、返回全局任务表；clients 需按 probes 重新聚合，现有 getPublicPingTasks()
+ * 的 taskMap 按任务名去重只保留首个 agent_id，无法直接给出节点列表。
+ * Phase 1 只供新增 REST 端点使用；RPC 方法形状切换（D2）留 Phase 2.1，
+ * 故此处不改动 getPublicPingTasks() 的既有返回。
+ */
+function officialPingTasks() {
+  const since = Date.now() - 24 * 3600 * 1000;
+  const rows = (db.metricsProbesAll(since, 2000) || []).filter(r => r.probes != null);
+  const byName = new Map();
+  rows.forEach(r => {
+    try {
+      const probes = JSON.parse(r.probes || '{}');
+      Object.keys(probes).forEach(name => {
+        if (!byName.has(name)) {
+          byName.set(name, { id: probeTaskId(name), name, clients: new Set() });
+        }
+        byName.get(name).clients.add(r.agent_id);
+      });
+    } catch (_) { /* 坏 probes JSON 跳过 */ }
+  });
+  return Array.from(byName.values()).map(t => ({
+    id: t.id,
+    weight: 0,
+    name: t.name,
+    clients: Array.from(t.clients),
+    // diting 无「任务默认开启」开关语义，按约定恒 true 并登记为偏差（A3）。
+    default_on: true,
+    type: 'icmp',
+    interval: PROBE_TASK_INTERVAL
+  }));
+}
+
 // Komari 官方 getRecords(type=ping).tasks 每项带窗口统计字段
 // （web/rpc/jsonrpc/common.record.go:362-383）；其中 loss 会被 PingChart 直接用于
 // toFixed(2)，缺字段会让整个延迟图组件渲染抛错。diting 此前直接复用 getPublicPingTasks()
@@ -478,4 +498,4 @@ function rpcMiddleware(req, res) {
   });
 }
 
-module.exports = { handleRpc, registerMethod, rpcMiddleware, METHODS };
+module.exports = { handleRpc, registerMethod, rpcMiddleware, METHODS, officialPingTasks };

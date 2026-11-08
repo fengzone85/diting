@@ -12,6 +12,10 @@ const { heavyQuery } = require('./heavy-db');
 // task id 必须与 RPC（getPublicPingTasks / getPingMetricStats / queryMetrics）同源：
 // 主题可能混用 REST 与 RPC 两侧数据，id 口径不同就永远关联不上。
 const { probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
+// publicSettings() 需要主题 manifest 的配置字段与默认值合并；两者都是叶子模块，
+// 不回指 compat/compat-rpc，故不新增循环依赖（compat.js:460 的延迟 require 保持不变）。
+const validators = require('./validate');
+const themeStore = require('./theme');
 
 // 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
 // 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
@@ -246,37 +250,60 @@ router.use((req, res, next) => {
   next();
 });
 
-// GET /api/public —— 站点公开属性（主题用）
-router.get('/public', guard, (req, res) => {
+// 官方 GET /api/public 的 data 与 RPC public:getPublicSettings 共用同一真源，
+// 避免 REST/RPC 两处各自写死字段导致漂移（方案 C5）。theme_settings 取当前启用
+// 主题「manifest 默认值 + 管理员保存值」的合并结果（方案 C6）。
+function publicSettings() {
   const ui = db.getUiSettings();
-  res.json({
-    status: 'success', message: '',
-    data: {
-      cors_origin_check_enabled: false,
-      custom_body: '', custom_head: '',
-      description: '',
-      disable_password_login: true,
-      oauth_enable: false, oauth_provider: '',
-      ping_record_preserve_time: 48,
-      private_site: false,
-      record_enabled: false, record_preserve_time: 720,
-      sitename: ui.site_title || 'diting',
-      theme: ui.public_theme || 'Mochi',
-      theme_settings: {},
-      // 注意：前端 LoadChart/PingChart 的 Y()/Pe()/Qe() 期望 cards 为【短名字符串数组】
-      // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
-      // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
-      chartDashboardTemplate: {
-        // gpu / gpuMemory / connections 已移除：diting 不采集（红线），这三张卡永远没有
-        // series（compat-metrics.js 刻意只断映射不删定义），保留只会让主题渲染空图，
-        // 用户还得改主题才能去掉。process / temperature 有真实数据源，保留。
-        cards: [
-          'cpu', 'load', 'memory', 'disk', 'network',
-          'temperature', 'process', 'traffic', 'ping', 'pingLoss'
-        ]
+  const theme = ui.public_theme || 'Mochi';
+  let themeSettings = {};
+  if (theme && theme !== 'default') {
+    const t = themeStore.getTheme(theme);
+    if (t && t.configuration) {
+      const checked = validators.validateManifest({ short: theme, name: t.name, configuration: t.configuration });
+      if (checked.ok && checked.value.configuration) {
+        const fields = checked.value.configuration.fields;
+        const merged = validators.mergeThemeConfig(fields, db.getThemeConfig(theme));
+        // 官方选择器（nodes/pingtasks）底层存 JSON 字符串，公开 API 输出时还原为数组。
+        for (const f of fields) {
+          if ((f.type === 'nodes' || f.type === 'pingtasks') && typeof merged[f.key] === 'string') {
+            try { merged[f.key] = JSON.parse(merged[f.key]); } catch (_) { /* 值非法时保持字符串 */ }
+          }
+        }
+        themeSettings = merged;
       }
     }
-  });
+  }
+  return {
+    cors_origin_check_enabled: false,
+    custom_body: '', custom_head: '',
+    description: '',
+    disable_password_login: true,
+    oauth_enable: false, oauth_provider: '',
+    ping_record_preserve_time: 48,
+    private_site: false,
+    record_enabled: false, record_preserve_time: 720,
+    sitename: ui.site_title || 'diting',
+    theme,
+    theme_settings: themeSettings,
+    // 注意：前端 LoadChart/PingChart 的 Y()/Pe()/Qe() 期望 cards 为【短名字符串数组】
+    // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
+    // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
+    chartDashboardTemplate: {
+      // gpu / gpuMemory / connections 已移除：diting 不采集（红线），这三张卡永远没有
+      // series（compat-metrics.js 刻意只断映射不删定义），保留只会让主题渲染空图，
+      // 用户还得改主题才能去掉。process / temperature 有真实数据源，保留。
+      cards: [
+        'cpu', 'load', 'memory', 'disk', 'network',
+        'temperature', 'process', 'traffic', 'ping', 'pingLoss'
+      ]
+    }
+  };
+}
+
+// GET /api/public —— 站点公开属性（主题用）
+router.get('/public', guard, (req, res) => {
+  res.json({ status: 'success', message: '', data: publicSettings() });
 });
 
 // GET /api/version 已移至 server.js（注册于本 router 之前）。此前这里有一条
@@ -456,6 +483,15 @@ router.get('/me', (req, res) => {
   res.json({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' });
 });
 
+// GET /api/task/ping —— 官方公开 Ping 任务清单（router.go:62 → public:getPublicPingTasks）。
+// 按 D2 已定目标形状一步到位：data 为官方 7 字段裸数组（无 target）。
+// 本项不改 RPC 方法现有返回；形状切换（含两处 .tasks 解包与 task_id 类型）留 Phase 2.1。
+router.get('/task/ping', guard, (req, res) => {
+  // 延迟 require：compat-rpc.js 顶层已 require 本模块，避免成环。
+  const { officialPingTasks } = require('./compat-rpc');
+  res.json({ status: 'success', message: '', data: officialPingTasks() });
+});
+
 // POST /api/rpc2 —— 社区主题 JSON-RPC 网关
 // 使用延迟 require 避免 compat.js <-> compat-rpc.js 循环依赖
 router.post('/rpc2', (req, res) => {
@@ -463,4 +499,4 @@ router.post('/rpc2', (req, res) => {
   rpcMiddleware(req, res);
 });
 
-module.exports = { router, snapshot, publicOpen, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };
+module.exports = { router, snapshot, publicOpen, publicSettings, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };

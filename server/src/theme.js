@@ -83,6 +83,8 @@ function readManifest(dir, shortHint, bundled = false) {
 
     const diting = raw.diting && typeof raw.diting === 'object' ? raw.diting : {};
     const conf = raw.configuration && typeof raw.configuration === 'object' ? raw.configuration : null;
+    // 官方：未声明 configuration.type 按 managed 处理；raw/redirect 保留类型但不生成表单。
+    const confType = conf ? String(conf.type || 'managed') : null;
 
     return {
       short,
@@ -93,7 +95,9 @@ function readManifest(dir, shortHint, bundled = false) {
       author: normalizeAuthor(raw.author),
       url: typeof raw.url === 'string' ? raw.url : '',
       preview: typeof raw.preview === 'string' ? raw.preview : '',
-      configuration: conf && conf.type === 'managed' ? conf : null,
+      configuration: conf && confType === 'managed' ? conf : null,
+      // 供后台标注 raw/redirect「当前不支持」；themeConfigurationOf 仍只看 configuration。
+      configurationType: confType,
       diting: {
         compatibility: typeof diting.compatibility === 'string' ? diting.compatibility : '',
         // Komari 生态的主题包不会写 diting.* 字段，而社区主题普遍含内联脚本与外部
@@ -117,23 +121,56 @@ const isValidShort = (short) => typeof short === 'string' && SHORT_RE.test(short
 
 /**
  * 解析主题目录：安装目录优先 → 内置目录。未找到返回 null。
- * 返回 { dir, bundled }。
+ * 返回 { dir, bundled, rootDir }。dir 恒为包根（manifest 所在、备份整包）。
+ * rootDir 是投放根相对包根的子目录：官方主题包为 `dist/index.html`，
+ * diting 早期/社区主题为根 `index.html`（''）。保留 dir/bundled 语义不变。
  */
+function detectRootDir(dir) {
+  try {
+    if (fs.statSync(path.join(dir, 'index.html')).isFile()) return '';
+  } catch (e) { /* 继续探测 dist/ */ }
+  try {
+    if (fs.statSync(path.join(dir, 'dist', 'index.html')).isFile()) return 'dist';
+  } catch (e) { /* 无 dist/ */ }
+  return '';
+}
+
 function resolveThemeDir(short) {
   if (!isValidShort(short)) return null;
   const installed = path.join(INSTALLED_THEMES_DIR, short);
   try {
-    if (fs.statSync(installed).isDirectory()) return { dir: installed, bundled: false };
+    if (fs.statSync(installed).isDirectory()) {
+      return { dir: installed, bundled: false, rootDir: detectRootDir(installed) };
+    }
   } catch (e) { /* 未安装 */ }
   const bundled = path.join(BUNDLED_THEMES_DIR, short);
   try {
-    if (fs.statSync(bundled).isDirectory()) return { dir: bundled, bundled: true };
+    if (fs.statSync(bundled).isDirectory()) {
+      return { dir: bundled, bundled: true, rootDir: detectRootDir(bundled) };
+    }
   } catch (e) { /* 非内置 */ }
   return null;
 }
 
-function hasIndexHtml(dir) {
-  try { return fs.statSync(path.join(dir, 'index.html')).isFile(); } catch (e) { return false; }
+/**
+ * 投放用的路径集合：packageDir 用于静态子路径（subPath 自带 dist/ 前缀），
+ * assetDir 用于 index.html / images 等按投放根定位的资源，urlBase 用于重写根绝对引用。
+ */
+function resolveThemeAssets(short) {
+  const found = resolveThemeDir(short);
+  if (!found) return null;
+  const rootDir = found.rootDir || '';
+  return {
+    packageDir: found.dir,
+    rootDir,
+    assetDir: rootDir ? path.join(found.dir, rootDir) : found.dir,
+    urlBase: `/themes/${short}/` + (rootDir ? rootDir + '/' : '')
+  };
+}
+
+function hasIndexHtml(dir, rootDir = '') {
+  const base = rootDir ? path.join(dir, rootDir) : dir;
+  try { return fs.statSync(path.join(base, 'index.html')).isFile(); } catch (e) { return false; }
 }
 
 /**
@@ -198,7 +235,7 @@ function setEnabled(short) {
   if (!found) {
     throw Object.assign(new Error('theme not found'), { code: 'theme_not_found' });
   }
-  if (!hasIndexHtml(found.dir)) {
+  if (!hasIndexHtml(found.dir, found.rootDir)) {
     throw Object.assign(new Error('theme has no index.html'), { code: 'theme_broken' });
   }
   const ui = db.getUiSettings();
@@ -351,6 +388,8 @@ module.exports = {
   readManifest,
   readRawManifest,
   resolveThemeDir,
+  resolveThemeAssets,
+  detectRootDir,
   listInstalledThemes,
   getTheme,
   setEnabled,
