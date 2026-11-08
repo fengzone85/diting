@@ -300,7 +300,9 @@ app.use('/api', (req, res, next) => {
 
 // IP 白名单：保护管理 API（公开只读接口除外）
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/public/') || req.path === '/report' ||
+  // app.use('/api') 内 req.path 已去掉 /api 前缀：/api/public 是精确的 '/public'，
+  // 此前只放行 '/public/' 前缀会让主题初始化接口在开启白名单时被误拦（403）。
+  if (req.path === '/public' || req.path.startsWith('/public/') || req.path === '/report' ||
       req.path.startsWith('/v1/') ||
       // /client-ip 是白名单排障入口：白名单配错时管理员需要它才能看清自己被识别成哪个 IP
       // （自身带 adminOrReadonly 鉴权，放行不会引入未授权访问）
