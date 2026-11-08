@@ -364,14 +364,56 @@ function injectNonce(html, nonce) {
 // 原则：**不改模板产物**（可随时用官方 zip 覆盖/升级），改由服务端在投放 index.html 时按主题目录
 // 的实际一级条目重写根绝对引用——只有首段能在主题包内找到（assets/、images/、favicon.ico、admin-app/…）
 // 才加 `/themes/<short>/` 前缀；主题自己的 SPA 路由链接（如 `/instance/<uuid>`）保持原样。
-function adaptThemeHtml(html, assetDir, urlBase) {
+// Komari 官方 web/public/public.go:57-79：按 cookie `language` 替换 <html lang>。
+// 只接受 [A-Za-z0-9-] 且长度 2-32，避免把任意内容拼进 HTML。
+function readThemeLanguageCookie(req) {
+  const raw = req && req.headers ? req.headers.cookie : '';
+  if (!raw) return '';
+  const m = /(?:^|;\s*)language=([^;]+)/.exec(raw);
+  if (!m) return '';
+  let v = m[1];
+  try { v = decodeURIComponent(v); } catch (_) { /* 非法编码时保留原值 */ }
+  v = v.trim().replace(/_/g, '-');
+  if (v.length < 2 || v.length > 32 || !/^[A-Za-z0-9-]+$/.test(v)) return '';
+  return v;
+}
+
+// Komari 官方主题页字面量替换（web/public/public.go:200-241 的 strings.NewReplacer）。
+// 官方主题包内没有 {{...}} 变量占位符，禁止自造占位符名；/admin、/terminal 不替换（:200-208）。
+// 管理员自定义 HTML 属受信任输入，原样注入到公开主题页（R16 信任模型）；
+// 未配置（空值）时保留原 HTML，避免空标题/空描述破坏现有主题。
+function applyOfficialHtmlReplacements(html, req) {
+  const p = (req && req.path) || '';
+  if (p.startsWith('/admin') || p.startsWith('/terminal')) return html;
+  const ui = db.getUiSettings();
+  let out = html;
+  if (ui.site_title) out = out.replace('<title>Komari Monitor</title>', `<title>${ui.site_title}</title>`);
+  if (ui.site_description) out = out.replace('A simple server monitor tool.', ui.site_description);
+  if (ui.custom_head) out = out.replace('</head>', ui.custom_head + '</head>');
+  if (ui.custom_body) out = out.replace('</body>', ui.custom_body + '</body>');
+  const lang = readThemeLanguageCookie(req);
+  if (lang) {
+    const forms = [
+      ['<html lang="en">', `<html lang="${lang}">`],
+      ["<html lang='en'>", `<html lang='${lang}'>`],
+      ['<html>', `<html lang="${lang}">`]
+    ];
+    for (const [from, to] of forms) {
+      if (out.includes(from)) { out = out.replace(from, to); break; }
+    }
+  }
+  return out;
+}
+
+function adaptThemeHtml(html, assetDir, urlBase, req) {
   let entries;
-  try { entries = new Set(fs.readdirSync(assetDir)); } catch (_) { return html; }
-  return html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
+  try { entries = new Set(fs.readdirSync(assetDir)); } catch (_) { entries = new Set(); }
+  const rewritten = html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
     const rest = url.slice(1);
     const seg = rest.split(/[/?#]/)[0];
     return entries.has(seg) ? `${attr}="${urlBase}${rest}"` : match;
   });
+  return applyOfficialHtmlReplacements(rewritten, req);
 }
 // 主题包根：安装目录（THEMES_DIR，随数据卷持久）优先，其次只读内置目录（public/themes）。
 // 通配静态路由的 subPath 自带 dist/ 前缀，故这里必须返回包根而不是投放根。
@@ -458,7 +500,7 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
   if (!assets) return next();
   const indexPath = path.join(assets.assetDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
-  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase);
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase, req);
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
@@ -475,7 +517,7 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   if (!assets) return next();
   const indexPath = path.join(assets.assetDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
-  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase);
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase, req);
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
@@ -564,7 +606,7 @@ app.get('*', (req, res, next) => {
     if (fp && fs.existsSync(fp)) {
       // 第三方社区主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
       // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
-      const html = adaptThemeHtml(fs.readFileSync(fp, 'utf8'), assets.assetDir, assets.urlBase);
+      const html = adaptThemeHtml(fs.readFileSync(fp, 'utf8'), assets.assetDir, assets.urlBase, req);
       res.setHeader('Cache-Control', 'no-store, must-revalidate');
       if (THEME_NEEDS_NONCE.has(theme)) {
         const nonce = crypto.randomBytes(16).toString('base64');
@@ -821,6 +863,14 @@ try {
       } catch (err) {
         // 非法 JSON：msg 未解析成功，用 null id 回复，不抛出以免崩进程。
         try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
+        return;
+      }
+      // 批量只在 HTTP POST /api/rpc2 支持：官方 WS 逐条 ReadJSON/WriteJSON，
+      // 且主题 parseJsonRpcResponse 拒绝数组响应（方案 R9「WS 保持单条」）。
+      if (Array.isArray(msg)) {
+        try {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'batch not supported over WebSocket' }, id: null }));
+        } catch (_) {}
         return;
       }
       // 审查 C4：handleRpc 异步化（内部重聚合走 worker 线程，不阻塞事件循环）

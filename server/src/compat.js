@@ -276,8 +276,10 @@ function publicSettings() {
   }
   return {
     cors_origin_check_enabled: false,
-    custom_body: '', custom_head: '',
-    description: '',
+    // 官方 GET /api/public 暴露站点自定义头/尾与描述（database/utils.go:88-103）。
+    // 与主题页字面量替换共用同一份 ui_settings（C5 单一真源）。
+    custom_body: ui.custom_body || '', custom_head: ui.custom_head || '',
+    description: ui.site_description || '',
     disable_password_login: true,
     oauth_enable: false, oauth_provider: '',
     ping_record_preserve_time: 48,

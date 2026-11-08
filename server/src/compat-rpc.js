@@ -173,7 +173,9 @@ async function getRecords(params = {}) {
       const p99_p50_ratio = p50 ? p99 / p50 : 0;
       return {
         entity_id: a.entity_id,
-        task_id: a.task_id,
+        // 官方 publicPingMetricTaskStats.TaskID 是 string（public.metric.go:100）；
+        // 主题 re(o.task_id) 无条件调 .trim()，数字会让主路径抛错后回退 legacy（R11）。
+        task_id: String(a.task_id),
         name: a.name,
         total: a.total,
         valid: vals.length,
@@ -193,7 +195,7 @@ async function getRecords(params = {}) {
       stats,
       // Komari 官方 RecordsResp.tasks 除任务清单外还带窗口统计（loss/avg/min/max/...），
       // 主题 PingChart 直接对 loss 调 toFixed(2)，缺字段会让整个组件渲染抛错。
-      tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }).tasks, records),
+      tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }), records),
       basic_info: [],
       from: fromIso,
       to: nowIso
@@ -239,50 +241,30 @@ async function getRecords(params = {}) {
 }
 
 function getPublicPingTasks(params = {}) {
-  // Komari 社区主题 PingChart 调用，返回某个 entity 的全部探针任务列表。
+  // D2（已拍板 A）：回归官方裸数组（public.go:208-234），与 GET /api/task/ping 同形。
+  // R1 已证伪「主题依赖 {count,tasks} 信封」：主题 go() 把 result 原样交给 it()/Us(t.map)，
+  // 信封会抛 t.map is not a function 并静默回退 legacy；信封才是主路径断开的元凶。
+  // 官方 7 字段之外保留 diting 兼容超集（A3 登记），不影响官方对齐验收。
   const entityId = params.entity_id || params.uuid;
-  const since = Date.now() - 24 * 3600 * 1000; // 最近 24h 内出现的 task
-  // 只取探针三列并降采样（每 agent 最多 2000 点），规避 SELECT * 全表 OOM；task 名收集不依赖全量。
-  const rows = (db.metricsProbesAll(since, 2000) || [])
-    .filter(r => r.probes != null && (!entityId || r.agent_id === entityId));
-  const taskMap = new Map();
-  rows.forEach(r => {
-    try {
-      const probes = JSON.parse(r.probes || '{}');
-      Object.keys(probes).forEach(name => {
-        if (!taskMap.has(name)) {
-          // id/task_id 用数字（Komari 的 PingTaskInfo.id 是数字），中文名放 name/task_name：
-          // 主题用 id 做选中态与 series 关联，给中文名会导致「有 tab 没图」。
-          const tid = probeTaskId(name);
-          taskMap.set(name, {
-            entity_id: r.agent_id,
-            client: r.agent_id,
-            id: tid,
-            task_id: tid,
-            task_name: name,
-            name: name,
-            type: 'icmp',
-            interval_seconds: PROBE_TASK_INTERVAL,
-            interval: PROBE_TASK_INTERVAL
-          });
-        }
-      });
-    } catch (_) {}
-  });
-  return { count: taskMap.size, tasks: Array.from(taskMap.values()) };
+  return officialPingTasks(entityId).map(t => Object.assign({}, t, {
+    entity_id: entityId || (t.clients[0] || ''),
+    client: entityId || (t.clients[0] || ''),
+    task_id: t.id,
+    task_name: t.name,
+    interval_seconds: t.interval
+  }));
 }
 
 /**
  * 官方 GET /api/task/ping（router.go:62 → public:getPublicPingTasks）的 7 字段裸数组：
  * id/weight/name/clients/default_on/type/interval（public.go:213-221，不暴露 target）。
- * 官方方法无参、返回全局任务表；clients 需按 probes 重新聚合，现有 getPublicPingTasks()
- * 的 taskMap 按任务名去重只保留首个 agent_id，无法直接给出节点列表。
- * Phase 1 只供新增 REST 端点使用；RPC 方法形状切换（D2）留 Phase 2.1，
- * 故此处不改动 getPublicPingTasks() 的既有返回。
+ * 官方方法无参、返回全局任务表；clients 按 probes 重新聚合。
+ * entityId 是 diting 超集（官方方法无参），仅用于单节点详情页过滤，登记为 A3 偏差。
  */
-function officialPingTasks() {
+function officialPingTasks(entityId) {
   const since = Date.now() - 24 * 3600 * 1000;
-  const rows = (db.metricsProbesAll(since, 2000) || []).filter(r => r.probes != null);
+  const rows = (db.metricsProbesAll(since, 2000) || [])
+    .filter(r => r.probes != null && (!entityId || r.agent_id === entityId));
   const byName = new Map();
   rows.forEach(r => {
     try {
@@ -305,6 +287,45 @@ function officialPingTasks() {
     type: 'icmp',
     interval: PROBE_TASK_INTERVAL
   }));
+}
+
+/**
+ * 官方 public:getPingRecords（web/rpc/jsonrpc/public.go:300-320）记录端点。
+ * 参数 uuid / task_id 至少一个，hours 默认 4；返回 { count, basic_info, records }，
+ * records 项为 { task_id, time, value, client? }。与 /api/records/ping 是两条不同绑定。
+ */
+async function getPublicPingRecords(params = {}) {
+  const entityId = params.uuid || params.entity_id;
+  const taskId = params.task_id != null && params.task_id !== '' ? Number(params.task_id) : null;
+  const hours = clamp(Math.floor(Number(params.hours || 4) || 0), 0, 720);
+  const maxCount = clamp(Math.floor(Number(params.max_count || params.maxCount || 4000) || 0), 0, 5000) || 4000;
+  let records = await getProbeRecords({ hours, maxCount, entityId });
+  if (Number.isFinite(taskId)) records = records.filter(r => r.task_id === taskId);
+  const out = records.map(r => ({
+    task_id: r.task_id,
+    time: r.time,
+    value: r.value,
+    client: r.client
+  }));
+  // 官方 basic_info 按 client 聚合窗口内的丢包率与最小/最大延迟。
+  const byClient = new Map();
+  out.forEach(r => {
+    if (!byClient.has(r.client)) byClient.set(r.client, { client: r.client, total: 0, loss: 0, min: 0, max: 0 });
+    const s = byClient.get(r.client);
+    s.total++;
+    if (r.value < 0) s.loss++;
+    else {
+      if (s.min === 0 || r.value < s.min) s.min = r.value;
+      if (r.value > s.max) s.max = r.value;
+    }
+  });
+  const basic_info = Array.from(byClient.values()).map(s => ({
+    client: s.client,
+    loss: s.total ? s.loss / s.total * 100 : 0,
+    min: s.min,
+    max: s.max
+  }));
+  return { count: out.length, basic_info, records: out };
 }
 
 // Komari 官方 getRecords(type=ping).tasks 每项带窗口统计字段
@@ -352,55 +373,105 @@ function toFlatRecent(agentId, m) {
 }
 
 function getPingMetricStats(params = {}) {
-  // Komari 社区主题 PingChart 调用 public:getPingMetricStats，期望返回 stats 数组。
-  // 结构与 metrics:ping 里的 stats 一致：按 (client,task_id) 聚合延迟统计。
-  const entityId = params.entity_id || params.uuid;
-  const hours = clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
+  // 官方 publicPingMetricStatsParams（public.metric.go:81-96）支持 start/end/start_time/end_time；
+  // 响应为 { start, end, interval_seconds, stats, count }（:119-125）。
+  const entityId = params.entity_id || params.uuid || (Array.isArray(params.entity_ids) ? params.entity_ids[0] : undefined);
+  const startMs = Date.parse(params.start || params.start_time || '') || null;
+  const endMs = Date.parse(params.end || params.end_time || '') || null;
+  const hours = startMs && endMs
+    ? Math.max(0, (endMs - startMs) / 3600000)
+    : clamp(Math.floor(Number(params.hours || params.h || 1) || 0), 0, 720);
   const maxCount = clamp(Math.floor(Number(params.max_points || params.maxPoints || 5000) || 0), 0, 5000) || 5000;
+  const since = startMs || (endMs ? endMs - hours * 3600000 : Date.now() - hours * 3600000);
+  const until = endMs || Date.now();
   // 与 getRecords(type=ping) 同源：按实体走单节点采样，避免跨节点切片把本实体挤空。
-  return getProbeRecords({ hours, maxCount, entityId }).then((records) => {
-  const agg = {};
-  records.forEach(r => {
-    if (entityId && r.client !== entityId) return;
-    const k = r.client + '\x00' + r.task_id;
-    if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [] };
-    if (typeof r.value === 'number' && r.value >= 0) agg[k].values.push(r.value);
-  });
-  const stats = Object.values(agg).map(a => {
-    const vals = a.values.slice().sort((x, y) => x - y);
-    const sum = vals.reduce((s, v) => s + v, 0);
-    const avg = vals.length ? sum / vals.length : 0;
-    const min = vals.length ? vals[0] : 0;
-    const max = vals.length ? vals[vals.length - 1] : 0;
-    const p50 = vals.length ? vals[Math.floor(vals.length * 0.5)] : 0;
-    const p99 = vals.length ? vals[Math.floor(vals.length * 0.99)] : 0;
-    const stddev = vals.length ? Math.sqrt(vals.reduce((s, v) => s + (v - avg) ** 2, 0) / vals.length) : 0;
+  // getProbeRecords 只按 hours 采样，绝对时间窗在结果上二次过滤（不改 worker 采样接口）。
+  return getProbeRecords({ hours, maxCount, entityId }).then((rawRecords) => {
+    const records = rawRecords.filter(r => {
+      const t = Date.parse(r.time);
+      return t >= since && t <= until;
+    });
+    const agg = {};
+    records.forEach(r => {
+      if (entityId && r.client !== entityId) return;
+      const k = r.client + '\x00' + r.task_id;
+      if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [] };
+      if (typeof r.value === 'number' && r.value >= 0) agg[k].values.push(r.value);
+    });
+    const stats = Object.values(agg).map(a => {
+      const vals = a.values.slice().sort((x, y) => x - y);
+      const sum = vals.reduce((s, v) => s + v, 0);
+      const avg = vals.length ? sum / vals.length : 0;
+      const min = vals.length ? vals[0] : 0;
+      const max = vals.length ? vals[vals.length - 1] : 0;
+      const p50 = vals.length ? vals[Math.floor(vals.length * 0.5)] : 0;
+      const p99 = vals.length ? vals[Math.floor(vals.length * 0.99)] : 0;
+      const stddev = vals.length ? Math.sqrt(vals.reduce((s, v) => s + (v - avg) ** 2, 0) / vals.length) : 0;
+      return {
+        entity_id: a.entity_id,
+        client: a.client,
+        // 官方 publicPingMetricTaskStats.TaskID 是 string（public.metric.go:100）；
+        // 主题 re(o.task_id) 无条件调 .trim()，数字会让主路径抛错后回退 legacy（R11）。
+        task_id: String(a.task_id),
+        name: a.name,
+        total: a.values.length,
+        valid: vals.length,
+        loss: 0,
+        loss_approximate: false,
+        interval: PROBE_TASK_INTERVAL,
+        interval_seconds: PROBE_TASK_INTERVAL,
+        type: 'icmp',
+        avg, min, max, p50, p99,
+        p99_p50_ratio: p50 ? p99 / p50 : 0,
+        stddev,
+        latest: vals.length ? vals[vals.length - 1] : 0
+      };
+    });
+    // 顶层 interval_seconds 是窗口降采样间隔（public.metric.go:483 interval.Seconds()），
+    // 不是探测周期；照抄 PROBE_TASK_INTERVAL(60) 是错值。
+    const intervalSeconds = maxCount > 0 ? (until - since) / 1000 / maxCount : 0;
     return {
-      entity_id: a.entity_id,
-      client: a.client,
-      task_id: a.task_id,
-      name: a.name,
-      total: a.values.length,
-      valid: vals.length,
-      loss: 0,
-      loss_approximate: false,
-      interval: PROBE_TASK_INTERVAL,
-      interval_seconds: PROBE_TASK_INTERVAL,
-      type: 'icmp',
-      avg, min, max, p50, p99,
-      p99_p50_ratio: p50 ? p99 / p50 : 0,
-      stddev,
-      latest: vals.length ? vals[vals.length - 1] : 0
+      start: new Date(since).toISOString(),
+      end: new Date(until).toISOString(),
+      interval_seconds: intervalSeconds,
+      count: stats.length,
+      stats,
+      tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }), records),
+      basic_info: []
     };
-  });
-  return { count: stats.length, stats, tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }).tasks, records), basic_info: [] };
   });
 }
 
 // ===== 方法表注册 =====
 registerMethod('rpc.ping', () => 'pong');
+// diting 自造原名，主题服务层直接调用，必须保留；官方名另行补在下方。
 registerMethod('rpc.getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 registerMethod('rpc.getMethods', () => Array.from(METHODS.keys()));
+
+// 官方内建方法（komari/pkg/rpc/internal.go:26-90）。rpc.version 返回协议版本字符串。
+const RPC_VERSION = '2.0'; // komari/pkg/rpc/rpc.go:4
+registerMethod('rpc.version', () => RPC_VERSION);
+registerMethod('rpc.methods', (params = {}) => {
+  const internal = !!(params && params.internal);
+  return Array.from(METHODS.keys())
+    .filter(m => internal || !m.startsWith('rpc.'))
+    .sort();
+});
+// diting 无 MethodMeta 注册表，这里按官方 []MethodMeta 形状返回可实现的降级元数据
+// （name/summary/returns），不编造参数说明；指定 method 时返回单项。
+function rpcMethodMeta(name) {
+  return {
+    name,
+    summary: name.startsWith('rpc.') ? 'Internal RPC method' : 'Komari compatible method',
+    returns: 'any'
+  };
+}
+registerMethod('rpc.help', (params = {}) => {
+  const name = params && params.method;
+  if (name) return METHODS.has(name) ? rpcMethodMeta(name) : null;
+  return Array.from(METHODS.keys()).filter(m => !m.startsWith('rpc.')).sort().map(rpcMethodMeta);
+});
+registerMethod('rpc.getHelp', (params = {}) => METHODS.get('rpc.help')(params));
 
 registerMethod('common:getNodes', () => Object.fromEntries(db.getMonitoredAgents().map(a => [a.id, toNode(a)])));
 registerMethod('common:getNodesLatestStatus', getNodesLatestStatus);
@@ -414,6 +485,12 @@ registerMethod('common:getNodeRecentStatus', (params = {}) => {
   return { count: 1, records: [toFlatRecent(a.id, m)] };
 });
 registerMethod('common:getRecords', getRecords);
+// 官方 Common RPC（komari/web/rpc/jsonrpc/README.md）：与 public:* 共用同一真源。
+registerMethod('common:getMe', () => ({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' }));
+registerMethod('common:getPublicInfo', getPublicInfo);
+registerMethod('common:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
+// 主题服务层实际会调用的自造名，补齐避免静默 -32601。
+registerMethod('common:getBackendVersion', () => ({ hash: '-', version: 'diting-compat' }));
 
 registerMethod('public:getMe', () => ({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('public:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
@@ -427,6 +504,8 @@ registerMethod('public:getClientRecentRecords', (params = {}) => {
 });
 registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params));
 registerMethod('public:getPublicPingTasks', getPublicPingTasks);
+// 官方记录端点（router.go:61），与 /api/records/ping 是两条不同绑定。
+registerMethod('public:getPingRecords', getPublicPingRecords);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
 // 返回结构：保持 { start, end, series } 信封。实测 Glassmorphism v3.4.4 的 LoadChart 直接读
 // `o.series`（`We(o.series)`），若按 Komari Go 侧的 []publicMetricSeries 裸数组返回，`o.series`
@@ -475,6 +554,32 @@ async function handleRpc(method, params) {
   return await METHODS.get(method)(params);
 }
 
+// 官方请求体校验（komari/pkg/rpc/request.go:34-45）：版本必须为 2.0、method 非空。
+function validateRpcMessage(msg) {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return 'invalid request';
+  if (msg.jsonrpc !== '2.0') return 'invalid jsonrpc version';
+  if (typeof msg.method !== 'string' || !msg.method.trim()) return 'method required';
+  return null;
+}
+
+// 官方 response.go 的 `omitempty`：id / result 为 nil 时省略字段，不输出 null。
+function rpcResponse(id, payload) {
+  const body = { jsonrpc: '2.0' };
+  if (id !== undefined && id !== null) body.id = id;
+  return Object.assign(body, payload);
+}
+function rpcSuccess(id, result) {
+  return result === undefined || result === null
+    ? rpcResponse(id, {})
+    : rpcResponse(id, { result });
+}
+function rpcError(id, code, message) {
+  return rpcResponse(id, { error: { code, message } });
+}
+
+// 批量上限：官方无此限制，diting 为防未认证请求放大 heavyQuery worker 附加（方案 R9）。
+const MAX_RPC_BATCH = 50;
+
 function rpcMiddleware(req, res) {
   if (!publicOpen()) {
     return res.status(403).json({ status: 'error', message: 'public page disabled' });
@@ -482,19 +587,26 @@ function rpcMiddleware(req, res) {
   // Express 已通过 express.json() 中间件解析 body 到 req.body。
   // 切勿再用 req.on('data')/'end' 读 stream——stream 已被 Express 消费，
   // 'end' 事件不会再触发，会导致请求永久挂起。
-  const msg = req.body || {};
-  if (!msg || typeof msg !== 'object' || !msg.method) {
-    return res.status(200).json({ jsonrpc: '2.0', error: { code: -32600, message: 'invalid request' }, id: msg?.id ?? null });
+  const body = req.body;
+  const messages = Array.isArray(body) ? body : [body];
+  // 请求体校验阶段：任一条校验失败 → 整批拒（官方 parse.go:22-56），
+  // 且官方返回 HTTP 400（transport.go:129），不是 diting 此前的 200。
+  if (messages.length === 0) return res.status(400).json(rpcError(null, -32600, 'empty batch'));
+  if (messages.length > MAX_RPC_BATCH) return res.status(400).json(rpcError(null, -32600, 'batch too large'));
+  for (const msg of messages) {
+    const err = validateRpcMessage(msg);
+    if (err) return res.status(400).json(rpcError(null, -32600, err));
   }
-  // 审查 C4：handleRpc 异步化（重聚合走 worker），错误仍以 JSON-RPC error 返回
-  handleRpc(msg.method, msg.params).then((result) => {
-    res.json({ jsonrpc: '2.0', result, id: msg.id });
-  }).catch((err) => {
-    res.status(200).json({
-      jsonrpc: '2.0',
-      error: { code: err.code || -32603, message: err.message || 'internal error' },
-      id: msg?.id ?? null
-    });
+  // 方法执行阶段：逐条独立 dispatch，错误只落在自身的 error 对象上（transport.go:133-141）。
+  // notification（无 id）也回包：response.go 注释说不回，但 servePost 无条件 append，
+  // 以实现为准（方案 A4 登记「注释与实现不一致」）。
+  const dispatchOne = (msg) => handleRpc(msg.method, msg.params).then(
+    (result) => rpcSuccess(msg.id, result),
+    (err) => rpcError(msg.id, err?.code || -32603, err?.message || 'internal error')
+  );
+  Promise.all(messages.map(dispatchOne)).then((responses) => {
+    // 官方按 responses 长度决定形状：1 条返单对象，多条返数组。
+    res.status(200).json(responses.length === 1 ? responses[0] : responses);
   });
 }
 

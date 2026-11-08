@@ -309,6 +309,8 @@ export const zhCN: Record<string, string> = {
   'settings.publicEnabled': '公开页启用',
   'settings.publicShowBusiness': '公开接口展示业务字段（商家/到期/备注/配额/套餐）',
   'settings.customCss': '自定义 CSS',
+  'settings.customHead': '自定义 <head> HTML（公开主题页）',
+  'settings.customBody': '自定义 <body> HTML（公开主题页）',
   'settings.alertThresholds': '告警阈值',
   'settings.notifyChannels': '通知渠道',
   'settings.notifyChannelsHint': '内置邮件 / Telegram 的凭据使用上方「通知设置」；Webhook 可在此增删改（即时生效），支持任意第三方通知服务。',
