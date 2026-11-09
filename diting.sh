@@ -626,6 +626,8 @@ HOSTENV
     echo -e ""
     echo -e "   生产请将 Nginx + TLS 反代到 127.0.0.1:${port}（见 README 部署章节）"
     echo -e "   Nginx upstream 需与端口一致：proxy_pass http://127.0.0.1:${port};"
+    echo -e "   ${YELLOW}⚠️ 反代必须透传 WebSocket 升级头，否则公开主题页实时数据为空（显示离线/N/A）${NC}"
+    echo -e "   请直接复制 nginx/monitor.conf.example（含 map 升级头与实时端点 location）"
 }
 
 # ── 更新：本安装脚本自身 ──────────────────────────────────────────────────────

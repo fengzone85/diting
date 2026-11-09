@@ -215,9 +215,15 @@ sudo bash diting.sh --backup-list
 
 ## 反向代理
 
-推荐使用 Nginx 或 Caddy 配置 HTTPS：
+推荐使用 Nginx 或 Caddy 配置 HTTPS。**生产环境请直接复制仓库的 `nginx/monitor.conf.example`**（含限流、gzip、长超时等完整配置）；下面是最小的可用片段，重点是 **WebSocket 升级头不能省**。
 
 ```nginx
+# map 必须位于 http {} 上下文；站点配置被 include 进 http 时，放在本文件顶层即可
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 443 ssl http2;
     server_name monitor.example.com;
@@ -225,8 +231,25 @@ server {
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
 
+    # 实时端点（WebSocket / SSE / JSON-RPC）：必须透传升级头并放宽长连接超时。
+    # 缺 Upgrade / Connection 两行 → 浏览器 WSS 握手失败 → 主题页显示「离线」、实时数值变 N/A，
+    # 而服务端直连 127.0.0.1:8081 完全正常，很容易误判成后端故障。
+    location ~ ^/api/(clients(/sse)?|rpc2)$ {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -234,3 +257,5 @@ server {
     }
 }
 ```
+
+> 若用 `certbot --nginx` 从 80 端口块生成 443 块，它会自动继承 `location`；**手工新建 443 server 块时，务必把上面的实时端点 `location` 一起复制过去**。可自检：`curl -sk -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' https://你的域名/api/clients` 应返回 `101` 而不是 `404`。

@@ -171,6 +171,8 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 - 第三方 Komari 主题通过兼容层接入，**运行时重写 HTML 引用**，磁盘上的主题文件不做任何修改
 - 签名中继只转发「ed25519 验签通过 + 架构匹配」的产物，按具体 tag 缓存，`:os/:arch` 走白名单查表
 
+> ⚠️ **反代必须透传 WebSocket 升级头**：`/api/clients`、`/api/rpc2` 是实时数据通道。手工写 `location /` 若漏了 `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade`，浏览器 WSS 握手会失败，公开主题页显示「离线」、实时数值变 `N/A`，而直连 `127.0.0.1:8081` 完全正常。请直接复制 `nginx/monitor.conf.example`（含 `map $http_upgrade` 与实时端点 `location`）；手工新建 443 server 块时也要把该 `location` 一起复制（`certbot --nginx` 生成的 443 块会自动继承 80 块 location）。
+
 ---
 
 ## 📁 项目结构

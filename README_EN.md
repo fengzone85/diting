@@ -174,6 +174,8 @@ GitHub release on failure. Both paths still enforce SHA256.
 - Third-party Komari themes are adapted **at response time by rewriting HTML references**; theme files on disk are untouched
 - The signed relay forwards only artifacts that pass ed25519 verification *and* match the requested arch, cached per concrete tag; `:os/:arch` is a whitelist lookup
 
+> ⚠️ **The reverse proxy must forward WebSocket upgrade headers**: `/api/clients` and `/api/rpc2` are the realtime channels. If a hand-written `location /` omits `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade`, the browser WSS handshake fails and public theme pages show "offline" with `N/A` values, while `127.0.0.1:8081` works perfectly when accessed directly. Copy `nginx/monitor.conf.example` (it includes the `map $http_upgrade` and the realtime `location`); when you create the 443 server block manually, carry that `location` over too (`certbot --nginx` inherits locations from the port-80 block).
+
 ---
 
 ## 📁 Project structure
