@@ -121,6 +121,22 @@ GET /themes/<short>/config        # 受 public_enabled 开关控制，返回扁�
 
 > 接入 Komari 社区皮肤时，只需将其前端请求层的 base URL 指向本服务、资源路径改为 `/themes/<id>/...`，即可复用。自带适配示例见 `komari-demo/`。
 
+## 硬件字段可用性（Komari 兼容层）
+
+受控端**不自动采集**硬件指纹。以下字段来自管理员在后台「节点详情 → 硬件档案」的手工录入。每个字段支持四态：**不填写 / 预设 / 手填 / 隐藏**，另有一个全局开关「公开接口展示硬件档案」（关闭 = 一键隐藏全部）。
+
+| 字段 | 有值条件 | 说明 |
+| --- | --- | --- |
+| `cpu_cores` | 受控端已上报 | 真实采集（聚合属性） |
+| `cpu_name` | 管理员填写 | 预设为「厂商 + 代际」（如 `Intel 第11代`），也可手填整串 |
+| `arch` | 管理员填写；未填时按构建平台派生 | `amd64→x86_64`、`arm64→aarch64`、`386→x86` 等；派生值来自 `agent_meta.platform`，不是硬件探测 |
+| `virtualization` | 管理员填写 | 物理机 / KVM / VMware / Hyper-V / LXC / Docker / 其他 |
+| `gpu_name` | 管理员填写 | 仅「核显 / 独显」类目或手填；未填或隐藏时为 `None` |
+| `kernel_version` | 恒为空串 | 红线字段，不采集 |
+| `cpu_physical_cores` | 恒为 `0` | 物理核心需受控端探测，不采集 |
+
+> 「隐藏」只阻止接口输出值。部分社区主题（如 Glassmorphism）对 `arch` / `virtualization` 会固定渲染占位符「-」，这是主题自身行为，服务端不修改主题模板。GPU 使用率（`load_type=gpu` / `gpuMemory`）没有数据源；即使填了 `gpu_name`，也只会多一行名称，不会产生曲线。
+
 ## 参考实现
 
 - `komari-demo/`：适配版 Komari 皮肤示例，基于上面的 Komari 兼容 API，证明 Komari 社区皮肤可在本项目运行。

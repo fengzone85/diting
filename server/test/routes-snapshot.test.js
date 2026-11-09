@@ -65,6 +65,7 @@ const EXPECTED = [
   'GET /ai/usage',
   'GET /billing',
   'GET /client-ip',
+  'GET /hardware-options',
   'GET /overview',
   'GET /public/agents',
   'GET /public/agents/:id/online-history',

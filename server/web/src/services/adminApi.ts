@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, AgentArtifact, AgentDistributionResult, AgentVersionSummary, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession } from './types';
+import type { Agent, AgentArtifact, AgentDistributionResult, AgentVersionSummary, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession, HardwareOptions } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -36,6 +36,8 @@ export const adminApi = {
   // agents
   listAgents: () => api.get<Agent[]>('/api/agents'),
   getAgent: (id: string) => api.get<Agent>(`/api/agents/${encodeURIComponent(id)}`),
+  // 硬件档案候选清单（单一事实源在服务端 src/hardware-profile.js）
+  hardwareOptions: () => api.get<HardwareOptions>('/api/hardware-options'),
   createAgent: (payload: Partial<Agent>) => api.post<Agent & { token: string; install: InstallCommands }>('/api/agents', payload),
   updateAgent: (id: string, payload: Partial<Agent>) =>
     api.put<Agent>(`/api/agents/${encodeURIComponent(id)}`, payload),

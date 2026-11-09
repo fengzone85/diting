@@ -8,8 +8,9 @@ import { apiErrorMessage } from '../../utils/apiError';
 import { isOlderVersion } from '../../utils/version';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
+import HardwareProfileFields from '../../components/admin/HardwareProfileFields.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
-import type { InstallCommands, Agent, DeletedAgent, AgentVersionSummary, AgentVersionStatus, AgentArtifact, AgentDistributionResult } from '../../services/types';
+import type { InstallCommands, Agent, DeletedAgent, AgentVersionSummary, AgentVersionStatus, AgentArtifact, AgentDistributionResult, HardwareOptions } from '../../services/types';
 import { publicApi } from '../../services/publicApi';
 
 const { state } = useAdmin();
@@ -30,6 +31,10 @@ onMounted(() => {
   publicApi.version()
     .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })
     .catch(() => { agentLatest.value = ''; });
+  // 新建表单的硬件档案候选（失败不阻塞创建：下拉为空仍可手填）
+  adminApi.hardwareOptions()
+    .then((o) => { hwOptions.value = o; })
+    .catch(() => { hwOptions.value = null; });
   });
 
 // ---- V 阶段：版本可判定性（期望版本对照 + 分布汇总）----
@@ -206,6 +211,9 @@ const newName = ref('');
 const error = ref('');
 const created = ref<{ id: string; token: string; install: InstallCommands } | null>(null);
 const showToken = ref(false);
+// 新建流程的硬件档案（可选、可折叠；与详情页共用同一个编辑器组件）
+const hwOptions = ref<HardwareOptions | null>(null);
+const hwFields = ref<InstanceType<typeof HardwareProfileFields> | null>(null);
 
 // B3: 搜索 / 排序 / 批量
 const search = ref('');
@@ -267,8 +275,13 @@ async function add() {
     return;
   }
   try {
-    const res = await adminApi.createAgent({ name });
+    const res = await adminApi.createAgent({
+      name,
+      // 硬件档案可选：未填写/手填为空的字段由服务端省略
+      hardware: hwFields.value?.value() || {},
+    });
     newName.value = '';
+    hwFields.value?.reset(undefined);
     created.value = { id: res.id, token: res.token, install: res.install };
     await loadAdmin();
   } catch (e) {
@@ -487,6 +500,16 @@ async function batchRenew() {
         <input v-model="newName" :placeholder="t('common.name')" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white" @keyup.enter="add" />
         <button class="rounded-lg bg-sky-500 px-4 py-2 text-white hover:bg-sky-400" @click="add">{{ t('agents.add') }}</button>
       </div>
+      <!-- 硬件档案（可选）：受控端不采集，建好后也可在详情页修改 -->
+      <details class="mt-3">
+        <summary class="cursor-pointer select-none text-sm text-slate-400">
+          {{ t('hw.title') }}
+          <span class="ml-2 text-xs text-slate-500">{{ t('hw.createHint') }}</span>
+        </summary>
+        <div class="mt-3">
+          <HardwareProfileFields ref="hwFields" :options="hwOptions" />
+        </div>
+      </details>
       <div v-if="created" class="mt-4 space-y-3 border-t border-slate-700 pt-4">
         <div class="flex items-center gap-3">
           <span class="text-sm text-emerald-300">{{ t('agents.created', { id: created.id }) }}</span>

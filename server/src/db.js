@@ -403,6 +403,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
   if (!existing.has('agent_platform')) db.exec("ALTER TABLE agents ADD COLUMN agent_platform TEXT DEFAULT ''");
   if (!existing.has('build_tag')) db.exec("ALTER TABLE agents ADD COLUMN build_tag TEXT DEFAULT ''");
 }
+// schema migration: agents 增加硬件档案列（管理员手工录入，单列 JSON；'' = 未填写）。
+// 受控端不自动采集硬件指纹，四字段（cpu/arch/virt/gpu）的值全部来自管理面输入，
+// 每个字段支持「预设 / 手填 / 隐藏」三态，结构见 src/hardware-profile.js 头注释。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
+  if (!existing.has('hw_profile')) db.exec("ALTER TABLE agents ADD COLUMN hw_profile TEXT DEFAULT ''");
+}
 // P1: agents 增加流量重置日列。三态 NULL=未设置（采纳 agent 上报）/0=累计/1–31=重置日；不给默认值。
 {
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
@@ -450,13 +457,13 @@ const stmts = {
   getDeletedAgents: db.prepare('SELECT * FROM agents WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC'),
   getAgentIncludingDeleted: db.prepare('SELECT * FROM agents WHERE id = ?'),
   insertAgent: db.prepare(`INSERT INTO agents
-    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, pending, created_at, last_seen)
-    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @pending, @created_at, 0)`),
+    (id, name, token_hash, merchant, note, expire_at, monthly_quota_gb, price, billing_cycle, currency, auto_renewal, grp, country, probe_targets, hw_profile, pending, created_at, last_seen)
+    VALUES (@id, @name, @token_hash, @merchant, @note, @expire_at, @monthly_quota_gb, @price, @billing_cycle, @currency, @auto_renewal, @grp, @country, @probe_targets, @hw_profile, @pending, @created_at, 0)`),
   updateAgent: db.prepare(`UPDATE agents SET
     name=@name, merchant=@merchant, note=@note, expire_at=@expire_at, monthly_quota_gb=@monthly_quota_gb,
     month_rotate=@month_rotate,
     price=@price, billing_cycle=@billing_cycle, currency=@currency, auto_renewal=@auto_renewal,
-    grp=@grp, country=@country, probe_targets=@probe_targets
+    grp=@grp, country=@country, probe_targets=@probe_targets, hw_profile=@hw_profile
     WHERE id=@id`),
   upsertTrafficState: db.prepare(`INSERT OR REPLACE INTO traffic_state
     (agent_id, cycle_key, cycle_start, used_rx, used_tx, last_rx, last_tx, last_ts, epoch, updated_at)
@@ -734,6 +741,8 @@ const createAgent = (fields) => {
     grp: fields.grp || '',
     country: (fields.country || '').toUpperCase().slice(0, 2),
     probe_targets: fields.probe_targets || '',
+    // 硬件档案（管理员手工录入的 JSON；'' = 未填写）
+    hw_profile: fields.hw_profile || '',
     // 审查 G4：自助注册默认待确认（pending=1）；后台手动创建不传即为 0
     pending: fields.pending ? 1 : 0,
     created_at: Date.now()
@@ -837,6 +846,10 @@ const updateAgent = (id, f) => {
   const monthRotate = Object.prototype.hasOwnProperty.call(f, 'month_rotate')
     ? traffic.normalizeRotate(f.month_rotate)
     : (current ? current.month_rotate : null);
+  // 硬件档案同样三态：调用方未携带该字段时保留库中原值，避免设置页/其他局部更新把档案抹掉。
+  const hwProfile = Object.prototype.hasOwnProperty.call(f, 'hw_profile')
+    ? String(f.hw_profile || '')
+    : (current ? (current.hw_profile || '') : '');
   return stmts.updateAgent.run({
     id,
     name: f.name,
@@ -851,7 +864,8 @@ const updateAgent = (id, f) => {
     auto_renewal: f.auto_renewal !== false ? 1 : 0,
     grp: f.grp || '',
     country: (f.country || '').toUpperCase().slice(0, 2),
-    probe_targets: f.probe_targets || ''
+    probe_targets: f.probe_targets || '',
+    hw_profile: hwProfile
   });
 };
 
@@ -1635,6 +1649,10 @@ function getUiSettings() {
     // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；
     // 若公开页面向外部访客、不希望暴露经营信息，在后台设置里关闭即可，公开页会自动隐藏相关模块。
     public_show_business: true,
+    // 公开接口（/api/public/agents、/api/v1/nodes、/api/nodes）是否透出硬件档案：
+    // 由管理员手工录入（受控端不自动采集），默认 true 以便 Komari 模板开箱即用；
+    // 关闭后所有公开出口统一输出空值（字段级 hidden 仍然生效），管理面不受影响。
+    public_show_hardware: true,
     home_layout: 'grid', public_theme: 'default', probe_targets: 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
     // 主题可视化配置（对齐 komari-theme-Glassmorphism）
     glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom

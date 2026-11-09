@@ -17,7 +17,6 @@ import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, format
 import {
   Cpu,
   Computer,
-  Code,
   Timer,
   Server,
   Memory,
@@ -164,17 +163,14 @@ const hwDynamic = computed(() => {
   if (Number((a as any).cores) > 0) {
     items.push({ label: t('node.cpuCores'), value: String((a as any).cores), icon: Cpu });
   }
-  // 架构（无 IP 时显示，diting 当前未上报 arch → -）
+  // 架构（管理员手填优先；未填时服务端按受控端构建平台派生）
   items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
-  // 虚拟化
+  // 虚拟化（管理员手填）
   items.push({ label: t('node.virtualization'), value: (a as any).virtualization || '—', icon: Server });
-  // GPU（仅当存在时渲染，否则跳过）
-  if ((a as any).gpu_name) {
-    items.push({ label: t('node.gpu'), value: (a as any).gpu_name, icon: VideoOne });
-  }
-  // 物理核心（仅当为有效数字时渲染）
-  if (typeof (a as any).cpu_physical_cores === 'number' && (a as any).cpu_physical_cores > 0) {
-    items.push({ label: t('node.physicalCores'), value: String((a as any).cpu_physical_cores), icon: Cpu });
+  // GPU（仅当管理员填写时渲染；空 / 'None' = 无或不公开）
+  const gpu = String((a as any).gpu_name || '').trim();
+  if (gpu && gpu.toLowerCase() !== 'none') {
+    items.push({ label: t('node.gpu'), value: gpu, icon: VideoOne });
   }
   return items;
 });
@@ -564,11 +560,6 @@ onMounted(load);
                   <span>{{ t('node.cpuModel') }}</span>
                 </div>
                 <span class="text-xs sm:text-sm text-content">{{ agent.cpu_name || t('node.unknown') }}</span>
-                <!-- 芯片天梯评分条：无型号则显示灰色未知占位条 -->
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-500/20">
-                  <div class="h-full rounded-full bg-gray-400" style="width: 0%"></div>
-                </div>
-                <span class="text-[10px] text-content/60">{{ t('node.unknown') }}</span>
               </div>
               <!-- 动态条目：架构/虚拟化/GPU/物理核心（按需渲染，无则显 -） -->
               <div class="grid grid-cols-2 gap-1">
@@ -589,10 +580,6 @@ onMounted(load);
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><Computer :size="14" /><span>{{ t('node.os') }}</span></span>
                   <span class="truncate text-xs sm:text-sm text-content">{{ agent.os || '—' }}</span>
-                </div>
-                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
-                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Code :size="14" /><span>{{ t('node.kernel') }}</span></span>
-                  <span class="truncate text-xs sm:text-sm text-content">{{ agent.kernel_version || '—' }}</span>
                 </div>
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><Timer :size="14" /><span>{{ t('node.metric.uptime') }}</span></span>

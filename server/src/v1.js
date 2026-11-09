@@ -11,6 +11,8 @@ const router = express.Router();
 // 改造前这里只看 OFFLINE_THRESHOLD_SEC env —— 面板调过阈值或给节点设了覆盖后，
 // 会出现「v1 接口说在线、告警说离线」的分裂。
 const online = require('./online');
+// 管理员手工录入的硬件档案（受控端不自动采集）
+const hardware = require('./hardware-profile');
 
 // 统一响应信封：{ code, message, data }
 function ok(res, data) { res.json({ code: 0, message: '', data }); }
@@ -24,11 +26,13 @@ const CAPABILITY = {
   connections: false,
   // 2026-10-12 起 agent 真实采集进程总数（聚合计数，无个体明细）→ 能力置 true
   process: true,
-  virtualization: false,
-  arch: false,
+  // 以下三项自 PR2 起可提供：值来自管理员手工录入的硬件档案（或 arch 的构建目标派生），
+  // 受控端不自动采集；具体节点是否为空取决于管理员是否填写。
+  virtualization: true,
+  arch: true,
   // agents.cores 真实存在且已写库（S1/T18），此处声明 false 会让 adapter/模板主动隐藏核数
   cpu_cores: true,
-  cpu_name: false,
+  cpu_name: true,
   temperature: true,
   disks: true,
   probes: true
@@ -41,11 +45,18 @@ function businessVisible() {
   return ui.public_show_business !== false;
 }
 
+// 公开接口是否透出硬件档案（管理员手工录入）：全局开关 ui_settings.public_show_hardware。
+function hardwareVisible() {
+  const ui = db.getUiSettings();
+  return ui.public_show_hardware !== false;
+}
+
 // 节点基础信息（标准字段语义，缺失统一 null / 空对象，不猜默认值）
 // showBusiness 由调用方（列表/详情 handler）传入，避免每个节点各读一次 ui_settings。
-function toNode(a, showBusiness, octx) {
+function toNode(a, showBusiness, octx, showHardware) {
   const m = db.getLatestMetric(a.id) || {};
   const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
+  const hw = hardware.publicFields(a, showHardware === undefined ? hardwareVisible() : showHardware);
   return {
     uuid: a.id,
     name: a.name,
@@ -57,11 +68,13 @@ function toNode(a, showBusiness, octx) {
     hostname: a.hostname || null,
     // CPU 核心数：agents.cores 真实采集值（0 = 未上报 → null，不猜默认值）
     cpu_cores: Number(a.cores) || null,
-    // 以下三项为 PR2（管理员手工录入粗粒度硬件档案）预留形状，PR1 恒 null
-    cpu_name: null,
-    arch: null,
-    virtualization: null,
-    gpu: { model: null, count: null, detailed_info: [] },
+    // 硬件档案：管理员手工录入（受控端不自动采集），未填写/隐藏/全局关闭时统一 null。
+    // arch 未填写时由 agent_platform（构建目标）派生。
+    cpu_name: hw.cpu_name || null,
+    arch: hw.arch || null,
+    virtualization: hw.virtualization || null,
+    // gpu.model 为粗粒度类目（核显/独显）或手填文本；count/detailed_info 需实时采集，恒未知。
+    gpu: { model: hw.gpu_name || null, count: null, detailed_info: [] },
     ram: { total: Number(m.mem_total) || null, used: Number(m.mem_used) || null },
     swap: { total: Number(m.swap_total) || null, used: Number(m.swap_used) || null },
     disk_total: Number(m.disk_total) || null,
@@ -148,16 +161,17 @@ router.get('/sites', (req, res) => {
 // GET /api/v1/nodes —— 节点列表（不含实时负载）
 router.get('/nodes', (req, res) => {
   const show = businessVisible();
+  const showHw = hardwareVisible();
   // 批量：一次预取阈值上下文，避免逐节点查库
   const octx = online.buildCtx();
-  ok(res, db.getMonitoredAgents().map((a) => toNode(a, show, octx)));
+  ok(res, db.getMonitoredAgents().map((a) => toNode(a, show, octx, showHw)));
 });
 
 // GET /api/v1/nodes/:uuid —— 单节点详情（基础信息 + 实时 + 能力声明）
 router.get('/nodes/:uuid', (req, res) => {
   const a = db.getAgent(req.params.uuid);
   if (!a) return res.status(404).json({ code: 1, message: 'node not found', data: null });
-  ok(res, { node: toNode(a, businessVisible()), realtime: toRealtime(db.getLatestMetric(a.id)), capability: CAPABILITY });
+  ok(res, { node: toNode(a, businessVisible(), undefined, hardwareVisible()), realtime: toRealtime(db.getLatestMetric(a.id)), capability: CAPABILITY });
 });
 
 // GET /api/v1/nodes/:uuid/metrics?hours=24&max_points=100 —— 时序指标（标准字段）

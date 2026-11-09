@@ -36,6 +36,8 @@ interface UiSettings {
   public_enabled?: boolean;
   // 公开接口是否透出业务字段（商家/到期/备注/配额/套餐）
   public_show_business?: boolean;
+  // 公开接口是否透出硬件档案（管理员手工录入；关闭 = 一键隐藏全部）
+  public_show_hardware?: boolean;
   home_layout?: 'grid' | 'list' | 'compact';
   public_theme?: string;
   probe_targets?: string;
@@ -113,6 +115,8 @@ function resetLocal() {
       capacity_enabled: true,
       capacity_max_rows: 2000000,
       capacity_max_mb: 2048,
+      // 硬件档案全局开关：默认公开（与 db.js getUiSettings 默认 true 一致）
+      public_show_hardware: true,
       // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）。
       // 必须在这里给默认值：模板 v-model="local.ui.alert!.cpu_pct" 会被立即求值，
       // 若 settings 尚未到达（冷加载）或拉取失败（429/5xx），alert 为 undefined
@@ -332,6 +336,12 @@ const {
         <FormInput v-model="local.ui.retention_days" :label="t('settings.retentionDays')" type="number" />
         <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
         <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />
+        <FormInput
+          v-model="local.ui.public_show_hardware"
+          :label="t('settings.publicShowHardware')"
+          :hint="t('settings.publicShowHardwareHint')"
+          type="checkbox"
+        />
         <FormInput v-model="local.ui.custom_css" :label="t('settings.customCss')" type="textarea" />
         <FormInput v-model="local.ui.custom_head" :label="t('settings.customHead')" type="textarea" />
         <FormInput v-model="local.ui.custom_body" :label="t('settings.customBody')" type="textarea" />

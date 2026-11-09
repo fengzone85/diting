@@ -66,7 +66,7 @@ expiry tracking, backup/restore, and a compatibility layer for Komari community 
 - **Windows agent (native)** — same Go code compiled to an exe, logon-triggered scheduled task
 - **Docker agent** — multi-stage scratch image, 65–150 MB (includes the daemon)
 - **Zero coupling between agents** — they do not know each other exists
-- **Data minimisation** — no kernel/GPU/public-IP/connection-count collection
+- **Data minimisation** — the agent collects no kernel/GPU/public IP/connection counts; CPU/arch/virtualization/GPU are admin-entered labels only (hideable)
 - **Multi-disk** — physical disks auto-detected (tmpfs/proc/pseudo disks filtered)
 - **Batch distribution** — the server generates packages; an admin executes on the node, binary-only swap keeps identity
 - **Version determinism** — expected version/sha comparison shows `outdated` / `unknown` at a glance
@@ -456,7 +456,7 @@ ZIPs run **without a single edit**:
 - **REST**: `/api/me`, `/api/public`, `/api/version`, `/api/nodes`, `/api/nodes/:uuid`, `/api/recent/:uuid`, `/api/records/load`, `/api/records/ping`
 - **Realtime**: `/api/clients` (WebSocket, send `get` for a snapshot), `/api/clients/sse` (fallback), `/api/rpc2` (POST / WS)
 - **Response envelope**: all `/api/*` responses use `{status,message,data}`; records are flat arrays and task ids are numeric — the themes' internal normalisation chain reads the Komari shape, so a different envelope or id type silently renders "no data"
-- **Field mapping**: `cpu_cores` is real; `kernel_version` / `arch` / `virtualization` explicitly return empty (capability `false` + `null`) so templates hide those blocks instead of showing fake values
+- **Field mapping**: `cpu_cores` is real; `cpu_name` / `arch` / `virtualization` / `gpu_name` come from the admin-entered hardware profile (never collected by the agent; empty by default, per-field hideable, plus a global kill switch). `arch` falls back to the agent build platform when unset; `kernel_version` is always empty (red line) rather than faked
 - **Static assets**: root-absolute references are rewritten **at response time** (theme files on disk untouched), and trailing-slash routes are handled
 - **CSP**: themes with inline scripts get a one-time nonce, relaxing `script-src` for that response only
 
@@ -675,8 +675,9 @@ Our design assumes the opposite: **the server may be compromised, a single agent
 - Metrics are stored per `agent_id`; all cross-agent aggregation (`getAgents`/`getMetricsAll`) is admin-only read queries for the dashboard, never pushed to any agent. Even a compromised server has no mechanism to make "agent A contact agent B".
 
 **③ Collected data carries no exploitable information**
-- We collect only basic state: online, load, CPU, memory, disk, traffic (incl. monthly totals), temperature, Swap, uptime. Temperature / Swap / uptime are **non-fingerprint** metrics (no kernel version / CVE targeting, no public IP, no GPU), so even a leak yields nothing actionable.
-- We do **not** collect kernel version, GPU, public IP, connection count, or process count — fingerprints usable for targeted attack. Even if the server DB is exfiltrated, the leak is only "machine X had CPU/memory Y at time Z" — useless for targeted attacks (no kernel version → no CVE targeting, no public IP → no direct target, no GPU → no mining leverage).
+- The agent collects only basic state: online, load, CPU, memory, disk, traffic (incl. monthly totals), temperature, Swap, uptime. Temperature / Swap / uptime are **non-fingerprint** metrics (no kernel version / CVE targeting, no public IP, no GPU), so even a leak yields nothing actionable.
+- The agent does **not** collect kernel version, GPU model, public IP, connection count, or per-process details — fingerprints usable for targeted attack. Even if the server DB is exfiltrated, the leak is only "machine X had CPU/memory Y at time Z" — useless for targeted attacks (no kernel version → no CVE targeting, no public IP → no direct target, no GPU → no mining leverage).
+- Exception note (2026-11): the four **display fields** required by Komari themes (`cpu_name` / `arch` / `virtualization` / `gpu_name`) may be entered manually by the admin. They never come from the agent, the presets stop at "vendor + generation" or "integrated/discrete GPU", and both per-field hiding and a global kill switch exist. Typing an exact model is a voluntary disclosure by the admin.
 
 **③·b Fingerprints carry two distinct risks: location, and clustering**
 
@@ -685,7 +686,7 @@ The common intuition is: "Since the agent has zero inbound, we don't collect the
 | Dimension | The problem the attacker must solve | What defends against it | Diting's stance |
 | --- | --- | --- | --- |
 | **Location** | Where is this machine? How do I reach it? | Not collecting the public IP / any IP | ✅ No IP collected, plus zero inbound |
-| **Clustering** | I've already landed on one host — **which other hosts can I hit with the same exploit?** | Not collecting vulnerability-matchable fingerprints | ✅ No kernel version, no CPU model, no GPU |
+| **Clustering** | I've already landed on one host — **which other hosts can I hit with the same exploit?** | Not collecting vulnerability-matchable fingerprints | ✅ No kernel / exact CPU model / GPU model collected by the agent; manual labels stop at generation/category and are hideable |
 
 The key insight: **clustering does not require location capability.** If an attacker already has a shell on one host via a completely unrelated entry point (say, an outdated CMS on that box), what he wants to know is "which of your other hosts can my existing exploit hit again?" Any field in the DB that groups machines together lowers his second-wave cost:
 
@@ -696,12 +697,14 @@ The key insight: **clustering does not require location capability.** If an atta
 So "no public IP" defends against *finding you*, while "no kernel version / CPU model" defends against *knowing where to strike once found* — two independent lines, neither a substitute for the other. This project does both, and the discipline **is not relaxed just because a field cannot be exploited in isolation**: once the first exception is granted for "it's unreachable anyway", the line is gone.
 
 > Note: `hostname` and `os` (e.g. "Ubuntu 22.04") are indeed stored and are lightweight identifiers. The former is an operational necessity (telling nodes apart); the latter is coarse-grained (a distro name cannot be matched to a kernel CVE). The line we draw is explicit: **do not collect fields that directly match vulnerabilities or lower the cost of second-wave spread** — not "collect no strings at all".
+>
+> Addendum (2026-11): the hardware profile (`cpu_name` / `arch` / `virtualization` / `gpu_name`) is not "collection" — the admin types it in the dashboard. Each field is one of four states (unset / preset / custom / private), plus a global "hide all hardware profiles" switch. Presets stop at "vendor + generation" or "integrated/discrete", precisely so that "same group = same exploit surface" does not hold; typing an exact model is a voluntary individual-level disclosure.
 
 ### Three compromise scenarios
 
 | Scenario | Attacker can | This project | Command-channel / fingerprinting monitor |
 | --- | --- | --- | --- |
-| ① Server compromised | Read reported data | ✅ (basic state incl. non-fingerprint metrics, no fingerprint) | ✅ (incl. kernel/GPU/public-IP/conns) |
+| ① Server compromised | Read reported data | ✅ (basic state; hardware profile is admin-entered and hideable) | ✅ (incl. kernel/GPU/public-IP/conns) |
 | | Spoof data to mislead agents | no effect (agents take no commands) | no effect |
 | | Push malicious tasks / probes | ❌ impossible (no command channel) | ✅ can push; agent becomes jump host |
 | | Move laterally to other agents | ❌ impossible | ⚠️ can probe other networks via tasks |
@@ -723,9 +726,9 @@ In the worst case (server + one agent both compromised), the attacker's ceiling 
 
 ### Three honest caveats
 
-1. **On the collected set**: besides the basic state, `hostname`, `os` (distro name, e.g. "Ubuntu 22.04"), temperature, Swap and uptime are also stored. They are lightweight identifiers or **non-fingerprint metrics**, not attack fingerprints; the "no fingerprint" claim should be read as "no fingerprint useful for targeted attack".
+1. **On the collected set**: besides the basic state, `hostname`, `os` (distro name, e.g. "Ubuntu 22.04"), temperature, Swap and uptime are also stored. They are lightweight identifiers or **non-fingerprint metrics**, not attack fingerprints; the "no fingerprint" claim should be read as "no fingerprint useful for targeted attack". The optional hardware profile is admin-entered display data, not agent collection.
 2. **Token hashing downgrades "plaintext leak" to "forge only with DB write access"**, not complete immunity — this should be explicit when evaluating scenario ③.
-3. **On the "clustering" dimension**: see ③·b above. "No public IP" addresses *location* only; it does not address "an attacker who already landed on one host uses fingerprints in the DB to select other hosts of the same model for a repeat run". Hence we do not collect kernel version / CPU model / GPU / process count / connection count — not because those fields are directly exploitable given "no public IP + no command channel" (they are not), but because they lower the cost of an attacker's second wave. The same discipline is why **adding any new collected field requires a fresh security review**.
+3. **On the "clustering" dimension**: see ③·b above. "No public IP" addresses *location* only; it does not address "an attacker who already landed on one host uses fingerprints in the DB to select other hosts of the same model for a repeat run". Hence the **agent** does not collect kernel version / CPU model / GPU / per-process details / connection count — not because those fields are directly exploitable given "no public IP + no command channel" (they are not), but because they lower the cost of an attacker's second wave. The display-only hardware profile is entered manually by the admin (per-field hide + global kill switch) and sits outside the agent's collection path. The same discipline is why **adding any new collected field requires a fresh security review**.
 
 ---
 
@@ -739,8 +742,8 @@ Many monitors (e.g. Nezha) prioritise features with an architecture of **monitor
 | Communication | One-way (Agent→Server POST) | Bidirectional (WebSocket, server can push) |
 | Remote execution | ❌ none (deliberately absent) | ✅ present (command exec → RCE risk) |
 | Agent coupling | Zero; mutually unaware | Server can orchestrate; agents can be jump hosts |
-| Collected data | Basic state (incl. non-fingerprint metrics like temp/Swap/uptime), no fingerprint | May include kernel/version/network detail |
-| Clustering risk | ❌ none (no kernel/CPU model collected, so the attacker cannot bucket the fleet by microarchitecture) | ⚠️ present (kernel/model bucket the fleet, letting one exploit be reused) |
+| Collected data | Basic state (incl. non-fingerprint metrics like temp/Swap/uptime); hardware profile is admin-entered and hideable | May include kernel/version/network detail |
+| Clustering risk | ❌ no automated collection (no kernel/exact model; manual labels stop at generation, so the attacker cannot bucket the fleet by microarchitecture) | ⚠️ present (kernel/model bucket the fleet, letting one exploit be reused) |
 | Worst case (server + 1 agent breached) | Only report spoofing; no machine controlled | Can push tasks to probe / execute via agents |
 | Trust model | Server and agents both untrusted | Implicitly assumes "server is trusted" |
 
@@ -780,7 +783,7 @@ For an agent to ping or probe a target, the server must push a task to it — wh
 > **Addendum (2026-07-09): we added a safe equivalent — "agent-side network-quality self-test."** The idea is to replace "server pushes arbitrary probe targets" with "each agent runs TCP/HTTP probes against a few *fixed public infrastructures* hardcoded in its local config (default: China Mobile portal `www.10086.cn:443` + CT/CU carrier DNS + 8.8.8.8)" from its own host. Because targets come from the agent's local config and the server **never** pushes any at runtime, the command channel does not exist and the trust boundary stays intact.
 
 ### 2. Host fingerprinting (kernel version / GPU model / public IP / TCP connection count, etc.)
-Such fingerprints, if the server is breached (especially exfiltrated), directly expose each machine's attack surface — an old kernel version enables targeted CVE matching, a public IP gives a direct target, a GPU enables mining trade-offs. We collect only basic state (incl. non-fingerprint metrics such as temperature / Swap / uptime), so even a leak yields nothing actionable.
+Such fingerprints, if the server is breached (especially exfiltrated), directly expose each machine's attack surface — an old kernel version enables targeted CVE matching, a public IP gives a direct target, a GPU enables mining trade-offs. The agent collects only basic state (incl. non-fingerprint metrics such as temperature / Swap / uptime), so even a leak yields nothing actionable. The display-only hardware profile (CPU vendor + generation / arch / virtualization / GPU category) is optional admin-entered data that can be hidden per field or globally, and never comes from agent collection.
 
 ### 3. Server-pushed sampling interval / collection policy
 This is another variant of a command channel (server influencing agent behaviour). We fix sampling logic locally on the agent; the server neither pushes nor knows it, preserving the isolation that "a breach of either side cannot affect the other."
@@ -836,7 +839,9 @@ anything at runtime; updating an agent is an admin action on the host itself.
 > which the relay verifies before forwarding.
 
 > Note: GPU model (from `nvidia-smi` / `lspci`) is a host fingerprint and conflicts with our
-> "no kernel/GPU/public-IP" rule, so we do not implement GPU monitoring either.
+> "the agent collects no kernel/GPU/public IP" rule, so we do not implement GPU monitoring either.
+> The `gpu_name` field templates expect only supports an admin-entered category (integrated/discrete)
+> or empty/private, and there is no GPU utilisation data source at all.
 
 ---
 

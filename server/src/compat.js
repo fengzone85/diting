@@ -16,6 +16,8 @@ const { probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
 // 不回指 compat/compat-rpc，故不新增循环依赖（compat.js:460 的延迟 require 保持不变）。
 const validators = require('./validate');
 const themeStore = require('./theme');
+// 管理员手工录入的硬件档案（受控端不自动采集）：合成 cpu_name/arch/virtualization/gpu_name
+const hardware = require('./hardware-profile');
 
 // 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
 // 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
@@ -75,6 +77,12 @@ function businessVisible() {
   return ui.public_show_business !== false;
 }
 
+// 公开接口是否透出硬件档案（管理员手工录入）：全局开关 ui_settings.public_show_hardware。
+function hardwareVisible() {
+  const ui = db.getUiSettings();
+  return ui.public_show_hardware !== false;
+}
+
 // 计费口径换算（diting ↔ Komari，见 plans/2026-10-26-komari-compat-fields.md §3.1）：
 //   price: diting 0（未设置）→ Komari -1（主题显示「—」）；diting <0（白嫖）→ 0；diting >0 原值
 //   cycle: diting null/空/非数 → 30；0（白嫖/一次性）必须原样保留，不能被 || 30 吞掉
@@ -91,22 +99,27 @@ function komariBillingCycle(a) {
 }
 
 // diting agent -> 社区主题 node 列表项（/api/nodes）
-function toNode(a, showBusiness, octx, now) {
+function toNode(a, showBusiness, octx, now, showHardware) {
   const m = db.getLatestMetric(a.id) || {};
   const show = showBusiness === undefined ? businessVisible() : showBusiness !== false;
+  // 硬件档案：管理员手工录入（受控端不自动采集）。全局开关关闭或字段 hidden 时输出空值；
+  // arch 未填写时从 agent_platform（构建目标）派生，属于「零采集」的粗粒度信息。
+  const hw = hardware.publicFields(a, showHardware === undefined ? hardwareVisible() : showHardware);
   return {
     uuid: a.id,
     name: a.name,
-    cpu_name: '',
-    virtualization: '',
-    arch: '',
+    cpu_name: hw.cpu_name,
+    virtualization: hw.virtualization,
+    arch: hw.arch,
     cpu_cores: Number(a.cores) || 0,
+    // 物理核心数需受控端探测（红线不采），恒 0 = 未知
     cpu_physical_cores: 0,
     os: a.os || '',
     // 内核版本是红线字段（diting 不采集）：此前错误地用 hostname 冒充，主题会把它当内核版本显示。
     // 保持空串，绝不回填 hostname。
     kernel_version: '',
-    gpu_name: 'None',
+    // Komari 约定：无 GPU 时 gpu_name = 'None'（Glassmorphism 据此整行隐藏）
+    gpu_name: hw.gpu_name || 'None',
     region: flagEmoji(a.country),
     mem_total: Number(m.mem_total) || 0,
     swap_total: Number(m.swap_total) || 0,
@@ -320,8 +333,9 @@ router.get('/nodes', guard, (req, res) => {
   // 注意：不能用 agents.map(toNode)——map 会把数组下标当作第二个参数 showBusiness 传入，
   // 下标 0 会被当成 false，导致第一个节点的业务字段被静默隐藏。
   const show = businessVisible();
+  const showHw = hardwareVisible();
   const octx = online.buildCtx();
-  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show, octx)) });
+  res.json({ status: 'success', message: '', data: agents.map((a) => toNode(a, show, octx, undefined, showHw)) });
 });
 
 // GET /api/recent —— 省略 uuid 时返回空数组（避免 /api/recent/ 触发 404，便于调试）。
@@ -512,7 +526,7 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
 router.get('/node/:uuid', guard, (req, res) => {
   const a = db.getAgent(req.params.uuid);
   if (!a) return res.json({ status: 'error', message: 'node not found', data: null });
-  const node = toNode(a, businessVisible());
+  const node = toNode(a, businessVisible(), undefined, undefined, hardwareVisible());
   const latest = db.getLatestMetric(a.id);
   const rt = toRealtime(latest);
   const sec = RANGES_C[req.query.range] || 21600;

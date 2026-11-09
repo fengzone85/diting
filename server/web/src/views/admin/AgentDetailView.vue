@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { adminApi } from '../../services/adminApi';
 import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/useAdmin';
@@ -8,9 +8,10 @@ import { apiErrorMessage } from '../../utils/apiError';
 import { isOlderVersion } from '../../utils/version';
 import { publicApi } from '../../services/publicApi';
 import { BILLING_CYCLES, CURRENCIES } from '../../utils/billing';
-import type { Agent, InstallCommands, ModifyCommands, ChartPoint } from '../../services/types';
+import type { Agent, InstallCommands, ModifyCommands, ChartPoint, HardwareOptions } from '../../services/types';
 import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
+import HardwareProfileFields from '../../components/admin/HardwareProfileFields.vue';
 import AiNodeAnalysisDialog from '../../components/ai/AiNodeAnalysisDialog.vue';
 
 const route = useRoute();
@@ -49,11 +50,22 @@ const formDirty = ref(false);
 // 回填中标志：resetForm 自身会改写 form，需屏蔽它触发的 watch，否则刚回填就被判为"已编辑"
 let backfilling = false;
 
+// ---- 硬件档案（管理员手工录入；受控端不自动采集）----
+// 编辑器状态由子组件自持：resetForm 调 reset()，保存时调 value()。
+const hwFields = ref<InstanceType<typeof HardwareProfileFields> | null>(null);
+const hwOptions = ref<HardwareOptions | null>(null);
+
+function onHardwareChange() {
+  if (backfilling) return;
+  formDirty.value = true;
+}
+
 function resetForm(src?: Agent) {
   backfilling = true;
   try {
     if (!src) {
       form.value = {};
+      hwFields.value?.reset(undefined);
     } else {
       form.value = {
         name: src.name,
@@ -70,6 +82,7 @@ function resetForm(src?: Agent) {
         country: src.country || '',
         probe_targets: src.probe_targets || '',
       };
+      hwFields.value?.reset(src.hardware);
       commandProbeTargets.value = src.probe_targets || '';
       longTerm.value = !(src.expire_at || '');
     }
@@ -118,6 +131,8 @@ async function save() {
       ...form.value,
       // 长期 = 无到期日；否则用表单里的日期
       expire_at: longTerm.value ? '' : (form.value.expire_at || ''),
+      // 硬件档案随主表单一起保存（未填写/手填为空的字段会被服务端省略）
+      hardware: hwFields.value?.value() || {},
     });
     message.value = t('agent.saved');
     await loadAdmin();
@@ -246,6 +261,8 @@ onMounted(async () => {
     await loadAdmin();
     await fetchCommands();
     await loadMetrics();
+    // 候选清单失败不阻塞页面：下拉为空，管理员仍可手填
+    try { hwOptions.value = await adminApi.hardwareOptions(); } catch { hwOptions.value = null; }
     publicApi.version()
       .then((info) => { agentLatest.value = info.agent_latest || info.data?.agent_latest || ''; })
       .catch(() => { agentLatest.value = ''; });
@@ -254,6 +271,13 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  // v-if="loading" 的 v-else 分支在 loading=false 后的下一次渲染才挂载，
+  // 此时 HardwareProfileFields 的 ref 才可用。首屏 watch(agent) 触发时组件还不存在，
+  // 只回填了表单字段；这里补一次硬件档案回填。
+  // 不加 formDirty 判断：首屏渲染与 nextTick 之间页面还不可交互，不存在用户编辑被覆盖的窗口；
+  // 且 form 的深度 watch 是异步 flush，resetForm 结束后会把 dirty 置真，用 dirty 判断反而永远跳过。
+  await nextTick();
+  hwFields.value?.reset(agent.value?.hardware);
 });
 
 onUnmounted(() => {
@@ -302,6 +326,14 @@ function formatDate(ts?: number) {
               <FormInput v-model="form.note" :label="t('agent.note')" type="textarea" />
             </div>
           </div>
+        </div>
+
+        <!-- 硬件档案（管理员手工录入；受控端不自动采集） -->
+        <div class="glass p-6">
+          <h2 class="mb-1 text-lg font-semibold">{{ t('hw.title') }}</h2>
+          <p class="mb-4 text-xs leading-relaxed text-slate-500">{{ t('hw.hint') }}</p>
+          <HardwareProfileFields ref="hwFields" :options="hwOptions" @change="onHardwareChange" />
+          <p class="mt-3 text-[11px] leading-relaxed text-slate-500">{{ t('hw.disclaimer') }}</p>
         </div>
 
         <div class="glass p-6">

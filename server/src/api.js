@@ -17,6 +17,8 @@ const { nextExpire, autoRenewExpire } = require('./renew');
 const { computeBilling } = require('./billing');
 const theme = require('./theme');
 const validators = require('./validate');
+// 管理员手工录入的硬件档案（受控端不自动采集；候选清单/校验/合成单一事实源）
+const hardware = require('./hardware-profile');
 
 
 // 计费字段口径（对齐 Komari）：
@@ -351,6 +353,8 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
       has_counter: db.hasTrafficCounter(a.id),
       latest: latestOut,
       hostname: shortHost(a.hostname),
+      // 硬件档案（解析为对象；列表页不编辑，仅用于详情页初始化与刷新）
+      hardware: hardware.parseProfile(a.hw_profile),
       alert: {
         effective: {
           offline_sec: eff.offlineSec,
@@ -423,6 +427,11 @@ router.get('/agents/deleted', adminOrReadonly, agentScope, (req, res) => {
 });
 
 // ---- Admin: single agent info ----
+// ---- Admin: 硬件档案候选清单（预设枚举；前端下拉经此取，不前后端各存一份）----
+router.get('/hardware-options', adminOrReadonly, (req, res) => {
+  res.json(hardware.options());
+});
+
 router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
   if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const a = db.getAgent(req.params.id);
@@ -431,7 +440,15 @@ router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
   // 与 /agents 列表同源（逐节点阈值），避免列表说在线、详情说离线
   const isOnlineNow = online.isOnline(a);
   const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
-  res.json(Object.assign({}, a, { group: a.grp || '', online: isOnlineNow, latest: latestOut, hostname: shortHost(a.hostname), ...computeBilling(a) }));
+  res.json(Object.assign({}, a, {
+    group: a.grp || '',
+    online: isOnlineNow,
+    latest: latestOut,
+    hostname: shortHost(a.hostname),
+    // 硬件档案（解析为对象便于前端编辑；原始字符串仍在 a.hw_profile 中）
+    hardware: hardware.parseProfile(a.hw_profile),
+    ...computeBilling(a)
+  }));
 });
 
 // ---- Admin: metrics time-series ----
@@ -593,6 +610,8 @@ router.get('/public/agents', (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const showBiz = ui.public_show_business !== false;
+  // 硬件档案全局开关：关闭后所有公开出口统一输出空值（字段级 hidden 仍生效）
+  const showHw = ui.public_show_hardware !== false;
   // 在线判定统一走 src/online.js（此前只看 OFFLINE_THRESHOLD_SEC，
   // 公开首页的在线绿点会与告警/面板判定不一致）；批量场景预取上下文避免逐节点查库。
   const octx = online.buildCtx();
@@ -636,6 +655,9 @@ router.get('/public/agents', (req, res) => {
       os: (m && m.os) ? m.os : (a.os || ''),
       // CPU 核心数（agents.cores，S1/T18 采集；0 = 未上报，前端据此显示「—」）
       cores: Number(a.cores) || 0,
+      // 硬件档案（管理员手工录入，受控端不自动采集）：cpu_name/arch/virtualization/gpu_name。
+      // 未填写或隐藏时为空串；GPU 空串 = 无（原生页不渲染该条目）。
+      ...hardware.publicFields(a, showHw),
       probes: m ? (m.probes || '') : '',
       hostname: online ? shortHost(a.hostname) : '',
       disks: m ? parseDisks(m.disks) : []
@@ -1007,6 +1029,13 @@ router.post('/agents', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const probeTargets = str(req.body.probe_targets, 600) || ui.probe_targets || '';
   const price = Number(req.body.price);
   const cycleNum = Number(req.body.billing_cycle);
+  // 硬件档案（可选）：管理员手工录入；非法枚举/超长文本 → 400，不静默丢弃。
+  let hwProfile = '';
+  if (req.body && req.body.hardware !== undefined) {
+    const v = hardware.normalizeProfile(req.body.hardware);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    hwProfile = Object.keys(v.value).length ? JSON.stringify(v.value) : '';
+  }
   const { id, token } = db.createAgent({
     name: str(req.body.name, 100) || undefined,
     merchant: str(req.body.merchant, 100),
@@ -1019,7 +1048,8 @@ router.post('/agents', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
     auto_renewal: typeof req.body.auto_renewal === 'boolean' ? req.body.auto_renewal : undefined,
     grp: str(req.body.group, 60),
     country: str(req.body.country, 2),
-    probe_targets: probeTargets
+    probe_targets: probeTargets,
+    hw_profile: hwProfile
   });
   // 创建时一次性把「地址 + 该客户端令牌 + 探测目标」预填进一键命令返回（令牌仅此刻明文可用）。
   const install = buildInstallCommands(base, id, token, AGENT_INTERVAL_DEFAULT, probeTargets, 0);
@@ -1060,6 +1090,12 @@ router.put('/agents/:id', adminOnly, agentScope, (req, res) => {
   if (Number.isFinite(cycleUp) && isValidCycle(cycleUp)) updates.billing_cycle = cycleUp;
   if (isValidCurrency(req.body.currency)) updates.currency = req.body.currency;
   if (typeof req.body.auto_renewal === 'boolean') updates.auto_renewal = req.body.auto_renewal;
+  // 硬件档案：仅当请求体显式携带 hardware 时才写；缺失 = 保留库中原值（与其他可选字段同口径）。
+  if (Object.prototype.hasOwnProperty.call(req.body, 'hardware')) {
+    const v = hardware.normalizeProfile(req.body.hardware);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+    updates.hw_profile = Object.keys(v.value).length ? JSON.stringify(v.value) : '';
+  }
   db.updateAgent(req.params.id, updates);
   res.json({ ok: true });
   // a 为更新前快照（:818 已取）。注意 updates 是【部分字段】，

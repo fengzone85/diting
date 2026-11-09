@@ -1,3 +1,30 @@
+// ---- 硬件档案（管理员手工录入；受控端不自动采集）----
+// 四态：字段不存在 = 未填写；src=enum = 预设；src=custom = 手填；hidden=true = 隐藏。
+export type HardwareFieldKey = 'cpu' | 'arch' | 'virt' | 'gpu';
+
+export interface HardwareField {
+  src: 'enum' | 'custom';
+  hidden: boolean;
+  // cpu 预设：厂商 + 代际（代际可为空 = 只到厂商）
+  vendor?: string;
+  tag?: string;
+  // arch / virt / gpu 预设：受控枚举值
+  value?: string;
+  // 手填文本（≤32 字符）
+  text?: string;
+}
+
+export type HardwareProfile = Partial<Record<HardwareFieldKey, HardwareField>>;
+
+export interface HardwareOptions {
+  cpu_vendors: string[];
+  cpu_tags_by_vendor: Record<string, string[]>;
+  archs: string[];
+  virtualizations: string[];
+  gpu_types: string[];
+  max_text_length: number;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -42,6 +69,11 @@ export interface Agent {
   agent_platform?: string; // 运行平台 linux-amd64 / windows-amd64 …
   build_tag?: string;    // 管理员标注（'' | 'custom' | 自由标签）
   cpu_name?: string;
+  // 硬件档案（管理员手工录入；详情/列表接口返回解析后的对象）
+  hardware?: HardwareProfile;
+  arch?: string;
+  virtualization?: string;
+  gpu_name?: string;
   kernel_version?: string;
   last_seen?: number;
   status?: 'online' | 'offline' | 'warn';
@@ -346,6 +378,8 @@ export interface PublicMeta {
   public_enabled?: boolean;
   // 公开接口是否透出业务字段（商家/到期/备注/配额/套餐）
   public_show_business?: boolean;
+  // 公开接口是否透出硬件档案（管理员手工录入；关闭 = 一键隐藏全部）
+  public_show_hardware?: boolean;
   home_layout?: 'grid' | 'list' | 'compact';
   agent_order?: string[];
   social_email?: string;
