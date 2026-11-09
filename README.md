@@ -171,7 +171,9 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 - 第三方 Komari 主题通过兼容层接入，**运行时重写 HTML 引用**，磁盘上的主题文件不做任何修改
 - 签名中继只转发「ed25519 验签通过 + 架构匹配」的产物，按具体 tag 缓存，`:os/:arch` 走白名单查表
 
-> ⚠️ **反代必须透传 WebSocket 升级头**：`/api/clients`、`/api/rpc2` 是实时数据通道。手工写 `location /` 若漏了 `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade`，浏览器 WSS 握手会失败，公开主题页显示「离线」、实时数值变 `N/A`，而直连 `127.0.0.1:8081` 完全正常。请直接复制 `nginx/monitor.conf.example`（含 `map $http_upgrade` 与实时端点 `location`）；手工新建 443 server 块时也要把该 `location` 一起复制（`certbot --nginx` 生成的 443 块会自动继承 80 块 location）。
+> **默认部署路径（A）**：服务端只绑 `127.0.0.1:8081`，不占用 443；HTTPS 由宝塔 / 1Panel / 已有 Nginx 绑定域名反代提供，证书由面板管理。⚠️ 反代必须透传 WebSocket 升级头：`/api/clients`、`/api/rpc2` 是实时通道，漏了 `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade` 会让主题页显示「离线」、实时数值变 `N/A`，而直连 8081 完全正常。完整可粘贴配置与面板步骤见 [反向代理与 HTTPS](docs/src/content/docs/reverse-proxy.md)，通用模板见 `nginx/monitor.conf.example`。
+>
+> **可选路径（B）**：无面板、无域名的局域网机器可执行 `sudo bash diting.sh --bundled-proxy`，一键起自签 HTTPS（占用 443）。A 路径用户不要执行。
 
 ---
 

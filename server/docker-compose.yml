@@ -72,5 +72,21 @@ services:
       # 宿主上先建目录并写入 /etc/diting/host.env（见 diting.sh --backup-schedule install 的提示）。
       - ${HOST_BACKUP_DIR:-./backups}:/data/backups
 
+  # 可选 B 路径：无面板 / 无域名的局域网自签 HTTPS 反代。
+  # 默认不启用；由 `sudo bash diting.sh --bundled-proxy` 通过 profile 拉起。
+  nginx:
+    image: nginx:alpine
+    container_name: diting-bundled-proxy
+    profiles: ["bundled-proxy"]
+    restart: unless-stopped
+    # host network：proxy_pass 到宿主回环 127.0.0.1:8081，反代源地址仍是 loopback，
+    # TRUST_PROXY 保持默认即可，与 A 路径（宿主面板反代）行为一致。
+    network_mode: host
+    volumes:
+      - ./nginx/bundled.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - server
+
 volumes:
   server-data:

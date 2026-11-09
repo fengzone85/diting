@@ -213,49 +213,12 @@ sudo bash diting.sh --backup-list
 
 后台设置保存后 1 小时内自动生效，无需重启服务。
 
-## 反向代理
+## 反向代理与 HTTPS
 
-推荐使用 Nginx 或 Caddy 配置 HTTPS。**生产环境请直接复制仓库的 `nginx/monitor.conf.example`**（含限流、gzip、长超时等完整配置）；下面是最小的可用片段，重点是 **WebSocket 升级头不能省**。
+服务端默认只监听回环 `127.0.0.1:8081`，**不占用 443**。生产请通过 Nginx / 宝塔 / 1Panel 绑定域名并反代——这是默认路径，证书由面板管理。
 
-```nginx
-# map 必须位于 http {} 上下文；站点配置被 include 进 http 时，放在本文件顶层即可
-map $http_upgrade $connection_upgrade {
-    default upgrade;
-    ''      close;
-}
+完整可粘贴配置、宝塔/1Panel 操作步骤、自检命令与故障排查见文档站《反向代理与 HTTPS》页（仓库文件 `docs/src/content/docs/reverse-proxy.md`）；通用模板见 `nginx/monitor.conf.example`。
 
-server {
-    listen 443 ssl http2;
-    server_name monitor.example.com;
+> ⚠️ 反代必须透传 WebSocket 升级头（`/api/clients`、`/api/rpc2`）并关闭 SSE 缓冲，否则主题页显示「离线」、实时数值变 `N/A`，而直连 `127.0.0.1:8081` 完全正常。自检：`curl -sk -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' https://你的域名/api/clients` 应返回 `101` 而不是 `404`。
 
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    # 实时端点（WebSocket / SSE / JSON-RPC）：必须透传升级头并放宽长连接超时。
-    # 缺 Upgrade / Connection 两行 → 浏览器 WSS 握手失败 → 主题页显示「离线」、实时数值变 N/A，
-    # 而服务端直连 127.0.0.1:8081 完全正常，很容易误判成后端故障。
-    location ~ ^/api/(clients(/sse)?|rpc2)$ {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade    $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 3600s;
-        proxy_buffering off;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-> 若用 `certbot --nginx` 从 80 端口块生成 443 块，它会自动继承 `location`；**手工新建 443 server 块时，务必把上面的实时端点 `location` 一起复制过去**。可自检：`curl -sk -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' https://你的域名/api/clients` 应返回 `101` 而不是 `404`。
+无面板、无域名的局域网场景可选 `sudo bash diting.sh --bundled-proxy`（自带自签证书，占用 443），详见该文档的 B 路径。
