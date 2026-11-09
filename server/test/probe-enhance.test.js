@@ -229,3 +229,43 @@ test('F4 收口：公开 probes 端点的取数走 heavy worker（不走主线�
   assert.deepStrictEqual(viaWorker.map((r) => r.ts), viaMain.map((r) => r.ts),
     'worker 与主线程回落路径的取数结果必须一致');
 });
+
+test('时间范围：4h/12h 档位与自定义 start/end 生效', async () => {
+  const { id } = db.createAgent({ name: 'range-custom' });
+  const now = Date.now();
+  const t2 = now - 2 * 3600 * 1000;
+  const t1 = now - 1 * 3600 * 1000;
+  db.insertMetric(id, {
+    ts: t2, cpu: 10, mem_used: 10, mem_total: 100, probes: JSON.stringify({ 公共: { ms: 10, ok: true } })
+  });
+  db.insertMetric(id, {
+    ts: t1, cpu: 20, mem_used: 10, mem_total: 100, probes: JSON.stringify({ 公共: { ms: 20, ok: true } })
+  });
+
+  // Glassmorphism 新增的 4h / 12h 档位必须被后端接受
+  for (const range of ['4h', '12h']) {
+    const r = await request(app).get(`/api/public/agents/sparklines?id=${id}&range=${range}`);
+    assert.strictEqual(r.status, 200, range);
+  }
+
+  // 自定义窗口只含 t1（t2 在窗口外）
+  const start = new Date(t2 + 30 * 60 * 1000).toISOString();
+  const end = new Date(now - 10 * 60 * 1000).toISOString();
+  const sl = await request(app).get(`/api/public/agents/sparklines?id=${id}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+  assert.strictEqual(sl.status, 200);
+  const rows = sl.body[id] || [];
+  assert.ok(rows.length >= 1, '自定义窗口应有数据');
+  assert.ok(rows.every((p) => p.ts >= Date.parse(start) && p.ts <= Date.parse(end)), '所有点必须在窗口内');
+  assert.ok(rows.some((p) => p.cpu === 20), '应包含 t1 的点');
+  assert.ok(!rows.some((p) => p.cpu === 10), '不应包含窗口外的 t2 点');
+
+  const pr = await request(app).get(`/api/public/agents/${id}/probes?availability=1&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+  assert.strictEqual(pr.status, 200);
+  const pts = (pr.body.series && pr.body.series['公共']) || [];
+  assert.ok(pts.length >= 1);
+  assert.ok(pts.every((p) => p.ts >= Date.parse(start) && p.ts <= Date.parse(end)));
+
+  // 窗口上限 30 天
+  const tooWide = await request(app).get(`/api/public/agents/sparklines?id=${id}&start=${encodeURIComponent(new Date(now - 40 * 86400000).toISOString())}&end=${encodeURIComponent(new Date(now).toISOString())}`);
+  assert.strictEqual(tooWide.status, 400);
+});

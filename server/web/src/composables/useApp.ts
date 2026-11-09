@@ -74,6 +74,30 @@ export const state = reactive<AppState>({
   search: '',
 });
 
+// 节点收藏（纯本地，不回传服务端）：首页快捷统计与详情页星标共用。
+const FAVORITES_KEY = 'diting-favorite-nodes';
+function getStoredFavorites(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+const favoriteIds = reactive(new Set<string>(getStoredFavorites()));
+
+export function isFavoriteNode(id: string): boolean {
+  return !!id && favoriteIds.has(id);
+}
+
+export function toggleFavoriteNode(id: string): boolean {
+  if (!id) return false;
+  const on = !favoriteIds.has(id);
+  if (on) favoriteIds.add(id); else favoriteIds.delete(id);
+  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favoriteIds])); } catch { /* 隐私模式等忽略 */ }
+  return on;
+}
+
 let intervalId: ReturnType<typeof setInterval> | null = null;
 // visibilitychange 监听只绑一次（useApp 会被多个组件调用）
 let visibilityBound = false;
@@ -293,6 +317,8 @@ export function useApp() {
     providerAlias,
     customTag,
     cardSchemeKeys,
+    isFavoriteNode,
+    toggleFavoriteNode,
     stopAutoRefresh,
     setAutoRefreshPaused,
   };

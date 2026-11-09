@@ -452,10 +452,11 @@ router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
 });
 
 // ---- Admin: metrics time-series ----
-const RANGES = { '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+// 4h/12h：对齐 Glassmorphism 的负载图（4 小时）与延迟图（12 小时）档位。
+const RANGES = { '1h': 3600, '4h': 14400, '6h': 21600, '12h': 43200, '24h': 86400, '7d': 604800, '30d': 2592000 };
 // 各档默认点数（体检 L-6）：原先走 getMetrics(metricsRange=SELECT *) 全量拉取，
 // 30d 约 12.9 万行且含 probes/disks 大 JSON。改用 SQL 层均匀采样（保留首尾点）。
-const RANGE_POINTS = { '1h': 180, '6h': 360, '24h': 360, '7d': 360, '30d': 360 };
+const RANGE_POINTS = { '1h': 180, '4h': 240, '6h': 360, '12h': 360, '24h': 360, '7d': 360, '30d': 360 };
 router.get('/agents/:id/metrics', adminOrReadonly, agentScope, (req, res) => {
   if (!inAgentScope(req, req.params.id)) return res.status(403).json({ error: 'forbidden_node' });
   const sec = RANGES[req.query.range] || 3600;
@@ -691,9 +692,19 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const range = RANGES[req.query.range] ? req.query.range : '7d'; // 无效 range 兜底 7d
-  const sec = RANGES[range];
+  // 自定义时间窗（Glassmorphism「自定义」）：start/end 为 ISO 或可被 Date.parse 的字符串。
+  // 两者都有效且 end > start 才生效；最长 30 天（与服务端指标保留期一致）。
+  const startMs = Date.parse(req.query.start || '') || null;
+  const endMs = Date.parse(req.query.end || '') || null;
+  const custom = !!(startMs && endMs && endMs > startMs);
+  if (custom && endMs - startMs > 30 * 86400000) {
+    return res.status(400).json({ error: 'range_too_large' });
+  }
+  const sec = custom ? Math.round((endMs - startMs) / 1000) : RANGES[range];
+  const since = custom ? startMs : Date.now() - sec * 1000;
+  const until = custom ? endMs : Date.now();
   const onlyId = typeof req.query.id === 'string' && req.query.id ? req.query.id : null;
-  const cacheKey = `${range}|${onlyId || '*'}`;
+  const cacheKey = custom ? `c:${since}:${until}|${onlyId || '*'}` : `${range}|${onlyId || '*'}`;
   const cached = sparkCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < SPARK_CACHE_TTL) {
     return res.json(cached.data);
@@ -705,19 +716,20 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   //   此前单节点是「全量拉 10.8 万行 → Node 侧降采样」，每次 2.77s + 220MB 峰值，
   //   30s 缓存一过就慢/偶发超时（详情页图表"慢/有时无法显示"）。SQL 层直接只返回 maxPoints 行。
   const mp = clampInt(req.query.max_points, 60, 20000)
-    || (onlyId ? sparkMaxPoints(range) : SPARK_ALL_MAX_POINTS);
+    || (onlyId ? (custom ? 2000 : sparkMaxPoints(range)) : SPARK_ALL_MAX_POINTS);
   const t0 = Date.now();
   // 审查 C4：全量分支（首页卡片迷你图，100 台规模最重）移 worker 线程；
   // 单节点分支（详情页）行数有界，保留主线程同步路径。
   const rows = onlyId
-    ? db.getMetricsSparklinesOne(onlyId, Date.now() - sec * 1000, mp)
-    : await heavyQuery('sparklinesAllSampled', Date.now() - sec * 1000, mp);
+    ? db.getMetricsSparklinesOne(onlyId, since, mp)
+    : await heavyQuery('sparklinesAllSampled', since, mp);
   // 后端降采样（对齐 Komari max_points 契约）。
   // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
   // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
   // 有 id 的单节点请求（详情页磁盘耗尽预测）：SQL 层已按 range 上限采样（30d→2000 足够线性外推），
   // 此处 downsampleSparklines 仅作幂等兜底（SQL 采样已保留首尾点，若点数已≤mp 会原样返回）。
-  const byAgent = downsampleSparklines(rows, mp);
+  // since 已由 SQL WHERE 限定；这里只补 until 上界（自定义窗口结束在过去时）。
+  const byAgent = downsampleSparklines(rows.filter(r => r.ts >= since && r.ts <= until), mp);
   for (const id of Object.keys(byAgent)) {
     byAgent[id] = byAgent[id].map(r => ({
       ts: r.ts, cpu: r.cpu, mem_pct: r.mem_pct, disk_pct: r.disk_pct,
@@ -757,7 +769,7 @@ function clampInt(v, min = 1, max = 50000) {
 // 全量 30d 单节点 9.5 万点，100 台规模下公开 sparklines 无 id 全量查询会雪崩（DoS 级）。
 // 故按 range 给每 agent 设定点数上限，做时间桶聚合，避免传输/序列化灾难。
 const SPARK_MAX_POINTS = {
-  '1h': 300, '6h': 600, '24h': 1000, '7d': 1500, '30d': 2000
+  '1h': 300, '4h': 450, '6h': 600, '12h': 800, '24h': 1000, '7d': 1500, '30d': 2000
 };
 function sparkMaxPoints(range) {
   return SPARK_MAX_POINTS[range] || 2000;
@@ -810,7 +822,15 @@ router.get('/public/agents/:id/probes', async (req, res) => {
   if (ui.public_enabled === false) return publicDisabled(res);
   const a = db.getAgent(req.params.id);
   if (!a) return res.status(404).json({ error: 'agent not found' });
-  const sec = RANGES[req.query.range] || 21600;
+  // 自定义时间窗（对齐 Glass PingChart 的「自定义」），规则与 sparklines 一致。
+  const startMs = Date.parse(req.query.start || '') || null;
+  const endMs = Date.parse(req.query.end || '') || null;
+  const custom = !!(startMs && endMs && endMs > startMs);
+  if (custom && endMs - startMs > 30 * 86400000) {
+    return res.status(400).json({ error: 'range_too_large' });
+  }
+  const since = custom ? startMs : Date.now() - (RANGES[req.query.range] || 21600) * 1000;
+  const until = custom ? endMs : Date.now();
   // 提前算出本请求的每 label 点数上限（供 SQL 层采样 + 后续桶聚合共用）。
   const reqMaxPoints = clampInt(req.query.max_points) || PROBES_MAX_POINTS;
   // 仅取 ts+probes 两列：30d 近 9.5 万行，SELECT * 物化全行开销大（实测 5.4s vs 0.56s）
@@ -821,13 +841,14 @@ router.get('/public/agents/:id/probes', async (req, res) => {
   // 理由：公开端点未认证即可触发，30d 窗口的采样 + JSON.parse 在主线程会阻塞事件循环
   // （期间 /report 与告警全部挂起）。worker 不可用时 heavy-db 自动回落主线程同步执行，
   // 行为与改造前完全一致（可用性优先）。
-  const rows = await heavyQuery('probesOne', a.id, Date.now() - sec * 1000, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
+  const rows = await heavyQuery('probesOne', a.id, since, Math.min(20000, Math.max(reqMaxPoints, PROBES_MAX_POINTS) * 3));
   const wantAvail = req.query.availability === '1' || req.query.availability === 'true';
   const series = {}; // label -> [{ts, ms}]
   // 可用率累加器（F4）：只统计采样后的原始上报点，不受下面时间桶聚合影响；
   // SQL 采样是均匀抽样（metricsProbesOne 的 rn % step），对 up/down 比例无系统偏差。
   const stats = wantAvail ? {} : null;
   for (const r of rows) {
+    if (r.ts > until) continue;
     if (!r.probes) continue;
     let probes;
     try { probes = JSON.parse(r.probes); } catch (_) { continue; }

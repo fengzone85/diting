@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue';
+import { ref, watch, computed, nextTick, markRaw } from 'vue';
 import AppHeader from '../components/AppHeader.vue';
 import NodeCard from '../components/NodeCard.vue';
 import NodeCardSimple from '../components/NodeCardSimple.vue';
@@ -13,9 +13,10 @@ import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
 import {
   GridFour, ListTwo, LayoutOne, LayoutFour, ApplicationMenu, GridTwo, Search,
+  Star, Server, Wifi, SpeedOne, Time,
 } from '@icon-park/vue-next';
 
-const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents } = useApp();
+const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents, isFavoriteNode } = useApp();
 const { t } = useI18n();
 
 const searchInput = ref(state.search);
@@ -227,11 +228,31 @@ function fmtRateCompact(n: number): string {
 }
 
 
-// 快捷统计条（对齐 komari 快捷控制条）
+// 快捷统计卡片（对齐 Glassmorphism 首页统计卡）：图标 + 数值 + 标签，玻璃卡样式。
+const QUICK_ICONS = {
+  fav: markRaw(Star),
+  total: markRaw(Server),
+  offline: markRaw(Wifi),
+  highload: markRaw(SpeedOne),
+  expiring: markRaw(Time),
+};
+const QUICK_TONES: Record<string, string> = {
+  fav: 'bg-amber-500/15 text-amber-300',
+  total: 'bg-sky-500/15 text-sky-300',
+  offline: 'bg-rose-500/15 text-rose-300',
+  highload: 'bg-orange-500/15 text-orange-300',
+  expiring: 'bg-violet-500/15 text-violet-300',
+};
+function quickIcon(key: string) {
+  return (QUICK_ICONS as Record<string, unknown>)[key];
+}
+function quickTone(key: string) {
+  return QUICK_TONES[key] || 'bg-slate-500/15 text-slate-300';
+}
 const quickFilters = computed(() => {
   const ags = state.agents;
   return [
-    { key: 'fav', label: t('public.favorites'), count: 0 },
+    { key: 'fav', label: t('public.favorites'), count: ags.filter((a) => isFavoriteNode(a.id)).length },
     { key: 'total', label: t('public.totalAgents'), count: ags.length },
     { key: 'offline', label: t('public.offline'), count: ags.filter((a) => !a.online).length },
     { key: 'highload', label: t('public.highLoad'), count: ags.filter((a) => (a.cpu_percent ?? a.cpu ?? 0) >= 80).length },
@@ -263,7 +284,8 @@ const COLS_OPTS = [
   { key: 2 as const, icon: GridTwo, label: 'public.cols2' },
 ];
 const filteredAgents = computed(() => {
-  if (!activeQuick.value || activeQuick.value === 'total' || activeQuick.value === 'fav') return visibleAgents.value;
+  if (activeQuick.value === 'fav') return visibleAgents.value.filter((a) => isFavoriteNode(a.id));
+  if (!activeQuick.value || activeQuick.value === 'total') return visibleAgents.value;
   const ags = visibleAgents.value;
   if (activeQuick.value === 'offline') return ags.filter((a) => !a.online);
   if (activeQuick.value === 'highload') return ags.filter((a) => (a.cpu_percent ?? a.cpu ?? 0) >= 80);
@@ -299,16 +321,22 @@ const filteredAgents = computed(() => {
         />
       </div>
 
-      <!-- 快捷统计条 -->
-      <div class="mb-4 flex flex-wrap items-center gap-2">
+      <!-- 快捷统计卡：对齐 Glassmorphism 首页统计卡的玻璃卡样式 -->
+      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <button
           v-for="q in quickFilters"
           :key="q.key"
-          class="rounded-full border px-3 py-1 text-xs"
-          :class="activeQuick === q.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+          class="glass group flex min-w-0 items-center gap-3 rounded-xl p-3 text-left transition-all"
+          :class="activeQuick === q.key ? 'ring-1 ring-sky-400/70' : 'hover:ring-1 hover:ring-slate-500/40'"
           @click="activeQuick = activeQuick === q.key ? null : q.key"
         >
-          {{ q.label }} <span class="opacity-70">{{ q.count }}</span>
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="quickTone(q.key)">
+            <component :is="quickIcon(q.key)" :size="18" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-lg font-semibold leading-tight text-content">{{ q.count }}</span>
+            <span class="block truncate text-xs text-secondary">{{ q.label }}</span>
+          </span>
         </button>
       </div>
 

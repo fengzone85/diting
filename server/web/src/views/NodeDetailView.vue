@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, computed, ref, markRaw } from 'vue';
-import { useRoute, RouterLink } from 'vue-router';
+import { onMounted, onUnmounted, computed, ref, markRaw } from 'vue';
+import { useRoute, useRouter, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import ChartLatency from '../components/ChartLatency.vue';
 import ChartLatencyMulti from '../components/ChartLatencyMulti.vue';
@@ -31,6 +31,9 @@ import {
   ShoppingBag,
   Time,
   Wallet,
+  Star,
+  ArrowLeft,
+  ArrowRight,
 } from '@icon-park/vue-next';
 
 function formatDate(s: string | undefined): string {
@@ -39,7 +42,8 @@ function formatDate(s: string | undefined): string {
 }
 
 const route = useRoute();
-const { state, visibleAgents } = useApp();
+const router = useRouter();
+const { state, visibleAgents, isFavoriteNode, toggleFavoriteNode } = useApp();
 const agentId = computed(() => route.params.id as string);
 // 对齐 Komari：切 range 打后端，后端按 max_points 降采样返回（避免短 range 从 30d 全量截取导致点过稀）
 const probes = ref<Probes>({});
@@ -64,17 +68,27 @@ const sparkRows = ref<SparklinePoint[]>([]);
 // 否则短窗口噪声会让「剩余天数」剧烈抖动，故与图表数据分开维护。
 const sparkRows30d = ref<SparklinePoint[]>([]);
 
-// 网络质量波形图时间范围：后端 RANGES 支持 1h/6h/24h/7d/30d
-const RANGES = ['1h', '6h', '24h', '7d', '30d'];
-// 默认 1h：跨度 ≤24h 时 ChartLatencyMulti 的 X 轴走 showDate=false 分支，
-// 标签显示为纯小时（HH:mm）；30d 会显示 MM/DD HH:mm。1h 同样是小时标签且更聚焦于近期。
+// 网络质量（延迟）图范围：对齐 Glassmorphism PingChart 的 1h/6h/12h/1d/7d + 自定义
+const RANGES = ['1h', '6h', '12h', '24h', '7d'];
 const currentRange = ref('1h');
-// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）的时间范围，默认 1h。
-// 注意：磁盘耗尽预测不走这里，它固定用 sparkRows30d 的 30d 基线，故默认改 1h 不影响 ETA。
-const CHART_RANGES = ['1h', '6h', '24h', '7d', '30d'];
-const chartRange = ref('1h');
+// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）范围：对齐 Glassmorphism LoadChart
+// 的 实时/4h/1d/7d/30d + 自定义。磁盘耗尽预测不走这里，固定用 sparkRows30d。
+const CHART_RANGES = ['realtime', '4h', '24h', '7d', '30d'];
+const chartRange = ref('realtime');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
-const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '6h': 1000, '24h': 1500, '7d': 2000, '30d': 3000 };
+const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '4h': 800, '6h': 1000, '12h': 1200, '24h': 1500, '7d': 2000, '30d': 3000 };
+
+// 实时模式：先用 1h 历史垫底，再每 10s 把 agent 快照追加到滚动窗口（保留 60 点）。
+const rtRows = ref<SparklinePoint[]>([]);
+let rtTimer: ReturnType<typeof setInterval> | null = null;
+
+// 自定义时间窗（浮层）
+const customOpen = ref(false);
+const customTarget = ref<'chart' | 'probes'>('chart');
+const customStart = ref('');
+const customEnd = ref('');
+const customChart = ref<{ start: string; end: string } | null>(null);
+const customProbes = ref<{ start: string; end: string } | null>(null);
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
 
@@ -160,10 +174,7 @@ const hwDynamic = computed(() => {
   const a = agent.value;
   if (!a) return [];
   const items: { label: string; value: string; icon: any }[] = [];
-  // CPU 核心数（agents.cores，S1/T18 起真实采集；0 = 未上报 → 不渲染该条目）
-  if (Number((a as any).cores) > 0) {
-    items.push({ label: t('node.cpuCores'), value: String((a as any).cores), icon: Cpu });
-  }
+  // 核心数不再单独占一项：并入 CPU 型号行（`型号 (N vCPU)`），与 Glassmorphism 对齐。
   // 架构（管理员手填优先；未填时服务端按受控端构建平台派生）
   items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
   // 虚拟化（管理员手填）
@@ -212,17 +223,22 @@ const diskAgg = computed(() => {
   return { used, total, pct };
 });
 
-const neighborIds = computed(() => {
-  const list = visibleAgents.value.length ? visibleAgents.value : state.agents;
-  const idx = list.findIndex(a => a.id === agentId.value);
-  if (idx < 0) return { prev: null, next: null };
-  return {
-    prev: idx > 0 ? list[idx - 1] : null,
-    next: idx < list.length - 1 ? list[idx + 1] : null,
-  };
-});
+// 节点切换：按首页同一顺序（visibleAgents）取上一个/下一个，下拉列全部节点。
+// 对齐 Glassmorphism 顶栏下方的「← / 节点下拉 / →」控件。
+const nodeList = computed(() => (visibleAgents.value.length ? visibleAgents.value : state.agents));
+const currentIndex = computed(() => nodeList.value.findIndex((a) => a.id === agentId.value));
+const prevNode = computed(() => (currentIndex.value > 0 ? nodeList.value[currentIndex.value - 1] : null));
+const nextNode = computed(() => (
+  currentIndex.value >= 0 && currentIndex.value < nodeList.value.length - 1
+    ? nodeList.value[currentIndex.value + 1]
+    : null
+));
+const favorite = computed(() => isFavoriteNode(agentId.value));
+function goNode(id: string) {
+  if (id && id !== agentId.value) router.push(`/node/${id}`);
+}
 
-const sparkline = computed(() => sparkRows.value);
+const sparkline = computed(() => (chartRange.value === 'realtime' ? rtRows.value : sparkRows.value));
 const cpuSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.cpu ?? d.cpu_percent ?? 0 })));
 const memSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.mem_pct ?? 0 })));
 const loadSeries = computed<ChartPoint[]>(() => sparkline.value.map(d => ({ t: d.ts, v: d.load1 ?? 0 })));
@@ -366,7 +382,48 @@ const probeSeriesList = computed(() =>
   }))
 );
 
+function stopRealtime() {
+  if (rtTimer) { clearInterval(rtTimer); rtTimer = null; }
+}
+
+function appendRealtime() {
+  if (chartRange.value !== 'realtime') return;
+  const a = agent.value;
+  if (!a) return;
+  const prev = rtRows.value[rtRows.value.length - 1];
+  const ts = Date.now();
+  // 快照轮询本身是 10s；避免同一时刻重复追加
+  if (prev && ts - prev.ts < 5000) return;
+  const next: SparklinePoint = {
+    ts,
+    cpu: a.cpu ?? a.cpu_percent,
+    mem_pct: a.mem_pct,
+    disk_pct: a.disk_pct,
+    net_rx_rate: a.net_rx_rate,
+    net_tx_rate: a.net_tx_rate,
+    load1: a.load1,
+    temp: a.temp,
+    swap_pct: a.swap_pct,
+    uptime: a.uptime,
+    process_count: a.process_count,
+    // agent 快照没有磁盘速率，沿用上一个历史点，避免实时模式磁盘 IO 图掉 0
+    disk_r_rate: prev?.disk_r_rate,
+    disk_w_rate: prev?.disk_w_rate,
+  };
+  rtRows.value = [...rtRows.value.slice(-59), next];
+}
+
+async function startRealtime() {
+  stopRealtime();
+  const sl = await publicApi.sparklines(agentId.value, '1h');
+  rtRows.value = (sl?.[agentId.value] || []).slice(-40);
+  appendRealtime();
+  rtTimer = setInterval(appendRealtime, 10000);
+}
+
 async function loadSpark(range: string) {
+  if (range === 'realtime') { await startRealtime(); return; }
+  stopRealtime();
   const sl = await publicApi.sparklines(agentId.value, range);
   sparkRows.value = sl?.[agentId.value] || [];
 }
@@ -393,8 +450,9 @@ async function load() {
   }
 }
 
-// 六图时间范围切换（1h/6h/24h/7d/30d）：只重拉图表数据，不影响磁盘预测的 30d 基线。
+// 六图范围切换：实时/4h/1d/7d/30d + 自定义；只重拉图表数据，不影响磁盘预测的 30d 基线。
 async function switchChartRange(range: string) {
+  if (range === 'custom') { openCustom('chart'); return; }
   if (range === chartRange.value) return;
   chartRange.value = range;
   loading.value = true;
@@ -408,7 +466,7 @@ async function switchChartRange(range: string) {
 }
 
 // 对齐 Komari 的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
-// 每段 range 各自保证点数合适（1h→600, 6h→1000, 24h→1500, 7d→2000, 30d→3000）。
+// 每段 range 各自保证点数合适（1h→600, 6h→1000, 12h→1200, 24h→1500, 7d→2000）。
 async function loadProbes(range: string) {
   const mp = RANGE_MAX_POINTS[range] ?? 3000;
   const data = await publicApi.probesDetailed(agentId.value, range, mp);
@@ -418,6 +476,7 @@ async function loadProbes(range: string) {
 
 // 切范围：对齐 Komari，置 loading → 打后端 → 取消 loading（loading 反馈掩盖网络延迟，体验丝滑）
 function switchRange(range: string) {
+  if (range === 'custom') { openCustom('probes'); return; }
   if (range === currentRange.value) return;
   currentRange.value = range;
   loading.value = true;
@@ -426,6 +485,52 @@ function switchRange(range: string) {
   }).finally(() => {
     loading.value = false;
   });
+}
+
+// ---- 自定义时间范围（对齐 Glass 的「自定义」浮层）----
+function toLocalInput(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function openCustom(target: 'chart' | 'probes') {
+  customTarget.value = target;
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 3600 * 1000);
+  customStart.value = toLocalInput(start);
+  customEnd.value = toLocalInput(end);
+  customOpen.value = true;
+}
+async function applyCustom() {
+  const start = new Date(customStart.value);
+  const end = new Date(customEnd.value);
+  if (!(end.getTime() > start.getTime())) {
+    error.value = t('node.custom.invalid');
+    return;
+  }
+  const range = { start: start.toISOString(), end: end.toISOString() };
+  loading.value = true;
+  error.value = null;
+  try {
+    if (customTarget.value === 'chart') {
+      stopRealtime();
+      customChart.value = range;
+      chartRange.value = 'custom';
+      const sl = await publicApi.sparklines(agentId.value, undefined, range);
+      sparkRows.value = sl?.[agentId.value] || [];
+    } else {
+      customProbes.value = range;
+      currentRange.value = 'custom';
+      const mp = RANGE_MAX_POINTS['24h'];
+      const data = await publicApi.probesDetailed(agentId.value, undefined, mp, range);
+      probes.value = data?.series || {};
+      availability.value = data?.availability || {};
+    }
+    customOpen.value = false;
+  } catch (e) {
+    error.value = (e as Error).message || t('common.error');
+  } finally {
+    loading.value = false;
+  }
 }
 
 // 磁盘耗尽预测：基于最近 sparkline 的 disk_used 真实字节增量线性外推
@@ -467,24 +572,51 @@ const diskPredict = computed(() => {
 });
 
 onMounted(load);
+onUnmounted(stopRealtime);
 </script>
 
 <template>
   <div class="min-h-screen">
     <AppHeader :meta="state.meta" />
     <main class="mx-auto max-w-7xl px-6 pt-4">
-      <div class="mb-4 flex items-center gap-3">
-        <RouterLink to="/" class="text-sm text-sky-400 hover:text-sky-300">← {{ t('node.backHome') }}</RouterLink>
+      <div class="mb-4 flex flex-wrap items-center gap-2">
         <RouterLink
-          v-if="neighborIds.prev"
-          :to="`/node/${neighborIds.prev.id}`"
-          class="text-sm text-muted hover:text-sky-300"
-        >← {{ neighborIds.prev.name }}</RouterLink>
-        <RouterLink
-          v-if="neighborIds.next"
-          :to="`/node/${neighborIds.next.id}`"
-          class="ml-auto text-sm text-muted hover:text-sky-300"
-        >{{ neighborIds.next.name }} →</RouterLink>
+          to="/"
+          class="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-sky-400 transition-colors hover:text-sky-300"
+        >← {{ t('node.backHome') }}</RouterLink>
+        <button
+          class="glass flex h-8 w-8 items-center justify-center rounded-lg"
+          :title="favorite ? t('node.unfavorite') : t('node.favorite')"
+          @click="toggleFavoriteNode(agentId)"
+        >
+          <Star :size="16" :fill="favorite ? 'currentColor' : 'none'" :class="favorite ? 'text-amber-300' : 'text-slate-400'" />
+        </button>
+        <div class="glass ml-auto flex items-center gap-1 rounded-lg p-1">
+          <button
+            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
+            :disabled="!prevNode"
+            :title="t('node.prevNode')"
+            @click="prevNode && goNode(prevNode.id)"
+          >
+            <ArrowLeft :size="15" />
+          </button>
+          <select
+            :value="agentId"
+            class="max-w-40 cursor-pointer rounded-md border-none bg-transparent px-1 py-0.5 text-sm text-content outline-none"
+            :title="t('node.switchNode')"
+            @change="goNode(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="n in nodeList" :key="n.id" :value="n.id">{{ n.name }}</option>
+          </select>
+          <button
+            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
+            :disabled="!nextNode"
+            :title="t('node.nextNode')"
+            @click="nextNode && goNode(nextNode.id)"
+          >
+            <ArrowRight :size="15" />
+          </button>
+        </div>
       </div>
       <ErrorMessage v-if="error" class="mb-6" :message="error" />
       <Loading v-if="loading && !agent" />
@@ -560,7 +692,9 @@ onMounted(load);
                   <Cpu :size="14" />
                   <span>{{ t('node.cpuModel') }}</span>
                 </div>
-                <span class="text-xs sm:text-sm text-content">{{ agent.cpu_name || t('node.unknown') }}</span>
+                <span class="text-xs sm:text-sm text-content">
+                  {{ agent.cpu_name || t('node.unknown') }}<template v-if="(agent.cores || 0) > 0"> ({{ agent.cores }} vCPU)</template>
+                </span>
               </div>
               <!-- 动态条目：架构/虚拟化/GPU/物理核心（按需渲染，无则显 -） -->
               <div class="grid grid-cols-2 gap-1">
@@ -676,7 +810,12 @@ onMounted(load);
                   chartRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-secondary hover:bg-hover',
                   loading ? 'opacity-60 pointer-events-none' : '',
                 ]"
-              >{{ r }}</button>
+              >{{ t('node.range.' + r) }}</button>
+              <button
+                class="rounded-lg px-2 py-1 text-xs transition-colors"
+                :class="[chartRange === 'custom' ? 'bg-sky-500 text-white' : 'bg-surface text-secondary hover:bg-hover', loading ? 'opacity-60 pointer-events-none' : '']"
+                @click="openCustom('chart')"
+              >{{ t('node.range.custom') }}</button>
             </div>
           </div>
 
@@ -823,6 +962,11 @@ onMounted(load);
               class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
               :class="currentRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
             >{{ t('node.range.' + r) }}</span>
+            <span
+              @click="openCustom('probes')"
+              class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
+              :class="currentRange === 'custom' ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
+            >{{ t('node.range.custom') }}</span>
           </div>
           <div class="mb-3 flex flex-wrap gap-4 text-xs">
             <span
@@ -860,6 +1004,41 @@ onMounted(load);
         guard-auth
         @close="showAiDialog = false"
       />
+
+      <!-- 自定义时间范围（对齐 Glass 的自定义浮层） -->
+      <div
+        v-if="customOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        @click.self="customOpen = false"
+      >
+        <div class="glass w-full max-w-md rounded-xl p-5">
+          <h3 class="mb-4 text-lg font-semibold">{{ t('node.custom.title') }}</h3>
+          <label class="mb-3 block text-xs text-secondary">
+            {{ t('node.custom.start') }}
+            <input
+              v-model="customStart"
+              type="datetime-local"
+              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+            />
+          </label>
+          <label class="mb-4 block text-xs text-secondary">
+            {{ t('node.custom.end') }}
+            <input
+              v-model="customEnd"
+              type="datetime-local"
+              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+            />
+          </label>
+          <div class="flex justify-end gap-2">
+            <button class="rounded-lg px-3 py-1.5 text-sm text-secondary hover:text-white" @click="customOpen = false">
+              {{ t('common.cancel') }}
+            </button>
+            <button class="rounded-lg bg-sky-500 px-3 py-1.5 text-sm text-white hover:bg-sky-400" @click="applyCustom">
+              {{ t('node.custom.apply') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
