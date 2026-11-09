@@ -12,6 +12,10 @@ const { heavyQuery } = require('./heavy-db');
 // task id 必须与 RPC（getPublicPingTasks / getPingMetricStats / queryMetrics）同源：
 // 主题可能混用 REST 与 RPC 两侧数据，id 口径不同就永远关联不上。
 const { probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
+// publicSettings() 需要主题 manifest 的配置字段与默认值合并；两者都是叶子模块，
+// 不回指 compat/compat-rpc，故不新增循环依赖（compat.js:460 的延迟 require 保持不变）。
+const validators = require('./validate');
+const themeStore = require('./theme');
 
 // 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
 // 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
@@ -246,37 +250,64 @@ router.use((req, res, next) => {
   next();
 });
 
-// GET /api/public —— 站点公开属性（主题用）
-router.get('/public', guard, (req, res) => {
+// 官方 GET /api/public 的 data 与 RPC public:getPublicSettings 共用同一真源，
+// 避免 REST/RPC 两处各自写死字段导致漂移（方案 C5）。theme_settings 取当前启用
+// 主题「manifest 默认值 + 管理员保存值」的合并结果（方案 C6）。
+function publicSettings() {
   const ui = db.getUiSettings();
-  res.json({
-    status: 'success', message: '',
-    data: {
-      cors_origin_check_enabled: false,
-      custom_body: '', custom_head: '',
-      description: '',
-      disable_password_login: true,
-      oauth_enable: false, oauth_provider: '',
-      ping_record_preserve_time: 48,
-      private_site: false,
-      record_enabled: false, record_preserve_time: 720,
-      sitename: ui.site_title || 'diting',
-      theme: ui.public_theme || 'Mochi',
-      theme_settings: {},
-      // 注意：前端 LoadChart/PingChart 的 Y()/Pe()/Qe() 期望 cards 为【短名字符串数组】
-      // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
-      // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
-      chartDashboardTemplate: {
-        // gpu / gpuMemory / connections 已移除：diting 不采集（红线），这三张卡永远没有
-        // series（compat-metrics.js 刻意只断映射不删定义），保留只会让主题渲染空图，
-        // 用户还得改主题才能去掉。process / temperature 有真实数据源，保留。
-        cards: [
-          'cpu', 'load', 'memory', 'disk', 'network',
-          'temperature', 'process', 'traffic', 'ping', 'pingLoss'
-        ]
+  // 官方默认主题名为 "default"（database/utils.go:42-44）；此前回退 'Mochi' 是历史值。
+  // 未配置/默认皮肤时统一回官方值，已配置具体主题时不受影响（Phase 3 C1 决策）。
+  const theme = ui.public_theme || 'default';
+  let themeSettings = {};
+  if (theme && theme !== 'default') {
+    const t = themeStore.getTheme(theme);
+    if (t && t.configuration) {
+      const checked = validators.validateManifest({ short: theme, name: t.name, configuration: t.configuration });
+      if (checked.ok && checked.value.configuration) {
+        const fields = checked.value.configuration.fields;
+        const merged = validators.mergeThemeConfig(fields, db.getThemeConfig(theme));
+        // 官方选择器（nodes/pingtasks）底层存 JSON 字符串，公开 API 输出时还原为数组。
+        for (const f of fields) {
+          if ((f.type === 'nodes' || f.type === 'pingtasks') && typeof merged[f.key] === 'string') {
+            try { merged[f.key] = JSON.parse(merged[f.key]); } catch (_) { /* 值非法时保持字符串 */ }
+          }
+        }
+        themeSettings = merged;
       }
     }
-  });
+  }
+  return {
+    cors_origin_check_enabled: false,
+    // 官方 GET /api/public 暴露站点自定义头/尾与描述（database/utils.go:88-103）。
+    // 与主题页字面量替换共用同一份 ui_settings（C5 单一真源）。
+    custom_body: ui.custom_body || '', custom_head: ui.custom_head || '',
+    description: ui.site_description || '',
+    disable_password_login: true,
+    oauth_enable: false, oauth_provider: '',
+    ping_record_preserve_time: 48,
+    private_site: false,
+    record_enabled: false, record_preserve_time: 720,
+    sitename: ui.site_title || 'diting',
+    theme,
+    theme_settings: themeSettings,
+    // 注意：前端 LoadChart/PingChart 的 Y()/Pe()/Qe() 期望 cards 为【短名字符串数组】
+    // （如 "cpu"/"load"/"memory"/"disk"/"network"/"ping"），而非 {name} 对象数组。
+    // 对象数组会导致 includes/indexOf 永远 false，从而所有卡片不渲染。
+    chartDashboardTemplate: {
+      // gpu / gpuMemory / connections 已移除：diting 不采集（红线），这三张卡永远没有
+      // series（compat-metrics.js 刻意只断映射不删定义），保留只会让主题渲染空图，
+      // 用户还得改主题才能去掉。process / temperature 有真实数据源，保留。
+      cards: [
+        'cpu', 'load', 'memory', 'disk', 'network',
+        'temperature', 'process', 'traffic', 'ping', 'pingLoss'
+      ]
+    }
+  };
+}
+
+// GET /api/public —— 站点公开属性（主题用）
+router.get('/public', guard, (req, res) => {
+  res.json({ status: 'success', message: '', data: publicSettings() });
 });
 
 // GET /api/version 已移至 server.js（注册于本 router 之前）。此前这里有一条
@@ -309,7 +340,24 @@ router.get('/recent/:uuid', guard, (req, res) => {
 });
 
 // GET /api/records/load —— 负载历史（官方主题详情页历史曲线依赖）。
-// 参数：uuid / client（节点）、hours（默认24）、max_count（默认1000）。
+// 参数：uuid / client（节点）、hours（默认4，官方 API 文档 13.7）、max_count、load_type。
+// 官方 load_type 白名单（public.go:156-160）；指定非 all 时只投影对应字段并在 data 回显 load_type。
+const LOAD_TYPE_FIELDS = {
+  cpu: ['cpu'],
+  ram: ['ram', 'ram_total'],
+  swap: ['swap', 'swap_total'],
+  load: ['load'],
+  temp: ['temp'],
+  disk: ['disk', 'disk_total'],
+  network: ['net_in', 'net_out', 'net_total_up', 'net_total_down'],
+  process: ['process'],
+  connections: ['connections']
+};
+function projectLoadRecord(rec, fields) {
+  const out = { client: rec.client, time: rec.time };
+  for (const f of fields) if (f in rec) out[f] = rec[f];
+  return out;
+}
 function toLoadRecord(m) {
   return {
     client: m.agent_id,
@@ -326,16 +374,22 @@ function toLoadRecord(m) {
     net_out: Number(m.net_tx_rate) || 0,
     net_total_up: Number(m.net_tx_month) || 0,
     net_total_down: Number(m.net_rx_month) || 0,
+    temp: Number(m.temp) || 0,
+    process: Number(m.process_count) || 0,
     connections: 0
   };
 }
 router.get('/records/load', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
-  const hours = Math.min(Number(req.query.hours) || 24, 720);
+  // 官方 REST /api/records/load 默认 hours=4（API 文档 13.7）；此前 diting 为 24。
+  const hours = Math.min(Number(req.query.hours) || 4, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
+  const rawLoadType = typeof req.query.load_type === 'string' ? req.query.load_type : '';
+  const loadType = Object.prototype.hasOwnProperty.call(LOAD_TYPE_FIELDS, rawLoadType) ? rawLoadType : '';
   // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
   // 审查 C4：缓存未命中时的重聚合移 worker 线程（否则数秒阻塞事件循环）
-  const payload = await cachedRecordsAsync(`load|${uuid || '*'}|${hours}|${maxCount}`, async () => {
+  // 缓存键纳入 load_type，避免不同投影结果串味。
+  const payload = await cachedRecordsAsync(`load|${uuid || '*'}|${hours}|${maxCount}|${loadType}`, async () => {
     const since = Date.now() - hours * 3600 * 1000;
     // M-02：SQL 层采样 + 只取负载列（不含 probes/disks 大 JSON 字段）。
     // 指定节点走单节点采样；不指定时按节点数分摊每节点点数（响应最终只保留 maxCount 条，
@@ -344,9 +398,17 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
       ? await heavyQuery('loadOne', uuid, since, maxCount)
       : await heavyQuery('loadAll', since, perAgentPoints(maxCount, since));
     const rows = sampled.sort((a, b) => a.ts - b.ts).slice(-maxCount);
-    const records = rows.map(toLoadRecord);
-    // 同 /records/ping：Komari REST 标准外壳要求结果包在 data 里
-    return { status: 'success', message: '', data: { count: records.length, records } };
+    let records = rows.map(toLoadRecord);
+    const data = { count: records.length, records };
+    // 官方：指定非 all 的 load_type 时投影字段并在 data 回显 load_type（public.go:169-177）。
+    if (loadType) {
+      records = records.map(r => projectLoadRecord(r, LOAD_TYPE_FIELDS[loadType]));
+      data.records = records;
+      data.count = records.length;
+      data.load_type = loadType;
+    }
+    // Komari REST 标准外壳要求结果包在 data 里
+    return { status: 'success', message: '', data };
   });
   res.json(payload);
 }));
@@ -356,7 +418,8 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
 // 转译为官方结构：每个被探测目标为一个 task，value=该时刻延迟(ms)，loss=丢包率。
 router.get('/records/ping', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
-  const hours = Math.min(Number(req.query.hours) || 24, 720);
+  // 官方 REST /api/records/ping 默认 hours=4（API 文档 13.8 / public.go:334-341）。
+  const hours = Math.min(Number(req.query.hours) || 4, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
   // 与 /records/load 同理：游客可直连，720h 全量最坏要扫百万行，30s 缓存兜底
   // 审查 C4：重聚合移 worker 线程
@@ -396,10 +459,36 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
         if (it.value == null || !Number.isFinite(it.value)) continue;
         let t = tasks.get(it.name);
         if (!t) { t = { id: probeTaskId(it.name), name: it.name, interval: PROBE_TASK_INTERVAL, loss: it.loss || 0, type: it.type || 'tcp', code: it.code ?? null, cert_days: it.cert_days ?? null }; tasks.set(it.name, t); }
-        records.push({ task_id: t.id, time: new Date(m.ts).toISOString(), value: it.value });
+        // 官方 recordsResp 含 client（public.go:300-305）；单节点采样行可能不带 agent_id。
+        records.push({
+          task_id: t.id,
+          time: new Date(m.ts).toISOString(),
+          value: it.value,
+          client: m.agent_id || uuid || ''
+        });
       }
     }
     records.sort((a, b) => new Date(a.time) - new Date(b.time));
+    const out = records.slice(-maxCount);
+    // 官方 public:getPingRecords 的 basic_info 按 client 聚合窗口内丢包率与延迟极值
+    // （public.go:306-311,382-393）。
+    const byClient = new Map();
+    for (const r of out) {
+      if (!byClient.has(r.client)) byClient.set(r.client, { client: r.client, total: 0, loss: 0, min: 0, max: 0 });
+      const s = byClient.get(r.client);
+      s.total++;
+      if (r.value < 0) s.loss++;
+      else {
+        if (s.min === 0 || r.value < s.min) s.min = r.value;
+        if (r.value > s.max) s.max = r.value;
+      }
+    }
+    const basic_info = Array.from(byClient.values()).map(s => ({
+      client: s.client,
+      loss: s.total ? s.loss / s.total * 100 : 0,
+      min: s.min,
+      max: s.max
+    }));
     // Komari REST 标准外壳：{ status, message, data:<result> }（Go 侧 jsonRpc.Bind →
     // renderStandard，见 komari/web/rpc/jsonrpc/bridge.go）。此前把 count/records 放在顶层，
     // React 系主题（PurCarte v1.2.5）读 `resp.data.records` 得到 undefined → 延迟图恒
@@ -408,9 +497,10 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       status: 'success',
       message: '',
       data: {
-        count: records.length,
-        records: records.slice(-maxCount),
-        tasks: [...tasks.values()]
+        count: out.length,
+        records: out,
+        tasks: [...tasks.values()],
+        basic_info
       }
     };
   });
@@ -453,7 +543,17 @@ router.get('/node/:uuid', guard, (req, res) => {
 // 主题端 AccountContext 直接把整个响应体当 account 使用：account = await resp.json()，
 // 故必须扁平返回，否则 account.logged_in 为 undefined。
 router.get('/me', (req, res) => {
-  res.json({ logged_in: false, username: '', sso_id: '', sso_type: '', uuid: '' });
+  // 官方 guest 账户用户名为 "Guest"（web/rpc/jsonrpc/public.go:91 / API 文档 3.2）。
+  res.json({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' });
+});
+
+// GET /api/task/ping —— 官方公开 Ping 任务清单（router.go:62 → public:getPublicPingTasks）。
+// 按 D2 已定目标形状一步到位：data 为官方 7 字段裸数组（无 target）。
+// 本项不改 RPC 方法现有返回；形状切换（含两处 .tasks 解包与 task_id 类型）留 Phase 2.1。
+router.get('/task/ping', guard, (req, res) => {
+  // 延迟 require：compat-rpc.js 顶层已 require 本模块，避免成环。
+  const { officialPingTasks } = require('./compat-rpc');
+  res.json({ status: 'success', message: '', data: officialPingTasks() });
 });
 
 // POST /api/rpc2 —— 社区主题 JSON-RPC 网关
@@ -463,4 +563,4 @@ router.post('/rpc2', (req, res) => {
   rpcMiddleware(req, res);
 });
 
-module.exports = { router, snapshot, publicOpen, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };
+module.exports = { router, snapshot, publicOpen, publicSettings, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };

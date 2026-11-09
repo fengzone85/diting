@@ -213,24 +213,12 @@ sudo bash diting.sh --backup-list
 
 后台设置保存后 1 小时内自动生效，无需重启服务。
 
-## 反向代理
+## 反向代理与 HTTPS
 
-推荐使用 Nginx 或 Caddy 配置 HTTPS：
+服务端默认只监听回环 `127.0.0.1:8081`，**不占用 443**。生产请通过 Nginx / 宝塔 / 1Panel 绑定域名并反代——这是默认路径，证书由面板管理。
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name monitor.example.com;
+完整可粘贴配置、宝塔/1Panel 操作步骤、自检命令与故障排查见文档站《反向代理与 HTTPS》页（仓库文件 `docs/src/content/docs/reverse-proxy.md`）；通用模板见 `nginx/monitor.conf.example`。
 
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
+> ⚠️ 反代必须透传 WebSocket 升级头（`/api/clients`、`/api/rpc2`）并关闭 SSE 缓冲，否则主题页显示「离线」、实时数值变 `N/A`，而直连 `127.0.0.1:8081` 完全正常。自检：`curl -sk -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' https://你的域名/api/clients` 应返回 `101` 而不是 `404`。
 
-    location / {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+无面板、无域名的局域网场景可选 `sudo bash diting.sh --bundled-proxy`（自带自签证书，占用 443），详见该文档的 B 路径。

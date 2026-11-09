@@ -307,6 +307,8 @@ export const enUS: Record<string, string> = {
   'settings.publicEnabled': 'Enable public page',
   'settings.publicShowBusiness': 'Expose business fields on public API (provider / expiry / note / quota / plan)',
   'settings.customCss': 'Custom CSS',
+  'settings.customHead': 'Custom <head> HTML (public theme page)',
+  'settings.customBody': 'Custom <body> HTML (public theme page)',
   'settings.alertThresholds': 'Alert Thresholds',
   'settings.notifyChannels': 'Notification channels',
   'settings.notifyChannelsHint': 'Built-in mail / Telegram use the settings above; Webhooks can be added here (applies immediately) for any third-party service.',

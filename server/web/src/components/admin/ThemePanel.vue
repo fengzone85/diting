@@ -537,14 +537,14 @@ function onSelect(key: string, e: Event) {
             <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
           </select>
           <textarea
-            v-else-if="f.type === 'textarea'"
+            v-else-if="f.type === 'textarea' || f.type === 'richtext'"
             :value="String(configEditor.values[f.key] ?? '')"
             rows="3"
             class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
             @input="onText(f.key, $event)"
           />
           <input
-            v-else-if="f.type === 'boolean'"
+            v-else-if="f.type === 'boolean' || f.type === 'switch'"
             type="checkbox"
             :checked="configEditor.values[f.key] === true || configEditor.values[f.key] === 'true'"
             @change="onCheck(f.key, $event)"

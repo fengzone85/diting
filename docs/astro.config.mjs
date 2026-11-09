@@ -30,6 +30,7 @@ export default defineConfig({
             { label: '简介', slug: 'intro' },
             { label: '快速开始', slug: 'quick-start' },
             { label: '安装指南', slug: 'install' },
+            { label: '反向代理与 HTTPS', slug: 'reverse-proxy' },
           ],
         },
         {

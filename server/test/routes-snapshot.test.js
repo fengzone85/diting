@@ -99,6 +99,7 @@ const EXPECTED = [
   'POST /admin/theme/market/sources',
   'POST /admin/theme/rollback',
   'POST /admin/theme/set',
+  'POST /admin/theme/settings',
   'POST /admin/theme/update',
   'POST /agents',
   'POST /agents/:id/approve',
@@ -155,9 +156,10 @@ test('路由快照：拆分前后 method + path 集合逐条一致', () => {
   assert.deepStrictEqual(actual, EXPECTED);
 });
 
-test('路由快照：admin 路由 61 条、无前缀路由 9 条', () => {
+test('路由快照：admin 路由 62 条、无前缀路由 9 条', () => {
   const all = walk(api.stack);
-  assert.strictEqual(all.filter((r) => r.includes(' /admin/')).length, 61);
+  // +1：官方路径 POST /admin/theme/settings（与 /admin/theme/config 共用 handler）。
+  assert.strictEqual(all.filter((r) => r.includes(' /admin/')).length, 62);
   const noPrefix = all.filter((r) => {
     const p = r.split(' ')[1];
     return p === '/report' || p === '/overview' || p === '/billing' || p === '/client-ip'

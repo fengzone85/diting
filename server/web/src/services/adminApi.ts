@@ -332,14 +332,17 @@ export interface AuditLogList {
 export interface ThemeConfigField {
   key: string;
   name: string;
-  type: 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'color';
+  // 与 src/validate.js THEME_CONFIG_TYPES 同步：官方托管配置项类型。
+  type: 'text' | 'textarea' | 'number' | 'select' | 'boolean' | 'color'
+    | 'switch' | 'string' | 'richtext' | 'nodes' | 'pingtasks';
   options: string[];
   default: unknown;
   required: boolean;
   help: string;
 }
 export interface ThemeConfiguration {
-  type: 'managed';
+  // 官方支持三种；raw/redirect 在 diting 只接受安装、不生成表单（D3）。
+  type: 'managed' | 'raw' | 'redirect';
   fields: ThemeConfigField[];
 }
 export interface ThemeInfo {

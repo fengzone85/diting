@@ -265,7 +265,13 @@ function validateNotifyGroupInput(body) {
 
 // ---- S5/F10 主题：源 / short / manifest / 配置值 ---------------------------
 const THEME_SHORT_RE = /^[A-Za-z0-9_-]+$/;
-const THEME_CONFIG_TYPES = ['text', 'textarea', 'number', 'select', 'boolean', 'color'];
+// 官方托管配置项类型（komari.wiki 主题开发指南）：title/textbox 是无 key 的展示项，
+// 只用于分组标题与说明文字，不进入配置表单；其余为可保存字段。
+const THEME_CONFIG_TYPES = [
+  'text', 'textarea', 'number', 'select', 'boolean', 'color',
+  'switch', 'string', 'richtext', 'nodes', 'pingtasks'
+];
+const THEME_DISPLAY_ONLY_TYPES = new Set(['title', 'textbox']);
 
 function validateThemeShort(short) {
   if (typeof short !== 'string' || !THEME_SHORT_RE.test(short) || short === 'default') {
@@ -317,15 +323,21 @@ function validateManifest(raw) {
   if (raw.configuration !== undefined && raw.configuration !== null) {
     const c = raw.configuration;
     if (typeof c !== 'object' || Array.isArray(c)) return { ok: false, error: 'configuration_invalid' };
+    // 官方：未声明 type 按 managed；支持 managed/raw/redirect 三种。
+    // D3：raw/redirect 只接受安装，不执行主题自带 HTML、不跳转、不生成表单字段。
     const type = String(c.type || 'managed');
-    // 本轮只支持 managed：raw（主题自带 HTML）与 redirect 需要额外的渲染沙箱/站内路径校验。
-    if (type !== 'managed') return { ok: false, error: 'configuration_type_unsupported' };
-    const data = Array.isArray(c.data) ? c.data : [];
+    if (!['managed', 'raw', 'redirect'].includes(type)) {
+      return { ok: false, error: 'configuration_type_unsupported' };
+    }
+    const managed = type === 'managed';
+    const data = managed && Array.isArray(c.data) ? c.data : [];
     if (data.length > 50) return { ok: false, error: 'configuration_too_many_fields' };
     const fields = [];
     for (const item of data) {
       if (!item || typeof item !== 'object') return { ok: false, error: 'configuration_field_invalid' };
       const key = typeof item.key === 'string' ? item.key.trim() : '';
+      // 官方 managed 示例含无 key 的 title/textbox 展示项：跳过，不能伪造 key 或拒绝整包。
+      if (!key && THEME_DISPLAY_ONLY_TYPES.has(String(item.type || ''))) continue;
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)) return { ok: false, error: 'configuration_field_key_invalid' };
       const ftype = THEME_CONFIG_TYPES.includes(item.type) ? item.type : 'text';
       const options = ftype === 'select'
@@ -343,7 +355,7 @@ function validateManifest(raw) {
         help: typeof item.help === 'string' ? item.help.slice(0, 500) : ''
       });
     }
-    configuration = { type: 'managed', fields };
+    configuration = { type, fields };
   }
 
   return {
@@ -384,15 +396,21 @@ function validateThemeConfig(configuration, body) {
       const n = Number(raw);
       if (!Number.isFinite(n)) return { ok: false, error: 'config_value_invalid' };
       patch[k] = n;
-    } else if (f.type === 'boolean') {
+    } else if (f.type === 'boolean' || f.type === 'switch') {
       patch[k] = raw === true || raw === 'true' || raw === 1 || raw === '1';
     } else if (f.type === 'select') {
       const s = String(raw);
       if (!f.options.includes(s)) return { ok: false, error: 'config_value_invalid' };
       patch[k] = s;
+    } else if (f.type === 'nodes' || f.type === 'pingtasks') {
+      // 官方选择器：底层保存 JSON 字符串数组，公开 API 输出时再还原为数组。
+      const s = Array.isArray(raw) ? JSON.stringify(raw) : String(raw);
+      if (s.length > 2000) return { ok: false, error: 'config_value_too_long' };
+      patch[k] = s;
     } else {
       if (typeof raw !== 'string') return { ok: false, error: 'config_value_invalid' };
-      if (raw.length > 2000) return { ok: false, error: 'config_value_too_long' };
+      const limit = f.type === 'richtext' ? 20000 : 2000;
+      if (raw.length > limit) return { ok: false, error: 'config_value_too_long' };
       patch[k] = raw;
     }
     if (f.required && (patch[k] === '' || patch[k] === null || patch[k] === undefined)) {

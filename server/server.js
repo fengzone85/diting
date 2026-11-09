@@ -21,7 +21,7 @@ const rollup = require('./src/rollup');
 const restoreAudit = require('./src/restore-audit');
 const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
-const { sanitizeCss } = require('./src/validate');
+const { sanitizeCss, validateManifest, mergeThemeConfig } = require('./src/validate');
 const { hasAdminToken, verifyAdminToken, hashAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
 // Node ≥15 起，未捕获的 promise rejection 默认会杀掉进程（--unhandled-rejections=throw）。
 // 这里降级为「记录 + 存活」，避免单个请求异常导致整个监控站不可用。
@@ -300,13 +300,16 @@ app.use('/api', (req, res, next) => {
 
 // IP 白名单：保护管理 API（公开只读接口除外）
 app.use('/api', (req, res, next) => {
-  if (req.path.startsWith('/public/') || req.path === '/report' ||
+  // app.use('/api') 内 req.path 已去掉 /api 前缀：/api/public 是精确的 '/public'，
+  // 此前只放行 '/public/' 前缀会让主题初始化接口在开启白名单时被误拦（403）。
+  if (req.path === '/public' || req.path.startsWith('/public/') || req.path === '/report' ||
       req.path.startsWith('/v1/') ||
       // /client-ip 是白名单排障入口：白名单配错时管理员需要它才能看清自己被识别成哪个 IP
       // （自身带 adminOrReadonly 鉴权，放行不会引入未授权访问）
       req.path === '/client-ip' ||
       req.path === '/me' || req.path === '/nodes' || req.path === '/recent' ||
       req.path === '/records/load' || req.path === '/records/ping' ||
+      req.path === '/task/ping' ||
       req.path === '/version' || req.path === '/rpc2' || req.path === '/clients/sse' ||
       // S5：二进制中继对未注册受控端开放（IP 白名单只保护管理面）
       req.path.startsWith('/releases/agent/')) return next();
@@ -363,18 +366,59 @@ function injectNonce(html, nonce) {
 // 原则：**不改模板产物**（可随时用官方 zip 覆盖/升级），改由服务端在投放 index.html 时按主题目录
 // 的实际一级条目重写根绝对引用——只有首段能在主题包内找到（assets/、images/、favicon.ico、admin-app/…）
 // 才加 `/themes/<short>/` 前缀；主题自己的 SPA 路由链接（如 `/instance/<uuid>`）保持原样。
-function adaptThemeHtml(html, dir, short) {
+// Komari 官方 web/public/public.go:57-79：按 cookie `language` 替换 <html lang>。
+// 只接受 [A-Za-z0-9-] 且长度 2-32，避免把任意内容拼进 HTML。
+function readThemeLanguageCookie(req) {
+  const raw = req && req.headers ? req.headers.cookie : '';
+  if (!raw) return '';
+  const m = /(?:^|;\s*)language=([^;]+)/.exec(raw);
+  if (!m) return '';
+  let v = m[1];
+  try { v = decodeURIComponent(v); } catch (_) { /* 非法编码时保留原值 */ }
+  v = v.trim().replace(/_/g, '-');
+  if (v.length < 2 || v.length > 32 || !/^[A-Za-z0-9-]+$/.test(v)) return '';
+  return v;
+}
+
+// Komari 官方主题页字面量替换（web/public/public.go:200-241 的 strings.NewReplacer）。
+// 官方主题包内没有 {{...}} 变量占位符，禁止自造占位符名；/admin、/terminal 不替换（:200-208）。
+// 管理员自定义 HTML 属受信任输入，原样注入到公开主题页（R16 信任模型）；
+// 未配置（空值）时保留原 HTML，避免空标题/空描述破坏现有主题。
+function applyOfficialHtmlReplacements(html, req) {
+  const p = (req && req.path) || '';
+  if (p.startsWith('/admin') || p.startsWith('/terminal')) return html;
+  const ui = db.getUiSettings();
+  let out = html;
+  if (ui.site_title) out = out.replace('<title>Komari Monitor</title>', `<title>${ui.site_title}</title>`);
+  if (ui.site_description) out = out.replace('A simple server monitor tool.', ui.site_description);
+  if (ui.custom_head) out = out.replace('</head>', ui.custom_head + '</head>');
+  if (ui.custom_body) out = out.replace('</body>', ui.custom_body + '</body>');
+  const lang = readThemeLanguageCookie(req);
+  if (lang) {
+    const forms = [
+      ['<html lang="en">', `<html lang="${lang}">`],
+      ["<html lang='en'>", `<html lang='${lang}'>`],
+      ['<html>', `<html lang="${lang}">`]
+    ];
+    for (const [from, to] of forms) {
+      if (out.includes(from)) { out = out.replace(from, to); break; }
+    }
+  }
+  return out;
+}
+
+function adaptThemeHtml(html, assetDir, urlBase, req) {
   let entries;
-  try { entries = new Set(fs.readdirSync(dir)); } catch (_) { return html; }
-  const base = `/themes/${short}/`;
-  return html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
+  try { entries = new Set(fs.readdirSync(assetDir)); } catch (_) { entries = new Set(); }
+  const rewritten = html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
     const rest = url.slice(1);
     const seg = rest.split(/[/?#]/)[0];
-    return entries.has(seg) ? `${attr}="${base}${rest}"` : match;
+    return entries.has(seg) ? `${attr}="${urlBase}${rest}"` : match;
   });
+  return applyOfficialHtmlReplacements(rewritten, req);
 }
-// 主题根目录：安装目录（THEMES_DIR，随数据卷持久）优先，其次只读内置目录（public/themes）。
-// 由 src/theme.js 统一解析，避免两处目录策略漂移。
+// 主题包根：安装目录（THEMES_DIR，随数据卷持久）优先，其次只读内置目录（public/themes）。
+// 通配静态路由的 subPath 自带 dist/ 前缀，故这里必须返回包根而不是投放根。
 function resolveThemeRoot(id) {
   if (typeof id !== 'string' || id === 'default') return null;
   const found = themeStore.resolveThemeDir(id);
@@ -415,7 +459,17 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/config\/?$/, (req, res) => {
   if (!themeStore.isValidShort(id)) return res.status(400).json({ error: 'short_invalid' });
   if (!db.getUiSettings().public_enabled) return res.status(403).json({ error: 'public_disabled' });
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
-  res.json(db.getThemeConfig(id));
+  // 与管理端 /api/admin/theme/config、公开 /api/public 的 theme_settings 同一口径：
+  // 返回「manifest 默认值 + 管理员保存值」的合并结果，而非裸存储值（C6）。
+  let values = db.getThemeConfig(id);
+  const t = themeStore.getTheme(id);
+  if (t && t.configuration) {
+    const checked = validateManifest({ short: id, name: t.name, configuration: t.configuration });
+    if (checked.ok && checked.value.configuration) {
+      values = mergeThemeConfig(checked.value.configuration.fields, values);
+    }
+  }
+  res.json(values);
 });
 
 // 第三方皮肤资源：用显式路由投放，不依赖 express.static 对 themes 目录的覆盖，
@@ -443,10 +497,12 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
     return serveFileStream(res, fp);
   }
   // 无后缀深链（如 /themes/<id>/instance/<uuid>）：社区主题 SPA history 路由，
-  // 回退到主题根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
-  const indexPath = path.join(baseDir, 'index.html');
+  // 回退到投放根 index.html，避免「Cannot GET」；nonce 注入对白名单主题放宽 CSP。
+  const assets = themeStore.resolveThemeAssets(id);
+  if (!assets) return next();
+  const indexPath = path.join(assets.assetDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
-  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), baseDir, id);
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase, req);
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
@@ -459,11 +515,11 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/(.*)$/, (req, res, next) => {
 // 裸主题根路径（如 /themes/<short>）：返回主题 index.html。
 app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   const id = req.params[0];
-  const baseDir = resolveThemeRoot(id);
-  if (!baseDir) return next();
-  const indexPath = path.join(baseDir, 'index.html');
+  const assets = themeStore.resolveThemeAssets(id);
+  if (!assets) return next();
+  const indexPath = path.join(assets.assetDir, 'index.html');
   if (!fs.existsSync(indexPath)) return next();
-  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), baseDir, id);
+  const html = adaptThemeHtml(fs.readFileSync(indexPath, 'utf8'), assets.assetDir, assets.urlBase, req);
   res.setHeader('Cache-Control', 'no-store, must-revalidate');
   if (THEME_NEEDS_NONCE.has(id)) {
     const nonce = crypto.randomBytes(16).toString('base64');
@@ -523,13 +579,13 @@ app.get('*', (req, res, next) => {
   // 带后缀文件：优先尝试当前主题根目录映射，未命中再交给 express.static
   if (path.extname(req.path)) {
     if (!isSpaRoute && theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
-      const themeRoot = resolveThemeRoot(theme);
-      if (!themeRoot) return next();
-      const fp = path.join(themeRoot, req.path);
+      const assets = themeStore.resolveThemeAssets(theme);
+      if (!assets) return next();
+      const fp = path.join(assets.assetDir, req.path);
       // 防路径穿越（与上方 /themes/:id 显式路由的守卫一致）：req.path 原样来自请求行，
-      // `?theme=<非default>` 可被任意访问者指定，join 归一化后必须仍落在主题目录内，
+      // `?theme=<非default>` 可被任意访问者指定，join 归一化后必须仍落在投放目录内，
       // 否则可读任意带扩展名文件（活体 PoC：8 层 ../ 读出 /etc/resolv.conf）。
-      if (!fp.startsWith(themeRoot + path.sep)) return next();
+      if (!fp.startsWith(assets.assetDir + path.sep)) return next();
       if (fs.existsSync(fp) && !fs.statSync(fp).isDirectory()) {
         res.setHeader('Cache-Control', 'no-store, must-revalidate');
         const ext = path.extname(fp).toLowerCase();
@@ -547,12 +603,12 @@ app.get('*', (req, res, next) => {
 
   // 无后缀：返回主题 index.html（官方主题在 dist/ 下也按根目录 index.html 处理）
   if (theme && theme !== 'default' && /^[A-Za-z0-9_-]+$/.test(theme)) {
-    const themeRoot = resolveThemeRoot(theme);
-    const fp = themeRoot ? path.join(themeRoot, 'index.html') : '';
+    const assets = themeStore.resolveThemeAssets(theme);
+    const fp = assets ? path.join(assets.assetDir, 'index.html') : '';
     if (fp && fs.existsSync(fp)) {
       // 第三方社区主题页：用一次性 nonce 放宽 CSP，仅覆盖本次响应。
       // admin.html / setup.html / api 等其他路由仍走全局严格 CSP，不受影响。
-      const html = adaptThemeHtml(fs.readFileSync(fp, 'utf8'), themeRoot, theme);
+      const html = adaptThemeHtml(fs.readFileSync(fp, 'utf8'), assets.assetDir, assets.urlBase, req);
       res.setHeader('Cache-Control', 'no-store, must-revalidate');
       if (THEME_NEEDS_NONCE.has(theme)) {
         const nonce = crypto.randomBytes(16).toString('base64');
@@ -592,9 +648,9 @@ app.use((req, res, next) => {
   const theme = ui.public_theme;
   if (!theme || theme === 'default' || !/^[A-Za-z0-9_-]+$/.test(theme)) return next();
   const sub = p.slice('/images/'.length); // logo/os-x.svg 或 flags/CN.svg
-  const themeRoot = resolveThemeRoot(theme);
-  if (!themeRoot) return next();
-  const baseDir = path.join(themeRoot, 'images');
+  const assets = themeStore.resolveThemeAssets(theme);
+  if (!assets) return next();
+  const baseDir = path.join(assets.assetDir, 'images');
   const fp = path.join(baseDir, sub);
   if (!fp.startsWith(baseDir + path.sep)) return next(); // 防路径穿越
   if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return next();
@@ -809,6 +865,14 @@ try {
       } catch (err) {
         // 非法 JSON：msg 未解析成功，用 null id 回复，不抛出以免崩进程。
         try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
+        return;
+      }
+      // 批量只在 HTTP POST /api/rpc2 支持：官方 WS 逐条 ReadJSON/WriteJSON，
+      // 且主题 parseJsonRpcResponse 拒绝数组响应（方案 R9「WS 保持单条」）。
+      if (Array.isArray(msg)) {
+        try {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'batch not supported over WebSocket' }, id: null }));
+        } catch (_) {}
         return;
       }
       // 审查 C4：handleRpc 异步化（内部重聚合走 worker 线程，不阻塞事件循环）

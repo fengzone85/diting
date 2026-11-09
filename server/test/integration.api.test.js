@@ -413,3 +413,23 @@ test('白名单配错时 /api/client-ip 仍可用（排障入口不受白名单�
     assert.ok(diag.body.ip);
   });
 });
+
+test('白名单开启时公开只读端点仍可访问（/api/public、/api/task/ping）', async () => {
+  await withUi({ admin_allow_ips: '203.0.113.9' }, async () => {
+    // 管理面仍被拦截，确认白名单确实生效（放行没有扩大成全放行）
+    const blocked = await request(app).get('/api/agents').set(ADMIN);
+    assert.strictEqual(blocked.status, 403);
+
+    // app.use('/api') 内 req.path 是精确的 '/public'；此前只放行 '/public/' 前缀，
+    // 导致第三方主题初始化拿不到 theme_settings（收口验证发现的 F1）。
+    const pub = await request(app).get('/api/public');
+    assert.strictEqual(pub.status, 200, '/api/public 不得被管理 IP 白名单拦截');
+    assert.strictEqual(pub.body.status, 'success');
+    assert.ok('theme_settings' in pub.body.data, '主题设置字段必须可达');
+
+    // Phase 0+1 新增端点同样在放行清单
+    const tasks = await request(app).get('/api/task/ping');
+    assert.strictEqual(tasks.status, 200);
+    assert.ok(Array.isArray(tasks.body.data));
+  });
+});

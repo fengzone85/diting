@@ -76,6 +76,7 @@ router.get('/admin/theme/list', adminOrReadonly, agentScope, (req, res) => {
     url: t.url,
     preview: t.preview,
     configuration: t.configuration,
+    configuration_type: t.configurationType,
     diting: t.diting,
     installed_at: t.installed_at,
     enabled: t.enabled,
@@ -224,7 +225,10 @@ router.get('/admin/theme/config', adminOrReadonly, agentScope, (req, res) => {
   });
 });
 
-router.post('/admin/theme/config', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
+// 主题配置保存：官方路径 POST /api/admin/theme/settings?theme=<short> 与 diting 既有
+// /admin/theme/config 共用同一 handler —— 保持 adminOnly→agentScope→agentGlobalOnly
+// 鉴权顺序、审计日志、错误码与 16KB body 限制，不做 HTTP 自调用转发。
+function saveThemeConfig(req, res) {
   const short = themeShortArg(req.query.theme || (req.body && req.body.theme));
   if (!theme.isValidShort(short)) return res.status(400).json({ error: 'short_invalid' });
   const configuration = themeConfigurationOf(short);
@@ -238,6 +242,9 @@ router.post('/admin/theme/config', adminOnly, agentScope, agentGlobalOnly, (req,
   db.setThemeConfig(short, values);
   auditLog(req, 'theme_action', `op=config short=${short} keys=${Object.keys(v.value).sort().join(',')}`);
   res.json({ saved: true, values });
-});
+}
+
+router.post('/admin/theme/config', adminOnly, agentScope, agentGlobalOnly, saveThemeConfig);
+router.post('/admin/theme/settings', adminOnly, agentScope, agentGlobalOnly, saveThemeConfig);
 
 module.exports = router;

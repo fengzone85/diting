@@ -1629,7 +1629,7 @@ const SETTINGS_KEY = 'ui_settings';
 const NOTIFY_KEY = 'notify_config';
 const BACKUP_STATE_KEY = 'backup_state';
 function getUiSettings() {
-  const def = { site_title: '', site_description: '', site_url: '', custom_css: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
+  const def = { site_title: '', site_description: '', site_url: '', custom_css: '', custom_head: '', custom_body: '', default_sort: 'created', group_order: [], agent_server_url: '', admin_allow_ips: '', alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 }, public_enabled: true,
     // 公开接口（/api/public/agents、/api/v1/nodes）是否透出业务字段：
     // 商家 merchant、到期 expire_at、备注 note、月流量配额 monthly_quota_gb、套餐 price/billing_cycle/currency。
     // 默认 true 与旧版行为一致（公开页首页「商家数/即将到期」与详情页「备注/套餐」依赖这些字段）；

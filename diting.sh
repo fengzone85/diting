@@ -170,6 +170,10 @@ show_usage() {
   # 安装服务端（Docker，自动生成强随机令牌）
   sudo bash diting.sh --install-server
 
+  # 可选：无面板 / 无域名的局域网机器，一键起自签 HTTPS 反代（占用 443）
+  #       默认部署请用宝塔 / 1Panel / 已有 Nginx 绑定域名反代，见 reverse-proxy.md
+  sudo bash diting.sh --bundled-proxy
+
   # 安装受控端（需先在服务端后台「新建客户端」拿到 ID/Token）
   sudo bash diting.sh --install-agent --server https://your-server:8008 --id NODE1 --token SECRET
 
@@ -624,8 +628,77 @@ HOSTENV
     echo -e "     未配反代:  ssh -L ${port}:127.0.0.1:${port} <user>@<本机>  然后打开 http://127.0.0.1:${port}/install"
     echo -e "     （向导里填写站点名称/描述/上报地址，并生成管理员 Token —— 只显示一次）"
     echo -e ""
-    echo -e "   生产请将 Nginx + TLS 反代到 127.0.0.1:${port}（见 README 部署章节）"
+    echo -e "   生产请在 Nginx / 宝塔 / 1Panel 中绑定域名反代到 127.0.0.1:${port}（默认路径，面板管证书）"
     echo -e "   Nginx upstream 需与端口一致：proxy_pass http://127.0.0.1:${port};"
+    echo -e "   ${YELLOW}⚠️ 反代必须透传 WebSocket 升级头，否则公开主题页实时数据为空（显示离线/N/A）${NC}"
+    echo -e "   完整可粘贴配置与面板步骤：docs/src/content/docs/reverse-proxy.md"
+    echo -e "   无面板/无域名的局域网机器可选：sudo bash diting.sh --bundled-proxy（自签 HTTPS，占用 443）"
+}
+
+# ── 可选：无面板 / 无域名的局域网自签 HTTPS 反代（B 路径）────────────────────
+# 默认部署走 A 路径（宝塔 / 1Panel / 已有 Nginx 绑定域名反代）；本开关只给纯净
+# 机器用，占用宿主 443。nginx 容器用 network_mode: host，反代源地址仍是 loopback，
+# 因此 TRUST_PROXY 保持默认，A 路径用户不受影响。
+setup_bundled_proxy() {
+    ensure_deps || return 1
+    ensure_docker || return 1
+
+    local server_dir="$SRC_DIR/server"
+    if [[ ! -f "$server_dir/docker-compose.yml" ]]; then
+        echo -e "${RED}[错误] 未找到 $server_dir/docker-compose.yml，请先执行 --install-server${NC}" >&2
+        return 1
+    fi
+
+    local port ip
+    port="$(grep -E '^PORT=' "$server_dir/.env" 2>/dev/null | cut -d= -f2 || true)"
+    [[ -n "$port" ]] || port=8081
+    # 容器配置固定反代到 8081；自定义 PORT 时要求先同步，避免静默连不上后端。
+    if [[ "$port" != "8081" ]] && ! grep -q "127.0.0.1:${port}" "$server_dir/nginx/bundled.conf" 2>/dev/null; then
+        echo -e "${RED}[错误] .env 的 PORT=${port}，但 server/nginx/bundled.conf 固定反代到 127.0.0.1:8081。${NC}" >&2
+        echo -e "${YELLOW}       请把该文件所有 8081 改成 ${port} 后重试（A 路径不受影响）。${NC}" >&2
+        return 1
+    fi
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [[ -n "$ip" ]] || ip="127.0.0.1"
+
+    local cert_dir="$server_dir/certs"
+    mkdir -p "$cert_dir"
+    chmod 0755 "$cert_dir"
+
+    # 幂等：证书已存在则不覆盖，避免浏览器反复提示证书变更。
+    if [[ ! -f "$cert_dir/server.crt" || ! -f "$cert_dir/server.key" || ! -f "$cert_dir/ca.crt" ]]; then
+        local ext
+        ext="$(mktemp)"
+        cat > "$ext" <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:localhost,IP:127.0.0.1,IP:${ip}
+EOF
+        openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 \
+            -keyout "$cert_dir/ca.key" -out "$cert_dir/ca.crt" \
+            -subj "/O=diting-local/CN=diting Local Root CA" >/dev/null 2>&1
+        openssl req -newkey rsa:2048 -nodes -sha256 \
+            -keyout "$cert_dir/server.key" -out "$cert_dir/server.csr" \
+            -subj "/O=diting-local/CN=${ip}" >/dev/null 2>&1
+        openssl x509 -req -in "$cert_dir/server.csr" -CA "$cert_dir/ca.crt" -CAkey "$cert_dir/ca.key" \
+            -CAcreateserial -out "$cert_dir/server.crt" -days 825 -sha256 -extfile "$ext" >/dev/null 2>&1
+        rm -f "$ext" "$cert_dir/server.csr" "$cert_dir/ca.srl"
+        chmod 0644 "$cert_dir/ca.crt" "$cert_dir/server.crt"
+        chmod 0600 "$cert_dir/ca.key" "$cert_dir/server.key"
+        echo -e "${GREEN}[OK]   已生成自签 CA 与服务端证书（SAN: localhost / 127.0.0.1 / ${ip}）${NC}"
+    else
+        echo -e "${GREEN}[OK]   已有自签证书，保持不变${NC}"
+    fi
+
+    ( cd "$server_dir" && docker compose --profile bundled-proxy up -d ) || return 1
+    echo ""
+    echo -e "${GREEN}✅ 自签 HTTPS 反代已启动${NC}"
+    echo -e "   访问：https://${ip}/install（浏览器会有一次自签证书警告，属预期）"
+    echo -e "   证书目录：$cert_dir"
+    echo -e "   ${YELLOW}跨机受控端需信任 $cert_dir/ca.crt（加入系统信任库或设 SSL_CERT_FILE）${NC}"
+    echo -e "   本机受控端可直接使用 http://localhost:${port}"
+    echo -e "   该 profile 占用宿主 443；A 路径（面板反代）用户请勿使用。"
 }
 
 # ── 更新：本安装脚本自身 ──────────────────────────────────────────────────────
@@ -3115,6 +3188,7 @@ show_menu() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --install-server) ACTION="server"; shift ;;
+        --bundled-proxy) ACTION="bundled-proxy"; shift ;;
         # 监听端口：配合 --install-server（非交互部署用）。校验在 resolve_server_port 内做，
         # 非法值会让安装在任何写盘动作之前中止。
         --port)           need_val_guard "$1" "${2:-}"; A_SERVER_PORT="${2:-}"; shift 2 ;;
@@ -3192,6 +3266,7 @@ fi
 if [[ -n "$ACTION" ]]; then
     case "$ACTION" in
         server)       install_server ;;
+        bundled-proxy) setup_bundled_proxy ;;
         agent)        install_agent ;;
         update-script) update_script ;;
         update-server) update_server ;;

@@ -22,6 +22,8 @@ interface UiSettings {
   site_url?: string;
   logo_url?: string;
   custom_css?: string;
+  custom_head?: string;
+  custom_body?: string;
   default_sort?: string;
   group_order?: string[];
   agent_server_url?: string;
@@ -92,6 +94,8 @@ const dirty = ref(false);
 function resetLocal() {
   local.value = {
     ui: {
+      custom_head: '',
+      custom_body: '',
       background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 },
       announcement: { enabled: false, title: '', content: '' },
       provider_aliases: {},
@@ -198,6 +202,8 @@ function cloneSettings(src: Settings): SettingsForm {
   return {
     ui: {
       ...ui,
+      custom_head: ui.custom_head || '',
+      custom_body: ui.custom_body || '',
       alert: { ...(ui.alert || {}) },
       background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50, ...(ui.background || {}) },
       announcement: { enabled: false, title: '', content: '', ...(ui.announcement || {}) },
@@ -327,6 +333,8 @@ const {
         <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
         <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />
         <FormInput v-model="local.ui.custom_css" :label="t('settings.customCss')" type="textarea" />
+        <FormInput v-model="local.ui.custom_head" :label="t('settings.customHead')" type="textarea" />
+        <FormInput v-model="local.ui.custom_body" :label="t('settings.customBody')" type="textarea" />
       </div>
       <div class="glass p-6">
         <h2 class="mb-4 text-lg font-semibold">{{ t('settings.alertThresholds') }}</h2>
