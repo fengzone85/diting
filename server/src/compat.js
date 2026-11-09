@@ -135,7 +135,10 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值
     expired_at: show && a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
     group: a.grp || '',
-    tags: '',
+    // Glassmorphism 的「厂商」不是独立字段：它从 name/public_remark/remark/tags/group/region
+    // 里做关键词匹配。把 diting 的 merchant 放进 tags，主题才能识别到商家（tags 默认不显示）。
+    // 属业务字段：public_show_business 关闭时一并清空。
+    tags: show ? (a.merchant || '') : '',
     hidden: false,
     public_remark: a.note || '',
     // monthly_quota_gb 为 GiB 口径（与 alerts/前端/AI 一致），对主题边界换算成字节。
@@ -263,6 +266,29 @@ router.use((req, res, next) => {
   next();
 });
 
+// 厂商别名：diting 的 merchant → 显示名映射，换算成 Glassmorphism 的
+// `Provider:alias1,alias2;...` 格式；未显式映射的 merchant 自动映射为自己，
+// 让后台「商家」直接显示为「厂商」而不是「未知厂商」。
+// 含分隔符的值跳过（会破坏主题解析格式），管理员可改用主题自身的配置项。
+function buildProviderAliases(aliases, merchants) {
+  const byDisplay = new Map();
+  const add = (display, alias) => {
+    const d = String(display || '').trim();
+    const a = String(alias || '').trim();
+    if (!d || !a || /[:;,]/.test(d) || /[:;,]/.test(a)) return;
+    if (!byDisplay.has(d)) byDisplay.set(d, new Set());
+    byDisplay.get(d).add(a);
+  };
+  const map = aliases && typeof aliases === 'object' ? aliases : {};
+  for (const [merchant, display] of Object.entries(map)) add(display || merchant, merchant);
+  const explicit = new Set(Object.keys(map).map((s) => String(s).trim()));
+  for (const merchant of merchants || []) {
+    const m = String(merchant || '').trim();
+    if (m && !explicit.has(m)) add(m, m);
+  }
+  return [...byDisplay.entries()].map(([d, set]) => `${d}:${[...set].join(',')}`).join(';');
+}
+
 // 官方 GET /api/public 的 data 与 RPC public:getPublicSettings 共用同一真源，
 // 避免 REST/RPC 两处各自写死字段导致漂移（方案 C5）。theme_settings 取当前启用
 // 主题「manifest 默认值 + 管理员保存值」的合并结果（方案 C6）。
@@ -284,6 +310,15 @@ function publicSettings() {
           if ((f.type === 'nodes' || f.type === 'pingtasks') && typeof merged[f.key] === 'string') {
             try { merged[f.key] = JSON.parse(merged[f.key]); } catch (_) { /* 值非法时保持字符串 */ }
           }
+        }
+        // 仅对声明了 providerAliases 的主题注入（当前为 Glassmorphism）：
+        // 主题自身配置优先，diting 的 merchant→display 映射与未映射 merchant 追加在后。
+        if (fields.some((f) => f.key === 'providerAliases')) {
+          const own = String(merged.providerAliases || '').trim();
+          const auto = ui.public_show_business !== false
+            ? buildProviderAliases(ui.provider_aliases, db.getMonitoredAgents().map((a) => a.merchant))
+            : '';
+          merged.providerAliases = [own, auto].filter(Boolean).join(';');
         }
         themeSettings = merged;
       }
@@ -577,4 +612,4 @@ router.post('/rpc2', (req, res) => {
   rpcMiddleware(req, res);
 });
 
-module.exports = { router, snapshot, publicOpen, publicSettings, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus };
+module.exports = { router, snapshot, publicOpen, publicSettings, toNode, toRealtime, isOnline: online.isOnline, getNodesLatestStatus, buildProviderAliases };

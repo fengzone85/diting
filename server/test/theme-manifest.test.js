@@ -213,9 +213,16 @@ test('validateManifest：字段 key / select options / 数量上限', () => {
   assert.strictEqual(noOpt.error, 'configuration_field_options_required');
 
   const tooMany = validators.validateManifest({
-    short: 'a', name: 'A', configuration: { type: 'managed', data: Array.from({ length: 51 }, (_, i) => ({ key: `k${i}` })) }
+    short: 'a', name: 'A', configuration: { type: 'managed', data: Array.from({ length: 129 }, (_, i) => ({ key: `k${i}` })) }
   });
   assert.strictEqual(tooMany.error, 'configuration_too_many_fields');
+
+  // Glassmorphism v3.4.4 的 63 项必须被接受（旧上限 50 会让 theme_settings 全空）
+  const glass = validators.validateManifest({
+    short: 'a', name: 'A', configuration: { type: 'managed', data: Array.from({ length: 63 }, (_, i) => ({ key: `k${i}` })) }
+  });
+  assert.strictEqual(glass.ok, true);
+  assert.strictEqual(glass.value.configuration.fields.length, 63);
 });
 
 // ---- 4. 列表与内置主题 ------------------------------------------------------

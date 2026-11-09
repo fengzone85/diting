@@ -59,6 +59,22 @@ test('cpu_cores 取 agents.cores 真实值，未上报为 0', () => {
   assert.strictEqual(compat.toNode(noCores, true).cpu_cores, 0);
 });
 
+test('merchant 映射到 tags（供 Glassmorphism 识别厂商），业务字段关闭时清空', () => {
+  const a = mkAgent({ name: 'compat-merchant', merchant: '家里云' });
+  assert.strictEqual(compat.toNode(a, true).tags, '家里云');
+  assert.strictEqual(compat.toNode(a, false).tags, '');
+});
+
+test('buildProviderAliases：merchant→display 与未映射 merchant 原名', () => {
+  assert.strictEqual(
+    compat.buildProviderAliases({ 家里云: 'HomeCloud' }, ['家里云', '搬瓦工', '搬瓦工', '']),
+    'HomeCloud:家里云;搬瓦工:搬瓦工'
+  );
+  assert.strictEqual(compat.buildProviderAliases({}, []), '');
+  // 含分隔符的值会破坏主题解析，直接跳过
+  assert.strictEqual(compat.buildProviderAliases({ 'a;b': 'X' }, []), '');
+});
+
 test('kernel_version 未填写时为空串，绝不等于 hostname（回归锁死）', () => {
   const a = db.getAgent(A.id);
   assert.strictEqual(a.hostname, 'node-alpha');

@@ -331,7 +331,9 @@ function validateManifest(raw) {
     }
     const managed = type === 'managed';
     const data = managed && Array.isArray(c.data) ? c.data : [];
-    if (data.length > 50) return { ok: false, error: 'configuration_too_many_fields' };
+    // Glassmorphism v3.4.4 声明 63 项；旧上限 50 会整包拒绝，导致 theme_settings 全空
+    // （主题侧表现为所有配置项都是默认值，本次厂商别名注入也依赖该合并结果）。
+    if (data.length > 128) return { ok: false, error: 'configuration_too_many_fields' };
     const fields = [];
     for (const item of data) {
       if (!item || typeof item !== 'object') return { ok: false, error: 'configuration_field_invalid' };
