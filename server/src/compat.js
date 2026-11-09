@@ -12,6 +12,8 @@ const { heavyQuery } = require('./heavy-db');
 // task id 必须与 RPC（getPublicPingTasks / getPingMetricStats / queryMetrics）同源：
 // 主题可能混用 REST 与 RPC 两侧数据，id 口径不同就永远关联不上。
 const { probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
+// 只读保留天数（叶子模块，无 require 依赖）：record_enabled / ping_record_preserve_time 需要真实口径。
+const metricsMerge = require('./metrics-merge');
 // publicSettings() 需要主题 manifest 的配置字段与默认值合并；两者都是叶子模块，
 // 不回指 compat/compat-rpc，故不新增循环依赖（compat.js:460 的延迟 require 保持不变）。
 const validators = require('./validate');
@@ -332,9 +334,14 @@ function publicSettings() {
     description: ui.site_description || '',
     disable_password_login: true,
     oauth_enable: false, oauth_provider: '',
-    ping_record_preserve_time: 48,
+    // 官方语义：record_enabled = retention.AllPositive（database/utils.go:97）。
+    // 硬编码 false 会让 Glassmorphism 直接跳过全部 ping 历史请求（首页卡片延迟/丢包恒 "-"）。
+    // 保留时长按 diting 实际口径：探测在明细表（METRICS_DETAIL_DAYS，默认 7 天 = 168h），
+    // 普通指标走 RETENTION_DAYS（默认 30 天 = 720h）。
+    ping_record_preserve_time: metricsMerge.detailDays() * 24,
     private_site: false,
-    record_enabled: false, record_preserve_time: 720,
+    record_enabled: true,
+    record_preserve_time: db.getRetentionDays() * 24,
     sitename: ui.site_title || 'diting',
     theme,
     theme_settings: themeSettings,

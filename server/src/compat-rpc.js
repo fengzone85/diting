@@ -397,7 +397,10 @@ function getPingMetricStats(params = {}) {
     records.forEach(r => {
       if (entityId && r.client !== entityId) return;
       const k = r.client + '\x00' + r.task_id;
-      if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [] };
+      if (!agg[k]) agg[k] = { entity_id: r.client, client: r.client, task_id: r.task_id, name: r.task_name || String(r.task_id), values: [], total: 0 };
+      // 失败样本在 getProbeRecords 里编码为 value=-1；必须计入分母，否则全丢包任务
+      // 会因 valid=0 被主题当成「无样本」丢掉，卡片丢包率永远显示 0。
+      agg[k].total += 1;
       if (typeof r.value === 'number' && r.value >= 0) agg[k].values.push(r.value);
     });
     const stats = Object.values(agg).map(a => {
@@ -416,9 +419,9 @@ function getPingMetricStats(params = {}) {
         // 主题 re(o.task_id) 无条件调 .trim()，数字会让主路径抛错后回退 legacy（R11）。
         task_id: String(a.task_id),
         name: a.name,
-        total: a.values.length,
+        total: a.total,
         valid: vals.length,
-        loss: 0,
+        loss: a.total > 0 ? Math.max(0, ((a.total - vals.length) / a.total) * 100) : 0,
         loss_approximate: false,
         interval: PROBE_TASK_INTERVAL,
         interval_seconds: PROBE_TASK_INTERVAL,

@@ -146,6 +146,12 @@ Glassmorphism 的「厂商」**不是后端字段**：它从节点的 `name` / `
 
 因此后台填了「商家」后，主题的「厂商」会直接显示该名称；`public_show_business=false` 时 `tags` 与自动别名都不输出，避免泄露业务字段。
 
+## 延迟 / 丢包数据
+
+- `/api/public` 的 `record_enabled` 恒为 `true`（对应 Komari 的 `retention.AllPositive`）。Glassmorphism 等主题用它做总开关，为 `false` 时**不会发起任何** ping 历史请求，卡片延迟/丢包会恒为 `-`。
+- `ping_record_preserve_time` = `METRICS_DETAIL_DAYS * 24`（默认 168h），`record_preserve_time` = `RETENTION_DAYS * 24`。
+- `public:getPingMetricStats` 的 `total` 包含失败样本（`value=-1`），`loss = (total-valid)/total*100`；全丢包任务仍会返回，`loss=100`，不会被主题当成「无样本」丢弃。
+
 ## 参考实现
 
 - `komari-demo/`：适配版 Komari 皮肤示例，基于上面的 Komari 兼容 API，证明 Komari 社区皮肤可在本项目运行。
