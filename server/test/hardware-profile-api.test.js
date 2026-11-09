@@ -45,7 +45,8 @@ test('POST /api/agents 接受 hardware，GET 回读为解析对象', async () =>
         cpu: { src: 'enum', vendor: 'Intel', tag: '第11代', hidden: false },
         arch: { src: 'custom', text: 'x86_64', hidden: false },
         virt: { src: 'enum', value: 'KVM', hidden: true },
-        gpu: { src: 'enum', value: '核显', hidden: false }
+        gpu: { src: 'enum', value: '核显', hidden: false },
+        kernel: { src: 'custom', text: '6.1.0-18-amd64', hidden: false }
       }
     });
   assert.strictEqual(res.status, 200);
@@ -56,6 +57,7 @@ test('POST /api/agents 接受 hardware，GET 回读为解析对象', async () =>
   assert.strictEqual(got.body.hardware.cpu.vendor, 'Intel');
   assert.strictEqual(got.body.hardware.cpu.tag, '第11代');
   assert.strictEqual(got.body.hardware.virt.hidden, true);
+  assert.strictEqual(got.body.hardware.kernel.text, '6.1.0-18-amd64');
 });
 
 test('GET /api/hardware-options 返回候选清单', async () => {
@@ -108,7 +110,8 @@ test('公开出口：cpu_name 合成、hidden 不输出、GPU 空值 None', asyn
       hardware: {
         cpu: { src: 'enum', vendor: 'Intel', tag: '第12代', hidden: false },
         arch: { src: 'enum', value: 'x86_64', hidden: false },
-        virt: { src: 'enum', value: 'LXC', hidden: false }
+        virt: { src: 'enum', value: 'LXC', hidden: false },
+        kernel: { src: 'custom', text: '6.1.0-18-amd64', hidden: false }
       }
     });
 
@@ -119,17 +122,20 @@ test('公开出口：cpu_name 合成、hidden 不输出、GPU 空值 None', asyn
   assert.strictEqual(node.arch, 'x86_64');
   assert.strictEqual(node.virtualization, 'LXC');
   assert.strictEqual(node.gpu_name, 'None');
+  assert.strictEqual(node.kernel_version, '6.1.0-18-amd64');
 
   const v1Res = await request(app).get('/api/v1/nodes');
   assert.strictEqual(v1Res.status, 200);
   const v1Node = v1Res.body.data.find((n) => n.uuid === agentId);
   assert.strictEqual(v1Node.cpu_name, 'Intel 第12代');
+  assert.strictEqual(v1Node.kernel, '6.1.0-18-amd64');
 
   const pubRes = await request(app).get('/api/public/agents');
   assert.strictEqual(pubRes.status, 200);
   const pub = pubRes.body.find((n) => n.id === agentId);
   assert.strictEqual(pub.cpu_name, 'Intel 第12代');
   assert.strictEqual(pub.gpu_name, '');
+  assert.strictEqual(pub.kernel_version, '6.1.0-18-amd64');
 });
 
 test('全局开关关闭：公开出口统一空值，管理面仍可见', async () => {
@@ -142,11 +148,13 @@ test('全局开关关闭：公开出口统一空值，管理面仍可见', async
     assert.strictEqual(node.arch, '');
     assert.strictEqual(node.virtualization, '');
     assert.strictEqual(node.gpu_name, 'None');
+    assert.strictEqual(node.kernel_version, '');
 
     const v1Res = await request(app).get('/api/v1/nodes');
     const v1Node = v1Res.body.data.find((n) => n.uuid === agentId);
     assert.strictEqual(v1Node.cpu_name, null);
     assert.strictEqual(v1Node.arch, null);
+    assert.strictEqual(v1Node.kernel, null);
 
     const adminRes = await request(app).get(`/api/agents/${agentId}`).set(ADMIN);
     assert.strictEqual(adminRes.body.hardware.cpu.vendor, 'Intel');

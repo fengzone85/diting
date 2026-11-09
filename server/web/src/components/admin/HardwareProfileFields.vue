@@ -16,7 +16,7 @@ interface HwFieldState {
 }
 type HwState = Record<HardwareFieldKey, HwFieldState>;
 
-const HW_KEYS: HardwareFieldKey[] = ['cpu', 'arch', 'virt', 'gpu'];
+const HW_KEYS: HardwareFieldKey[] = ['cpu', 'arch', 'virt', 'gpu', 'kernel'];
 
 interface Props {
   // 候选清单由服务端 GET /api/hardware-options 提供；缺失时下拉为空、仍可手填
@@ -29,7 +29,7 @@ function emptyField(): HwFieldState {
   return { src: '', hidden: false, vendor: '', tag: '', value: '', text: '' };
 }
 function emptyHw(): HwState {
-  return { cpu: emptyField(), arch: emptyField(), virt: emptyField(), gpu: emptyField() };
+  return { cpu: emptyField(), arch: emptyField(), virt: emptyField(), gpu: emptyField(), kernel: emptyField() };
 }
 
 // 档案对象 → 编辑态：保持四键齐全，模板无需处理 undefined。
@@ -121,7 +121,8 @@ function setHwMode(key: HardwareFieldKey, mode: string) {
   if (!state.value[key].src) state.value[key] = emptyField();
   const f = state.value[key];
   if (mode === 'hidden') {
-    if (!f.src) f.src = 'enum';
+    // 内核版本没有预设档位，空隐藏也要存成 custom，否则会被服务端判为非法枚举。
+    if (!f.src) f.src = key === 'kernel' ? 'custom' : 'enum';
     f.hidden = true;
     return;
   }
@@ -243,6 +244,27 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :class="fieldCls"
         />
         <span v-else class="text-xs text-slate-500">{{ t('hw.unset') }}</span>
+      </div>
+    </div>
+
+    <!-- 内核版本：没有「代际」粒度，只支持手填 / 隐藏；可直接匹配 CVE，属最高敏感项 -->
+    <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
+      <label class="text-sm text-slate-400">{{ t('hw.kernel') }}</label>
+      <select :value="hwMode('kernel')" :class="fieldCls" @change="setHwMode('kernel', ($event.target as HTMLSelectElement).value)">
+        <option value="">{{ t('hw.mode.unset') }}</option>
+        <option value="custom">{{ t('hw.mode.custom') }}</option>
+        <option value="hidden">{{ t('hw.mode.hidden') }}</option>
+      </select>
+      <div>
+        <span v-if="hwMode('kernel') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <input
+          v-else-if="hwMode('kernel') === 'custom'"
+          v-model="state.kernel.text"
+          :maxlength="options?.max_text_length || 32"
+          :placeholder="t('hw.kernelPlaceholder')"
+          :class="fieldCls"
+        />
+        <span v-else class="text-xs text-slate-500">{{ t('hw.kernelHint') }}</span>
       </div>
     </div>
   </div>

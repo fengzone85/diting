@@ -83,6 +83,35 @@ test('normalizeProfile：隐藏态允许不选值（压住 arch 派生）', () =
   assert.strictEqual(f.gpu_name, '');
 });
 
+test('normalizeProfile：内核版本只接受手填（无预设档位）', () => {
+  const r = hardware.normalizeProfile({ kernel: { src: 'custom', text: ' 6.1.0-18-amd64 ' } });
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(r.value.kernel, { src: 'custom', text: '6.1.0-18-amd64', hidden: false });
+
+  const hidden = hardware.normalizeProfile({ kernel: { src: 'custom', hidden: true } });
+  assert.deepStrictEqual(hidden.value.kernel, { src: 'custom', hidden: true });
+
+  // 内核版本不允许预设枚举，避免 pseudo-precise 的假档位
+  assert.strictEqual(hardware.normalizeProfile({ kernel: { src: 'enum', value: '6.1' } }).ok, false);
+  assert.strictEqual(hardware.normalizeProfile({ kernel: { src: 'custom', text: '<6.1>' } }).ok, false);
+  assert.strictEqual(hardware.normalizeProfile({ kernel: { src: 'custom', text: 'x'.repeat(33) } }).ok, false);
+});
+
+test('publicFields：内核版本随字段隐藏 / 全局开关输出空值', () => {
+  const profile = { kernel: { src: 'custom', text: '6.1.0-18-amd64', hidden: false } };
+  const visible = hardware.publicFields({ hw_profile: JSON.stringify(profile) }, true);
+  assert.strictEqual(visible.kernel_version, '6.1.0-18-amd64');
+
+  const hidden = hardware.publicFields(
+    { hw_profile: JSON.stringify({ kernel: { src: 'custom', text: '6.1.0-18-amd64', hidden: true } }) },
+    true
+  );
+  assert.strictEqual(hidden.kernel_version, '');
+
+  const off = hardware.publicFields({ hw_profile: JSON.stringify(profile) }, false);
+  assert.strictEqual(off.kernel_version, '');
+});
+
 test('parseProfile：损坏 JSON 按未填写处理，不影响节点列表', () => {
   assert.deepStrictEqual(hardware.parseProfile('{bad json'), {});
   assert.deepStrictEqual(hardware.parseProfile(''), {});
@@ -119,7 +148,7 @@ test('publicFields：全局开关关闭时全部为空', () => {
     hw_profile: JSON.stringify({ cpu: { src: 'custom', text: 'Intel i5' }, gpu: { src: 'enum', value: '核显' } })
   };
   const f = hardware.publicFields(a, false);
-  assert.deepStrictEqual(f, { cpu_name: '', arch: '', virtualization: '', gpu_name: '' });
+  assert.deepStrictEqual(f, { cpu_name: '', arch: '', virtualization: '', gpu_name: '', kernel_version: '' });
 });
 
 test('DB round-trip：创建/更新写入档案，局部更新不抹掉', () => {
@@ -166,6 +195,17 @@ test('compat.toNode：字段映射、GPU 占位与全局开关', () => {
   } finally {
     db.setUiSettings(before);
   }
+});
+
+test('compat / v1：内核版本映射（未填为空 / null）', () => {
+  const a = mkAgent({ name: 'hw-kernel' });
+  const row = setProfile(a, { kernel: { src: 'custom', text: '6.1.0-18-amd64' } });
+  assert.strictEqual(compat.toNode(row, true, undefined, undefined, true).kernel_version, '6.1.0-18-amd64');
+  assert.strictEqual(v1.toNode(row, true, undefined, true).kernel, '6.1.0-18-amd64');
+
+  const empty = mkAgent({ name: 'hw-kernel-empty' });
+  assert.strictEqual(compat.toNode(empty, true, undefined, undefined, true).kernel_version, '');
+  assert.strictEqual(v1.toNode(empty, true, undefined, true).kernel, null);
 });
 
 test('v1.toNode / CAPABILITY：标准字段与能力声明同步', () => {

@@ -1,18 +1,20 @@
 'use strict';
-// 管理员手工录入的硬件档案 —— 对齐 Komari 节点的 cpu_name / arch / virtualization / gpu_name
+// 管理员手工录入的硬件/系统档案 —— 对齐 Komari 节点的 cpu_name / arch / virtualization / gpu_name / kernel_version
 //
 // 安全口径（README.md / docs/security.md 同步）：
 //   - 受控端**不自动采集**任何个体级硬件指纹；本模块只做「管理员手填值的校验与合成」。
 //   - 默认粒度切在「厂商 + 代际」：同一分组可能横跨多个微架构，「同分组 = 同漏洞面」不成立。
 //   - 管理员可自愿「手填」任意文本（≤32 字符），等同于自愿公开；「隐藏」只影响公开出口。
+//   - 内核版本没有「代际」粒度：只支持手填 / 不填 / 隐藏，且它可直接匹配 CVE，属最高敏感项。
 //   - 全局开关 ui_settings.public_show_hardware 关闭时，所有公开出口一律输出空值。
 //
 // 存储：agents.hw_profile 单列 JSON（'' / '{}' = 未填写）。
 // {
-//   "cpu":  { "src": "enum",   "vendor": "Intel", "tag": "第11代", "hidden": true },
-//   "arch": { "src": "custom", "text": "x86_64", "hidden": false },
-//   "virt": { "src": "enum",   "value": "KVM", "hidden": false },
-//   "gpu":  { "src": "enum",   "value": "核显", "hidden": false }
+//   "cpu":    { "src": "enum",   "vendor": "Intel", "tag": "第11代", "hidden": true },
+//   "arch":   { "src": "custom", "text": "x86_64", "hidden": false },
+//   "virt":   { "src": "enum",   "value": "KVM", "hidden": false },
+//   "gpu":    { "src": "enum",   "value": "核显", "hidden": false },
+//   "kernel": { "src": "custom", "text": "6.1.0-18-amd64", "hidden": false }
 // }
 //
 // 四态语义：字段不存在 = 未设置；src=enum = 预设；src=custom = 手填；
@@ -37,7 +39,7 @@ const VIRTUALIZATIONS = ['物理机', 'KVM', 'VMware', 'Hyper-V', 'LXC', 'Docker
 // 且 diting 没有 GPU 使用率数据源，填了也只有名称没有曲线。
 const GPU_TYPES = ['核显', '独显'];
 
-const FIELD_KEYS = ['cpu', 'arch', 'virt', 'gpu'];
+const FIELD_KEYS = ['cpu', 'arch', 'virt', 'gpu', 'kernel'];
 const MAX_TEXT = 32;
 const MAX_JSON = 2048;
 
@@ -79,6 +81,15 @@ function normalizeField(key, v) {
     const tag = String(v.tag == null ? '' : v.tag).trim();
     if (tag && !(CPU_TAGS_BY_VENDOR[vendor] || []).includes(tag)) return { ok: false, error: 'invalid_cpu_tag' };
     return { ok: true, value: { src, vendor, tag, hidden } };
+  }
+
+  // 内核版本没有「代际」粒度：只接受手填，不接受预设（避免给出 pseudo-precise 的假档位）。
+  if (key === 'kernel') {
+    if (src !== 'custom') return { ok: false, error: 'invalid_kernel_src' };
+    const text = normalizeText(v.text);
+    if (text === null) return { ok: false, error: 'invalid_kernel_text' };
+    if (!text) return empty();
+    return { ok: true, value: { src: 'custom', text, hidden } };
   }
 
   const list = key === 'arch' ? ARCHS : key === 'virt' ? VIRTUALIZATIONS : GPU_TYPES;
@@ -177,7 +188,10 @@ function publicFields(agent, showHardware) {
   let gpuName = '';
   if (visible && p.gpu && !p.gpu.hidden) gpuName = p.gpu.src === 'custom' ? p.gpu.text : p.gpu.value;
 
-  return { cpu_name: cpuName, arch, virtualization, gpu_name: gpuName };
+  let kernelVersion = '';
+  if (visible && p.kernel && !p.kernel.hidden) kernelVersion = p.kernel.text || '';
+
+  return { cpu_name: cpuName, arch, virtualization, gpu_name: gpuName, kernel_version: kernelVersion };
 }
 
 // 候选清单：服务端单一事实源（D4），前端下拉经 API 取，不前后端各存一份。

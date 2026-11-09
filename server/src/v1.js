@@ -61,9 +61,9 @@ function toNode(a, showBusiness, octx, showHardware) {
     uuid: a.id,
     name: a.name,
     os: a.os || null,
-    // 内核版本是红线字段（diting 不采集）：此前错误地用 hostname 冒充，主题会当成内核版本显示。
-    // 保持 null，绝不回填。
-    kernel: null,
+    // 内核版本：管理员手工录入（受控端不采集），未填写/隐藏/全局关闭时为 null。
+    // 绝不回填 hostname 冒充。
+    kernel: hw.kernel_version || null,
     // 主机名原本就经 kernel 字段泄露，现独立成字段（暴露面不变，语义正确）
     hostname: a.hostname || null,
     // CPU 核心数：agents.cores 真实采集值（0 = 未上报 → null，不猜默认值）

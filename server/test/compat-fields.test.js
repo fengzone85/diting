@@ -5,12 +5,12 @@
 //
 // 断言要点：
 //   1. cpu_cores 取 agents.cores 真实值（未上报为 0）
-//   2. kernel_version 恒为 ''（回归锁死：绝不能再等于 hostname）
+//   2. kernel_version 未填写时为空串（回归锁死：绝不能再等于 hostname）
 //   3. 实时态 process / 扁平态 temp、process 取 metrics 真实值
 //   4. 价格/周期/币种换算口径（diting ↔ Komari）
 //   5. billing_cycle = 0（白嫖/一次性）不被 || 30 吞掉
 //   6. CAPABILITY.cpu_cores = true
-//   7. 标准 API：kernel = null，hostname 独立字段，cpu_cores 有值
+//   7. 标准 API：未填 kernel = null，hostname 独立字段，cpu_cores 有值
 //   8. chartDashboardTemplate.cards 去掉无数据源的三张图
 // ============================================================
 process.env.DB_PATH = ':memory:';
@@ -59,7 +59,7 @@ test('cpu_cores 取 agents.cores 真实值，未上报为 0', () => {
   assert.strictEqual(compat.toNode(noCores, true).cpu_cores, 0);
 });
 
-test('kernel_version 恒为空串，绝不等于 hostname（回归锁死）', () => {
+test('kernel_version 未填写时为空串，绝不等于 hostname（回归锁死）', () => {
   const a = db.getAgent(A.id);
   assert.strictEqual(a.hostname, 'node-alpha');
   assert.strictEqual(compat.toNode(a, true).kernel_version, '');

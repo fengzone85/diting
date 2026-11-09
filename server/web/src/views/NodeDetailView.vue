@@ -17,6 +17,7 @@ import { formatBytes, formatBitsPerSecond, formatDuration, formatPercent, format
 import {
   Cpu,
   Computer,
+  Code,
   Timer,
   Server,
   Memory,
@@ -580,6 +581,10 @@ onMounted(load);
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><Computer :size="14" /><span>{{ t('node.os') }}</span></span>
                   <span class="truncate text-xs sm:text-sm text-content">{{ agent.os || '—' }}</span>
+                </div>
+                <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
+                  <span class="flex gap-1 items-center text-xs text-muted-foreground"><Code :size="14" /><span>{{ t('node.kernel') }}</span></span>
+                  <span class="truncate text-xs sm:text-sm text-content">{{ agent.kernel_version || '—' }}</span>
                 </div>
                 <div class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground"><Timer :size="14" /><span>{{ t('node.metric.uptime') }}</span></span>

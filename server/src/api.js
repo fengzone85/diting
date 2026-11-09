@@ -655,8 +655,8 @@ router.get('/public/agents', (req, res) => {
       os: (m && m.os) ? m.os : (a.os || ''),
       // CPU 核心数（agents.cores，S1/T18 采集；0 = 未上报，前端据此显示「—」）
       cores: Number(a.cores) || 0,
-      // 硬件档案（管理员手工录入，受控端不自动采集）：cpu_name/arch/virtualization/gpu_name。
-      // 未填写或隐藏时为空串；GPU 空串 = 无（原生页不渲染该条目）。
+      // 硬件/系统档案（管理员手工录入，受控端不自动采集）：
+      // cpu_name/arch/virtualization/gpu_name/kernel_version。未填写或隐藏时为空串。
       ...hardware.publicFields(a, showHw),
       probes: m ? (m.probes || '') : '',
       hostname: online ? shortHost(a.hostname) : '',

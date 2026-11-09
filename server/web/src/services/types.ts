@@ -1,6 +1,6 @@
 // ---- 硬件档案（管理员手工录入；受控端不自动采集）----
 // 四态：字段不存在 = 未填写；src=enum = 预设；src=custom = 手填；hidden=true = 隐藏。
-export type HardwareFieldKey = 'cpu' | 'arch' | 'virt' | 'gpu';
+export type HardwareFieldKey = 'cpu' | 'arch' | 'virt' | 'gpu' | 'kernel';
 
 export interface HardwareField {
   src: 'enum' | 'custom';

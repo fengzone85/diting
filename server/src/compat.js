@@ -115,9 +115,9 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 物理核心数需受控端探测（红线不采），恒 0 = 未知
     cpu_physical_cores: 0,
     os: a.os || '',
-    // 内核版本是红线字段（diting 不采集）：此前错误地用 hostname 冒充，主题会把它当内核版本显示。
-    // 保持空串，绝不回填 hostname。
-    kernel_version: '',
+    // 内核版本：管理员手工录入（受控端不采集），未填写/隐藏/全局关闭时为空串。
+    // 绝不回填 hostname 冒充。
+    kernel_version: hw.kernel_version,
     // Komari 约定：无 GPU 时 gpu_name = 'None'（Glassmorphism 据此整行隐藏）
     gpu_name: hw.gpu_name || 'None',
     region: flagEmoji(a.country),
