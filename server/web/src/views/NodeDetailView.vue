@@ -632,7 +632,7 @@ onUnmounted(() => {
         <RouterLink
           to="/"
           class="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-sky-400 transition-colors hover:text-sky-300"
-        >← {{ t('node.backHome') }}</RouterLink>
+        ><ArrowLeft :size="16" />{{ t('node.backHome') }}</RouterLink>
         <button
           class="glass flex h-8 w-8 items-center justify-center rounded-lg"
           :title="favorite ? t('node.unfavorite') : t('node.favorite')"
@@ -640,6 +640,7 @@ onUnmounted(() => {
         >
           <Star :size="16" :fill="favorite ? 'currentColor' : 'none'" :class="favorite ? 'text-amber-300' : 'text-slate-400'" />
         </button>
+        <!-- 方向指示统一使用 icon-park 绘制图标（与「返回首页」一致），不用 ← / → 文字字符 -->
         <div class="glass ml-auto flex items-center gap-1 rounded-lg p-1">
           <button
             class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
@@ -647,7 +648,7 @@ onUnmounted(() => {
             :title="t('node.prevNode')"
             @click="prevNode && goNode(prevNode.id)"
           >
-            <ArrowLeft :size="15" />
+            <ArrowLeft :size="16" />
           </button>
           <select
             :value="agentId"
@@ -663,7 +664,7 @@ onUnmounted(() => {
             :title="t('node.nextNode')"
             @click="nextNode && goNode(nextNode.id)"
           >
-            <ArrowRight :size="15" />
+            <ArrowRight :size="16" />
           </button>
         </div>
       </div>
@@ -848,7 +849,7 @@ onUnmounted(() => {
           <!-- 六图时间范围切换：只影响 CPU/内存/磁盘IO/负载/温度/swap 的显示范围；
                磁盘耗尽预测固定用 30d 基线，不随此切换变化，避免 ETA 抖动。 -->
           <div class="mb-2 flex flex-wrap items-center gap-2">
-            <span class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"><Time :size="16" />{{ t('node.chart.range') }}</span>
+            <span class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">{{ t('node.chart.range') }}</span>
             <button
               v-for="r in CHART_RANGES"
               :key="r"
@@ -857,14 +858,14 @@ onUnmounted(() => {
               class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
               :class="{ 'is-active': chartRange === r }"
               :disabled="loading"
-            ><Time :size="16" />{{ t('node.range.' + r) }}</button>
+            >{{ t('node.range.' + r) }}</button>
             <button
               type="button"
               class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
               :class="{ 'is-active': chartRange === 'custom' }"
               :disabled="loading"
               @click="openCustom('chart')"
-            ><Time :size="16" />{{ t('node.range.custom') }}</button>
+            >{{ t('node.range.custom') }}</button>
           </div>
 
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1010,13 +1011,13 @@ onUnmounted(() => {
               @click="switchRange(r)"
               class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
               :class="{ 'is-active': currentRange === r }"
-            ><Time :size="16" />{{ t('node.range.' + r) }}</button>
+            >{{ t('node.range.' + r) }}</button>
             <button
               type="button"
               @click="openCustom('probes')"
               class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
               :class="{ 'is-active': currentRange === 'custom' }"
-            ><Time :size="16" />{{ t('node.range.custom') }}</button>
+            >{{ t('node.range.custom') }}</button>
           </div>
           <!-- 探测目标横排精简卡：只保留「名称 + 平均延迟」，hover / 键盘聚焦展开完整统计 -->
           <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
