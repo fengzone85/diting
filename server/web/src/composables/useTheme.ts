@@ -4,28 +4,42 @@ import { state, loadMeta } from '../composables/useApp';
 type Theme = 'auto' | 'light' | 'dark';
 const STORAGE_KEY = 'diting-theme';
 
-// 内置兜底背景（未配置任何背景时启用），随主题切换让毛玻璃更明显
+// 内置兜底背景（未配置任何背景时启用）：对齐 Glassmorphism 的多层 aurora 光斑。
+// 暗色深靛黑底 + 紫/靛/青/洋红四角柔光；亮色浅冷白底 + 蓝紫/粉/青柔光。
+// 与 main.css 的 body 渐变、TemplateView 的默认背景保持同色系（三处口径一致）。
 const BG_DARK_FALLBACK =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
-    "<defs><radialGradient id='g' cx='25%' cy='15%' r='130%'>" +
-    "<stop offset='0' stop-color='#3b2a6b'/>" +
-    "<stop offset='45%' stop-color='#1b1640'/>" +
-    "<stop offset='100%' stop-color='#0a0a1a'/>" +
-    "</radialGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+    "<defs>" +
+    "<radialGradient id='a'><stop offset='0' stop-color='#7c3aed' stop-opacity='.55'/><stop offset='1' stop-color='#7c3aed' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='b'><stop offset='0' stop-color='#3b6bff' stop-opacity='.45'/><stop offset='1' stop-color='#3b6bff' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='c'><stop offset='0' stop-color='#14b8a6' stop-opacity='.35'/><stop offset='1' stop-color='#14b8a6' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='d'><stop offset='0' stop-color='#a855f7' stop-opacity='.28'/><stop offset='1' stop-color='#a855f7' stop-opacity='0'/></radialGradient>" +
+    "</defs>" +
+    "<rect width='1920' height='1080' fill='#070b18'/>" +
+    "<ellipse cx='300' cy='120' rx='950' ry='760' fill='url(#a)'/>" +
+    "<ellipse cx='1750' cy='180' rx='820' ry='640' fill='url(#b)'/>" +
+    "<ellipse cx='1580' cy='1010' rx='900' ry='720' fill='url(#c)'/>" +
+    "<ellipse cx='160' cy='980' rx='720' ry='600' fill='url(#d)'/>" +
+    "</svg>"
   );
 const BG_LIGHT_FALLBACK =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
     "<defs>" +
-    "<radialGradient id='g' cx='22%' cy='12%' r='40%'>" +
-    "<stop offset='0' stop-color='#dff3f0'/>" +
-    "<stop offset='100%' stop-color='#eef2f5'/>" +
-    "</radialGradient></defs>" +
-    "<rect width='1920' height='1080' fill='#eef2f5'/>" +
-    "<rect width='1920' height='1080' fill='url(#g)'/></svg>"
+    "<radialGradient id='a'><stop offset='0' stop-color='#a78bfa' stop-opacity='.55'/><stop offset='1' stop-color='#a78bfa' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='b'><stop offset='0' stop-color='#f472b6' stop-opacity='.42'/><stop offset='1' stop-color='#f472b6' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='c'><stop offset='0' stop-color='#67e8f9' stop-opacity='.50'/><stop offset='1' stop-color='#67e8f9' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='d'><stop offset='0' stop-color='#c7d2fe' stop-opacity='.60'/><stop offset='1' stop-color='#c7d2fe' stop-opacity='0'/></radialGradient>" +
+    "</defs>" +
+    "<rect width='1920' height='1080' fill='#eef2f9'/>" +
+    "<ellipse cx='240' cy='60' rx='1000' ry='780' fill='url(#d)'/>" +
+    "<ellipse cx='1780' cy='140' rx='800' ry='620' fill='url(#b)'/>" +
+    "<ellipse cx='1620' cy='1020' rx='880' ry='700' fill='url(#c)'/>" +
+    "<ellipse cx='420' cy='260' rx='760' ry='620' fill='url(#a)'/>" +
+    "</svg>"
   );
 
 function getInitialTheme(): Theme {
@@ -92,11 +106,12 @@ function applyBackground() {
   const bgDark = (m && m.background_dark) || (m && m.background) || null;
   const bgLight = (m && m.background_light) || null;
   let bg = isLight ? (bgLight || bgDark) : bgDark;
-  // 兜底：未配置背景时，按主题注入内置蓝紫渐变，使毛玻璃卡片始终有色彩衬托
+  // 兜底：未配置背景时注入内置 aurora 光斑，使毛玻璃卡片始终有色彩衬托。
+  // overlay 从 20/22 降到 10/8：新光斑本身已柔和，过厚遮罩会把色彩压回灰蒙蒙一片。
   if (!bg || !bg.enabled || !bg.url) {
     bg = isLight
-      ? { enabled: true, type: 'image', url: BG_LIGHT_FALLBACK, blur: 0, overlay: 22 }
-      : { enabled: true, type: 'image', url: BG_DARK_FALLBACK, blur: 0, overlay: 20 };
+      ? { enabled: true, type: 'image', url: BG_LIGHT_FALLBACK, blur: 0, overlay: 8 }
+      : { enabled: true, type: 'image', url: BG_DARK_FALLBACK, blur: 0, overlay: 10 };
   }
   if (bg && bg.enabled && bg.url) {
     if (!layer) {

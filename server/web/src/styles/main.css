@@ -135,10 +135,14 @@
 }
 
 [data-theme="light"] body {
-  /* 对齐 komari glassmorphism 亮色配方：干净浅灰蓝底 + 顶部极淡青光晕 */
+  /* 对齐 Glassmorphism 亮色 aurora：浅冷白底 + 紫/粉/青柔光，让 68% 半透明白卡
+     透出色彩层次（原先单一极淡青光晕几乎看不出）。与 BG_LIGHT_FALLBACK 同色系。 */
   background:
-    radial-gradient(circle at 50% 0%, rgb(16 185 129 / .06), transparent 40%),
-    #eef2f5;
+    radial-gradient(ellipse 68% 58% at 10% 0%, rgb(167 139 250 / .30), transparent 70%),
+    radial-gradient(ellipse 58% 50% at 92% 8%, rgb(244 114 182 / .22), transparent 68%),
+    radial-gradient(ellipse 62% 55% at 85% 96%, rgb(103 232 249 / .30), transparent 70%),
+    radial-gradient(ellipse 55% 48% at 4% 88%, rgb(199 210 254 / .34), transparent 70%),
+    #eef2f9;
   background-attachment: fixed;
   color: var(--text-primary);
 }
@@ -299,13 +303,15 @@ body {
 }
 
 body {
-  /* 基于 vps.zhreed.com / komari Glassmorphism 暗色配方，适度增强背景光斑，
-     让 82% 不透明度的玻璃卡片也能透出层次 */
+  /* 对齐 Glassmorphism 暗色 aurora：深靛黑底 + 紫/靛/青/洋红四角柔光。
+     原先灰蓝光斑偏浊、底色半透明，卡片叠上去层次不足；这里加深底色并提高
+     光斑饱和度，与 BG_DARK_FALLBACK 同色系（三处口径一致）。 */
   background:
-    radial-gradient(circle at 50% 20%, rgb(148 163 184 / .18), transparent 42%),
-    radial-gradient(circle at 82% 78%, rgb(99 102 241 / .16), transparent 38%),
-    radial-gradient(circle at 18% 88%, rgb(20 184 166 / .10), transparent 34%),
-    #0f172ab8;
+    radial-gradient(ellipse 70% 60% at 12% 6%, rgb(124 58 237 / .34), transparent 70%),
+    radial-gradient(ellipse 58% 52% at 90% 12%, rgb(59 107 255 / .26), transparent 68%),
+    radial-gradient(ellipse 62% 56% at 84% 94%, rgb(20 184 166 / .18), transparent 70%),
+    radial-gradient(ellipse 52% 46% at 6% 92%, rgb(168 85 247 / .13), transparent 70%),
+    #070b18;
   background-attachment: fixed;
   color: var(--text-primary);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
@@ -376,6 +382,15 @@ body {
 @supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
   .glass { background-color: var(--bg-secondary) !important; }
   .card-metric { background: var(--bg-surface) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+}
+
+/* 网络质量探测目标详情浮层：默认只显示「名称 + 平均延迟」，hover / 键盘聚焦才展开。
+   用显式选择器而非 Tailwind v4 的命名组变体（其生成 :is(:where(.group/x):hover *) 在
+   嵌套 glass 容器内实测未匹配）；无 layer 的普通声明优先于 @layer utilities 里的 opacity-0。 */
+.probe-chip:hover .probe-tip,
+.probe-chip:focus .probe-tip,
+.probe-chip:focus-within .probe-tip {
+  opacity: 1;
 }
 
 /* komari 风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */

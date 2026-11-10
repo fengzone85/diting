@@ -44,27 +44,42 @@ const dirty = ref(false);
 const defaultDark = ['#0a0e16cc', '145%', '14px', '#ffffff2e', '0 8px 30px #0000007a'];
 const defaultLight = ['#f1f5f9cc', '145%', '14px', '#e2e8f0ad', '0 8px 28px #0f172a2e'];
 
-// 内置默认背景：暗色深蓝紫渐变、亮色蓝紫渐变，让毛玻璃卡片透出色彩更明显。
-// 均为 SVG data URI（isSafeImageUrl 白名单允许），配合 80% 不透明卡片可在透明态下清晰阅读。
+// 内置默认背景：对齐 Glassmorphism 的多层 aurora 光斑，与 useTheme 的兜底 SVG、
+// main.css 的 body 渐变同色系（三处口径一致，避免「恢复默认」后又变回旧背景）。
+// 均为 SVG data URI（isSafeImageUrl 白名单允许），配合 80% 不透明卡片可清晰阅读。
 const BG_DARK =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
-    "<defs><radialGradient id='g' cx='25%' cy='15%' r='130%'>" +
-    "<stop offset='0' stop-color='#3b2a6b'/>" +
-    "<stop offset='45%' stop-color='#1b1640'/>" +
-    "<stop offset='100%' stop-color='#0a0a1a'/>" +
-    "</radialGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+    "<defs>" +
+    "<radialGradient id='a'><stop offset='0' stop-color='#7c3aed' stop-opacity='.55'/><stop offset='1' stop-color='#7c3aed' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='b'><stop offset='0' stop-color='#3b6bff' stop-opacity='.45'/><stop offset='1' stop-color='#3b6bff' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='c'><stop offset='0' stop-color='#14b8a6' stop-opacity='.35'/><stop offset='1' stop-color='#14b8a6' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='d'><stop offset='0' stop-color='#a855f7' stop-opacity='.28'/><stop offset='1' stop-color='#a855f7' stop-opacity='0'/></radialGradient>" +
+    "</defs>" +
+    "<rect width='1920' height='1080' fill='#070b18'/>" +
+    "<ellipse cx='300' cy='120' rx='950' ry='760' fill='url(#a)'/>" +
+    "<ellipse cx='1750' cy='180' rx='820' ry='640' fill='url(#b)'/>" +
+    "<ellipse cx='1580' cy='1010' rx='900' ry='720' fill='url(#c)'/>" +
+    "<ellipse cx='160' cy='980' rx='720' ry='600' fill='url(#d)'/>" +
+    "</svg>"
   );
 const BG_LIGHT =
   "data:image/svg+xml," +
   encodeURIComponent(
     "<svg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080'>" +
-    "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>" +
-    "<stop offset='0' stop-color='#c9d6ff'/>" +
-    "<stop offset='50%' stop-color='#e0c3fc'/>" +
-    "<stop offset='100%' stop-color='#f5d9ff'/>" +
-    "</linearGradient></defs><rect width='1920' height='1080' fill='url(#g)'/></svg>"
+    "<defs>" +
+    "<radialGradient id='a'><stop offset='0' stop-color='#a78bfa' stop-opacity='.55'/><stop offset='1' stop-color='#a78bfa' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='b'><stop offset='0' stop-color='#f472b6' stop-opacity='.42'/><stop offset='1' stop-color='#f472b6' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='c'><stop offset='0' stop-color='#67e8f9' stop-opacity='.50'/><stop offset='1' stop-color='#67e8f9' stop-opacity='0'/></radialGradient>" +
+    "<radialGradient id='d'><stop offset='0' stop-color='#c7d2fe' stop-opacity='.60'/><stop offset='1' stop-color='#c7d2fe' stop-opacity='0'/></radialGradient>" +
+    "</defs>" +
+    "<rect width='1920' height='1080' fill='#eef2f9'/>" +
+    "<ellipse cx='240' cy='60' rx='1000' ry='780' fill='url(#d)'/>" +
+    "<ellipse cx='1780' cy='140' rx='800' ry='620' fill='url(#b)'/>" +
+    "<ellipse cx='1620' cy='1020' rx='880' ry='700' fill='url(#c)'/>" +
+    "<ellipse cx='420' cy='260' rx='760' ry='620' fill='url(#a)'/>" +
+    "</svg>"
   );
 
 // 把 rgba / #rrggbbaa 字符串解析为 {hex, alpha}
