@@ -49,8 +49,8 @@ const probesAll = (db, sinceTs, maxPoints) =>
 // 为什么单独提供：公开端点 /public/agents/:id/probes 走的是**单节点**窗口，
 // 30d 窗口下 SQL 采样 + JSON.parse 仍会占用主线程数百毫秒；
 // 放进 worker 后主线程只做聚合，事件循环不再被拖住。
-const probesOne = (db, agentId, sinceTs, maxPoints) =>
-  merge.probesOne(db, agentId, sinceTs, maxPoints);
+const probesOne = (db, agentId, sinceTs, maxPoints, untilTs) =>
+  merge.probesOne(db, agentId, sinceTs, maxPoints, untilTs);
 
 module.exports = {
   LOAD_COLS, loadOne, loadAll, sparklinesAllSampled, clusterAvg, diskTrendAll, probesAll, probesOne

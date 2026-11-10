@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed, ref, markRaw } from 'vue';
+import { onMounted, onUnmounted, computed, ref, markRaw, watch } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import AppHeader from '../components/AppHeader.vue';
 import ChartLatency from '../components/ChartLatency.vue';
@@ -89,6 +89,8 @@ const customStart = ref('');
 const customEnd = ref('');
 const customChart = ref<{ start: string; end: string } | null>(null);
 const customProbes = ref<{ start: string; end: string } | null>(null);
+// 组件存活标志：startRealtime 的 await 期间可能已卸载/切换节点，防止卸载后仍启动定时器。
+let alive = true;
 
 const agent = computed(() => state.agents.find(a => a.id === agentId.value));
 
@@ -169,7 +171,8 @@ const remainingStatusClass: Record<string, string> = {
   normal: 'text-emerald-400',
 };
 
-// 硬件卡动态条目：架构/虚拟化/GPU/物理核心（无字段则显示 -；不对指纹字段扩展采集）
+// 硬件卡动态条目：架构/虚拟化/GPU（无字段则显示 -；不对指纹字段扩展采集）。
+// 核心数已并入上方 CPU 型号行，不再单独占一项。
 const hwDynamic = computed(() => {
   const a = agent.value;
   if (!a) return [];
@@ -415,8 +418,11 @@ function appendRealtime() {
 
 async function startRealtime() {
   stopRealtime();
-  const sl = await publicApi.sparklines(agentId.value, '1h');
-  rtRows.value = (sl?.[agentId.value] || []).slice(-40);
+  const id = agentId.value;
+  const sl = await publicApi.sparklines(id, '1h');
+  // 垫底请求返回时可能已切节点/切范围/卸载：不得写旧数据，更不得留下孤儿定时器。
+  if (!alive || id !== agentId.value || chartRange.value !== 'realtime') return;
+  rtRows.value = (sl?.[id] || []).slice(-40);
   appendRealtime();
   rtTimer = setInterval(appendRealtime, 10000);
 }
@@ -424,26 +430,36 @@ async function startRealtime() {
 async function loadSpark(range: string) {
   if (range === 'realtime') { await startRealtime(); return; }
   stopRealtime();
-  const sl = await publicApi.sparklines(agentId.value, range);
-  sparkRows.value = sl?.[agentId.value] || [];
+  const id = agentId.value;
+  // custom 复用已选窗口（节点切换后重载时原样恢复），不再把 'custom' 当 range 传给后端。
+  const win = range === 'custom' ? customChart.value : null;
+  if (range === 'custom' && !win) { sparkRows.value = []; return; }
+  const sl = await publicApi.sparklines(id, win ? undefined : range, win || undefined);
+  if (!alive || id !== agentId.value) return;
+  sparkRows.value = sl?.[id] || [];
 }
 
 async function load() {
   loading.value = true;
   error.value = null;
+  const id = agentId.value;
   try {
     // 图表数据按当前 chartRange 拉取；写入组件内 sparkRows，不用全局 state.sparklines
     //（会被首页 5s 轮询清空，见 sparkRows 注释）。
     await loadSpark(chartRange.value);
     // 磁盘耗尽预测固定用 30d 长窗口，避免短窗口噪声导致 ETA 剧烈抖动
     //（komari 仅 1d 留存，diting 有完整历史）。切 range 时不重拉这份。
-    const sl30 = await publicApi.sparklines(agentId.value, '30d');
-    sparkRows30d.value = sl30?.[agentId.value] || [];
+    const sl30 = await publicApi.sparklines(id, '30d');
+    if (!alive || id !== agentId.value) return;
+    sparkRows30d.value = sl30?.[id] || [];
     // 对齐 Komari：初始拉当前 range，后端按 max_points 降采样返回。
     await loadProbes(currentRange.value);
     // 在线时段独立于图表 range（固定 30 天）；失败不阻断整页
-    online.value = await publicApi.onlineHistory(agentId.value, 30).catch(() => null);
+    const oh = await publicApi.onlineHistory(id, 30).catch(() => null);
+    if (!alive || id !== agentId.value) return;
+    online.value = oh;
   } catch (e) {
+    if (!alive || id !== agentId.value) return;
     error.value = (e as Error).message || t('common.error');
   } finally {
     loading.value = false;
@@ -454,11 +470,13 @@ async function load() {
 async function switchChartRange(range: string) {
   if (range === 'custom') { openCustom('chart'); return; }
   if (range === chartRange.value) return;
+  const id = agentId.value;
   chartRange.value = range;
   loading.value = true;
   try {
     await loadSpark(range);
   } catch (e) {
+    if (!alive || id !== agentId.value) return;
     error.value = (e as Error).message || t('common.error');
   } finally {
     loading.value = false;
@@ -468,8 +486,12 @@ async function switchChartRange(range: string) {
 // 对齐 Komari 的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
 // 每段 range 各自保证点数合适（1h→600, 6h→1000, 12h→1200, 24h→1500, 7d→2000）。
 async function loadProbes(range: string) {
+  const id = agentId.value;
   const mp = RANGE_MAX_POINTS[range] ?? 3000;
-  const data = await publicApi.probesDetailed(agentId.value, range, mp);
+  // custom 复用已选窗口；'custom' 不是后端合法 range，不能直接透传。
+  const win = range === 'custom' ? customProbes.value : null;
+  const data = await publicApi.probesDetailed(id, win ? undefined : range, mp, win || undefined);
+  if (!alive || id !== agentId.value) return;
   probes.value = data?.series || {};
   availability.value = data?.availability || {};
 }
@@ -478,9 +500,11 @@ async function loadProbes(range: string) {
 function switchRange(range: string) {
   if (range === 'custom') { openCustom('probes'); return; }
   if (range === currentRange.value) return;
+  const id = agentId.value;
   currentRange.value = range;
   loading.value = true;
   loadProbes(range).catch((e) => {
+    if (!alive || id !== agentId.value) return;
     error.value = (e as Error).message || t('common.error');
   }).finally(() => {
     loading.value = false;
@@ -494,17 +518,27 @@ function toLocalInput(d: Date): string {
 }
 function openCustom(target: 'chart' | 'probes') {
   customTarget.value = target;
-  const end = new Date();
-  const start = new Date(end.getTime() - 24 * 3600 * 1000);
+  // 重开浮层时回填该图上次选中的窗口，避免明明显示「自定义」却跳回最近 24h。
+  const saved = target === 'chart' ? customChart.value : customProbes.value;
+  const end = saved ? new Date(saved.end) : new Date();
+  const start = saved ? new Date(saved.start) : new Date(end.getTime() - 24 * 3600 * 1000);
   customStart.value = toLocalInput(start);
   customEnd.value = toLocalInput(end);
   customOpen.value = true;
 }
+const CUSTOM_MAX_MS = 30 * 86400000;
 async function applyCustom() {
   const start = new Date(customStart.value);
   const end = new Date(customEnd.value);
-  if (!(end.getTime() > start.getTime())) {
+  const s = start.getTime();
+  const e = end.getTime();
+  if (!Number.isFinite(s) || !Number.isFinite(e) || !(e > s)) {
     error.value = t('node.custom.invalid');
+    return;
+  }
+  // 后端上限 30 天，前端先拦，避免把 400 原始错误直接甩给用户。
+  if (e - s > CUSTOM_MAX_MS) {
+    error.value = t('node.custom.tooLarge');
     return;
   }
   const range = { start: start.toISOString(), end: end.toISOString() };
@@ -512,22 +546,17 @@ async function applyCustom() {
   error.value = null;
   try {
     if (customTarget.value === 'chart') {
-      stopRealtime();
       customChart.value = range;
       chartRange.value = 'custom';
-      const sl = await publicApi.sparklines(agentId.value, undefined, range);
-      sparkRows.value = sl?.[agentId.value] || [];
+      await loadSpark('custom'); // 内部会 stopRealtime()
     } else {
       customProbes.value = range;
       currentRange.value = 'custom';
-      const mp = RANGE_MAX_POINTS['24h'];
-      const data = await publicApi.probesDetailed(agentId.value, undefined, mp, range);
-      probes.value = data?.series || {};
-      availability.value = data?.availability || {};
+      await loadProbes('custom');
     }
     customOpen.value = false;
-  } catch (e) {
-    error.value = (e as Error).message || t('common.error');
+  } catch (err) {
+    error.value = (err as Error).message || t('common.error');
   } finally {
     loading.value = false;
   }
@@ -571,8 +600,26 @@ const diskPredict = computed(() => {
   };
 });
 
+// /node/:id 是同一路由记录，App.vue 的 <RouterView /> 无 key ⇒ 组件实例会被复用。
+// 头部「上一个/下一个/下拉切换」只改 params，不会重跑 onMounted；必须显式重载全部时序数据，
+// 否则 URL 变了但六图/延迟/在线率仍是上一个节点的，实时模式还会把新节点快照混进旧历史。
+watch(agentId, () => {
+  if (!alive) return;
+  stopRealtime();
+  sparkRows.value = [];
+  rtRows.value = [];
+  sparkRows30d.value = [];
+  probes.value = {};
+  availability.value = {};
+  online.value = null;
+  load();
+});
+
 onMounted(load);
-onUnmounted(stopRealtime);
+onUnmounted(() => {
+  alive = false;
+  stopRealtime();
+});
 </script>
 
 <template>
@@ -606,7 +653,7 @@ onUnmounted(stopRealtime);
             :title="t('node.switchNode')"
             @change="goNode(($event.target as HTMLSelectElement).value)"
           >
-            <option v-for="n in nodeList" :key="n.id" :value="n.id">{{ n.name }}</option>
+            <option v-for="n in nodeList" :key="n.id" :value="n.id" class="bg-slate-800 text-content">{{ n.name }}</option>
           </select>
           <button
             class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
@@ -696,7 +743,7 @@ onUnmounted(stopRealtime);
                   {{ agent.cpu_name || t('node.unknown') }}<template v-if="(agent.cores || 0) > 0"> ({{ agent.cores }} vCPU)</template>
                 </span>
               </div>
-              <!-- 动态条目：架构/虚拟化/GPU/物理核心（按需渲染，无则显 -） -->
+              <!-- 动态条目：架构/虚拟化/GPU（核心数已并入上方 CPU 行） -->
               <div class="grid grid-cols-2 gap-1">
                 <div v-for="item in hwDynamic" :key="item.label" class="flex min-w-0 flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                   <span class="flex gap-1 items-center text-xs text-muted-foreground">

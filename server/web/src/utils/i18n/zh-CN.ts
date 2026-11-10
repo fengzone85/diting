@@ -795,6 +795,7 @@ export const zhCN: Record<string, string> = {
   'node.custom.end': '结束时间',
   'node.custom.apply': '应用',
   'node.custom.invalid': '结束时间必须晚于开始时间',
+  'node.custom.tooLarge': '时间范围不能超过 30 天',
   'node.cpuModel': 'CPU 型号',
   'node.cpuCores': '核心数',
   'node.arch': '架构',

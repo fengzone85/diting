@@ -421,9 +421,11 @@ function probeRows(db, { agentId, since, until, bucket, groupAgent }) {
   return groupAgent ? rows : rows.map(({ ts, probes }) => ({ ts, probes }));
 }
 
-const probesOne = (db, agentId, since, maxPoints) => {
-  const bucket = spanBucket(since, null, maxPoints);
-  return probeRows(db, { agentId, since, until: null, bucket, groupAgent: false });
+// until 可选：自定义历史窗口必须把上界下推到 SQL，否则会扫描并解析窗口结束后的
+// 全部 probes 行，且桶宽按 (now - since) 反推会把窗口内数据稀释成很少几个点。
+const probesOne = (db, agentId, since, maxPoints, until) => {
+  const bucket = spanBucket(since, until, maxPoints);
+  return probeRows(db, { agentId, since, until: until == null ? null : Number(until), bucket, groupAgent: false });
 };
 
 const probesAll = (db, since, maxPoints) => {

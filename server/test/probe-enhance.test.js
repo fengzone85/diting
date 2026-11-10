@@ -269,3 +269,68 @@ test('时间范围：4h/12h 档位与自定义 start/end 生效', async () => {
   const tooWide = await request(app).get(`/api/public/agents/sparklines?id=${id}&start=${encodeURIComponent(new Date(now - 40 * 86400000).toISOString())}&end=${encodeURIComponent(new Date(now).toISOString())}`);
   assert.strictEqual(tooWide.status, 400);
 });
+
+test('自定义历史窗口：until 下推 SQL，点数不稀释、不混入窗口外数据', async () => {
+  const { id } = db.createAgent({ name: 'range-historic' });
+  const now = Date.now();
+  const since = now - 25 * 86400000;
+  const until = since + 86400000;
+  const step = 2 * 60000; // 窗口内 720 个点
+  const probes = JSON.stringify({ 公共: { ms: 10, ok: true } });
+  for (let ts = since; ts < until; ts += step) {
+    db.insertMetric(id, { ts, cpu: 50, mem_used: 10, mem_total: 100, probes });
+  }
+  // 窗口结束后（现在）再放一条：未下推 until 时会被扫描，并把末点覆盖成它再被结果层丢掉
+  db.insertMetric(id, {
+    ts: now, cpu: 999, mem_used: 10, mem_total: 100,
+    probes: JSON.stringify({ 公共: { ms: 99, ok: false } })
+  });
+  const q = `start=${encodeURIComponent(new Date(since).toISOString())}&end=${encodeURIComponent(new Date(until).toISOString())}`;
+
+  const sl = await request(app).get(`/api/public/agents/sparklines?id=${id}&${q}`);
+  assert.strictEqual(sl.status, 200);
+  const rows = sl.body[id] || [];
+  assert.ok(rows.length >= 500, `历史窗口点数不应被稀释，实际 ${rows.length}`);
+  assert.ok(rows.every((p) => p.ts >= since && p.ts <= until), 'sparklines 不得含窗口外点');
+  assert.ok(!rows.some((p) => p.cpu === 999), 'sparklines 不得混入窗口之后的点');
+  assert.ok(rows[rows.length - 1].ts > until - 10 * step, '末点必须落在窗口尾部');
+
+  const pr = await request(app).get(`/api/public/agents/${id}/probes?availability=1&${q}`);
+  assert.strictEqual(pr.status, 200);
+  const pts = (pr.body.series && pr.body.series['公共']) || [];
+  assert.ok(pts.length >= 500, `probes 历史窗口不应被稀释，实际 ${pts.length}`);
+  assert.ok(pts.every((p) => p.ts >= since && p.ts <= until), 'probes 不得含窗口外点');
+  assert.ok(!pts.some((p) => p.ms === 99), 'probes 不得混入窗口之后的点');
+
+  // 纯函数级对照：同一份数据，传 until 与不传 until 的桶宽差异必须体现出来
+  const withUntil = db.getMetricsProbesOne(id, since, 2000, until);
+  const noUntil = db.getMetricsProbesOne(id, since, 2000);
+  assert.ok(withUntil.length >= 500, `下推 until 后 probes 应保留密集点，实际 ${withUntil.length}`);
+  assert.ok(noUntil.length < 200, `不传 until 会按 (now-since) 定桶宽并稀释，实际 ${noUntil.length}`);
+  assert.ok(noUntil.some((r) => r.ts > until), '未下推 until 时会扫描到窗口结束之后的行');
+});
+
+test('自定义窗口参数校验：非法/不成对/倒序/超长一律 400，不静默回落', async () => {
+  const { id } = db.createAgent({ name: 'range-invalid' });
+  const now = Date.now();
+  const iso = (t) => encodeURIComponent(new Date(t).toISOString());
+  const start = iso(now - 3600000);
+  const end = iso(now);
+  const cases = [
+    `start=${start}`,                                 // 缺 end
+    `end=${end}`,                                     // 缺 start
+    `start=not-a-date&end=${end}`,                    // 非法 start
+    `start=${start}&end=not-a-date`,                  // 非法 end
+    `start=${end}&end=${start}`,                      // 倒序
+    `start=${iso(now - 40 * 86400000)}&end=${end}`,  // >30 天
+  ];
+  for (const q of cases) {
+    const sl = await request(app).get(`/api/public/agents/sparklines?id=${id}&${q}`);
+    assert.strictEqual(sl.status, 400, `sparklines 应拒绝: ${q}`);
+    const pr = await request(app).get(`/api/public/agents/${id}/probes?${q}`);
+    assert.strictEqual(pr.status, 400, `probes 应拒绝: ${q}`);
+  }
+  // 合法窗口仍 200（防校验过严把正常请求也挡掉）
+  const ok = await request(app).get(`/api/public/agents/sparklines?id=${id}&start=${start}&end=${end}`);
+  assert.strictEqual(ok.status, 200);
+});

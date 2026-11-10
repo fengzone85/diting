@@ -814,7 +814,7 @@ const resetAgentToken = (id) => {
 
 
 // 单节点探针 SQL 层采样（详情页延迟波形）：只返回 maxPoints 行，规避 9.5 万次 JSON.parse。
-const getMetricsProbesOne = (agentId, sinceTs, maxPoints) => merge.probesOne(db, agentId, sinceTs, maxPoints);
+const getMetricsProbesOne = (agentId, sinceTs, maxPoints, untilTs) => merge.probesOne(db, agentId, sinceTs, maxPoints, untilTs);
 
 // 全量探针：只取 ts/agent_id/probes 三列，并按 agent 时间桶降采样（每 agent 最多 maxPoints 点），
 // 规避 SELECT * 物化全列 + 330 万行全量读进内存触发 OOM（see getMetricsAll 教训）。

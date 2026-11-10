@@ -793,6 +793,7 @@ export const enUS: Record<string, string> = {
   'node.custom.end': 'End',
   'node.custom.apply': 'Apply',
   'node.custom.invalid': 'End time must be after start time',
+  'node.custom.tooLarge': 'Time range cannot exceed 30 days',
   'node.cpuModel': 'CPU Model',
   'node.cpuCores': 'Cores',
   'node.arch': 'Arch',
