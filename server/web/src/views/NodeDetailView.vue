@@ -19,6 +19,7 @@ import {
   Computer,
   Code,
   Timer,
+  Thermometer,
   Server,
   Memory,
   Switch,
@@ -72,6 +73,16 @@ const CHART_RANGES = ['realtime', '4h', '24h', '7d', '30d'];
 const chartRange = ref('realtime');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '4h': 800, '6h': 1000, '12h': 1200, '24h': 1500, '7d': 2000, '30d': 3000 };
+
+// 六图标题图标：markRaw 避免组件对象被 reactive 代理；颜色与各自曲线一致。
+const CHART_ICONS = {
+  cpu: markRaw(Cpu),
+  mem: markRaw(Memory),
+  diskIo: markRaw(HardDisk),
+  load: markRaw(DashboardOne),
+  temp: markRaw(Thermometer),
+  swap: markRaw(Switch),
+};
 
 // 实时模式：先用 1h 历史垫底，再每 10s 把 agent 快照追加到滚动窗口（保留 60 点）。
 const rtRows = ref<SparklinePoint[]>([]);
@@ -875,10 +886,12 @@ onUnmounted(() => {
           </div>
 
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <ChartLatency :title="t('node.chart.cpu')" :data="cpuSeries" color="#38bdf8" :current="cpuCurrent" />
-          <ChartLatency :title="t('node.chart.mem')" :data="memSeries" color="#a78bfa" :current="memCurrent" />
+          <ChartLatency :title="t('node.chart.cpu')" :icon="CHART_ICONS.cpu" icon-color="#38bdf8" :data="cpuSeries" color="#38bdf8" :current="cpuCurrent" />
+          <ChartLatency :title="t('node.chart.mem')" :icon="CHART_ICONS.mem" icon-color="#a78bfa" :data="memSeries" color="#a78bfa" :current="memCurrent" />
           <ChartLatencyDual
             :title="t('node.chart.diskIo')"
+            :icon="CHART_ICONS.diskIo"
+            icon-color="#22d3ee"
             :series="[
               { name: t('node.read'), data: diskReadSeries, color: '#22d3ee' },
               { name: t('node.write'), data: diskWriteSeries, color: '#c084fc' },
@@ -887,12 +900,14 @@ onUnmounted(() => {
           />
           <ChartLatency
             :title="isWindows ? t('node.chart.process') : t('node.chart.load')"
+            :icon="CHART_ICONS.load"
+            icon-color="#fb923c"
             :data="isWindows ? processSeries : loadSeries"
             color="#fb923c"
             :current="loadCurrent"
           />
-          <ChartLatency :title="t('node.chart.temp')" :data="tempSeries" color="#f87171" :current="tempCurrent" />
-          <ChartLatency :title="t('node.chart.swap')" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
+          <ChartLatency :title="t('node.chart.temp')" :icon="CHART_ICONS.temp" icon-color="#f87171" :data="tempSeries" color="#f87171" :current="tempCurrent" />
+          <ChartLatency :title="t('node.chart.swap')" :icon="CHART_ICONS.swap" icon-color="#fbbf24" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
         </div>
         </div>
 

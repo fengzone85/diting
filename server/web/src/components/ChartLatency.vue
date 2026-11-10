@@ -19,6 +19,9 @@ const props = defineProps<{
   color?: string;
   /** 卡片右上角的当前值（如 "18.2%"）；为空则不渲染 */
   current?: string;
+  /** 标题前的可选图标（icon-park 组件）；后台复用时不传，保持纯文字标题 */
+  icon?: unknown;
+  iconColor?: string;
 }>();
 
 const { colors } = useChartTheme();
@@ -106,7 +109,10 @@ onUnmounted(() => { ro?.disconnect(); chart?.dispose(); });
 <template>
   <div class="glass p-4">
     <div v-if="title || current" class="mb-3 flex items-baseline justify-between gap-2">
-      <h4 v-if="title" class="text-sm font-medium text-content">{{ title }}</h4>
+      <h4 v-if="title" class="flex items-center gap-1.5 text-sm font-medium text-content">
+        <component v-if="icon" :is="icon" :size="14" :style="iconColor ? { color: iconColor } : undefined" />
+        <span>{{ title }}</span>
+      </h4>
       <span v-if="current" class="truncate text-sm font-semibold tabular-nums text-content">{{ current }}</span>
     </div>
     <div ref="chartRef" class="h-48 w-full" />
