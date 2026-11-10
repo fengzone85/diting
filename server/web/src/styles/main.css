@@ -393,6 +393,21 @@ body {
   opacity: 1;
 }
 
+/* 统一小卡片：node 页顶部指标条、两组时间范围切换、首页分组标签共用。
+   尺寸/排布由模板里的 Tailwind utilities 提供（自定义裸规则会被构建链丢弃，
+   实测产物中只剩下方带 !important 的声明），这里只处理交互态。 */
+button.pill-card { cursor: pointer; }
+button.pill-card:disabled { opacity: 0.55; pointer-events: none; }
+/* 选中态：accent 淡染玻璃底 + 描边，替代原来的实心蓝胶囊，保持玻璃质感。
+   .glass / [data-theme=light] .glass 的背景都带 !important，故此处同样提升优先级。 */
+.pill-card.is-active,
+.pill-card.is-active:hover {
+  background-color: color-mix(in srgb, var(--accent) 20%, var(--glass-tint)) !important;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-border)) !important;
+  color: var(--accent) !important;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
 /* komari 风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */
 
 .card-hover {

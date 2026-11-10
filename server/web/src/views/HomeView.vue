@@ -416,7 +416,7 @@ const filteredAgents = computed(() => {
 
         <template v-else>
           <div v-for="group in groupOrder(groupedAgents)" :key="group" class="mb-6">
-            <h3 class="mb-3 text-sm font-semibold text-slate-400">{{ group }}</h3>
+            <h3 class="glass pill-card mb-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"><LayoutOne :size="16" />{{ group }}</h3>
             <!-- 简约卡片（默认） -->
             <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
               <NodeCardSimple

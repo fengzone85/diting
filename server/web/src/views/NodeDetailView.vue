@@ -695,17 +695,17 @@ onUnmounted(() => {
         <div class="space-y-6">
           <!-- 顶部信息条：对齐 glassmorphism 节点页顶部水平指标条 -->
           <div class="flex flex-wrap gap-3">
-            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+            <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
               <svg class="h-4 w-4 text-cyan-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.traffic') }}</span>
               <span class="text-sm font-semibold text-cyan-700">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
             </div>
-            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+            <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
               <svg class="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.quota') }}</span>
               <span class="text-sm font-semibold text-emerald-700">{{ agent.monthly_quota_gb != null ? formatBytes(agent.monthly_quota_gb * 1024 ** 3) : '∞' }}</span>
             </div>
-            <div class="glass flex items-center gap-2 rounded-xl px-3 py-2">
+            <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
               <svg class="h-4 w-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.uptime') }}</span>
               <span class="text-sm font-semibold text-indigo-700">{{ formatDuration(agent.uptime) }}</span>
@@ -847,25 +847,24 @@ onUnmounted(() => {
 
           <!-- 六图时间范围切换：只影响 CPU/内存/磁盘IO/负载/温度/swap 的显示范围；
                磁盘耗尽预测固定用 30d 基线，不随此切换变化，避免 ETA 抖动。 -->
-          <div class="mb-2 flex flex-wrap items-center gap-1">
-            <span class="mr-1 text-xs text-secondary">{{ t('node.chart.range') }}</span>
-            <div class="flex gap-1">
-              <button
-                v-for="r in CHART_RANGES"
-                :key="r"
-                @click="switchChartRange(r)"
-                class="rounded-lg px-2 py-1 text-xs transition-colors"
-                :class="[
-                  chartRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-secondary hover:bg-hover',
-                  loading ? 'opacity-60 pointer-events-none' : '',
-                ]"
-              >{{ t('node.range.' + r) }}</button>
-              <button
-                class="rounded-lg px-2 py-1 text-xs transition-colors"
-                :class="[chartRange === 'custom' ? 'bg-sky-500 text-white' : 'bg-surface text-secondary hover:bg-hover', loading ? 'opacity-60 pointer-events-none' : '']"
-                @click="openCustom('chart')"
-              >{{ t('node.range.custom') }}</button>
-            </div>
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"><Time :size="16" />{{ t('node.chart.range') }}</span>
+            <button
+              v-for="r in CHART_RANGES"
+              :key="r"
+              type="button"
+              @click="switchChartRange(r)"
+              class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
+              :class="{ 'is-active': chartRange === r }"
+              :disabled="loading"
+            ><Time :size="16" />{{ t('node.range.' + r) }}</button>
+            <button
+              type="button"
+              class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
+              :class="{ 'is-active': chartRange === 'custom' }"
+              :disabled="loading"
+              @click="openCustom('chart')"
+            ><Time :size="16" />{{ t('node.range.custom') }}</button>
           </div>
 
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -1004,18 +1003,20 @@ onUnmounted(() => {
         <div class="glass p-4">
           <h3 class="mb-3 text-lg font-semibold">{{ t('node.netQuality') }}</h3>
           <div class="mb-3 flex flex-wrap items-center gap-2">
-            <span
+            <button
               v-for="r in RANGES"
               :key="r"
+              type="button"
               @click="switchRange(r)"
-              class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
-              :class="currentRange === r ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
-            >{{ t('node.range.' + r) }}</span>
-            <span
+              class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
+              :class="{ 'is-active': currentRange === r }"
+            ><Time :size="16" />{{ t('node.range.' + r) }}</button>
+            <button
+              type="button"
               @click="openCustom('probes')"
-              class="cursor-pointer rounded-full px-3 py-1 text-xs transition-colors"
-              :class="currentRange === 'custom' ? 'bg-sky-500 text-white' : 'bg-surface text-muted hover:text-sky-300'"
-            >{{ t('node.range.custom') }}</span>
+              class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
+              :class="{ 'is-active': currentRange === 'custom' }"
+            ><Time :size="16" />{{ t('node.range.custom') }}</button>
           </div>
           <!-- 探测目标横排精简卡：只保留「名称 + 平均延迟」，hover / 键盘聚焦展开完整统计 -->
           <div class="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
