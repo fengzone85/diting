@@ -74,7 +74,7 @@ const chartRange = ref('realtime');
 // 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '4h': 800, '6h': 1000, '12h': 1200, '24h': 1500, '7d': 2000, '30d': 3000 };
 
-// 六图标题图标：markRaw 避免组件对象被 reactive 代理；颜色与各自曲线一致。
+// 六图标题图标：markRaw 避免组件对象被 reactive 代理；图标统一单色（继承标题文字色）。
 const CHART_ICONS = {
   cpu: markRaw(Cpu),
   mem: markRaw(Memory),
@@ -637,19 +637,19 @@ onUnmounted(() => {
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <RouterLink
           to="/"
-          class="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-sky-400 transition-colors hover:text-sky-300"
+          class="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-secondary transition-colors hover:text-content"
         ><ArrowLeft :size="16" />{{ t('node.backHome') }}</RouterLink>
         <button
           class="glass flex h-8 w-8 items-center justify-center rounded-lg"
           :title="favorite ? t('node.unfavorite') : t('node.favorite')"
           @click="toggleFavoriteNode(agentId)"
         >
-          <Star :size="16" :fill="favorite ? 'currentColor' : 'none'" :class="favorite ? 'text-amber-300' : 'text-slate-400'" />
+          <Star :size="16" :fill="favorite ? 'currentColor' : 'none'" :class="favorite ? 'text-content' : 'text-muted'" />
         </button>
         <!-- 方向指示统一使用 icon-park 绘制图标（与「返回首页」一致），不用 ← / → 文字字符 -->
         <div class="glass ml-auto flex items-center gap-1 rounded-lg p-1">
           <button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
+            class="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:text-content disabled:opacity-30"
             :disabled="!prevNode"
             :title="t('node.prevNode')"
             @click="prevNode && goNode(prevNode.id)"
@@ -665,7 +665,7 @@ onUnmounted(() => {
             <option v-for="n in nodeList" :key="n.id" :value="n.id" class="bg-slate-800 text-content">{{ n.name }}</option>
           </select>
           <button
-            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:text-sky-300 disabled:opacity-30"
+            class="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:text-content disabled:opacity-30"
             :disabled="!nextNode"
             :title="t('node.nextNode')"
             @click="nextNode && goNode(nextNode.id)"
@@ -703,28 +703,28 @@ onUnmounted(() => {
           <!-- 顶部信息条：对齐 glassmorphism 节点页顶部水平指标条 -->
           <div class="flex flex-wrap gap-3">
             <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
-              <svg class="h-4 w-4 text-cyan-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.traffic') }}</span>
               <span class="text-sm font-semibold text-cyan-700">{{ formatBytes((agent.net_rx_month || 0) + (agent.net_tx_month || 0)) }}</span>
             </div>
             <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
-              <svg class="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.quota') }}</span>
               <span class="text-sm font-semibold text-emerald-700">{{ agent.monthly_quota_gb != null ? formatBytes(agent.monthly_quota_gb * 1024 ** 3) : '∞' }}</span>
             </div>
             <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
-              <svg class="h-4 w-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
               <span class="text-xs text-muted">{{ t('node.metric.uptime') }}</span>
               <span class="text-sm font-semibold text-indigo-700">{{ formatDuration(agent.uptime) }}</span>
             </div>
             <!-- 分组 / 备注：原「备注与套餐」卡取消后并入顶部指标条 -->
             <div v-if="agent.group" class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
-              <svg class="h-4 w-4 text-violet-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
               <span class="text-xs text-muted">{{ t('node.group') }}</span>
               <span class="max-w-32 truncate text-sm font-semibold text-violet-700" :title="agent.group">{{ agent.group }}</span>
             </div>
             <div v-if="agent.note" class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
-              <svg class="h-4 w-4 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
               <span class="text-xs text-muted">{{ t('node.note') }}</span>
               <span class="max-w-40 truncate text-sm font-semibold text-amber-700" :title="agent.note">{{ agent.note }}</span>
             </div>
@@ -886,12 +886,12 @@ onUnmounted(() => {
           </div>
 
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <ChartLatency :title="t('node.chart.cpu')" :icon="CHART_ICONS.cpu" icon-color="#38bdf8" :data="cpuSeries" color="#38bdf8" :current="cpuCurrent" />
-          <ChartLatency :title="t('node.chart.mem')" :icon="CHART_ICONS.mem" icon-color="#a78bfa" :data="memSeries" color="#a78bfa" :current="memCurrent" />
+          <ChartLatency :title="t('node.chart.cpu')" :icon="CHART_ICONS.cpu" :data="cpuSeries" color="#38bdf8" :current="cpuCurrent" />
+          <ChartLatency :title="t('node.chart.mem')" :icon="CHART_ICONS.mem" :data="memSeries" color="#a78bfa" :current="memCurrent" />
           <ChartLatencyDual
             :title="t('node.chart.diskIo')"
             :icon="CHART_ICONS.diskIo"
-            icon-color="#22d3ee"
+           
             :series="[
               { name: t('node.read'), data: diskReadSeries, color: '#22d3ee' },
               { name: t('node.write'), data: diskWriteSeries, color: '#c084fc' },
@@ -901,13 +901,13 @@ onUnmounted(() => {
           <ChartLatency
             :title="isWindows ? t('node.chart.process') : t('node.chart.load')"
             :icon="CHART_ICONS.load"
-            icon-color="#fb923c"
+           
             :data="isWindows ? processSeries : loadSeries"
             color="#fb923c"
             :current="loadCurrent"
           />
-          <ChartLatency :title="t('node.chart.temp')" :icon="CHART_ICONS.temp" icon-color="#f87171" :data="tempSeries" color="#f87171" :current="tempCurrent" />
-          <ChartLatency :title="t('node.chart.swap')" :icon="CHART_ICONS.swap" icon-color="#fbbf24" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
+          <ChartLatency :title="t('node.chart.temp')" :icon="CHART_ICONS.temp" :data="tempSeries" color="#f87171" :current="tempCurrent" />
+          <ChartLatency :title="t('node.chart.swap')" :icon="CHART_ICONS.swap" :data="swapSeries" color="#fbbf24" :current="swapCurrent" />
         </div>
         </div>
 
@@ -916,7 +916,7 @@ onUnmounted(() => {
         <div v-if="online" class="glass p-5">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 class="flex items-center gap-2 text-base font-semibold text-content">
-              <svg class="h-4 w-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
               {{ t('node.onlineTitle') }}
             </h3>
             <span v-if="online.uptime_pct != null" class="text-sm text-muted">
@@ -960,7 +960,7 @@ onUnmounted(() => {
           <div v-if="diskPredict" class="glass p-5">
             <div class="mb-4 flex items-center justify-between">
               <h3 class="flex items-center gap-2 text-base font-semibold text-content">
-                <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
+                <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg>
                 {{ t('node.diskEta') }}
               </h3>
               <span

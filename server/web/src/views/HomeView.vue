@@ -236,18 +236,8 @@ const QUICK_ICONS = {
   highload: markRaw(SpeedOne),
   expiring: markRaw(Time),
 };
-const QUICK_TONES: Record<string, string> = {
-  fav: 'bg-amber-500/15 text-amber-300',
-  total: 'bg-sky-500/15 text-sky-300',
-  offline: 'bg-rose-500/15 text-rose-300',
-  highload: 'bg-orange-500/15 text-orange-300',
-  expiring: 'bg-violet-500/15 text-violet-300',
-};
 function quickIcon(key: string) {
   return (QUICK_ICONS as Record<string, unknown>)[key];
-}
-function quickTone(key: string) {
-  return QUICK_TONES[key] || 'bg-slate-500/15 text-slate-300';
 }
 const quickFilters = computed(() => {
   const ags = state.agents;
@@ -330,7 +320,7 @@ const filteredAgents = computed(() => {
           :class="activeQuick === q.key ? 'ring-1 ring-sky-400/70' : 'hover:ring-1 hover:ring-slate-500/40'"
           @click="activeQuick = activeQuick === q.key ? null : q.key"
         >
-          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" :class="quickTone(q.key)">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-500/15 text-secondary">
             <component :is="quickIcon(q.key)" :size="18" />
           </span>
           <span class="min-w-0">
@@ -345,7 +335,7 @@ const filteredAgents = computed(() => {
           <!-- 搜索：图标按钮（点击展开/收起输入框，Esc 收起） -->
           <button
             class="flex h-7 w-7 items-center justify-center rounded-lg border"
-            :class="searchOpen || searchInput ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :class="searchOpen || searchInput ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
             :title="t('public.search')"
             @click="toggleSearch"
           >
@@ -367,7 +357,7 @@ const filteredAgents = computed(() => {
             v-for="o in LAYOUT_OPTS"
             :key="o.key"
             class="flex h-7 w-7 items-center justify-center rounded-lg border"
-            :class="state.layout === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :class="state.layout === o.key ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
             :title="t(o.label)"
             @click="setLayout(o.key)"
           >
@@ -379,7 +369,7 @@ const filteredAgents = computed(() => {
             v-for="o in TEMPLATE_OPTS"
             :key="o.key"
             class="flex h-7 w-7 items-center justify-center rounded-lg border"
-            :class="state.template === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :class="state.template === o.key ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
             :title="t(o.label)"
             @click="setTemplate(o.key)"
           >
@@ -392,7 +382,7 @@ const filteredAgents = computed(() => {
               v-for="o in COLS_OPTS"
               :key="o.key"
               class="flex h-7 w-7 items-center justify-center rounded-lg border"
-              :class="listCols === o.key ? 'border-sky-500 bg-sky-500/20 text-sky-300' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+              :class="listCols === o.key ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
               :title="t(o.label)"
               @click="setListCols(o.key)"
             >
@@ -416,7 +406,7 @@ const filteredAgents = computed(() => {
 
         <template v-else>
           <div v-for="group in groupOrder(groupedAgents)" :key="group" class="mb-6">
-            <h3 class="glass pill-card mb-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"><LayoutOne :size="16" />{{ group }}</h3>
+            <h3 class="glass pill-card mb-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">{{ group }}</h3>
             <!-- 简约卡片（默认） -->
             <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
               <NodeCardSimple

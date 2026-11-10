@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
   <button
     ref="trigger"
     type="button"
-    class="flex h-7 w-7 items-center justify-center rounded-lg text-orange-300 hover:bg-orange-500/10"
+    class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-orange-500/10"
     :title="t('billing.card')"
     :aria-label="t('billing.card')"
     :aria-expanded="open"

@@ -333,7 +333,7 @@ const tags = computed(() => {
           <ArrowUp :size="11" />
           <span class="tabular-nums truncate">{{ netOut }}</span>
         </div>
-        <div class="text-[11px] text-success flex items-center gap-1">
+        <div class="text-[11px] text-muted flex items-center gap-1">
           <ArrowDown :size="11" />
           <span class="tabular-nums truncate">{{ netIn }}</span>
         </div>

@@ -128,7 +128,7 @@ function isActive(to: string) {
             :aria-label="item.label"
             class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
             :class="isActive(item.to)
-              ? 'bg-sky-500/20 text-sky-300'
+              ? 'bg-sky-500/20 text-content'
               : 'text-content hover:bg-slate-700/30'"
             @click="emit('close')"
           >
@@ -152,7 +152,7 @@ function isActive(to: string) {
       </RouterLink>
       <button
         :title="t('nav.logout')"
-        class="footer-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-rose-300"
+        class="footer-item flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-slate-400 hover:bg-rose-500/10 hover:text-content"
         @click="logout"
       >
         <Logout :size="18" class="flex-shrink-0" />

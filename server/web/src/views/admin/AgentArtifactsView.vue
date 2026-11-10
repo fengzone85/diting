@@ -179,7 +179,7 @@ onMounted(load);
                 <td class="px-3 py-2 text-slate-400">{{ a.source_note || '—' }}</td>
                 <td class="px-3 py-2 text-slate-400">{{ fmtTime(a.created_at) }}</td>
                 <td class="px-3 py-2 text-right">
-                  <button class="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10" @click="remove(a)">
+                  <button class="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-2 py-1 text-xs text-slate-400 hover:bg-rose-500/10" @click="remove(a)">
                     <Delete :size="12" /> {{ t('common.delete') }}
                   </button>
                 </td>

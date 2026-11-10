@@ -708,19 +708,19 @@ async function batchRenew() {
               </td>
               <td class="px-4 py-3 align-middle">
                 <div class="flex items-center justify-end gap-1">
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-violet-400 hover:bg-violet-500/10" :title="t('agents.alert')" :aria-label="t('agents.alert')" @click="openAlert(agent)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-violet-500/10" :title="t('agents.alert')" :aria-label="t('agents.alert')" @click="openAlert(agent)">
                     <Remind :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-sky-400 hover:bg-sky-500/10" :title="t('common.detail')" :aria-label="t('common.detail')" @click="router.push(`/admin/agents/${agent.id}`)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-sky-500/10" :title="t('common.detail')" :aria-label="t('common.detail')" @click="router.push(`/admin/agents/${agent.id}`)">
                     <FileText :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-amber-400 hover:bg-amber-500/10" :title="t('common.reset')" :aria-label="t('common.reset')" @click="resetToken(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-amber-500/10" :title="t('common.reset')" :aria-label="t('common.reset')" @click="resetToken(agent.id)">
                     <Refresh :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-emerald-400 hover:bg-emerald-500/10" :title="t('common.renew')" :aria-label="t('common.renew')" @click="renew(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-emerald-500/10" :title="t('common.renew')" :aria-label="t('common.renew')" @click="renew(agent.id)">
                     <Time :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-500/10" :title="t('common.delete')" :aria-label="t('common.delete')" @click="remove(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-500/10" :title="t('common.delete')" :aria-label="t('common.delete')" @click="remove(agent.id)">
                     <Delete :size="16" theme="outline" />
                   </button>
                 </div>

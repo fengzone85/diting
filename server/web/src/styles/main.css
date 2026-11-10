@@ -404,7 +404,7 @@ button.pill-card:disabled { opacity: 0.55; pointer-events: none; }
 .pill-card.is-active:hover {
   background-color: color-mix(in srgb, var(--accent) 20%, var(--glass-tint)) !important;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-border)) !important;
-  color: var(--accent) !important;
+  color: var(--text-primary) !important;
   box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
