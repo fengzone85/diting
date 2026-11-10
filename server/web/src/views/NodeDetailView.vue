@@ -36,11 +36,6 @@ import {
   ArrowRight,
 } from '@icon-park/vue-next';
 
-function formatDate(s: string | undefined): string {
-  if (!s) return '—';
-  return s;
-}
-
 const route = useRoute();
 const router = useRouter();
 const { state, visibleAgents, isFavoriteNode, toggleFavoriteNode } = useApp();
@@ -711,6 +706,17 @@ onUnmounted(() => {
               <span class="text-xs text-muted">{{ t('node.metric.uptime') }}</span>
               <span class="text-sm font-semibold text-indigo-700">{{ formatDuration(agent.uptime) }}</span>
             </div>
+            <!-- 分组 / 备注：原「备注与套餐」卡取消后并入顶部指标条 -->
+            <div v-if="agent.group" class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
+              <svg class="h-4 w-4 text-violet-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              <span class="text-xs text-muted">{{ t('node.group') }}</span>
+              <span class="max-w-32 truncate text-sm font-semibold text-violet-700" :title="agent.group">{{ agent.group }}</span>
+            </div>
+            <div v-if="agent.note" class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
+              <svg class="h-4 w-4 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+              <span class="text-xs text-muted">{{ t('node.note') }}</span>
+              <span class="max-w-40 truncate text-sm font-semibold text-amber-700" :title="agent.note">{{ agent.note }}</span>
+            </div>
           </div>
 
           <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡，统一毛玻璃） -->
@@ -890,7 +896,8 @@ onUnmounted(() => {
         </div>
         </div>
 
-        <!-- F7：在线率（30 天热力条 + 最近停机） -->
+        <!-- F7 在线率 + 磁盘耗尽预测：横排共用一行（仅一张卡时占满） -->
+        <div v-if="online || diskPredict" class="grid grid-cols-1 gap-6" :class="online && diskPredict ? 'md:grid-cols-2' : ''">
         <div v-if="online" class="glass p-5">
           <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h3 class="flex items-center gap-2 text-base font-semibold text-content">
@@ -934,40 +941,6 @@ onUnmounted(() => {
             </div>
           </div>
         </div>
-
-        <div v-if="(agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null || agent.hostname || agent.group) || diskPredict" class="grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div v-if="agent.note || agent.expire_at || agent.monthly_quota_gb != null || agent.price != null || agent.hostname || agent.group" class="glass p-5">
-            <h3 class="mb-4 flex items-center gap-2 text-base font-semibold text-content">
-              <svg class="h-4 w-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
-              {{ t('node.notePlan') }}
-            </h3>
-            <div v-if="agent.note" class="mb-4 rounded-xl border-l-2 border-sky-400/70 bg-surface/60 px-4 py-3 text-sm leading-relaxed text-content">{{ agent.note }}</div>
-            <div class="flex flex-wrap gap-2">
-              <span v-if="agent.hostname" class="inline-flex items-center gap-1.5 rounded-full border border-slate-400/30 bg-slate-400/10 px-3 py-1.5 text-xs">
-                <span class="text-muted">{{ t('node.hostname') }}</span>
-                <span class="font-semibold text-slate-200">{{ agent.hostname }}</span>
-              </span>
-              <span v-if="agent.group" class="inline-flex items-center gap-1.5 rounded-full border border-slate-400/30 bg-slate-400/10 px-3 py-1.5 text-xs">
-                <span class="text-muted">{{ t('node.group') }}</span>
-                <span class="font-semibold text-slate-200">{{ agent.group }}</span>
-              </span>
-              <span v-if="agent.monthly_quota_gb != null" class="inline-flex items-center gap-1.5 rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1.5 text-xs">
-                <svg class="h-3.5 w-3.5 text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 5-4 7-8 8-4-1-8-3-8-8V7z"/></svg>
-                <span class="text-muted">{{ t('node.quotaMonthly') }}</span>
-                <span class="font-semibold text-sky-300">{{ formatBytes(agent.monthly_quota_gb * 1024 ** 3) }}</span>
-              </span>
-              <span v-if="agent.expire_at" class="inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1.5 text-xs">
-                <svg class="h-3.5 w-3.5 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
-                <span class="text-muted">{{ t('node.expireAt') }}</span>
-                <span class="font-semibold text-emerald-300">{{ formatDate(agent.expire_at) }}</span>
-              </span>
-              <span v-if="agent.price != null" class="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-xs">
-                <svg class="h-3.5 w-3.5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h4.5a2 2 0 0 1 0 4H9"/></svg>
-                <span class="text-muted">{{ t('node.price') }}</span>
-                <span class="font-semibold text-amber-300">{{ agent.currency || '' }} {{ formatNumber(agent.price, 2) }}<span v-if="agent.billing_cycle"> / {{ t('node.daysCycle', { n: agent.billing_cycle }) }}</span></span>
-              </span>
-            </div>
-          </div>
 
           <div v-if="diskPredict" class="glass p-5">
             <div class="mb-4 flex items-center justify-between">

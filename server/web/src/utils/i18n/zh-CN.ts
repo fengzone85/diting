@@ -702,6 +702,7 @@ export const zhCN: Record<string, string> = {
   'node.hostname': '主机名',
   'node.os': '操作系统',
   'node.group': '分组',
+  'node.note': '备注',
   'node.agentVersion': 'Agent 版本',
   // V 阶段：构建元信息（版本可判定性）
   'node.buildSha': 'Commit SHA',

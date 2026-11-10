@@ -700,6 +700,7 @@ export const enUS: Record<string, string> = {
   'node.hostname': 'Hostname',
   'node.os': 'OS',
   'node.group': 'Group',
+  'node.note': 'Note',
   'node.agentVersion': 'Agent Version',
   // V stage: build metadata (version visibility)
   'node.buildSha': 'Commit SHA',
