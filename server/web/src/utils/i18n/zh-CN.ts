@@ -640,6 +640,7 @@ export const zhCN: Record<string, string> = {
   'public.totalValue': '总价值',
   'public.quota': '流量配额',
   'public.groups': '分组数',
+  'public.allGroups': '全部节点',
   'public.countries': '地区数',
   'public.merchants': '商家数',
   'public.gpu': 'GPU',

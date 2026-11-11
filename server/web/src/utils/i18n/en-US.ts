@@ -649,6 +649,7 @@ export const enUS: Record<string, string> = {
   'public.totalValue': 'Total value',
   'public.quota': 'Quota',
   'public.groups': 'Groups',
+  'public.allGroups': 'All nodes',
   'public.countries': 'Countries',
   'public.merchants': 'Merchants',
   'public.gpu': 'GPU',

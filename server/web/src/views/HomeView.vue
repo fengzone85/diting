@@ -282,6 +282,38 @@ const filteredAgents = computed(() => {
   if (activeQuick.value === 'expiring') return ags.filter((a) => a.expire_at && new Date(a.expire_at).getTime() - Date.now() < 30 * 864e5);
   return ags;
 });
+
+// 分组 Tabs（2026-11-11）：原先按组分段铺开，组内数量差异大（1 台 / 十几台）会在每组
+// 末尾留下「小尾巴」，首页整体错落。改为单一网格 + Tabs 过滤：任意时刻只有一张网格，
+// 列数仍由 cardSizeClass 决定（comfortable 档 ≥1280px 即一行四个）。
+const GROUP_STORAGE_KEY = 'diting-group';
+const selectedGroup = ref<string>(localStorage.getItem(GROUP_STORAGE_KEY) || 'all');
+function setGroup(key: string) {
+  selectedGroup.value = key;
+  localStorage.setItem(GROUP_STORAGE_KEY, key);
+}
+// 计数按「当前搜索 / 快捷筛选后可见数」统计：点进去能看到多少台就显示多少台。
+const groupTabs = computed(() => {
+  const counts = new Map<string, number>();
+  for (const a of filteredAgents.value) {
+    const g = a.group || a.grp || '默认分组';
+    counts.set(g, (counts.get(g) || 0) + 1);
+  }
+  return [
+    { key: 'all', label: t('public.allGroups'), count: filteredAgents.value.length },
+    ...groupOrder(groupedAgents.value).map((g) => ({ key: g, label: g, count: counts.get(g) || 0 })),
+  ];
+});
+// 组被删除 / 改名，或当前筛选下该组不再有节点时回到「全部」，避免停在空标签上。
+watch(groupTabs, (tabs) => {
+  if (selectedGroup.value !== 'all' && !tabs.some((x) => x.key === selectedGroup.value)) {
+    selectedGroup.value = 'all';
+  }
+});
+const groupFilteredAgents = computed(() => {
+  if (selectedGroup.value === 'all') return filteredAgents.value;
+  return filteredAgents.value.filter((a) => (a.group || a.grp || '默认分组') === selectedGroup.value);
+});
 </script>
 
 <template>
@@ -349,7 +381,7 @@ const filteredAgents = computed(() => {
             class="h-7 rounded-lg border border-slate-700 bg-slate-900/50 px-2.5 text-xs text-white outline-none focus:border-sky-500 sm:w-52"
             @keydown.esc="toggleSearch"
           />
-          <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: filteredAgents.length }) }}</span>
+          <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: groupFilteredAgents.length }) }}</span>
         </div>
         <div class="flex flex-wrap items-center gap-1">
           <!-- 布局：网格 / 列表 / 紧凑（图标控制，hover 显示名称） -->
@@ -392,8 +424,23 @@ const filteredAgents = computed(() => {
         </div>
       </div>
 
+      <!-- 分组 Tabs：默认「全部节点」走单一网格，点击分组只显示该组卡片（与 node 页小卡样式一致） -->
+      <div v-if="groupTabs.length > 1" class="mb-3 flex flex-wrap items-center gap-2">
+        <button
+          v-for="g in groupTabs"
+          :key="g.key"
+          type="button"
+          class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
+          :class="{ 'is-active': selectedGroup === g.key }"
+          @click="setGroup(g.key)"
+        >
+          <span class="truncate">{{ g.label }}</span>
+          <span class="tabular-nums opacity-70">{{ g.count }}</span>
+        </button>
+      </div>
+
       <Loading v-if="!state.initialized && state.loading" />
-      <EmptyState v-else-if="filteredAgents.length === 0" />
+      <EmptyState v-else-if="groupFilteredAgents.length === 0" />
 
       <template v-else>
         <div
@@ -401,45 +448,42 @@ const filteredAgents = computed(() => {
           class="grid grid-cols-1 gap-2"
           :class="listCols === 2 ? '2xl:grid-cols-2' : ''"
         >
-          <NodeRow v-for="agent in filteredAgents" :key="agent.id" :agent="agent" :dense="listCols === 2" />
+          <NodeRow v-for="agent in groupFilteredAgents" :key="agent.id" :agent="agent" :dense="listCols === 2" />
         </div>
 
         <template v-else>
-          <div v-for="group in groupOrder(groupedAgents)" :key="group" class="mb-6">
-            <h3 class="glass pill-card mb-3 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">{{ group }}</h3>
-            <!-- 简约卡片（默认） -->
-            <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
-              <NodeCardSimple
-                v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
-                :key="agent.id"
-                :agent="agent"
-                :tag="customTag(agent.id)"
-                :draggable="true"
-                :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
-                @dragstart="onDragStart(agent, $event)"
-                @dragend="onDragEnd"
-                @dragover="onDragOver(agent, $event)"
-                @drop="onDrop(agent, $event)"
-              />
-            </div>
-            <!-- 完整卡片 -->
-            <div v-else class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
-              <NodeCard
-                v-for="agent in groupedAgents[group].filter((a) => filteredAgents.includes(a))"
-                :key="agent.id"
-                :agent="agent"
-                :template="'full'"
-                :size="(state.meta?.card_size as any) || 'comfortable'"
-                :tag="customTag(agent.id)"
-                :sparklines="state.sparklines"
-                :draggable="true"
-                :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
-                @dragstart="onDragStart(agent, $event)"
-                @dragend="onDragEnd"
-                @dragover="onDragOver(agent, $event)"
-                @drop="onDrop(agent, $event)"
-              />
-            </div>
+          <!-- 简约卡片（默认）：单一网格，行内列数由 cardSizeClass 决定 -->
+          <div v-if="state.template === 'simple'" class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
+            <NodeCardSimple
+              v-for="agent in groupFilteredAgents"
+              :key="agent.id"
+              :agent="agent"
+              :tag="customTag(agent.id)"
+              :draggable="true"
+              :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
+              @dragstart="onDragStart(agent, $event)"
+              @dragend="onDragEnd"
+              @dragover="onDragOver(agent, $event)"
+              @drop="onDrop(agent, $event)"
+            />
+          </div>
+          <!-- 完整卡片 -->
+          <div v-else class="grid gap-3" :class="cardSizeClass" :style="{ '--card-max': cardMaxWidth }">
+            <NodeCard
+              v-for="agent in groupFilteredAgents"
+              :key="agent.id"
+              :agent="agent"
+              :template="'full'"
+              :size="(state.meta?.card_size as any) || 'comfortable'"
+              :tag="customTag(agent.id)"
+              :sparklines="state.sparklines"
+              :draggable="true"
+              :class="{ 'opacity-50': dragOverId === agent.id && dragId !== agent.id }"
+              @dragstart="onDragStart(agent, $event)"
+              @dragend="onDragEnd"
+              @dragover="onDragOver(agent, $event)"
+              @drop="onDrop(agent, $event)"
+            />
           </div>
         </template>
       </template>
