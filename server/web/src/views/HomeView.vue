@@ -424,14 +424,22 @@ const groupFilteredAgents = computed(() => {
         </div>
       </div>
 
-      <!-- 分组 Tabs：默认「全部节点」走单一网格，点击分组只显示该组卡片（与 node 页小卡样式一致） -->
-      <div v-if="groupTabs.length > 1" class="mb-3 flex flex-wrap items-center gap-2">
+      <!-- 分组 Tabs：对齐 Glassmorphism 的 segmented tabs——浅槽（bg-muted + p-[3px] +
+           rounded-lg）内嵌分段按钮，选中项是「浅/深色块 + 细边框 + 主文字色」，
+           而不是每个标签独立的毛玻璃卡片。 -->
+      <div
+        v-if="groupTabs.length > 1"
+        class="mb-3 inline-flex w-fit flex-wrap items-center justify-center gap-0 rounded-lg p-[3px]"
+        :style="{ backgroundColor: 'var(--bg-surface)', color: 'var(--text-secondary)' }"
+      >
         <button
           v-for="g in groupTabs"
           :key="g.key"
           type="button"
-          class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap"
-          :class="{ 'is-active': selectedGroup === g.key }"
+          class="relative inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2.5 text-sm font-medium transition-colors hover:bg-white/10"
+          :style="selectedGroup === g.key
+            ? { backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-divider)', color: 'var(--text-primary)' }
+            : undefined"
           @click="setGroup(g.key)"
         >
           <span class="truncate">{{ g.label }}</span>
