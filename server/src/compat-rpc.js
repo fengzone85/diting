@@ -366,11 +366,13 @@ function buildPingTasks(baseTasks, records) {
 // GPU 不采集故刻意不输出，主题会把缺失值当 null，避免伪造 0 值。
 function toFlatRecent(agentId, m) {
   const rec = { client: agentId, time: new Date(m.ts).toISOString() };
+  // P2-2：三态——缺数返回 null 而不是伪 0（Number(x)||0 会把 null 压成 0 画出伪贴底线）。
+  // 注：load 记录映射（本文件 :220/:231）依 flatRecord 契约刻意保留 0 伪值，不在此列。
   for (const [field, col] of Object.entries(LOAD_FIELD_MAP)) {
-    if (col) rec[field] = Number(m[col]) || 0;
+    if (col) rec[field] = m[col] == null ? null : Number(m[col]);
   }
-  rec.connections = Number(m.connections) || 0;
-  rec.connections_udp = Number(m.connections_udp) || 0;
+  rec.connections = m.connections == null ? null : Number(m.connections);
+  rec.connections_udp = m.connections_udp == null ? null : Number(m.connections_udp);
   return rec;
 }
 

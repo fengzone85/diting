@@ -55,4 +55,29 @@ function ip6ToBits(ip) {
   }
 }
 
-module.exports = { daysUntil, cycleLabel, asyncHandler, ip6ToBits };
+// P1-3：IP 字面量归一化（SSRF 判定用）：去方括号、剥离 zone id、把 ::ffff: 映射回
+// IPv4（点分与十六进制组两种写法都要认），其余原样小写返回。
+// 刻意不复用 ratelimit.js 的 bucketKey：那是限流语义（IPv6 归并到 /64 桶），
+// 会把不同的危险地址并进同一个桶，不能当安全判定。
+// Node 实测：new URL('http://[::ffff:169.254.169.254]/').hostname === '[::ffff:a9fe:a9fe]'
+//（WHATWG 带方括号 + 十六进制归一化），legacy url.parse 则不带括号——两种写法都归一。
+function normalizeIpLiteral(raw) {
+  let s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return '';
+  if (s.startsWith('[') && s.endsWith(']')) s = s.slice(1, -1);
+  const pct = s.indexOf('%');
+  if (pct > 0) s = s.slice(0, pct);
+  if (s.startsWith('::ffff:')) {
+    const rest = s.slice(7);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(rest)) return rest;
+    const m = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(rest);
+    if (m) {
+      const a = parseInt(m[1], 16);
+      const b = parseInt(m[2], 16);
+      return `${(a >> 8) & 255}.${a & 255}.${(b >> 8) & 255}.${b & 255}`;
+    }
+  }
+  return s;
+}
+
+module.exports = { daysUntil, cycleLabel, asyncHandler, ip6ToBits, normalizeIpLiteral };

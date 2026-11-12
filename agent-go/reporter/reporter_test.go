@@ -147,3 +147,67 @@ func TestReportCanceledDuringAuthBackoff(t *testing.T) {
 		t.Fatalf("hits = %d, want 1", got)
 	}
 }
+
+// ---- P1-11：重试时刻表锚定与总预算（假时钟）----
+
+// withFakeClock 冻结时钟并捕获 timeAfter 的等待时长（立即触发）。
+// 退避以「本轮首请求发出时刻」为原点：冻结时钟后等待时长不受真实耗时影响，
+// 即可断言锚定语义（修前从「失败完成」起算，慢失败会让首跳顺延）。
+func withFakeClock(t *testing.T, now time.Time) *[]time.Duration {
+	t.Helper()
+	oldNow, oldAfter := timeNow, timeAfter
+	waits := []time.Duration{}
+	timeNow = func() time.Time { return now }
+	timeAfter = func(d time.Duration) <-chan time.Time {
+		waits = append(waits, d)
+		ch := make(chan time.Time, 1)
+		ch <- now
+		return ch
+	}
+	t.Cleanup(func() { timeNow, timeAfter = oldNow, oldAfter })
+	return &waits
+}
+
+// 首个重试锚定在首请求后 30s（min(2×interval, 30s)），与 attempt 0 耗时无关；
+// 45s 预算拦掉后续跳（默认 20s 间隔下整轮恰好 2 个请求）。
+func TestReportRetryAnchoredToStartAndBudget(t *testing.T) {
+	r, hits := newTestReporter(t, 20*time.Second, func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(30 * time.Millisecond) // 慢失败：吃掉真实时间，验证计划时刻不漂移
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	waits := withFakeClock(t, time.Unix(1700000000, 0))
+
+	if err := r.Report(context.Background(), []byte("{}")); err == nil {
+		t.Fatal("全失败应返回错误")
+	}
+	if got := atomic.LoadInt32(hits); got != 2 {
+		t.Fatalf("默认参数 45s 预算下应恰好 2 个请求（attempt0 + 首跳重试），实际 %d", got)
+	}
+	if len(*waits) != 1 || (*waits)[0] != 30*time.Second {
+		t.Fatalf("首个重试应锚定在首请求后 30s（min(2×20s,30s)），实际 %v", *waits)
+	}
+}
+
+// 小 interval：3 次退避都在预算内，既有重试语义不被预算误伤。
+func TestReportRetriesWithinBudget(t *testing.T) {
+	r, hits := newTestReporter(t, 20*time.Millisecond, func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	waits := withFakeClock(t, time.Unix(1700000000, 0))
+
+	_ = r.Report(context.Background(), []byte("{}"))
+	if got := atomic.LoadInt32(hits); got != 4 {
+		t.Fatalf("小 interval 应仍重试 3 次共 4 个请求，实际 %d", got)
+	}
+	// 累计时刻表：attempt k 计划发出时刻 = start + Σ min(30s, 2^i×interval)。
+	// 冻结时钟下 timeAfter 捕获的 wait = 计划时刻距 start 的偏移（不是增量）。
+	want := []time.Duration{40 * time.Millisecond, 120 * time.Millisecond, 280 * time.Millisecond}
+	if len(*waits) != 3 {
+		t.Fatalf("应有 3 段退避，实际 %v", *waits)
+	}
+	for i := range want {
+		if (*waits)[i] != want[i] {
+			t.Fatalf("退避[%d] = %v, want %v", i, (*waits)[i], want[i])
+		}
+	}
+}

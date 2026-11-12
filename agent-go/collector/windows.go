@@ -21,6 +21,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"runtime"
@@ -207,11 +208,16 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 
 	// 网络：非 loopback 接口求和（GetIfEntry2，64 位计数）；S1 起同时返回接口集供 epoch
 	rx, tx, netIfaces, err := winNetTotals(c.netOpts)
+	netOK := err == nil
 	if err != nil {
-		return nil, fmt.Errorf("GetIfEntry2: %w", err)
+		// P2-4：网络读取失败不中断整轮采集——本轮网络段降级（计数器/速率为零值、
+		// epoch 置空；计数器归零走服务端既有重置修正，不伪造速率），CPU/内存/磁盘
+		// 照常上报；错误记日志便于排障。
+		log.Printf("[warn] winNetTotals: %v（本轮网络指标降级为空）", err)
+		rx, tx, netIfaces = 0, 0, nil
 	}
 	var rxRate, txRate float64
-	if c.prevNet != nil && !c.prevNetTime.IsZero() {
+	if netOK && c.prevNet != nil && !c.prevNetTime.IsZero() {
 		dt := now.Sub(c.prevNetTime).Seconds()
 		if dt > 0 {
 			if rx > c.prevNet.rx {
@@ -222,13 +228,21 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 			}
 		}
 	}
-	c.prevNet = &netSample{rx, tx}
-	c.prevNetTime = now
+	if netOK {
+		c.prevNet = &netSample{rx, tx}
+		c.prevNetTime = now
+	}
 
 	// 运行时间（GetTickCount64，ms）
 	uptime := winUptime()
 
 	hostname, _ := os.Hostname()
+
+	// 网络段降级时 epoch 置空（= 老 agent 语义，服务端退回旧 delta 逻辑）
+	epoch := ""
+	if netOK {
+		epoch = ifaceEpoch(bootID(), netIfaces)
+	}
 
 	return &Metrics{
 		Hostname: hostname,
@@ -259,7 +273,7 @@ func (c *windowsCollector) Collect() (*Metrics, error) {
 		NetTxRate: txRate,
 		NetRx:     rx,
 		NetTx:     tx,
-		NetEpoch:  ifaceEpoch(bootID(), netIfaces),
+		NetEpoch:  epoch,
 		// 磁盘 IO 速率：pdh.dll 直调 \PhysicalDisk(_Total)\Disk Read|Write
 		// Bytes/sec（零依赖，恢复 Python psutil.disk_io_counters 既有能力；
 		// 2026-10-12 修订 M2 时的"不抄 PDH"决策——彼时误判为采集面扩张）。

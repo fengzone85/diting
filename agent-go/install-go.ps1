@@ -148,20 +148,22 @@ Write-Host '[OK] SHA256 verified'
 # 于是 `set PROBE_TARGETS=…` 永远不生效（2026-10-26 真机定位到的真实故障）。
 $ptValue = if ($ProbeTargets) { $ProbeTargets } else { 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8' }
 $ptValue = ($ptValue -replace "[`r`n]+", ',' -replace ',{2,}', ',').Trim([char[]]" ,")
-$ptLine = "set PROBE_TARGETS=$ptValue"
+# P2-6：写 .bat 前对值转义——去引号/CR/LF/%（可注入 .bat 语法或断行），赋值整体加引号
+function Esc-Bat([string]$s) { if ($null -eq $s) { return '' } return ($s -replace '[\r\n"%]', '') }
+$ptLine = "set `"PROBE_TARGETS=$(Esc-Bat $ptValue)`""
 $bat = Join-Path $InstallDir 'run_scheduled.bat'
 $cont = @"
 @echo off
 chcp 65001 >nul
 rem single-instance guard: skip launch if already running
 tasklist /FI "IMAGENAME eq diting-agent.exe" 2>nul | find /I "diting-agent.exe" >nul && exit /b 0
-set SERVER_URL=$ServerUrl
-set AGENT_ID=$AgentId
-set AGENT_TOKEN=$AgentToken
-set INTERVAL=$Interval
-set MONTH_ROTATE=$MonthRotate
+set "SERVER_URL=$(Esc-Bat $ServerUrl)"
+set "AGENT_ID=$(Esc-Bat $AgentId)"
+set "AGENT_TOKEN=$(Esc-Bat $AgentToken)"
+set "INTERVAL=$(Esc-Bat $Interval)"
+set "MONTH_ROTATE=$(Esc-Bat $MonthRotate)"
 $ptLine
-"$exe"
+"$(Esc-Bat $exe)"
 "@
 # UTF-8 no BOM + chcp 65001 first line: cmd reads ascii fine here (no CJK by default)
 [IO.File]::WriteAllText($bat, $cont, (New-Object Text.UTF8Encoding($false)))

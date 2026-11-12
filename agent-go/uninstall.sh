@@ -24,5 +24,7 @@ rm -f /opt/diting/diting-agent
 echo -e "${GREEN}[OK] /opt/diting/diting-agent removed${NC}"
 echo -e "${YELLOW}[keep] /etc/diting/agent.env + /var/lib/diting/state.json NOT removed${NC}"
 echo -e "${YELLOW}       (monthly-traffic state survives reinstall with the same agent ID)${NC}"
+echo -e "${RED}[warn] /etc/diting/agent.env 仍含 Agent Token 明文。转赠/丢弃整机前请手动清除：${NC}"
+echo -e "${RED}       sudo rm -f /etc/diting/agent.env${NC}"
 echo ""
 echo "uninstall done."

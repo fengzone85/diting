@@ -10,6 +10,10 @@ User=feng
 #   配置 .env          = /data/simple-probe-data/server-data/.env（0600）
 # `-` 前缀表示文件缺失时不阻断启动（server.js 的 dotenv 仍有兜底）。
 EnvironmentFile=-/data/simple-probe-data/server-data/.env
+# DITING_ENV_FILE（P0-1）：让 server.js 的 dotenv 回退与 .env 权限自检（server.js:194）
+# 拿到真实环境文件路径。不设时自检退到运行副本目录 app/.env（不存在）→ 被 catch
+# 静默跳过，权限过松告警永不触发。
+Environment=DITING_ENV_FILE=/data/simple-probe-data/server-data/.env
 WorkingDirectory=/data/simple-probe-data/server-data/app
 ExecStart=/usr/local/bin/node server.js
 # Restart=always（2026-10-26 由 on-failure 改）：on-failure 只覆盖「非零退出」，
@@ -18,6 +22,10 @@ ExecStart=/usr/local/bin/node server.js
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
+# P2-6 加固：运行副本/配置/库/备份分别在 /data 与 /var/backups，写路径不涉 /usr /etc /home
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

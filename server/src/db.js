@@ -502,6 +502,10 @@ const stmts = {
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
+  // P2-2：批量版（/agents 列表用）——一次取回全部节点最新指标，消除逐节点 N+1。
+  // 行值 IN 走 idx_metrics_agent_ts 的分组最大值，外层按 (agent_id,ts) 回表。
+  latestMetricsAll: db.prepare(`SELECT * FROM metrics
+    WHERE (agent_id, ts) IN (SELECT agent_id, MAX(ts) FROM metrics GROUP BY agent_id)`),
   // S1.5：手工修正月流量后同步「最新一条」明细的月累计列——面板读的是 latest metric，
   // 不刷新的话修正要等下一轮上报才可见（rotate=0 节点甚至会永远看不到）。
   // 必须显式取主键：`SELECT *` 虽含 id，但绑定 undefined 会静默失败；
@@ -1519,6 +1523,13 @@ process.once('exit', () => {
 
 const getLatestMetric = (agent_id) => stmts.latestMetric.get(agent_id);
 
+// P2-2：批量取全部节点最新指标（agent_id → 行），/agents 列表单查询消除 N+1
+const getLatestMetricsMap = () => {
+  const map = new Map();
+  for (const r of stmts.latestMetricsAll.all()) map.set(r.agent_id, r);
+  return map;
+};
+
 // 窗口内有上报数据的节点数（走 idx_metrics_ts 覆盖扫描，毫秒级）
 const countActiveAgents = (sinceTs) => (stmts.countActiveAgents.get(sinceTs) || {}).c || 0;
 // 单节点全字段采样：只返回 ≤maxPoints 行（保留首尾），替代 getMetrics 全量拉取。
@@ -2166,7 +2177,7 @@ module.exports = {
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
   listDeletedAgents, getAgentIncludingDeleted, restoreAgent, purgeDeletedAgents,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
-  touchAgent, setAgentCores, setAgentBuild, setAgentBuildTag, insertMetric, getLatestMetric, getMetricsSampled, getMetricsProbesOne,
+  touchAgent, setAgentCores, setAgentBuild, setAgentBuildTag, insertMetric, getLatestMetric, getLatestMetricsMap, getMetricsSampled, getMetricsProbesOne,
   getRecentMetrics, trafficEstimateBucketed, accumulateTraffic, flushTraffic, hasTrafficCounter, correctTraffic,
   getMetricsLoadOne, getMetricsLoadAll, countActiveAgents,
   // metricsSparklinesAllSampled 是活函数（api.js + ai/summarizer.js 共 4 处），勿随 metricsSparklinesAll 一并删除。

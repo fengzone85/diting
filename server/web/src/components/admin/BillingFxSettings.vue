@@ -121,7 +121,7 @@ onMounted(() => { void loadFxStatus(); });
       class="mb-4 h-9 w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-sm text-content outline-none focus:border-sky-500"
       @change="setBaseCurrency(($event.target as HTMLSelectElement).value)"
     >
-      <option v-for="c in CURRENCY_OPTIONS" :key="c.code" :value="c.code">{{ c.symbol }} {{ c.code }} · {{ c.name }}</option>
+      <option v-for="c in CURRENCY_OPTIONS" :key="c.code" :value="c.code">{{ c.symbol }} {{ c.code }} · {{ t('billing.cur.' + c.code) }}</option>
     </select>
 
     <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

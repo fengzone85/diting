@@ -20,6 +20,8 @@ services:
       # 明文一旦出现在 `docker inspect` 输出里，等同泄露。存量实例升级时由
       # diting.sh 的 migrate_env_admin_token 在停容器前把 .env 明文转成哈希入库。
       # 会话 Cookie 签名密钥。缺失则每次重启随机生成 → 所有登录态失效（必须持久化）。
+      # P2-1 评估结论：env 注入的密钥会出现在 docker inspect 输出里；compose 文件挂载
+      # secrets（或 *_FILE 后缀读文件）是后续加固方向，涉及存量部署迁移，暂缓实施。
       - SESSION_SECRET=${SESSION_SECRET:-}
       # 登录会话有效期（毫秒），默认 12 小时
       - SESSION_TTL_MS=${SESSION_TTL_MS:-43200000}

@@ -6,7 +6,7 @@ const router = express.Router();
 const db = require('./db');
 const { loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
 const { heavyQuery } = require('./heavy-db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel, resolveRole } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 // 在线判定统一口径（节点覆盖 > 分组覆盖 > 全局，与告警同源）
@@ -347,13 +347,15 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
     groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
     nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
   };
+  // P2-2：批量取最新指标，消除逐节点 N+1（100 节点 = 1 次查询）
+  const latestMap = db.getLatestMetricsMap();
   // S2/F5：带节点白名单的 API Token 只看到授权范围内的节点。
   const list = db.getAgents().filter((a) => inAgentScope(req, a.id)).map((a) => {
-    const latest = db.getLatestMetric(a.id);
+    const latest = latestMap.get(a.id) || null;
     const eff = alerts.resolveAgentThresholds(a, ctx);
     const online = a.last_seen && (now - a.last_seen) < eff.offlineSec * 1000;
     const latestOut = latest ? Object.assign({}, latest, { disks: parseDisks(latest.disks) }) : null;
-    return Object.assign({}, a, {
+    const out = Object.assign({}, a, {
       group: a.grp || '',
       online: !!online,
       // 剩余价值/月均支出（参考面板口径，见 src/billing.js）
@@ -376,6 +378,8 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
         muted: eff.muted
       }
     });
+    delete out.token_hash; // P2-2：凭据哈希不出接口
+    return out;
   });
   res.json(list);
 });
@@ -545,7 +549,7 @@ router.get('/billing', adminOrReadonly, agentScope, (req, res) => {
   const expiringSoon = [];
   for (const a of agents) {
     const g = (a.grp || '').trim() || '未分组';
-    const cur = a.currency || '¥';
+    const cur = normalizeCurrency(a.currency) || String(a.currency || 'CNY');
     const bucket = conv.by_currency[cur];
     const rate = bucket && bucket.rate ? bucket.rate : null;
     // 分组费用同样先折到标准货币再累加；缺汇率的节点不进总额（perGroup 保留 0 便于前端提示）
@@ -870,7 +874,7 @@ router.get('/public/agents/:id/online-history', (req, res) => {
 // 受 ui.public_enabled 控制；range 支持 1h/4h/6h/12h/24h/7d/30d，或自定义 start/end（≤30 天）。
 // ?availability=1（F4）额外返回可用率聚合 { series, availability }，缺省保持原
 // 「纯 series 对象」形状不变——社区主题/既有调用方零影响。
-router.get('/public/agents/:id/probes', async (req, res) => {
+router.get('/public/agents/:id/probes', asyncHandler(async (req, res) => {
   const ui = db.getUiSettings();
   if (ui.public_enabled === false) return publicDisabled(res);
   const a = db.getAgent(req.params.id);
@@ -912,14 +916,24 @@ router.get('/public/agents/:id/probes', async (req, res) => {
       const loss = typeof p.loss === 'number'
         ? Math.round(p.loss)
         : (p.loss === null ? null : (ok === false ? 100 : (ok ? 0 : null)));
+      // P0-3：桶内布尔样本计数透传（合并层 finishProbe 输出 n_ok/n_samp）；
+      // 旧形状无计数时按单样本回退，保证加权口径统一
+      const nSamp = Number.isFinite(Number(p.n_samp)) ? Number(p.n_samp) : (ok !== null ? 1 : 0);
+      const nOk = nSamp > 0
+        ? (Number.isFinite(Number(p.n_ok)) ? Math.min(Number(p.n_ok), nSamp) : (ok === true ? nSamp : 0))
+        : 0;
       if (!series[label]) series[label] = [];
-      series[label].push({ ts: r.ts, ms, ok, loss });
-      if (stats && ok !== null) {
+      series[label].push({
+        ts: r.ts, ms, ok, loss, n_ok: nOk, n_samp: nSamp,
+        ok_rate: nSamp ? Math.round((nOk / nSamp) * 10000) / 10000 : null,
+      });
+      // 可用率按样本数加权（Σn_ok/Σn_samp），不再按桶等权
+      if (stats && nSamp > 0) {
         const st = stats[label] || (stats[label] = {
           samples: 0, up: 0, msSum: 0, msCnt: 0, maxMs: null, lastDownAt: null, latest: null
         });
-        st.samples++;
-        if (ok) st.up++;
+        st.samples += nSamp;
+        st.up += nOk;
         if (ms !== null) {
           st.msSum += ms;
           st.msCnt++;
@@ -956,9 +970,9 @@ router.get('/public/agents/:id/probes', async (req, res) => {
             ts: pt.ts,
             ms: pt.ms, // last 模式用桶内第一个点
             ok: pt.ok, loss: pt.loss,
-            // avg 累加器：ok 只统计有采样点（ok!=null），loss 只对有值样本求均值
+            // avg 累加器：ms/loss 只对有值样本求均值；可达计数按 n_ok/n_samp 加权（P0-3）
             sumMs: pt.ms != null ? pt.ms : 0, cntMs: pt.ms != null ? 1 : 0,
-            okCnt: pt.ok === true ? 1 : 0, sampCnt: pt.ok === null ? 0 : 1,
+            okCnt: pt.n_ok || 0, sampCnt: pt.n_samp || 0,
             sumLoss: pt.loss != null ? pt.loss : 0, cntLoss: pt.loss != null ? 1 : 0
           });
           order.push(key);
@@ -966,8 +980,8 @@ router.get('/public/agents/:id/probes', async (req, res) => {
           const cur = map.get(key);
           cur.ts = pt.ts;
           if (pt.ms != null) { cur.sumMs += pt.ms; cur.cntMs++; }
-          if (pt.ok === true) cur.okCnt++;
-          if (pt.ok !== null) cur.sampCnt++;
+          cur.okCnt += pt.n_ok || 0;
+          cur.sampCnt += pt.n_samp || 0;
           if (pt.loss != null) { cur.sumLoss += pt.loss; cur.cntLoss++; }
           if (agg === 'last' && pt.ms != null) cur.ms = pt.ms; // last 模式覆盖为桶内最后一个有效点
         }
@@ -978,9 +992,11 @@ router.get('/public/agents/:id/probes', async (req, res) => {
           return {
             ts: b.ts,
             ms: b.cntMs ? Math.round(b.sumMs / b.cntMs) : null,
-            // 桶内全无采样 → ok=null（不是失败）；否则有任一成功即视为可达
+            // 桶内全无采样 → ok=null（不是失败）；ok 保留「任一成功即可达」供兼容，
+            // 混合桶真实达成率看 ok_rate（P0-3：不再冒充 100%）
             ok: b.sampCnt ? b.okCnt > 0 : null,
-            loss: b.cntLoss ? Math.round(b.sumLoss / b.cntLoss) : null
+            loss: b.cntLoss ? Math.round(b.sumLoss / b.cntLoss) : null,
+            ok_rate: b.sampCnt ? Math.round((b.okCnt / b.sampCnt) * 10000) / 10000 : null
           };
         }
         return { ts: b.ts, ms: b.ms, ok: b.ok, loss: b.loss };
@@ -1011,7 +1027,7 @@ router.get('/public/agents/:id/probes', async (req, res) => {
     return res.json({ series, availability });
   }
   res.json(series);
-});
+}));
 
 // 游客视图元信息（无需登录）：站点标题、是否开放、首页默认布局、卡片排序。
 router.get('/public/meta', (req, res) => {
@@ -1392,7 +1408,7 @@ router.get('/fx/status', adminOrReadonly, (req, res) => {
 });
 
 // 立即拉取一次（设置页「立即刷新」）；未启用 api 模式时 refresh 直接返回旧快照
-router.post('/fx/refresh', adminOnly, asyncHandler(async (req, res) => {
+router.post('/fx/refresh', adminOnly, agentScope, agentGlobalOnly, asyncHandler(async (req, res) => {
   const api = await require('./fx').refresh({ force: true });
   res.json({ ok: api.status === 'ok', api });
 }));
@@ -1706,12 +1722,15 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
 // 注销：默认「使全部会话失效」（含其他已登录设备），再清当前 Cookie。
 // 此前只清 Cookie，已签发的会话在 TTL 内仍然有效（注销无效期）。
 // all=0 可退化为仅清当前 Cookie（不影响其他设备）。
+// P1-1：全量撤销仅限有效管理员身份（会话或 Admin Token）——匿名请求默认
+// revoke all 等于任何人都能把管理员全部踢下线（会话可用性 DoS）并刷审计噪声。
 router.post('/logout', (req, res) => {
-  const revokeAll = req.query.all !== '0';
+  const role = resolveRole(req);
+  const revokeAll = !!(role && role.role === 'admin') && req.query.all !== '0';
   if (revokeAll) revokeAllSessions();
   clearSessionCookie(res);
   res.json({ ok: true, revoked: revokeAll });
-  auditLog(req, 'logout', revokeAll ? 'all sessions' : '');
+  if (role) auditLog(req, 'logout', revokeAll ? 'all sessions' : '');
 });
 
 

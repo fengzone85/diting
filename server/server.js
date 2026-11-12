@@ -787,9 +787,17 @@ setInterval(() => {
 }, 5000).unref?.();
 try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch (_) { /* 首连前构造失败则等下次定时器 */ }
 function wsClientIp(req) {
-  // 只用 TCP 源地址，不读 X-Forwarded-For。XFF 可被直连攻击者伪造，
+  // 默认只用 TCP 源地址，不读 X-Forwarded-For——XFF 可被直连攻击者伪造，
   // 用于绕过 WebSocket 并发/速率限制。req.socket.remoteAddress 是真实连接源，不可伪造。
-  return (req.socket && req.socket.remoteAddress) || 'unknown';
+  // P2-3：连接来自可信反代（与 Express trust proxy 同判定，见 proxyLoopback）时才
+  // 采信 X-Real-IP（本机 nginx 显式设置），兼顾反代拓扑下 per-IP 限额的公平性；
+  // 不可信来源拿不到该待遇，伪造头无法绕过。
+  const sock = (req.socket && req.socket.remoteAddress) || 'unknown';
+  if (typeof TRUST_PROXY_RESOLVED === 'function' && TRUST_PROXY_RESOLVED(sock)) {
+    const real = req.headers['x-real-ip'];
+    if (real) return String(real).trim();
+  }
+  return sock;
 }
 // 共用限流函数：/api/clients 与 /api/rpc2 共享同一套并发/速率计数器
 function wsRateLimit(ip) {
@@ -806,9 +814,14 @@ try {
   // 注意：不可为 /api/clients 与 /api/rpc2 各建一个非 noServer 的 WSS 共享同一 server——
   // 那样 path 不匹配的 upgrade 会被第一个 WSS 以 HTTP 400 拒绝（ws 库默认行为），
   // 导致主题连接 /api/rpc2 失败、实时/负载数据全部拉不到。
-  const wss = new WebSocketServer({ noServer: true });
+  // maxPayload（P1-9）：匿名连接可发超大帧耗内存，限 1MiB（主题订阅/心跳远小于此），
+  // 超限 ws 以 1009 关闭连接。
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 
   function attachCommon(ws, req) {
+    // P1-9 配套：超限帧（maxPayload）等会触发 error 事件，ws 连接上不挂监听
+    // 会升级为 uncaughtException 直接崩进程；统一吞掉，由 close 事件收尾。
+    ws.on('error', () => { /* 超限 1009 / 协议错误已由 close 收尾 */ });
     if (!db.getUiSettings().public_enabled) {
       try { ws.close(1008, 'public disabled'); } catch (_) {}
       return;

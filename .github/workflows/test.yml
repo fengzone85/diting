@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+# P2-1：最小权限——CI 只读仓库内容
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

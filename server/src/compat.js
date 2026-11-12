@@ -142,7 +142,7 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 属业务字段：public_show_business 关闭时一并清空。
     tags: show ? (a.merchant || '') : '',
     hidden: false,
-    public_remark: a.note || '',
+    public_remark: show ? (a.note || '') : '',
     // monthly_quota_gb 为 GiB 口径（与 alerts/前端/AI 一致），对主题边界换算成字节。
     traffic_limit: Number(a.monthly_quota_gb) > 0 ? Math.round(a.monthly_quota_gb * 1024 * 1024 * 1024) : 0,
     traffic_limit_type: 'max',

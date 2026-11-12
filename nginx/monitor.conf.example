@@ -43,6 +43,17 @@ server {
     listen 80;
     server_name monitor.yourdomain.com;
 
+    # P2-6：ACME 校验留在 80，其余流量 301 到 https。
+    #（下方反代 location 仅为「尚未启用 TLS」的临时部署保留——启用 443 后请删除，
+    # 否则带前缀的 location 仍按最长前缀匹配放行明文流量。）
+    location ^~ /.well-known/acme-challenge/ {
+        default_type "text/plain";
+        root /var/www/html;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+
     # 安全响应头（certbot --nginx 生成 443 server 块时会继承这些 location，
     # 因此 HSTS 在 HTTPS 下自动生效；HTTP 下浏览器会忽略 HSTS，无害）
     add_header X-Content-Type-Options "nosniff" always;

@@ -19,6 +19,7 @@ const http = require('http');
 const dns = require('dns');
 const { URL } = require('url');
 const { SYSTEM_PROMPT, buildUserMessage } = require('./prompt');
+const { normalizeIpLiteral } = require('../util');
 
 // ── SSRF 防护：base_url 云元数据地址黑名单 ──────────────────────────────────────
 // 管理员可配置 base_url，若被恶意指向云 IMDS（169.254.169.254 等），服务端会向
@@ -31,15 +32,18 @@ const IMDS_BLOCKED = new Set([
 ]);
 
 function isDangerousIP(ip) {
-  if (!ip) return false;
+  // P1-3：先归一化——URL 字面量可能是 [::ffff:169.254.169.254]/[::ffff:a9fe:a9fe]
+  // 带括号/十六进制形，DNS 结果可能是 ::ffff:a9fe:a9fe；不归一化前缀匹配全部落空。
+  const norm = normalizeIpLiteral(ip);
+  if (!norm) return false;
   // 精确匹配已知云元数据地址
-  if (IMDS_BLOCKED.has(ip)) return true;
+  if (IMDS_BLOCKED.has(norm)) return true;
   // IPv4 link-local 全段拦截（169.254.0.0/16），含所有云厂商的 IMDS
-  if (ip.startsWith('169.254.')) return true;
+  if (norm.startsWith('169.254.')) return true;
   // 非路由地址
-  if (ip === '0.0.0.0') return true;
+  if (norm === '0.0.0.0') return true;
   // IPv6 link-local（fe80::/10）
-  if (ip.toLowerCase().startsWith('fe80:')) return true;
+  if (norm.startsWith('fe80:')) return true;
   // RFC 1918 全段放行：10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
   // localhost（127.0.0.0/8, ::1）放行
   return false;

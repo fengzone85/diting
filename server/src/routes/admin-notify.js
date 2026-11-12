@@ -37,8 +37,39 @@ router.get('/admin/notify/migration-status', adminOrReadonly, (req, res) => {
   });
 });
 
+// P1-4：只读身份脱敏。webhook 渠道的 URL/headers 是投递凭据，超出只读范围；
+// 脱敏在 API 层做，DB 层不感知角色。密钥值任何响应都不回声（编辑响应用掩码）。
+const { resolveRole } = require('../auth');
+
+function channelHost(u) {
+  try { return new URL(u).host; } catch (e) { return ''; }
+}
+
+// 只读视图：只留清单字段 + URL 主机名（不给完整 URL/headers/token）
+function channelRedacted(ch) {
+  const cfg = (ch.config && typeof ch.config === 'object' && ch.config.url)
+    ? { url_host: channelHost(ch.config.url) }
+    : {};
+  return { id: ch.id, name: ch.name, type: ch.type, enabled: ch.enabled, config: cfg };
+}
+
+// 编辑响应：结构保留供表单回显，headers 值一律掩码不回声（URL 管理员列表本就可见）
+function channelMasked(ch) {
+  if (!ch || !ch.config || typeof ch.config !== 'object') return ch;
+  const cfg = Object.assign({}, ch.config);
+  if (cfg.headers && typeof cfg.headers === 'object') {
+    const h = {};
+    for (const k of Object.keys(cfg.headers)) h[k] = '***';
+    cfg.headers = h;
+  }
+  return Object.assign({}, ch, { config: cfg });
+}
+
 router.get('/admin/notify/channels', adminOrReadonly, (req, res) => {
-  res.json(db.listNotifyChannels());
+  const list = db.listNotifyChannels();
+  const role = resolveRole(req);
+  if (!role || role.role !== 'admin') return res.json(list.map(channelRedacted));
+  res.json(list);
 });
 
 router.post('/admin/notify/channels', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
@@ -47,7 +78,7 @@ router.post('/admin/notify/channels', adminOnly, agentScope, agentGlobalOnly, (r
   try {
     const ch = db.createNotifyChannel(v.value);
     auditLog(req, 'notify_channel_create', `id=${ch.id} type=${ch.type} name=${ch.name}`);
-    res.status(201).json(ch);
+    res.status(201).json(channelMasked(ch));
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
     throw e;
@@ -74,7 +105,7 @@ router.put('/admin/notify/channels/:id', adminOnly, agentScope, agentGlobalOnly,
   try {
     const ch = db.updateNotifyChannel(cur.id, patch);
     auditLog(req, 'notify_channel_update', `id=${ch.id} fields=${Object.keys(patch).sort().join(',')}`);
-    res.json(ch);
+    res.json(channelMasked(ch));
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: 'duplicate_name' });
     throw e;

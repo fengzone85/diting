@@ -82,6 +82,11 @@ func Load() (*Config, error) {
 	if cfg.Interval < 5*time.Second {
 		cfg.Interval = 5 * time.Second
 	}
+	// P2-4：上限 1h——误配超大 INTERVAL（如 86400）会让节点长期不报被判离线；
+	// adaptive 的快/慢档同样从 Interval 派生，一并受钳制。
+	if cfg.Interval > 3600*time.Second {
+		cfg.Interval = 3600 * time.Second
+	}
 
 	// 解析 debug
 	if v := os.Getenv("DEBUG"); v == "1" || v == "true" || v == "yes" {

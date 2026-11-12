@@ -8,6 +8,8 @@ const totp = require('./totp');
 const { verifyAdminToken } = require('./token-policy');
 // IPv6 解析为 128 位 BigInt（S4 起 ratelimit.js 也用它做 /64 归桶，故放 util.js）。
 const { ip6ToBits } = require('./util');
+// P1-5：TOTP 失败锁定与登录限流同口径——IPv6 按 /64 归桶，堵「换接口地址绕锁定」。
+const { bucketKey } = require('./ratelimit');
 
 // 恒定时间比较，避免令牌比较的时序侧信道。
 // 先对两端统一做 SHA-256 哈希再比较固定长度摘要，消除「长度不等提前返回」暴露的
@@ -351,7 +353,7 @@ function verifyTotpOnce(secretBase32, code, opts = {}) {
  * @returns {boolean} true = 允许继续校验；false = 已锁定
  */
 function totpGuard(req) {
-  const ip = (req && req.ip) || '';
+  const ip = bucketKey((req && req.ip) || '');
   const rec = totpFails.get(ip);
   if (!rec) return true;
   if (Date.now() > rec.reset) { totpFails.delete(ip); return true; }
@@ -359,7 +361,7 @@ function totpGuard(req) {
 }
 
 function recordTotpFailure(req) {
-  const ip = (req && req.ip) || '';
+  const ip = bucketKey((req && req.ip) || '');
   const now = Date.now();
   const rec = totpFails.get(ip);
   if (!rec || now > rec.reset) {
@@ -370,7 +372,7 @@ function recordTotpFailure(req) {
 }
 
 function clearTotpFailures(req) {
-  const ip = (req && req.ip) || '';
+  const ip = bucketKey((req && req.ip) || '');
   totpFails.delete(ip);
 }
 

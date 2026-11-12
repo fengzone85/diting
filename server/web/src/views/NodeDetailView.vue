@@ -493,13 +493,17 @@ async function switchChartRange(range: string) {
 
 // 对齐参考面板的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
 // 每段 range 各自保证点数合适（1h→600, 6h→1000, 12h→1200, 24h→1500, 7d→2000）。
+// P2-5：范围切换竞态——请求序号丢弃过期响应（旧响应不得覆盖新范围数据）
+let probesSeq = 0;
+
 async function loadProbes(range: string) {
   const id = agentId.value;
+  const seq = ++probesSeq;
   const mp = RANGE_MAX_POINTS[range] ?? 3000;
   // custom 复用已选窗口；'custom' 不是后端合法 range，不能直接透传。
   const win = range === 'custom' ? customProbes.value : null;
   const data = await publicApi.probesDetailed(id, win ? undefined : range, mp, win || undefined);
-  if (!alive || id !== agentId.value) return;
+  if (!alive || id !== agentId.value || seq !== probesSeq) return;
   probes.value = data?.series || {};
   availability.value = data?.availability || {};
 }
@@ -1040,8 +1044,9 @@ onUnmounted(() => {
                   <span style="color: #94a3b8;">{{ t('node.lossRate') }}</span>
                   <span class="text-right" style="color: #f8fafc;">{{ formatNumber(lossPercent(points), 1) }}%</span>
                   <!-- F4：窗口可用率；全失败显示「不可达」而不是 0% -->
-                  <span style="color: #94a3b8;">{{ t('node.availability') }}</span>
-                  <span class="text-right" :style="{ color: probeUpColor(target) }">{{ probeUpLabel(target) }}</span>
+                  <!-- P0-3：悬停显示统计基础（采样点数），标明该值按窗口内采样聚合 -->
+                  <span style="color: #94a3b8;" :title="availability[target]?.samples != null ? t('node.availabilitySamples', { n: availability[target].samples }) : undefined">{{ t('node.availability') }}</span>
+                  <span class="text-right" :style="{ color: probeUpColor(target) }" :title="availability[target]?.samples != null ? t('node.availabilitySamples', { n: availability[target].samples }) : undefined">{{ probeUpLabel(target) }}</span>
                   <!-- F4：证书倒计时（仅 https 目标有 cert_days） -->
                   <template v-if="probeCertLeft(target) != null">
                     <span style="color: #94a3b8;">{{ t('node.cert') }}</span>

@@ -289,10 +289,13 @@ async function add() {
   }
 }
 
+// P2-5：成功提示走独立 info 通道（绿色），不再借用 error 通道显示「已复制」
+const info = ref('');
+
 function copy(text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    error.value = t('common.copied');
-    setTimeout(() => (error.value = ''), 2000);
+    info.value = t('common.copied');
+    setTimeout(() => (info.value = ''), 2000);
   });
 }
 
@@ -330,8 +333,8 @@ async function restore(id: string) {
   try {
     await adminApi.restoreAgent(id);
     await Promise.all([loadDeleted(), loadAdmin()]);
-    error.value = t('agents.restored');
-    setTimeout(() => (error.value = ''), 2500);
+    info.value = t('agents.restored');
+    setTimeout(() => (info.value = ''), 2500);
   } catch (e) {
     error.value = (e as Error).message || t('agents.restoreFailed');
   }
@@ -493,6 +496,9 @@ async function batchRenew() {
     <h1 class="mb-6 text-2xl font-bold">{{ t('agents.title') }}</h1>
     <div v-if="error" class="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
       {{ error }}
+    </div>
+    <div v-if="info" class="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+      {{ info }}
     </div>
 
     <div class="glass mb-6 p-4">

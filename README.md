@@ -489,6 +489,7 @@ curl -X POST https://your-server/api/admin/api-tokens \
 - `GET /metrics` 返回 Prometheus 文本格式
 - 鉴权：`Authorization: Bearer <ADMIN_TOKEN>`（**仅** `ADMIN_TOKEN`，恒定时间比较，且受管理端 IP 白名单约束）
 - **默认强制 HTTPS**（`X-Forwarded-Proto: https` 或直连 TLS）；仅内网调试可设 `ADMIN_ALLOW_HTTP=1`
+- **保护范围说明（P2-3）**：强制 HTTPS 目前只作用于凭据入口（登录、安装/生成 Token 等写入口）；其余管理读写由反代终结 TLS 后回源，属反代拓扑常态。请保证「反代 ↔ 服务端」链路可信（本机 loopback 或内网直连），并正确配置 `TRUST_PROXY`
 - 指标：`monitor_agent_cpu_percent`、`monitor_agent_mem_percent`、`monitor_agent_disk_percent`、`monitor_agent_net_rx_rate_bytes` 等
 - 示例：`curl -H 'Authorization: Bearer TOKEN' https://your-server/metrics`
 

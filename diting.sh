@@ -558,34 +558,7 @@ install_server() {
     port="$(resolve_server_port)" || return 1
     echo -e "${GREEN}[OK]   监听端口：${port}${NC}"
 
-    if [[ ! -f .env ]]; then
-        cp .env.example .env
-        local sess setup
-        sess="$(openssl rand -hex 32)"
-        setup="$(openssl rand -hex 16)"
-        sed -i "s#^PORT=.*#PORT=${port}#" .env
-        sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=${sess}#" .env
-        sed -i "s#^SETUP_TOKEN=.*#SETUP_TOKEN=${setup}#" .env
-        # 管理员凭据不预生成：由浏览器 /install 向导创建（对齐上游），库中只存 sha256 哈希，
-        # 明文只在向导完成页显示一次。预生成会让"未安装"判据恒为 false，
-        # 安装向导永远不会出现 —— 这正是旧版首装不弹引导的原因。
-        sed -i "s#^ADMIN_TOKEN=.*#ADMIN_TOKEN=#" .env
-        echo -e "${GREEN}[OK]   已生成 SESSION_SECRET / SETUP_TOKEN${NC}"
-        echo -e "${YELLOW}[重要] SETUP_TOKEN = ${setup}${NC}"
-        echo -e "${YELLOW}        受控端一键注册请用: --setup-token ${setup}${NC}"
-        echo -e "${YELLOW}        管理员 Token 不预生成：请在浏览器打开安装向导创建（只显示一次）${NC}"
-    else
-        # 存量部署：既有凭据一律保留（可能已有可用的 ADMIN_TOKEN），
-        # 仅在 --port 显式指定或缺失 PORT 时同步端口，绝不覆盖凭据。
-        if grep -q '^PORT=' .env; then
-            sed -i "s#^PORT=.*#PORT=${port}#" .env
-        else
-            printf 'PORT=%s\n' "$port" >> .env
-        fi
-        echo -e "${GREEN}[OK]   已存在 .env：凭据保持不变，PORT=${port}${NC}"
-        # 存量 .env 可能缺 SESSION_SECRET（旧版本/手工拷贝），补一次（幂等）。
-        ensure_session_secret
-    fi
+    init_env_file "$port"
 
     echo -e "${YELLOW}[信息] 构建并启动服务端（首次需编译 better-sqlite3，约 1-2 分钟）…${NC}"
     # 写入构建时间与 commit hash（供页脚显示）
@@ -1198,6 +1171,22 @@ locate_db() {
             return
         fi
     done
+    # 运行目录分离（L2）后 .env 在仓库树外、由 unit 的 EnvironmentFile 指定
+    # （如 /data/simple-probe-data/server-data/.env）：上面三个固定候选都会落空，
+    # 不问 unit 要路径的话，本机 CLI 备份/恢复永远「无法定位数据库」（2026-11-12
+    # 真机演练实测）。unit 优先于 Docker 卷判定：systemd 部署的机器即便装了
+    # Docker 也不该把库操作指到无关卷上。
+    local unit_env=""
+    unit_env="$(server_env_file)"
+    if [[ -n "$unit_env" && -f "$unit_env" ]]; then
+        env_db="$(sed -n 's/^[[:space:]]*DB_PATH[[:space:]]*=[[:space:]]*//p' "$unit_env" | tail -n1)"
+        env_db="${env_db%\"}"; env_db="${env_db#\"}"; env_db="${env_db%\'}"; env_db="${env_db#\'}"
+        env_db="${env_db%%[[:space:]]*}"
+        if [[ -n "$env_db" && -f "$env_db" ]]; then
+            echo "file:$env_db"
+            return
+        fi
+    fi
     # 其次：Docker 命名卷（server-data）
     # compose v2 会把卷命名为「<项目名>_server-data」（项目名默认取 compose 文件所在目录名，
     # 本仓库的 compose 在 server/ 下 → server_server-data）。只认裸名 server-data 会让
@@ -1375,6 +1364,9 @@ JS
 ensure_session_secret() {
     local envf="$SRC_DIR/server/.env" cur sess
     [[ -f "$envf" ]] || return 0
+    # P0-1：.env 含密钥，无论是否补齐都先收敛到 600 —— 此前提前 return 会跳过 chmod，
+    # 「secret 已存在但权限宽」的存量 .env 永远收不紧。
+    chmod 600 "$envf" 2>/dev/null || true
     cur="$(sed -n 's/^SESSION_SECRET=//p' "$envf" 2>/dev/null | tr -d '\r\n' | head -1 || true)"
     [[ -n "$cur" ]] && return 0
     sess="$(openssl rand -hex 32)"
@@ -1383,11 +1375,53 @@ ensure_session_secret() {
     else
         printf 'SESSION_SECRET=%s\n' "$sess" >> "$envf"
     fi
-    # .env 含密钥：收敛到 600，避免补齐动作把文件权限变宽。
-    chmod 600 "$envf" 2>/dev/null || true
     echo -e "${GREEN}[OK]   已补齐 SESSION_SECRET（存量 .env 原值为空）${NC}"
     echo -e "${YELLOW}[提示] 重启后此前发出的一次性安装/下载链接将失效，需在后台重新生成${NC}"
     return 0
+}
+
+# 首装/存量 .env 初始化（P0-1：从 install_server 抽出，便于桩测试）。
+#   - 首装：umask 077 创建（模板即便 644 也只落到 600），写入随机 SESSION_SECRET/SETUP_TOKEN，
+#     落盘后显式 chmod 600 兜底（不依赖 sed -i 的权限实现差异）；
+#   - 存量：只同步 PORT，凭据一律不动，ensure_session_secret 幂等补齐。
+# 红线：.env 含 SESSION_SECRET/SETUP_TOKEN，任何路径创建/改写后权限必须收敛到 600
+# （auth.js 对无 sid 的旧式签名 Cookie 仅验签放行，644 的 .env 等于可伪造管理员会话）。
+init_env_file() {
+    local port="${1:-}"
+    if [[ -z "$port" ]]; then
+        echo -e "${RED}[错误] init_env_file 需要端口参数${NC}" >&2
+        return 1
+    fi
+    if [[ ! -f .env ]]; then
+        ( umask 077; cp .env.example .env )
+        chmod 600 .env
+        local sess setup
+        sess="$(openssl rand -hex 32)"
+        setup="$(openssl rand -hex 16)"
+        sed -i "s#^PORT=.*#PORT=${port}#" .env
+        sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=${sess}#" .env
+        sed -i "s#^SETUP_TOKEN=.*#SETUP_TOKEN=${setup}#" .env
+        # 管理员凭据不预生成：由浏览器 /install 向导创建（对齐上游），库中只存 sha256 哈希，
+        # 明文只在向导完成页显示一次。预生成会让"未安装"判据恒为 false，
+        # 安装向导永远不会出现 —— 这正是旧版首装不弹引导的原因。
+        sed -i "s#^ADMIN_TOKEN=.*#ADMIN_TOKEN=#" .env
+        chmod 600 .env
+        echo -e "${GREEN}[OK]   已生成 SESSION_SECRET / SETUP_TOKEN${NC}"
+        echo -e "${YELLOW}[重要] SETUP_TOKEN = ${setup}${NC}"
+        echo -e "${YELLOW}        受控端一键注册请用: --setup-token ${setup}${NC}"
+        echo -e "${YELLOW}        管理员 Token 不预生成：请在浏览器打开安装向导创建（只显示一次）${NC}"
+    else
+        # 存量部署：既有凭据一律保留（可能已有可用的 ADMIN_TOKEN），
+        # 仅在 --port 显式指定或缺失 PORT 时同步端口，绝不覆盖凭据。
+        if grep -q '^PORT=' .env; then
+            sed -i "s#^PORT=.*#PORT=${port}#" .env
+        else
+            printf 'PORT=%s\n' "$port" >> .env
+        fi
+        echo -e "${GREEN}[OK]   已存在 .env：凭据保持不变，PORT=${port}${NC}"
+        # 存量 .env 可能缺 SESSION_SECRET（旧版本/手工拷贝），补一次（幂等）。
+        ensure_session_secret
+    fi
 }
 
 # 把 .env 里的明文 ADMIN_TOKEN 迁进库（只存哈希）。
@@ -1822,6 +1856,24 @@ process_restore_request() {
         rm -f "$reqf"
         return 1
     fi
+    # P1-8：恢复目标必须位于备份目录内——realpath 后判定，拒绝 `..` 与软链逃逸。
+    # 能写 restore.request 的本地用户不应借此让 root 把任意 SQLite 文件恢复进库。
+    local real target_ok="" base realbase
+    real="$(realpath "$file" 2>/dev/null || true)"
+    _init_backup_dir
+    for base in "${DB_BACKUP_DIR:-}" "${BACKUP_VISIBLE_DIR:-}"; do
+        [[ -n "$base" ]] || continue
+        realbase="$(realpath "$base" 2>/dev/null || true)"
+        if [[ -n "$real" && -n "$realbase" && "$real" == "$realbase"/* ]]; then
+            target_ok=1
+            break
+        fi
+    done
+    if [[ -z "$target_ok" ]]; then
+        echo -e "${RED}[错误] 恢复目标不在备份目录内，已拒绝: ${file}${NC}" >&2
+        rm -f "$reqf"
+        return 1
+    fi
     # 先删请求文件再执行，避免恢复过程中的失败被反复重试成循环
     rm -f "$reqf"
     do_restore "$file"
@@ -1892,6 +1944,53 @@ _restore_write_pending_file() {
 }
 
 # 恢复数据库：校验 → 自动备份当前 → 原子替换 → 重启服务。
+# P0-2：对「目标侧临时副本」复核。源文件已在解压后做过 integrity_check（_restore_apply），
+# 这里防的是复制中断/磁盘满导致的半截文件被 mv 上位。有 sqlite3 用 integrity_check，
+# 没有则退回字节数比对。
+_restore_verify_tmp() {
+    local tmp="$1" src="$2"
+    if command -v sqlite3 >/dev/null 2>&1; then
+        sqlite3 "$tmp" "PRAGMA integrity_check;" 2>/dev/null | grep -qx "ok" && return 0
+        return 1
+    fi
+    local a b
+    a="$(stat -c %s "$src" 2>/dev/null || echo "")"
+    b="$(stat -c %s "$tmp" 2>/dev/null || echo "")"
+    [[ -n "$a" && "$a" == "$b" ]]
+}
+
+# P0-2：恢复替换段的停服兜底。无论 _restore_apply 成败（含 RETURN trap 路径），
+# 把替换前停掉的服务拉回运行态，绝不把生产留在停止态。未停过服时幂等无操作。
+_restore_ensure_started() {
+    case "${RESTORE_STOPPED_MODE:-}" in
+        systemd)
+            systemctl start diting-server.service >/dev/null 2>&1 || true
+            ;;
+        compose)
+            if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
+                ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d 2>/dev/null ) || true
+            fi
+            ;;
+        docker)
+            local cid svc proj
+            cid="${RESTORE_STOPPED_CID:-}"
+            svc="${RESTORE_STOPPED_SVC:-server}"
+            timeout 180 docker start "$cid" >/dev/null 2>&1 || true
+            # compose 管理的容器用 compose up 更稳妥（保留替换前的既有语义）
+            proj="$(timeout 180 docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null)"
+            if [[ -n "$proj" && -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
+                ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d "$svc" 2>/dev/null ) || timeout 180 docker start "$cid" >/dev/null 2>&1 || true
+            fi
+            ;;
+        volume)
+            [[ -n "${RESTORE_STOPPED_CID:-}" ]] && timeout 180 docker start "${RESTORE_STOPPED_CID}" >/dev/null 2>&1 || true
+            ;;
+    esac
+    RESTORE_STOPPED_MODE=""
+    RESTORE_STOPPED_CID=""
+    RESTORE_STOPPED_SVC=""
+}
+
 # 外层只补审计：恢复会覆盖当前库，API 侧那条 request_restore_backup 记录会随
 # 旧库一起消失（F8.6），所以结果必须在新库里再记一条（via=script）。
 do_restore() {
@@ -1909,6 +2008,11 @@ do_restore() {
 
 _restore_apply() {
     _init_backup_dir
+    # 停服状态由替换段置位、RETURN trap 经 _restore_ensure_started 消费；
+    # 进来先清零，防同 shell 上一次调用残留。
+    RESTORE_STOPPED_MODE=""
+    RESTORE_STOPPED_CID=""
+    RESTORE_STOPPED_SVC=""
     local in_path="$1"
     [[ -z "$in_path" ]] && { echo -e "${RED}[错误] 用法: --restore <备份文件路径>${NC}" >&2; return 1; }
     [[ -f "$in_path" ]] || { echo -e "${RED}[错误] 文件不存在: $in_path${NC}" >&2; return 1; }
@@ -1931,8 +2035,9 @@ _restore_apply() {
         fi
         restore_src="$tmp_dec"
     fi
-    # 无论成功失败都清理临时解压/标记副本
-    trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"; [[ -n "${marked_tmp:-}" && -f "${marked_tmp:-}" ]] && rm -f "$marked_tmp"' RETURN
+    # 无论成功失败都清理临时解压/标记副本；替换段停过服时由 _restore_ensure_started
+    # 在函数返回路径统一拉起服务（P0-2：失败路径不得把生产留在停止态）
+    trap '[[ -n "${tmp_dec:-}" && -f "${tmp_dec:-}" ]] && rm -f "$tmp_dec"; [[ -n "${marked_tmp:-}" && -f "${marked_tmp:-}" ]] && rm -f "$marked_tmp"; _restore_ensure_started' RETURN
 
     # ── 校验：SQLite 完整性 + 魔数 ──────────────────────────────────────────
     # 用 read 而非 $(head -c)：SQLite 头部第 16 字节是 \0，命令替换会丢弃并告警
@@ -2020,6 +2125,9 @@ _restore_apply() {
     # 注意（F8.6）：当前 `db.js` 使用 rollback journal（未设 journal_mode，现网也无
     # -wal/-shm），覆盖 monitor.db 不会残留旧日志。若将来改用 WAL，这里必须同时
     # 删除 -wal/-shm，否则旧 WAL 会被新库误认成自己的日志（数据错乱）。
+    # P0-2 三分支共同约束：① 先停服再写（运行中直写会损坏库）② 目标同目录临时文件
+    # + mv 原子 rename（跨文件系统 mv 非原子）③ 复制后对目标侧副本复核
+    # ④ 失败保留原库与 .bak；服务恢复由 _restore_apply 的 RETURN trap 统一兜底。
     if [[ "$loc" == docker:* ]]; then
         local cid svc cpath
         cid="$(echo "$loc" | cut -d: -f2)"
@@ -2027,41 +2135,108 @@ _restore_apply() {
         cpath="$(echo "$loc" | cut -d: -f4)"
         echo -e "${YELLOW}[信息] 停止服务端容器以安全替换数据库…${NC}"
         timeout 180 docker stop "$cid" >/dev/null 2>&1 || true
+        RESTORE_STOPPED_MODE=docker
+        RESTORE_STOPPED_CID="$cid"
+        RESTORE_STOPPED_SVC="$svc"
         # 注意：必须用解压后的 restore_src，绝不能用 in_path（可能是 .gz，
-        # 直接拷进去会把数据库写坏）
-        cp "$restore_src" "${restore_src}.tmp"
-        timeout 180 docker cp "${restore_src}.tmp" "${cid}:${cpath}" 2>/dev/null
-        rm -f "${restore_src}.tmp"
-        echo -e "${YELLOW}[信息] 重启服务端…${NC}"
-        timeout 180 docker start "$cid" >/dev/null 2>&1 || true
-        # compose 管理的容器用 restart 更稳妥
-        local proj; proj="$(timeout 180 docker inspect --format '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null)"
-        if [[ -n "$proj" && -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-            ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d "$svc" 2>/dev/null ) || timeout 180 docker start "$cid" >/dev/null 2>&1 || true
+        # 直接拷进去会把数据库写坏）。先拷进容器内同目录临时文件再 mv 原子替换：
+        # 直接 docker cp 覆盖目标，中断时会留半截库。
+        if ! timeout 180 docker cp "$restore_src" "${cid}:${cpath}.restore.tmp" 2>/dev/null; then
+            echo -e "${RED}[错误] 恢复文件拷入容器失败，已放弃（原库未动）${NC}" >&2
+            return 1
         fi
+        local srcsz cpsz
+        srcsz="$(stat -c %s "$restore_src" 2>/dev/null || echo "")"
+        cpsz="$(timeout 180 docker exec "$cid" stat -c %s "${cpath}.restore.tmp" 2>/dev/null | tr -d '\r\n' || echo "")"
+        if [[ -z "$srcsz" || "$srcsz" != "$cpsz" ]]; then
+            timeout 180 docker exec "$cid" rm -f "${cpath}.restore.tmp" >/dev/null 2>&1 || true
+            echo -e "${RED}[错误] 容器内恢复副本不完整，已放弃（原库未动）${NC}" >&2
+            return 1
+        fi
+        # 同宿主机分支：docker cp 产物是 root 属主，替换前按容器内原库校准（P0-2）
+        timeout 180 docker exec "$cid" chown --reference="${cpath}" "${cpath}.restore.tmp" >/dev/null 2>&1 || true
+        timeout 180 docker exec "$cid" chmod --reference="${cpath}" "${cpath}.restore.tmp" >/dev/null 2>&1 || true
+        if ! timeout 180 docker exec "$cid" mv -f "${cpath}.restore.tmp" "${cpath}" >/dev/null 2>&1; then
+            timeout 180 docker exec "$cid" rm -f "${cpath}.restore.tmp" >/dev/null 2>&1 || true
+            echo -e "${RED}[错误] 容器内原子替换失败，已放弃（原库未动）${NC}" >&2
+            return 1
+        fi
+        timeout 180 docker exec "$cid" rm -f "${cpath}-wal" "${cpath}-shm" >/dev/null 2>&1 || true
+        echo -e "${YELLOW}[信息] 替换完成，准备重启服务端…${NC}"
     elif [[ "$loc" == volume:* ]]; then
         local vol; vol="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 通过临时容器写入卷…${NC}"
-        # 同样必须用解压后的文件（临时解压文件在 /tmp，需按其所在目录挂载）
-        timeout 180 docker run --rm -v "$vol":/data -v "$(dirname "$restore_src")":/in \
-            alpine:3.20 cp "/in/$(basename "$restore_src")" /data/monitor.db 2>/dev/null
+        # locate_db 给 volume: 形态 = 卷存在但容器未运行；仍防御性复查一次（能停则停）
+        local vcid
+        vcid="$(docker ps -q --filter "volume=$vol" 2>/dev/null | head -n1)"
+        if [[ -n "$vcid" ]]; then
+            echo -e "${YELLOW}[信息] 卷仍被容器 ${vcid} 使用，先停止…${NC}"
+            timeout 180 docker stop "$vcid" >/dev/null 2>&1 || true
+            RESTORE_STOPPED_MODE=volume
+            RESTORE_STOPPED_CID="$vcid"
+        fi
+        # 卷内临时文件 + cmp 完整性比对 + mv 原子替换（busybox 自带 cmp/mv）；
+        # 同样必须用解压后的文件（临时解压文件在 /tmp，需按其所在目录挂载）。
+        local srcdir srcname
+        srcdir="$(dirname "$restore_src")"
+        srcname="$(basename "$restore_src")"
+        # busybox 无 chown --reference：数值化捕获原库 uid:gid/mode 再套到 tmp 上（P0-2）
+        if ! timeout 180 docker run --rm -v "$vol":/data -v "$srcdir":/in alpine:3.20 sh -c \
+            "cp '/in/$srcname' /data/monitor.db.restore.tmp \
+             && cmp -s '/in/$srcname' /data/monitor.db.restore.tmp \
+             && { ref=\"\$(stat -c '%u:%g' /data/monitor.db 2>/dev/null)\"; md=\"\$(stat -c '%a' /data/monitor.db 2>/dev/null)\"; \
+                  [ -n \"\$ref\" ] && chown \"\$ref\" /data/monitor.db.restore.tmp; \
+                  [ -n \"\$md\" ] && chmod \"\$md\" /data/monitor.db.restore.tmp; true; } \
+             && mv -f /data/monitor.db.restore.tmp /data/monitor.db \
+             && rm -f /data/monitor.db-wal /data/monitor.db-shm" 2>/dev/null; then
+            timeout 180 docker run --rm -v "$vol":/data alpine:3.20 rm -f /data/monitor.db.restore.tmp 2>/dev/null || true
+            echo -e "${RED}[错误] 卷内恢复失败，已放弃（原库未动）${NC}" >&2
+            return 1
+        fi
     else
         local fpath; fpath="$(echo "$loc" | cut -d: -f2)"
         echo -e "${YELLOW}[信息] 替换宿主机数据库文件…${NC}"
-        # 停服
-        if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
+        # 停服（P0-2）：原生 systemd 部署先 systemctl stop，compose 部署 down；
+        # 两者都识别不了时显式告警后继续（替换动作本身仍是原子的）。
+        if systemctl cat diting-server.service >/dev/null 2>&1; then
+            echo -e "${YELLOW}[信息] 停止 diting-server（systemd）…${NC}"
+            if systemctl stop diting-server.service; then
+                RESTORE_STOPPED_MODE=systemd
+            else
+                echo -e "${RED}[错误] 停服失败，放弃恢复（避免运行中直写）${NC}" >&2
+                return 1
+            fi
+        elif [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]] \
+            && ( cd "$SRC_DIR/server" && docker compose ps -q 2>/dev/null | grep -q . ); then
+            echo -e "${YELLOW}[信息] 停止服务端容器（compose）…${NC}"
             ( cd "$SRC_DIR/server" && timeout 180 docker compose down 2>/dev/null ) || true
+            RESTORE_STOPPED_MODE=compose
+        else
+            echo -e "${YELLOW}[警告] 未识别到运行中的服务端（systemd/compose），按停服态继续替换${NC}"
         fi
         cp "$fpath" "${fpath}.before_restore.bak"
-        cp "$restore_src" "$fpath"
+        # 临时文件必须与目标同目录：跨文件系统 mv 不是原子 rename
+        if ! cp "$restore_src" "${fpath}.restore.tmp"; then
+            echo -e "${RED}[错误] 写入临时恢复文件失败，已放弃（原库未动）${NC}" >&2
+            return 1
+        fi
+        if ! _restore_verify_tmp "${fpath}.restore.tmp" "$restore_src"; then
+            rm -f "${fpath}.restore.tmp"
+            echo -e "${RED}[错误] 恢复副本完整性校验未通过，已放弃（原库未动）${NC}" >&2
+            return 1
+        fi
+        # mv 上位的 tmp 是 root 产物，会把属主/权限一起换掉——服务以非 root 运行时
+        # 直接 SQLITE_CANTOPEN（2026-11-12 真机演练实测）。替换前按原库校准。
+        chown --reference="$fpath" "${fpath}.restore.tmp" 2>/dev/null || true
+        chmod --reference="$fpath" "${fpath}.restore.tmp" 2>/dev/null || true
+        mv -f "${fpath}.restore.tmp" "$fpath"
         # 现网是 rollback journal，下面两个文件通常不存在；保留删除是为了将来
         # 启用 WAL 后不把旧日志带进新库（见「原子替换」开头的说明）。
         rm -f "${fpath}-wal" "${fpath}-shm" 2>/dev/null || true
-        # 重启
-        if [[ -n "${SRC_DIR:-}" && -d "$SRC_DIR/server" ]]; then
-            ( cd "$SRC_DIR/server" && timeout 180 docker compose up -d 2>/dev/null ) || true
-        fi
     fi
+
+    # 替换完成：把服务拉回运行态（幂等；中途失败由 RETURN trap 兜底）
+    _restore_ensure_started
 
     echo -e "${GREEN}[OK]   数据库已恢复${NC}"
     echo -e "${YELLOW}[提示] 请刷新后台确认数据正确；如有问题可从 ${pre_restore:-（无）} 回滚${NC}"
@@ -2827,8 +3002,10 @@ JS
     port="$(server_port)"
     code=""
     for i in 1 2 3; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-            -H 'X-Forwarded-Proto: https' -H "X-Admin-Token: ${new_token}" \
+        # P2-6：Token 走 curl 配置（stdin）而非 -H argv——argv 会被同机用户从
+        # /proc/*/cmdline 读到。curl -K - 从 stdin 读配置，凭据不落命令行。
+        code="$(printf 'header = "X-Forwarded-Proto: https"\nheader = "X-Admin-Token: %s"\n' "${new_token}" \
+            | curl -s -o /dev/null -w '%{http_code}' --max-time 5 -K - \
             "http://127.0.0.1:${port}/api/admin/alert-rules" 2>/dev/null || echo 000)"
         [[ "$code" == "200" ]] && break
         sleep 2

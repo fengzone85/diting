@@ -145,11 +145,13 @@ function weightedRows(db, spec, opts) {
              ${hourCols}
       FROM metrics_hour
       WHERE hour_ts >= @since AND hour_ts < @wm AND (@until IS NULL OR hour_ts < @until) ${agentFilterHour}
+        AND agent_id IN (SELECT id FROM agents WHERE deleted_at IS NULL)
       UNION ALL
       SELECT ${agentSel}CAST((ts - @since) / CAST(@bucket AS INTEGER) AS INTEGER) AS b, 1 AS w,
              ${detailCols}
       FROM metrics
       WHERE ts >= @since AND (@until IS NULL OR ts < @until) ${agentFilterDetail}
+        AND agent_id IN (SELECT id FROM agents WHERE deleted_at IS NULL)
       AND (ts >= @wm OR NOT EXISTS (
              SELECT 1 FROM metrics_hour mh
              WHERE mh.agent_id = metrics.agent_id
@@ -213,7 +215,9 @@ function applyEdgesAll(rows, db, spec, opts) {
   const { since, until, bucket } = opts;
   const agents = rows.length
     ? [...new Set(rows.map((r) => r.agent_id))]
-    : db.prepare('SELECT DISTINCT agent_id FROM metrics WHERE ts >= ?').all(since).map((r) => r.agent_id);
+    : db.prepare(`SELECT DISTINCT m.agent_id AS agent_id FROM metrics m
+        INNER JOIN agents a ON a.id = m.agent_id
+        WHERE m.ts >= ? AND a.deleted_at IS NULL`).all(since).map((r) => r.agent_id);
   if (!agents.length) return rows;
   const byAgent = new Map();
   for (const r of rows) {
@@ -344,6 +348,11 @@ function finishProbe(acc) {
     ms: acc.nMs ? Math.round((acc.msSum / acc.nMs) * 10) / 10 : null,
     ok: sampled === 0 ? null : acc.nOk > 0,
     loss: acc.nLoss ? Math.round(acc.lossSum / acc.nLoss) : (sampled === 0 ? null : (acc.nOk > 0 ? 0 : 100)),
+    // P0-3：透传布尔样本计数，供可用率按 Σn_ok/Σn_samp 加权（1 样本桶与 100 样本桶
+    // 不再等权）；ok/loss 保留既有语义供兼容展示，混合桶真实达成率看 ok_rate
+    n_ok: acc.nOk,
+    n_samp: sampled,
+    ok_rate: sampled ? Math.round((acc.nOk / sampled) * 10000) / 10000 : null,
   };
   if (acc.http) out.type = 'http';
   if (acc.code !== null) out.code = acc.code;
@@ -376,7 +385,8 @@ function probeRows(db, { agentId, since, until, bucket, groupAgent }) {
     SELECT agent_id, hour_ts AS ts, probes_hour AS probes
     FROM metrics_hour
     WHERE hour_ts >= @since AND hour_ts < @wm AND (@until IS NULL OR hour_ts < @until)
-      AND probes_hour IS NOT NULL ${hourAgent}`).all({
+      AND probes_hour IS NOT NULL ${hourAgent}
+      AND agent_id IN (SELECT id FROM agents WHERE deleted_at IS NULL)`).all({
     id: agentId, since, wm, until: until == null ? null : Number(until),
   });
   for (const r of hourRows) {
@@ -384,9 +394,10 @@ function probeRows(db, { agentId, since, until, bucket, groupAgent }) {
     foldProbeRow(store, r.agent_id, b, r.ts, r.probes, true);
   }
   const detailRows = db.prepare(`
-    SELECT agent_id, ts, probes FROM metrics
+    SELECT agent_id, ts, probes     FROM metrics
     WHERE ts >= @since AND (@until IS NULL OR ts < @until)
       AND probes IS NOT NULL AND probes NOT IN ('{}', '') ${detailAgent}
+      AND agent_id IN (SELECT id FROM agents WHERE deleted_at IS NULL)
       AND (ts >= @wm OR NOT EXISTS (
         SELECT 1 FROM metrics_hour mh WHERE mh.agent_id = metrics.agent_id
           AND mh.hour_ts = CAST(ts / 3600000 AS INTEGER) * 3600000))`).all({

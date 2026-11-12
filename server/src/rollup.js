@@ -115,7 +115,9 @@ function foldProbes(rows) {
       acc.n++;
       if (typeof p.ms === 'number' && Number.isFinite(p.ms)) { acc.msSum += p.ms; acc.nMs++; }
       if (typeof p.loss === 'number' && Number.isFinite(p.loss)) { acc.lossSum += p.loss; acc.nLoss++; }
-      if (p.ok !== false) acc.nOk++;
+      // P0-3：只有 ok===true 才计成功——`!== false` 会把 null（无采样）计进 nOk，
+      // 全 null 小时得到 n_ok=n/n_samp=0，合并层折出 ok:true/loss:0，可用率被系统性抬高
+      if (p.ok === true) acc.nOk++;
       // n_samp = ok 为布尔值的样本数（三态：null 是无采样，不算成功/失败）
       if (p.ok !== null && p.ok !== undefined) acc.nSamp++;
       if (typeof p.cert_days === 'number' && Number.isFinite(p.cert_days)) {

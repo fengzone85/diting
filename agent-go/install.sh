@@ -54,7 +54,14 @@ while [[ $# -gt 0 ]]; do
         --interval) INTERVAL="$2"; shift 2 ;;
         --probe-targets) PROBE_TARGETS="$2"; shift 2 ;;
         --month-rotate) MONTH_ROTATE="$2"; shift 2 ;;
-        --repo) RELEASE_BASE="$2"; shift 2 ;;
+        --repo)
+            # P2-6：只接受 https:// 或本地目录——明文 http 下载时 SHA 与二进制同源，
+            # 无法自证完整性（中间人可同时篡改两者）。
+            case "$2" in
+                https://*|/*|./*|../*) RELEASE_BASE="$2" ;;
+                *) echo -e "${RED}[error] --repo 仅支持 https:// 或本地目录: $2${NC}" >&2; exit 1 ;;
+            esac
+            shift 2 ;;
         --install-agent) shift ;;
         --help|-h) usage ;;
         *) echo -e "${RED}[error] unknown arg: $1${NC}" >&2; usage ;;

@@ -10,6 +10,7 @@ import {
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ChartPoint } from '../services/types';
+import { alignOnTimestamps } from '../utils/latencyAlign';
 
 echarts.use([LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -97,10 +98,11 @@ function capSeries(series: LatencySeries[], max = 2000): LatencySeries[] {
 
 function buildSeries() {
   const ds = capSeries(bucketDownsample(props.series));
-  // 类目轴：所有 series 共享同一时间戳序列（桶聚合后已对齐），data 为纯值数组
-  const labels = ds[0] ? ds[0].data.map(d => d.t) : [];
+  // P1-10：按时间戳并集对齐、缺失填 null——此前用 ds[0] 的时间轴 + 索引取值，
+  // 某序列缺点时后续值整体左移，图与真实时间错位。值与时间戳一一对应。
+  const aligned = alignOnTimestamps(ds);
   return {
-    labels,
+    labels: aligned.labels,
     series: ds.map((s, i) => ({
       name: s.name,
       type: 'line' as const,
@@ -109,7 +111,7 @@ function buildSeries() {
       connectNulls: false,
       lineStyle: { color: s.color || PALETTE[i % PALETTE.length], width: 1.5 },
       areaStyle: { color: areaGradient(s.color || PALETTE[i % PALETTE.length]) },
-      data: s.data.map(d => d.v),
+      data: aligned.values[i],
     })),
   };
 }
