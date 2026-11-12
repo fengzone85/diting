@@ -28,7 +28,7 @@ const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 
-// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+// 参考面板风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: hexToRgba(color, 0.2) },
@@ -60,7 +60,7 @@ function baseOption(): any {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: c.axisLine } },
-      // 对齐 Komari LoadChart 的时间轴写法：字号 10 + hideOverlap。
+      // 对齐参考面板 LoadChart 的时间轴写法：字号 10 + hideOverlap。
       // 该卡片在三列网格里只有 ~370px 宽，默认 12px 字号会让时间刻度首尾相接
       // （实测 1h 时 9 个 "HH:mm" 连成一片）；hideOverlap 让 ECharts 丢弃重叠标签，
       // 实测同样宽度下标签数由 9 降到 6，间距约一倍。

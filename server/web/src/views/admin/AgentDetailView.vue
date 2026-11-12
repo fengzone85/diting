@@ -29,7 +29,7 @@ const message = ref('');
 const error = ref('');
 
 const form = ref<Partial<Agent>>({});
-// 到期时间「长期」：勾选即清空到期日（对齐 Komari，长期 = 不设过期时间）
+// 到期时间「长期」：勾选即清空到期日（对齐参考面板，长期 = 不设过期时间）
 const longTerm = ref(false);
 const commands = ref<{ install?: InstallCommands; modify?: ModifyCommands }>({});
 const commandProbeTargets = ref('');
@@ -39,7 +39,7 @@ const showToken = ref(false);
 // 单节点按需分析：入口按钮 + 弹窗（弹窗内自带窗口切换、登录态与错误码分支）
 const showNodeDialog = ref(false);
 
-// 计费周期与货币选项与「服务器列表账单卡片」共用一份常量（对齐 Komari 的 9 种货币 + -1 一次性）
+// 计费周期与货币选项与「服务器列表账单卡片」共用一份常量（对齐参考面板的 9 种货币 + -1 一次性）
 const billingCycles = BILLING_CYCLES;
 const currencies = CURRENCIES;
 

@@ -92,7 +92,7 @@ function barBg(status: string): string {
   }
 }
 
-// 延迟迷你柱（对齐 Komari NodePingListCell：grid h-1 即 4px）
+// 延迟迷你柱（对齐参考面板 NodePingListCell：grid h-1 即 4px）
 const latencyBars = computed(() => {
   const probes = parseProbes();
   const entries = Object.entries(probes);
@@ -149,7 +149,7 @@ const trafficPct = computed(() => {
   return Math.min((used / limit) * 100, 100);
 });
 
-// 列定义 - 对齐 Komari NodeList grid-template-columns
+// 列定义 - 对齐参考面板 NodeList grid-template-columns
 // dense（横排 2 列形态）：去掉「信息」「速率+探测柱」两列（见模板 v-if），
 // 固定列宽整体压缩（合计最小约 560px，见下方求和），配合 HomeView 双列容器
 // 放宽（2xl:max-w-[1720px]，每列 ≥740px）保证不挤压错乱。
@@ -263,7 +263,7 @@ const columns = computed(() => props.dense
             ↑ {{ formatBitsPerSecond(agent.net_tx_rate) }}
           </span>
         </div>
-        <!-- 延迟/丢包迷你柱（对齐 Komari NodePingListCell grid h-1） -->
+        <!-- 延迟/丢包迷你柱（对齐参考面板 NodePingListCell grid h-1） -->
         <div class="flex items-center gap-1 opacity-80 hover:opacity-100">
           <div class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5 flex-1" :title="`延迟 ${avgLatency}`" :style="{ gridTemplateColumns: `repeat(${latencyBars.length}, minmax(0, 1fr))` }">
             <span v-for="bar in latencyBars" :key="bar.key" :title="bar.tooltip" class="h-full w-full">
@@ -282,7 +282,7 @@ const columns = computed(() => props.dense
 </template>
 
 <style scoped>
-/* 信号颜色 - 对齐 Komari（与 NodeCardSimple 一致） */
+/* 信号颜色 - 对齐参考面板（与 NodeCardSimple 一致） */
 .node-card-simple,
 :deep(.bg-signal-1) { background-color: var(--signal-1, #059669); }
 :deep(.bg-signal-2) { background-color: var(--signal-2, #4ade80); }

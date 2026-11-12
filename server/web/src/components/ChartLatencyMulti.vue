@@ -34,7 +34,7 @@ let ro: ResizeObserver | null = null;
 let curInterval = -1;
 let lastLabels: number[] = [];
 
-// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+// 参考面板风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: hexToRgba(color, 0.2) },
@@ -63,7 +63,7 @@ function detectInterval(series: LatencySeries[]): number {
   return 30000; // 默认 30s
 }
 
-// 对齐 Komari：按探测间隔做时间桶聚合（最小 800ms / 最大 6000ms 桶宽）
+// 对齐参考面板：按探测间隔做时间桶聚合（最小 800ms / 最大 6000ms 桶宽）
 // 同一桶内取最后一个有效点（null 跳过），把点数压到 ~区间长度/桶宽
 function bucketDownsample(series: LatencySeries[]): LatencySeries[] {
   const interval = detectInterval(series); // 单位已是 ms，不要再乘 1000
@@ -124,7 +124,7 @@ function fmtTime(t: number, showDate: boolean): string {
 // —— 横轴标签疏密控制 ——
 // ECharts 的 hideOverlap 只保证标签「不重叠」，不保证留白：宽图上它会让标签首尾相接
 // （实测 1200px 宽 / 1h 窗口下挤了 32 个 "15:49" 这类标签，视觉上连成一条线）。
-// 故按可用宽度反推最多能放几个标签，显式给出 interval 拉开间距（对齐 Komari 的疏朗刻度）。
+// 故按可用宽度反推最多能放几个标签，显式给出 interval 拉开间距（对齐参考面板的疏朗刻度）。
 // 单标签占宽（含留白）：HH:mm 约 30px、MM/DD HH:mm 约 63px（11px 字号），再各留 ~45px 间距。
 function labelSpanPx(showDate: boolean): number {
   return showDate ? 110 : 78;

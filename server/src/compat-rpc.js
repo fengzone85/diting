@@ -1,5 +1,5 @@
 'use strict';
-// 第三方主题 JSON-RPC 2.0 网关：为社区主题（如 Glassmorphism）提供查询接口。
+// 第三方主题 JSON-RPC 2.0 网关：为社区主题（如玻璃拟态设计）提供查询接口。
 // 方法表采用 Map 注册制，预留 plugin:<id>:* 命名空间供未来插件扩展。
 const db = require('./db');
 const { toNode, toRealtime, publicOpen, publicSettings, getNodesLatestStatus } = require('./compat');
@@ -43,7 +43,7 @@ async function getProbeRecords({ hours = 1, maxCount = 100, entityId } = {}) {
   // 审查 C4：跨节点全窗聚合（未认证 RPC 即可触发）移 worker 线程。
   // 指定实体时必须走单节点采样：跨节点 probesAll 的结果还要全局 slice(0, maxCount)，
   // 其它节点的记录排在前面会把目标实体挤空（实测请求 j4125 返回 count=0，全是 n5100 的记录）。
-  // Komari 官方同样按 uuid 取该实体记录（web/rpc/jsonrpc/common.record.go:177）。
+  // 上游官方同样按 uuid 取该实体记录（web/rpc/jsonrpc/common.record.go:177）。
   const raw = entityId
     ? await heavyQuery('probesOne', entityId, since, points)
     : await heavyQuery('probesAll', since, points);
@@ -71,7 +71,7 @@ async function getProbeRecords({ hours = 1, maxCount = 100, entityId } = {}) {
   return records.slice(0, maxCount);
 }
 
-// diting 内部字段名 → Komari 点分命名（用于 getRecords 字段映射）
+// diting 内部字段名 → 上游点分命名（用于 getRecords 字段映射）
 const RECORD_FIELD_MAP = {
   'cpu.usage': 'cpu',
   'load.average': 'load1',
@@ -97,7 +97,7 @@ const RECORD_FIELD_MAP = {
   'temperature': 'temp'
 };
 
-// Komari getRecords(type=load) 的扁平字段名 → diting metrics 列名。
+// 参考面板 getRecords(type=load) 的扁平字段名 → diting metrics 列名。
 // 主题 LoadChart 按 flatRecord 读取（cpu / ram / ram_total / load / temp / disk / net_in ...）。
 const LOAD_FIELD_MAP = {
   cpu: 'cpu',
@@ -153,7 +153,7 @@ async function getRecords(params = {}, defaultHours = 1) {
     records.forEach(r => {
       (byClient[r.client] = byClient[r.client] || []).push(r);
     });
-    // 按 (client, task_id) 聚合统计，对齐 Komari 社区主题 PingChart 期望的 stats 结构。
+    // 按 (client, task_id) 聚合统计，对齐第三方社区皮肤 PingChart 期望的 stats 结构。
     // 前端 Ae() 读 o.value.stats，且只保留 total>0 && !loss_approximate && isFinite(loss) 的 task。
     const agg = {};
     records.forEach(r => {
@@ -195,7 +195,7 @@ async function getRecords(params = {}, defaultHours = 1) {
       records,
       recordsByClient: byClient,
       stats,
-      // Komari 官方 RecordsResp.tasks 除任务清单外还带窗口统计（loss/avg/min/max/...），
+      // 上游官方 RecordsResp.tasks 除任务清单外还带窗口统计（loss/avg/min/max/...），
       // 主题 PingChart 直接对 loss 调 toFixed(2)，缺字段会让整个组件渲染抛错。
       tasks: buildPingTasks(getPublicPingTasks({ entity_id: entityId }), records),
       basic_info: [],
@@ -207,7 +207,7 @@ async function getRecords(params = {}, defaultHours = 1) {
   if (!entityId) return metricKeys ? { count: 0, recordsByClient: {}, from: fromIso, to: nowIso } : [];
   const rows = await getMetricsRange(entityId, { hours, maxPoints });
 
-  // Komari 契约：getRecords(type=load) 返回 []flatRecord（**裸数组**，字段扁平命名为
+  // 参考面板契约：getRecords(type=load) 返回 []flatRecord（**裸数组**，字段扁平命名为
   // cpu / ram / ram_total / load / temp / disk / net_in ...）。社区主题 LoadChart 直接把它
   // 当数组渲染，此前返回 { count, records, ... } 信封会被判定为「暂无负载数据」。
   // 带 metric_keys 的调用（点分命名，diting 自有的兼容用法）保持原信封不变。
@@ -330,7 +330,7 @@ async function getPublicPingRecords(params = {}) {
   return { count: out.length, basic_info, records: out };
 }
 
-// Komari 官方 getRecords(type=ping).tasks 每项带窗口统计字段
+// 上游官方 getRecords(type=ping).tasks 每项带窗口统计字段
 // （web/rpc/jsonrpc/common.record.go:362-383）；其中 loss 会被 PingChart 直接用于
 // toFixed(2)，缺字段会让整个延迟图组件渲染抛错。diting 此前直接复用 getPublicPingTasks()
 // 的任务清单（纯元数据、无 loss），故在窗口记录上补齐官方统计。
@@ -362,7 +362,7 @@ function buildPingTasks(baseTasks, records) {
   });
 }
 
-// Komari 官方 flatRecord（web/rpc/jsonrpc/common.go:514-534）：扁平命名字段。
+// 上游官方 flatRecord（web/rpc/jsonrpc/common.go:514-534）：扁平命名字段。
 // GPU 不采集故刻意不输出，主题会把缺失值当 null，避免伪造 0 值。
 function toFlatRecent(agentId, m) {
   const rec = { client: agentId, time: new Date(m.ts).toISOString() };
@@ -465,8 +465,8 @@ registerMethod('rpc.ping', () => 'pong');
 registerMethod('rpc.getVersion', () => ({ hash: '-', version: 'diting-compat' }));
 registerMethod('rpc.getMethods', () => Array.from(METHODS.keys()));
 
-// 官方内建方法（komari/pkg/rpc/internal.go:26-90）。rpc.version 返回协议版本字符串。
-const RPC_VERSION = '2.0'; // komari/pkg/rpc/rpc.go:4
+// 官方内建方法（上游/pkg/rpc/internal.go:26-90）。rpc.version 返回协议版本字符串。
+const RPC_VERSION = '2.0'; // 上游/pkg/rpc/rpc.go:4
 registerMethod('rpc.version', () => RPC_VERSION);
 registerMethod('rpc.methods', (params = {}) => {
   const internal = !!(params && params.internal);
@@ -501,7 +501,7 @@ registerMethod('common:getNodesLatestStatus', (params = {}) => {
   if (!wanted || !all || typeof all !== 'object') return all;
   return Object.fromEntries(Object.entries(all).filter(([id]) => wanted.has(id)));
 });
-// Komari 官方返回 { count, records: []flatRecord }（web/rpc/jsonrpc/common.go:536-542），
+// 上游官方返回 { count, records: []flatRecord }（web/rpc/jsonrpc/common.go:536-542），
 // 默认主题 LoadChart 的实时页签读 e.records 并按扁平字段取值；此前返回嵌套结构的裸数组 → 空图。
 registerMethod('common:getNodeRecentStatus', (params = {}) => {
   const a = db.getAgent(params.uuid);
@@ -512,7 +512,7 @@ registerMethod('common:getNodeRecentStatus', (params = {}) => {
 });
 // 官方 common:getRecords 默认 hours=1（common.record.go:56-59）。
 registerMethod('common:getRecords', (params = {}) => getRecords(params, 1));
-// 官方 Common RPC（komari/web/rpc/jsonrpc/README.md）：与 public:* 共用同一真源。
+// 官方 Common RPC（上游/web/rpc/jsonrpc/README.md）：与 public:* 共用同一真源。
 registerMethod('common:getMe', () => ({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('common:getPublicInfo', getPublicInfo);
 registerMethod('common:getVersion', () => ({ hash: '-', version: 'diting-compat' }));
@@ -535,14 +535,14 @@ registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 // 官方记录端点（router.go:61），与 /api/records/ping 是两条不同绑定。
 registerMethod('public:getPingRecords', getPublicPingRecords);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
-// 返回结构：保持 { start, end, series } 信封。实测 Glassmorphism v3.4.4 的 LoadChart 直接读
-// `o.series`（`We(o.series)`），若按 Komari Go 侧的 []publicMetricSeries 裸数组返回，`o.series`
+// 返回结构：保持 { start, end, series } 信封。实测玻璃拟态设计 v3.4.4 的 LoadChart 直接读
+// `o.series`（`We(o.series)`），若按上游 Go 侧的 []publicMetricSeries 裸数组返回，`o.series`
 // 为 undefined → 全部图表判定「暂无数据」。（曾按官方 Go 结构改成裸数组，实测反而六张负载图全空，
 // 已回退——以真实主题行为为准。）
 registerMethod('public:queryMetrics', queryMetrics);
 registerMethod('public:getPingMetricStats', getPingMetricStats);
 
-// Komari 官方社区主题（Glassmorphism）底层 MetricsService 调用的原生方法名
+// 上游官方社区主题（玻璃拟态设计）底层 MetricsService 调用的原生方法名
 // metrics:query 使用【位置参数数组】而非对象：
 //   [metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty, ...]
 // metrics:definitions / metrics:ping 为普通对象参数。
@@ -562,7 +562,7 @@ registerMethod('metrics:ping', (params = {}) => {
   return getRecords({ ...p, type: 'ping' }, 1);
 });
 
-// 别名注册：第三方社区主题（如 Komari 官方 Glassmorphism）常以「无命名空间」形式
+// 别名注册：第三方社区主题（如上游官方玻璃拟态设计）常以「无命名空间」形式
 // 调用方法（getNodes / getNodesLatestStatus / ping / getVersion 等），而非 common:* / rpc.* 前缀。
 // 为兼容不同主题实现，此处为每个已注册方法补一个「去掉前缀」的别名（同时处理冒号与点分隔）。
 (function registerAliases() {
@@ -583,7 +583,7 @@ async function handleRpc(method, params) {
   return await METHODS.get(method)(params);
 }
 
-// 官方请求体校验（komari/pkg/rpc/request.go:34-45）：版本必须为 2.0、method 非空。
+// 官方请求体校验（上游/pkg/rpc/request.go:34-45）：版本必须为 2.0、method 非空。
 function validateRpcMessage(msg) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return 'invalid request';
   if (msg.jsonrpc !== '2.0') return 'invalid jsonrpc version';

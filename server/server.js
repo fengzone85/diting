@@ -274,13 +274,13 @@ function _metricsHandler(req, res) {
   res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8').send(lines.join('\n') + '\n');
 }
 
-// ---- 安装向导 API（复刻 komari /api/install/*：status 探测 + complete 单步安装）----
+// ---- 安装向导 API（复刻参考面板 /api/install/*：status 探测 + complete 单步安装）----
 // 挂载在拦截闸之前，未安装时也要保证可达；complete 自带三层防重装（409/410）。
 app.use('/api/install', install.router);
 app.use('/api', agentRelay.router);
 
-// ---- 安装向导拦截（复刻 komari guideNoRoute：未安装时管理面 API 形同不存在）----
-// 未安装（库中无 Token 哈希）时，管理面端点返回 404 —— 对齐 komari 的
+// ---- 安装向导拦截（复刻参考面板 guideNoRoute：未安装时管理面 API 形同不存在）----
+// 未安装（库中无 Token 哈希）时，管理面端点返回 404 —— 对齐参考面板的
 // "Not found in install mode"：不暴露"这是未安装实例"这一状态信息，比 403 更少指纹。
 // 安装向导自身、旧 setup 兼容端点不受影响；agent 上报面（/api/v1/*、/api/report 等）
 // 与 SETUP_TOKEN 自助注册（/api/setup/register）同样放行——它们在「未安装」状态下
@@ -352,7 +352,7 @@ app.use('/api', compat.router);
 function themeRelaxedCsp(nonce) {
   // connect-src 白名单是「社区主题实际会直连的外部只读服务」：图标（Iconify 三源）、
   // IP 地理定位（ipwho.is / ipapi.co / api.ip.sb）、汇率换算（open.er-api.com /
-  // api.frankfurter.app，Glassmorphism 用来显示本币价格）。这些都是只读 GET，
+  // api.frankfurter.app，社区主题用来显示本币价格）。这些都是只读 GET，
   // 不引入新的数据外发面；脚本源仍限定 'self' + 一次性 nonce。
   return `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.iconify.design https://api.simplesvg.com https://api.unisvg.com https://ipwho.is https://ipapi.co https://api.ip.sb https://open.er-api.com https://api.frankfurter.app; font-src 'self' data:`;
 }
@@ -360,13 +360,13 @@ function themeRelaxedCsp(nonce) {
 function injectNonce(html, nonce) {
   return html.replace(/<script(?![^>]*\bsrc=)/g, `<script nonce="${nonce}"`);
 }
-// Komari 生态主题的构建产物普遍用根绝对路径引用资源（`/assets/index-xxx.js`、`href="/favicon.ico"`、
+// 第三方生态主题的构建产物普遍用根绝对路径引用资源（`/assets/index-xxx.js`、`href="/favicon.ico"`、
 // `src="/admin-app/..."`），而 diting 把主题挂在 /themes/<short>/ 下。原样投放会让这些请求落到
 // diting 自己的 /assets 上（404 或串到 SPA 资源）。
 // 原则：**不改模板产物**（可随时用官方 zip 覆盖/升级），改由服务端在投放 index.html 时按主题目录
 // 的实际一级条目重写根绝对引用——只有首段能在主题包内找到（assets/、images/、favicon.ico、admin-app/…）
 // 才加 `/themes/<short>/` 前缀；主题自己的 SPA 路由链接（如 `/instance/<uuid>`）保持原样。
-// Komari 官方 web/public/public.go:57-79：按 cookie `language` 替换 <html lang>。
+// 上游官方 web/public/public.go:57-79：按 cookie `language` 替换 <html lang>。
 // 只接受 [A-Za-z0-9-] 且长度 2-32，避免把任意内容拼进 HTML。
 function readThemeLanguageCookie(req) {
   const raw = req && req.headers ? req.headers.cookie : '';
@@ -380,7 +380,7 @@ function readThemeLanguageCookie(req) {
   return v;
 }
 
-// Komari 官方主题页字面量替换（web/public/public.go:200-241 的 strings.NewReplacer）。
+// 上游官方主题页字面量替换（web/public/public.go:200-241 的 strings.NewReplacer）。
 // 官方主题包内没有 {{...}} 变量占位符，禁止自造占位符名；/admin、/terminal 不替换（:200-208）。
 // 管理员自定义 HTML 属受信任输入，原样注入到公开主题页（R16 信任模型）；
 // 未配置（空值）时保留原 HTML，避免空标题/空描述破坏现有主题。
@@ -529,7 +529,7 @@ app.get(/^\/themes\/([A-Za-z0-9_-]+)\/?$/, (req, res, next) => {
   return res.send(html);
 });
 
-// 旧初始化页（/setup.html）已由 SPA 内安装向导 /install 取代（复刻 komari 安装向导：
+// 旧初始化页（/setup.html）已由 SPA 内安装向导 /install 取代（复刻参考面板安装向导：
 // 未安装时全站页面 307 进向导，安装完成后向导 API 永久禁用）。保留路径做 302 兼容跳转，
 // 旧书签、文档链接与脚本输出提示仍然可达。判断依据是库中有无 Token 哈希（P0 起）。
 app.get('/setup.html', (req, res) => res.redirect(302, '/install'));
@@ -538,7 +538,7 @@ app.get('/setup', (req, res) => res.redirect(302, '/install'));
 // admin 路由由 SPA 接管：网络层 IP 白名单闸 + 显式返回 SPA 入口
 // 正则覆盖裸 /admin 与 /admin/*（Express 4 中 /admin/* 不匹配裸 /admin）
 app.get(/^\/admin(\/.*)?$/, ipWhitelist, (req, res) => {
-  // 未安装：复刻 komari guideNoRoute——任何页面一律 307 进安装向导
+  // 未安装：复刻参考面板 guideNoRoute——任何页面一律 307 进安装向导
   if (install.needsInstall()) return res.redirect(307, '/install');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -559,7 +559,7 @@ app.get('*', (req, res, next) => {
   // API 与显式路由已注册在前，不会落到此处
   if (req.path.startsWith('/api') || req.path.startsWith('/themes')) return next();
 
-  // 未安装（复刻 komari guideNoRoute）：除向导页 /install 外，任何页面 GET 一律
+  // 未安装（复刻参考面板 guideNoRoute）：除向导页 /install 外，任何页面 GET 一律
   // 307 到 /install——访客首次打开任何地址都会被引导进安装向导。静态资源（带后缀）
   // 不受影响，向导页面自身可正常加载；/install 落到下方 SPA_PREFIXES 返回 Vue 入口。
   if (install.needsInstall() && req.path !== '/install' && !path.extname(req.path)) {
@@ -635,11 +635,11 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Komari 社区主题兼容兜底：第三方主题硬编码以根路径
+// 第三方社区主题兼容兜底：第三方主题硬编码以根路径
 // /images/logo/* 与 /images/flags/* 取 OS logo / 国旗，而 diting 原生将其平铺在
 // public/ 根（os-*.svg、flags/），目录层级不同会 404。此处仅在静态资源未命中时，
 // 按当前启用主题回退到 themes/<id>/images/ 目录（那里本就含完整 logo/flags 集），
-// 既满足 Komari 主题约定，又不复制/改动 diting 原生 public/ 布局。
+// 既满足社区主题约定，又不复制/改动 diting 原生 public/ 布局。
 const KOMARI_IMAGE_PREFIXES = ['/images/logo/', '/images/flags/'];
 app.use((req, res, next) => {
   const p = req.path;

@@ -4,7 +4,7 @@ import { state, loadMeta } from '../composables/useApp';
 type Theme = 'auto' | 'light' | 'dark';
 const STORAGE_KEY = 'diting-theme';
 
-// 内置兜底背景（未配置任何背景时启用）：对齐 Glassmorphism 的多层 aurora 光斑。
+// 内置兜底背景（未配置任何背景时启用）：对齐玻璃拟态设计的多层 aurora 光斑。
 // 暗色深靛黑底 + 紫/靛/青/洋红四角柔光；亮色浅冷白底 + 蓝紫/粉/青柔光。
 // 与 main.css 的 body 渐变、TemplateView 的默认背景保持同色系（三处口径一致）。
 const BG_DARK_FALLBACK =
@@ -62,7 +62,7 @@ function applyThemeAttr(theme: Theme) {
   }
 }
 
-// 将 meta 中的主题可视化配置应用到 <html> / 背景层（对齐 komari-theme-Glassmorphism）
+// 将 meta 中的主题可视化配置应用到 <html> / 背景层（对齐玻璃拟态主题）
 function applyGlassConfig() {
   const root = document.documentElement;
   const m = state.meta;

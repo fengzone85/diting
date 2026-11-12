@@ -245,7 +245,7 @@ export const zhCN: Record<string, string> = {
   'dashboard.saving': '保存中…',
   'dashboard.cancel': '取消',
   'dashboard.done': '完成',
-  // 卡片标题（对齐 Komari 的卡片清单）
+  // 卡片标题（对齐参考面板的卡片清单）
   'dashboard.cardOverview': '上线概览',
   'dashboard.cardCapacity': '资源容量',
   'dashboard.cardCpuRank': 'CPU 使用排行',
@@ -580,7 +580,7 @@ export const zhCN: Record<string, string> = {
   'login.tokenRequired': '管理员 Token 必填',
   'login.failed': '登录失败',
 
-  // 安装向导（/install，复刻 komari 安装向导）
+  // 安装向导（/install，复刻上游安装向导）
   'install.title': '欢迎使用 diting',
   'install.subtitle': '首次部署初始化：设置站点信息与管理员 Token',
   'install.lockedTitle': '已初始化',

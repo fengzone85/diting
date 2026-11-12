@@ -265,7 +265,7 @@ function validateNotifyGroupInput(body) {
 
 // ---- S5/F10 主题：源 / short / manifest / 配置值 ---------------------------
 const THEME_SHORT_RE = /^[A-Za-z0-9_-]+$/;
-// 官方托管配置项类型（komari.wiki 主题开发指南）：title/textbox 是无 key 的展示项，
+// 官方托管配置项类型（上游.wiki 主题开发指南）：title/textbox 是无 key 的展示项，
 // 只用于分组标题与说明文字，不进入配置表单；其余为可保存字段。
 const THEME_CONFIG_TYPES = [
   'text', 'textarea', 'number', 'select', 'boolean', 'color',
@@ -331,7 +331,7 @@ function validateManifest(raw) {
     }
     const managed = type === 'managed';
     const data = managed && Array.isArray(c.data) ? c.data : [];
-    // Glassmorphism v3.4.4 声明 63 项；旧上限 50 会整包拒绝，导致 theme_settings 全空
+    // 玻璃拟态设计 v3.4.4 声明 63 项；旧上限 50 会整包拒绝，导致 theme_settings 全空
     // （主题侧表现为所有配置项都是默认值，本次厂商别名注入也依赖该合并结果）。
     if (data.length > 128) return { ok: false, error: 'configuration_too_many_fields' };
     const fields = [];
@@ -422,7 +422,7 @@ function validateThemeConfig(configuration, body) {
   return { ok: true, value: patch };
 }
 
-// ---- 后台仪表盘布局（对齐 Komari 仪表盘布局模型）---------------------------
+// ---- 后台仪表盘布局（对齐参考面板仪表盘布局模型）---------------------------
 // 布局是有序数组，元素 = { id, width, height }：
 //   id     卡片唯一键（白名单，顺序即渲染顺序）
 //   width  compact | wide | full（标准 / 加宽 / 整行）
@@ -433,7 +433,7 @@ const DASHBOARD_WIDGET_IDS = [
   // 单指标卡
   'total', 'online', 'offline', 'monthly_cost', 'remaining_value',
   'avg_cpu', 'avg_mem', 'db_size', 'public_nodes',
-  // 复合卡（对齐 Komari：概览 / 资源 / 排行 / 流量 / 到期 / 网络 / 分组 / 快捷操作）
+  // 复合卡（对齐参考面板：概览 / 资源 / 排行 / 流量 / 到期 / 网络 / 分组 / 快捷操作）
   'overview', 'capacity', 'cpu_rank', 'mem_rank', 'disk_rank',
   'traffic', 'expiry', 'ping', 'groups', 'shortcuts',
 ];

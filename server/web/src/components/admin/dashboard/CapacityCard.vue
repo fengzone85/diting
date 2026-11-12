@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 资源容量卡（对齐 Komari 的 resources 卡）：集群总核心 / 总内存 / 总磁盘
+// 资源容量卡（对齐参考面板的 resources 卡）：集群总核心 / 总内存 / 总磁盘
 import { computed } from 'vue';
 import { Cpu, HardDisk, Memory, Server } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';

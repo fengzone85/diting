@@ -107,11 +107,11 @@ GET /themes/<short>/config        # 受 public_enabled 开关控制，返回扁�
 
 > 若 `public_enabled = false`，上述接口返回 `403`，皮肤应展示「暂未开放」之类提示。
 
-## Komari 兼容 API（可选，供 Komari 社区皮肤复用）
+## 主题兼容 API（可选，供第三方社区皮肤复用）
 
-后端已实现一套 **Komari 兼容 API 层（PoC）**：把本机数据映射成 Komari 主题所期望的 `{status,message,data}` 结构与同构字段，并兼容 Komari 主题的实时通道。同样受 `public_enabled` 开关控制（关闭时返回 `403` / 空快照）。
+后端已实现一套 **主题兼容 API 层（PoC）**：把本机数据映射成社区主题所期望的 `{status,message,data}` 结构与同构字段，并兼容社区主题的实时通道。同样受 `public_enabled` 开关控制（关闭时返回 `403` / 空快照）。
 
-| 接口                          | 对应 Komari 行为                                    |
+| 接口                          | 对应上游行为                                    |
 | ----------------------------- | --------------------------------------------------- |
 | `GET /api/public`             | 站点公开属性（sitename / description / theme 等）    |
 | `GET /api/version`            | 版本信息                                            |
@@ -119,9 +119,9 @@ GET /themes/<short>/config        # 受 public_enabled 开关控制，返回扁�
 | `GET /api/recent/:uuid`       | 该节点最近实时指标（嵌套结构：`cpu.usage` / `ram.total` / `network.up` …）|
 | `WebSocket /api/clients`      | 发送 `get` 返回 `{data:{online:[...], data:{uuid:{...}}}}` 实时快照（需 `ws` 包，缺失时自动降级为上面三个 REST 接口轮询）|
 
-> 接入 Komari 社区皮肤时，只需将其前端请求层的 base URL 指向本服务、资源路径改为 `/themes/<id>/...`，即可复用。自带适配示例见 `komari-demo/`。
+> 接入第三方社区皮肤时，只需将其前端请求层的 base URL 指向本服务、资源路径改为 `/themes/<id>/...`，即可复用。
 
-## 硬件字段可用性（Komari 兼容层）
+## 硬件字段可用性（主题兼容层）
 
 受控端**不自动采集**硬件指纹。以下字段来自管理员在后台「节点详情 → 硬件档案」的手工录入。每个字段支持四态：**不填写 / 预设 / 手填 / 隐藏**，另有一个全局开关「公开接口展示硬件档案」（关闭 = 一键隐藏全部）。
 
@@ -135,11 +135,11 @@ GET /themes/<short>/config        # 受 public_enabled 开关控制，返回扁�
 | `kernel_version` | 管理员手填 | 与 CPU 同理不进受控端；无「代际」预设，只支持手填 / 隐藏；未填或隐藏时为空串（可直接匹配 CVE，属最高敏感项） |
 | `cpu_physical_cores` | 恒为 `0` | 物理核心需受控端探测，不采集 |
 
-> 「隐藏」只阻止接口输出值。部分社区主题（如 Glassmorphism）对 `arch` / `virtualization` 会固定渲染占位符「-」，这是主题自身行为，服务端不修改主题模板。GPU 使用率（`load_type=gpu` / `gpuMemory`）没有数据源；即使填了 `gpu_name`，也只会多一行名称，不会产生曲线。
+> 「隐藏」只阻止接口输出值。部分社区主题对 `arch` / `virtualization` 会固定渲染占位符「-」，这是主题自身行为，服务端不修改主题模板。GPU 使用率（`load_type=gpu` / `gpuMemory`）没有数据源；即使填了 `gpu_name`，也只会多一行名称，不会产生曲线。
 
 ### 厂商（merchant）识别
 
-Glassmorphism 的「厂商」**不是后端字段**：它从节点的 `name` / `public_remark` / `remark` / `tags` / `group` / `region` 里做关键词匹配（内置 66 家厂商名单 + 主题配置 `providerAliases`）。diting 的兼容层做了两件事：
+社区主题的「厂商」**不是后端字段**：它从节点的 `name` / `public_remark` / `remark` / `tags` / `group` / `region` 里做关键词匹配（内置 66 家厂商名单 + 主题配置 `providerAliases`）。diting 的兼容层做了两件事：
 
 1. `GET /api/nodes` 的 `tags` 写入后台「商家」（`merchant`），并受 `public_show_business` 控制；
 2. `GET /api/public` 的 `theme_settings.providerAliases` 自动注入「商家:商家」；若后台配置了「厂商别名」（`provider_aliases`，商家→显示名），则按 `显示名:商家` 注入，且主题自身配置优先。
@@ -148,17 +148,17 @@ Glassmorphism 的「厂商」**不是后端字段**：它从节点的 `name` / `
 
 ## 延迟 / 丢包数据
 
-- `/api/public` 的 `record_enabled` 恒为 `true`（对应 Komari 的 `retention.AllPositive`）。Glassmorphism 等主题用它做总开关，为 `false` 时**不会发起任何** ping 历史请求，卡片延迟/丢包会恒为 `-`。
+- `/api/public` 的 `record_enabled` 恒为 `true`（对应上游 `retention.AllPositive` 语义）。社区主题用它做总开关，为 `false` 时**不会发起任何** ping 历史请求，卡片延迟/丢包会恒为 `-`。
 - `ping_record_preserve_time` = `METRICS_DETAIL_DAYS * 24`（默认 168h），`record_preserve_time` = `RETENTION_DAYS * 24`。
 - `public:getPingMetricStats` 的 `total` 包含失败样本（`value=-1`），`loss = (total-valid)/total*100`；全丢包任务仍会返回，`loss=100`，不会被主题当成「无样本」丢弃。
 
 ## 参考实现
 
-- `komari-demo/`：适配版 Komari 皮肤示例，基于上面的 Komari 兼容 API，证明 Komari 社区皮肤可在本项目运行。
+- 适配示例存于工作区适配稿（不随仓库分发），证明第三方社区皮肤可在本项目运行。
 
-## 关于复用 Komari 社区皮肤
+## 关于复用第三方社区皮肤
 
-Komari 皮肤原本面向 **Komari 自有后端 API**（JSON-RPC2 / WebSocket，数据模型不同）开发。本项目已通过**兼容层**抹平差异：
+社区皮肤原本面向其**自有后端 API**（JSON-RPC2 / WebSocket，数据模型不同）开发。本项目已通过**兼容层**抹平差异：
 
-1. **兼容层（已实现，推荐先试）**：后端把本机数据映射成 Komari 格式并暴露 `/api/public`、`/api/nodes`、`/api/recent/:uuid`、`WebSocket /api/clients`，Komari 社区皮肤的前端请求层只需改 base URL 与资源路径（`/themes/<id>/...`）即可直接挂载。示例见 `komari-demo/`。
+1. **兼容层（已实现，推荐先试）**：后端把本机数据映射成社区主题格式并暴露 `/api/public`、`/api/nodes`、`/api/recent/:uuid`、`WebSocket /api/clients`，第三方社区皮肤的前端请求层只需改 base URL 与资源路径（`/themes/<id>/...`）即可直接挂载。
 2. **适配路线**：若你只想用本项目原生契约，也可基于 `/api/public/*` 改写皮肤请求层（结构更轻、长期可控）。

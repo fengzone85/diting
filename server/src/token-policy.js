@@ -33,7 +33,7 @@ function hashAdminToken(t) {
 }
 
 // 是否已初始化：库中存在合法的 Token 哈希。
-// 这是「未安装 / 已安装」的唯一判据（对齐 komari 的 users 计数语义）。
+// 这是「未安装 / 已安装」的唯一判据（对齐上游的 users 计数语义）。
 function hasAdminToken() {
   return HASH_RE.test(db.getAdminTokenHash());
 }

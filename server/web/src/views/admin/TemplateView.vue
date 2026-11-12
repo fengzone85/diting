@@ -45,7 +45,7 @@ const dirty = ref(false);
 const defaultDark = ['#0a0e16cc', '145%', '14px', '#ffffff2e', '0 8px 30px #0000007a'];
 const defaultLight = ['#f1f5f9cc', '145%', '14px', '#e2e8f0ad', '0 8px 28px #0f172a2e'];
 
-// 内置默认背景：对齐 Glassmorphism 的多层 aurora 光斑，与 useTheme 的兜底 SVG、
+// 内置默认背景：对齐玻璃拟态设计的多层 aurora 光斑，与 useTheme 的兜底 SVG、
 // main.css 的 body 渐变同色系（三处口径一致，避免「恢复默认」后又变回旧背景）。
 // 均为 SVG data URI（isSafeImageUrl 白名单允许），配合 80% 不透明卡片可清晰阅读。
 const BG_DARK =

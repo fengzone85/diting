@@ -5,7 +5,7 @@
 
 <p align="center">
   <strong>自托管 VPS 监控 · 受控端零入站 · 无指令通道</strong><br>
-  <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · 主题市场 · Komari 主题兼容 · 100 台规模设计</sub><br>
+  <sub>Vue3 SPA 管理端 · 审计日志 · AI 日报 · 主题市场 · 社区主题兼容 · 100 台规模设计</sub><br>
   <a href="README_EN.md">English</a> · <a href="https://fengzone85.github.io/diting/">文档</a> · <a href="https://github.com/fengzone85/diting/issues">反馈</a>
 </p>
 
@@ -24,7 +24,7 @@
 
 **谛听（Diting）** 是一个自托管的 VPS 监控面板：每台受控机跑一个单文件 Go agent，只做出站 HTTPS 上报——
 **不开任何入站端口、不接受任何服务端指令**；服务端用 Node.js + SQLite 渲染 Vue3 管理端，配套告警、审计、
-AI 日报、计费到期、备份恢复与 Komari 社区主题兼容层。
+AI 日报、计费到期、备份恢复与第三方社区皮肤兼容层。
 
 ## ✨ 核心特性
 
@@ -76,7 +76,7 @@ AI 日报、计费到期、备份恢复与 Komari 社区主题兼容层。
 ### ⚡ 管理端与生态
 - **Vue3 SPA** — Vite + Tailwind v4 + TS，玻璃拟态/明亮双主题
 - **主题市场** — ZIP 安装 / URL 导入 / 更新 / 回滚，安全解压 + SSRF 防护
-- **Komari 主题兼容** — 官方社区皮肤免改即用（`/?theme=<id>`）
+- **社区主题兼容** — 第三方社区皮肤免改即用（`/?theme=<id>`）
 - **WebSocket 实时推送** — 离线/恢复/告警实时下发
 - **仪表盘自定义** — 拖拽排序、分组、卡片/列表两种模式
 - **备份管理** — 在线快照、上传/下载/恢复、完整性抽查
@@ -150,7 +150,7 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 │  谛听 Server（Node.js 22，仅绑 127.0.0.1:8081）             │
 │  ├─ REST API        /api/report · /api/agents · /api/admin  │
 │  ├─ SPA             / · /login · /admin · /node/:id         │
-│  ├─ Komari 兼容层    /api/v1/* · /api/clients(WS) · /api/rpc2│
+│  ├─ 主题兼容层    /api/v1/* · /api/clients(WS) · /api/rpc2│
 │  ├─ 公开脱敏视图     /api/public/*（游客可见，字段脱敏）      │
 │  ├─ 受控端中继       /api/releases/agent/:os/:arch（验签）   │
 │  ├─ 主题挂载/市场     THEMES_DIR（DB 同级，随数据卷持久）     │
@@ -160,7 +160,7 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 └────────────────────────────────────────────────────────────┘
              │
              ▼  Nginx + TLS 反代（对外 443，limit_req 限流）
-   浏览器面板 / Grafana / 第三方 Komari 主题
+   浏览器面板 / Grafana / 第三方社区主题
 ```
 
 **关键设计：**
@@ -168,7 +168,7 @@ sudo SP_INSTALL_SHA256=<release-notes 里的 sha256> bash diting.sh --update-scr
 - 服务端绑定 `127.0.0.1:8081`，由 Nginx + TLS 反代对外暴露 443
 - 数据库存储 Token 哈希（SHA-256），非明文
 - 登录态用签名 `HttpOnly + Secure + SameSite=Strict` Cookie
-- 第三方 Komari 主题通过兼容层接入，**运行时重写 HTML 引用**，磁盘上的主题文件不做任何修改
+- 第三方社区主题通过兼容层接入，**运行时重写 HTML 引用**，磁盘上的主题文件不做任何修改
 - 签名中继只转发「ed25519 验签通过 + 架构匹配」的产物，按具体 tag 缓存，`:os/:arch` 走白名单查表
 
 > **默认部署路径（A）**：服务端只绑 `127.0.0.1:8081`，不占用 443；HTTPS 由宝塔 / 1Panel / 已有 Nginx 绑定域名反代提供，证书由面板管理。⚠️ 反代必须透传 WebSocket 升级头：`/api/clients`、`/api/rpc2` 是实时通道，漏了 `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade` 会让主题页显示「离线」、实时数值变 `N/A`，而直连 8081 完全正常。完整可粘贴配置与面板步骤见 [反向代理与 HTTPS](docs/src/content/docs/reverse-proxy.md)，通用模板见 `nginx/monitor.conf.example`。
@@ -202,10 +202,10 @@ diting/
 │   │   ├── agent-relay.js   # 受控端签名中继（ed25519 验签后转发）
 │   │   ├── distribution.js  # 批量分发：生成分发包与只换二进制的脚本
 │   │   ├── agent-versions.js# 期望版本/sha 对照与状态判定
-│   │   ├── compat.js        # Komari 主题 REST 兼容层
-│   │   ├── compat-metrics.js# Komari /api/records/load|ping 适配
-│   │   ├── compat-rpc.js    # Komari /api/rpc2 适配
-│   │   ├── v1.js            # 标准 /api/v1/* 端点（与 Komari 同形）
+│   │   ├── compat.js        # 社区主题 REST 兼容层
+│   │   ├── compat-metrics.js# 社区主题 /api/records 适配
+│   │   ├── compat-rpc.js    # 社区主题 /api/rpc2 适配
+│   │   ├── v1.js            # 标准 /api/v1/* 端点（与社区主题同形）
 │   │   ├── totp.js          # RFC 6238 TOTP（零依赖）
 │   │   ├── validate.js      # 输入校验 + CSS 清洗
 │   │   └── ai/              # AI 日报（provider/prompt/report/schedule/summarizer）
@@ -318,7 +318,7 @@ diting/
 | `ADAPTIVE` | 否 | on | 纯本地自适应采样：变化快档 `FAST_INTERVAL` ↔ 平稳慢档 `SLOW_INTERVAL`，不解析任何服务端响应 |
 | `FAST_INTERVAL` / `SLOW_INTERVAL` | 否 | `10` / `60` | 自适应快/慢档间隔（秒）；慢档需服务端 `OFFLINE_THRESHOLD_SEC` 大于它 |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
-| `MONTH_ROTATE` | 否 | `0` | 流量重置日：`0` = 绝对累计，`1-31` = 每月该日归零（兼容 Komari `AGENT_MONTH_ROTATE`） |
+| `MONTH_ROTATE` | 否 | `0` | 流量重置日：`0` = 绝对累计，`1-31` = 每月该日归零（兼容上游 `AGENT_MONTH_ROTATE` 别名） |
 | `PROBE_TARGETS` | 否 | 移动门户 + 电信/联通 DNS + 谷歌 DNS | 网络质量探测目标（`label:host[:port]` TCP 或 `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。默认 `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8`——运营商 DNS 对 TCP 全拒，`CM` 用移动门户测「移动入口可达性」 |
 | `PROBE_TIMEOUT_MS` | 否 | `900` | TCP 单次握手死线（毫秒） |
 | `PROBE_RESOLVE_MS` | 否 | `900` | 主机名解析死线（毫秒）；超时为「无采样」，不算丢包（上报 `ok=null`） |
@@ -421,13 +421,13 @@ cd server/web && npm install && npm run build
 
 ---
 
-## 🎨 Komari 主题兼容与主题市场
+## 🎨 社区主题兼容与主题市场
 
-`server/src/compat.js` 实现 Komari 社区主题兼容层，官方主题 ZIP **一行不改**即可运行：
+`server/src/compat.js` 实现第三方社区皮肤兼容层，主题 ZIP **一行不改**即可运行：
 
 - **REST**：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/nodes/:uuid`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
 - **实时**：`/api/clients`（WebSocket，发 `get` 取 snapshot）、`/api/clients/sse`（SSE 备选）、`/api/rpc2`（POST / WS）
-- **响应外壳**：`/api/*` 统一 `{status,message,data}` 外壳；records 返回扁平数组、task id 用数字——主题内部的归一化链按 Komari 形状取值，外壳或 id 类型不符就会静默判成「暂无数据」
+- **响应外壳**：`/api/*` 统一 `{status,message,data}` 外壳；records 返回扁平数组、task id 用数字——主题内部的归一化链按社区主题形状取值，外壳或 id 类型不符就会静默判成「暂无数据」
 - **字段映射**：`cpu_cores` 真实透出；`cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version` 取自管理员手工录入的硬件/系统档案（受控端不采集；可留空、可逐字段隐藏、可全局关闭），`arch` 未填时按受控端构建平台派生；未填写或隐藏时 `kernel_version` 为空串，不显示假值
 - **静态资源**：根绝对路径引用由服务端在**响应时重写**（磁盘上的主题文件不动），并自动补尾斜杠路由
 - **CSP**：含内联脚本的主题注入一次性 nonce，只放宽该响应的 `script-src`
@@ -436,7 +436,7 @@ cd server/web && npm install && npm run build
 
 **解压与下载边界**：逐 entry 按实际字节封顶（不信任 header 声明的 size）、拒绝路径穿越/绝对路径/符号链接、安装单飞锁串行、下载钉住 DNS 并拦截私网（复用通知模块的 SSRF 规则）。
 
-> 兼容性用两种技术栈的正式产物交叉验证：Vue 系 Glassmorphism v3.4.4 与 React 系 PurCarte v1.2.5——负载六图、节点详情、记录接口已验证可渲染；延迟图已消除「暂无延迟数据」空态，统计卡与曲线仍在与主题内部组件联调。原则是**改服务端去适配主题**，不改主题模板——社区主题升级后直接换 ZIP 即可。
+> 兼容性用两种技术栈的正式产物交叉验证：Vue 系主题（v3.4.4）与 React 系主题（v1.2.5）——负载六图、节点详情、记录接口已验证可渲染；延迟图已消除「暂无延迟数据」空态，统计卡与曲线仍在与主题内部组件联调。原则是**改服务端去适配主题**，不改主题模板——社区主题升级后直接换 ZIP 即可。
 
 ---
 
@@ -637,7 +637,7 @@ sudo bash diting.sh --process-restore     # 执行后台「恢复」投递的请
 **③ 采集数据不含可利用信息**
 - 受控端只采集基础状态：在线、负载、CPU、内存、磁盘、流量（含月累计）、温度、Swap、开机时长。温度/Swap/开机时长是**非指纹**指标（无内核版本/CVE 定向、无公网IP、无 GPU），即便泄露也无 actionable 价值。
 - 受控端**不采**内核版本、GPU 型号、公网IP、连接数、进程明细——这些可被用于定向攻击的指纹。即便服务端 DB 被拖库，泄露的也只是「机器 X 在 Z 时刻 CPU/内存为 Y」——对定向攻击毫无用处（无内核版本→无法 CVE 定向，无公网IP→无直接目标，无 GPU→无挖矿杠杆）。
-- 例外说明（2026-11）：Komari 模板需要的 `cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version` 五个**展示字段**可由管理员在后台手工录入。它们不来自受控端，预设粒度到「厂商+代际」或「核显/独显」，且支持逐字段「隐藏」与全局一键隐藏；内核版本没有代际粒度，只支持手填 / 不填 / 隐藏，且可直接匹配 CVE，属最高敏感项。手填精确型号或内核版本属于管理员的主动披露选择。
+- 例外说明（2026-11）：社区主题模板需要的 `cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version` 五个**展示字段**可由管理员在后台手工录入。它们不来自受控端，预设粒度到「厂商+代际」或「核显/独显」，且支持逐字段「隐藏」与全局一键隐藏；内核版本没有代际粒度，只支持手填 / 不填 / 隐藏，且可直接匹配 CVE，属最高敏感项。手填精确型号或内核版本属于管理员的主动披露选择。
 
 **③·补 指纹的风险有两个维度：定位，以及聚类**
 

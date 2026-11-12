@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 后台仪表盘看板（对齐 Komari 的仪表盘布局编辑器）：
+// 后台仪表盘看板（对齐参考面板的仪表盘布局编辑器）：
 // - 浏览态：「自定义」入口，卡片按保存的布局渲染
 // - 编辑态：每张卡带工具条（拖拽手柄、卡名、宽度三档、高度三档、隐藏），
 //   顶部工具条提供「恢复默认布局 / 选择卡片 / 取消 / 保存」
@@ -80,7 +80,7 @@ function normalize(raw: DashboardLayoutItem[] | null | undefined): DashboardLayo
       height: HEIGHT_OPTIONS.some((o) => o.value === item.height) ? item.height : 'short',
     });
   }
-  // 与 Komari 的 parseDashboardLayout 一致：传了内容但一条都不合法 → 回退默认布局，
+  // 与参考面板的 parseDashboardLayout 一致：传了内容但一条都不合法 → 回退默认布局，
   // 避免脏数据把看板变成永久空白；真正的空数组仍表示「用户清空了全部卡片」
   return raw.length > 0 && out.length === 0 ? defaultLayout() : out;
 }

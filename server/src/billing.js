@@ -1,9 +1,9 @@
-// 计费折算（复刻 Komari 的「剩余价值」逻辑）
+// 计费折算（复刻参考面板的「剩余价值」逻辑）
 //
-// Komari 的资产统计/交易模态框口径：
+// 参考面板的资产统计/交易模态框口径：
 //   剩余价值 = 价格 × 剩余天数 ÷ 计费周期天数（按 UTC 整日差计算，避免时区导致 ±1 天）
 //   总价值   = 各节点价格之和；月均支出 = 价格 ÷ 周期天数 × 30
-// 特殊情形（Komari 同样不参与折算，界面上标为「免费 / 长期」）：
+// 特殊情形（参考面板同样不参与折算，界面上标为「免费 / 长期」）：
 //   price = 0   → 不显示（未填写价格）
 //   price = -1  → 免费，剩余价值记 0
 //   expire 为空 → 长期，无到期日无法折算，剩余价值记空
@@ -43,7 +43,7 @@ function computeBilling(agent, now = Date.now()) {
 
   const raw = String(agent.expire_at || '').trim();
   if (!raw) {
-    // 长期：没有到期日，剩余价值无从折算（Komari 显示为「长期」）
+    // 长期：没有到期日，剩余价值无从折算（参考面板显示为「长期」）
     out.billing_status = 'long_term';
     if (!cycleDays) { out.billing_status = 'one_off'; }
     return out;

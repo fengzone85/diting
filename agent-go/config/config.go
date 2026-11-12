@@ -27,7 +27,7 @@ type Config struct {
 	// （非空时只统计这些接口，忽略全部内置排除规则）。
 	NetIfaceFilter bool
 	NetIfaceOnly   string
-	// MonthRotate：Komari 兼容流量重置日（0=绝对累计，1–31=周期重置日；越界回落 0）。
+	// MonthRotate：主题兼容流量重置日（0=绝对累计，1–31=周期重置日；越界回落 0）。
 	MonthRotate  int
 	Debug        bool
 	Adaptive     bool          // 纯本地自适应（不解析响应）：变化大→快档，平稳→慢档
@@ -69,7 +69,7 @@ func Load() (*Config, error) {
 	}
 	cfg.NetIfaceOnly = strings.TrimSpace(os.Getenv("NET_IFACE_ONLY"))
 
-	// MonthRotate：优先 MONTH_ROTATE，兼容 Komari 别名 AGENT_MONTH_ROTATE；取第一个非空值，非法/越界回落 0。
+	// MonthRotate：优先 MONTH_ROTATE，兼容上游别名 AGENT_MONTH_ROTATE；取第一个非空值，非法/越界回落 0。
 	cfg.MonthRotate = getEnvRotate("MONTH_ROTATE", "AGENT_MONTH_ROTATE")
 
 	// 解析 interval（默认 20s，最小 5s；ADAPTIVE=false 时的固定间隔）

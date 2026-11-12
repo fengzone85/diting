@@ -44,7 +44,7 @@ export interface UiSettings {
   social_telegram?: string;
   social_qq?: string;
   social_website?: string;
-  // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+  // 主题可视化配置（对齐玻璃拟态主题）
   glass_preset?: string;
   glass_custom?: Record<string, unknown>;
   color_vision?: string;

@@ -1,7 +1,7 @@
 'use strict';
 // ============================================================
 // 硬件档案回归：管理员手工录入的 CPU / 架构 / 虚拟化 / GPU
-// 方案：plans/2026-10-26-komari-compat-fields.md §4（2026-11-09 更新为单列 JSON）
+// 方案：字段换算方案文档 §4（2026-11-09 更新为单列 JSON）
 //
 // 安全前提：受控端不自动采集硬件指纹；本文件验证
 //   1. 归一化：预设枚举、手填校验、隐藏标记
@@ -179,7 +179,7 @@ test('compat.toNode：字段映射、GPU 占位与全局开关', () => {
   assert.strictEqual(n.gpu_name, '核显');
   assert.strictEqual(n.kernel_version, '');
 
-  // 未填写 GPU → Komari 约定 'None'（主题整行隐藏）
+  // 未填写 GPU → 参考面板约定 'None'（主题整行隐藏）
   const noGpu = setProfile(a, { cpu: { src: 'enum', vendor: 'Intel' } });
   assert.strictEqual(compat.toNode(noGpu, true, undefined, undefined, true).gpu_name, 'None');
 

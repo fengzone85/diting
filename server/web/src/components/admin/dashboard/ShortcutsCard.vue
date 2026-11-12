@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 快捷操作卡（对齐 Komari 的 shortcuts 卡）：常用后台页面直达
+// 快捷操作卡（对齐参考面板的 shortcuts 卡）：常用后台页面直达
 import { ChartLine, FileText, Link, Remind, Server, SettingTwo } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';
 import { useI18n } from '../../../composables/useI18n';

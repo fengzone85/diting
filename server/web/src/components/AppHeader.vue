@@ -67,7 +67,7 @@ const themeIcon = computed(() => {
 </script>
 
 <template>
-  <!-- 对齐 komari: 无 <header> 标签，无固定毛玻璃，滚动才出现 blur -->
+  <!-- 对齐上游: 无 <header> 标签，无固定毛玻璃，滚动才出现 blur -->
   <div
     class="sticky top-0 z-10 border-b border-transparent transition-all duration-200"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"

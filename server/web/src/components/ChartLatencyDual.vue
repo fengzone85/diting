@@ -56,7 +56,7 @@ const chartRef = ref<HTMLDivElement | null>(null);
 let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 
-// Komari 风格：线条下方从颜色向透明做垂直线性渐变
+// 参考面板风格：线条下方从颜色向透明做垂直线性渐变
 function areaGradient(color: string): any {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: hexToRgba(color, 0.2) },
@@ -113,7 +113,7 @@ function baseOption(): any {
     xAxis: {
       type: 'time',
       axisLine: { lineStyle: { color: c.axisLine } },
-      // 同 ChartLatency：对齐 Komari LoadChart 的 10px 字号 + hideOverlap，
+      // 同 ChartLatency：对齐参考面板 LoadChart 的 10px 字号 + hideOverlap，
       // 避免三列网格下时间刻度首尾相接
       axisTick: { show: false },
       axisLabel: { color: c.text, fontSize: 10, hideOverlap: true },

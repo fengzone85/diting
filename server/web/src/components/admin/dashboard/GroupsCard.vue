@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 分组概览卡（对齐 Komari 的分组/地区概览）：各分组在线数 / 总数 + 在线率条
+// 分组概览卡（对齐参考面板的分组/地区概览）：各分组在线数 / 总数 + 在线率条
 import { Data } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';
 import { useI18n } from '../../../composables/useI18n';

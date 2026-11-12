@@ -24,7 +24,7 @@ const validators = require('./validate');
 const hardware = require('./hardware-profile');
 
 
-// 计费字段口径（对齐 Komari）：
+// 计费字段口径（对齐参考面板）：
 //   价格 price：0 = 不显示、-1 = 免费、>0 = 实际金额
 //   货币 currency：¥ $ € £ ₽ ₣ ₹ ₫ ฿
 //   计费周期 billing_cycle：-1 = 一次性（不续期）、0 = 白嫖/免费、>0 = 天数
@@ -106,7 +106,7 @@ router.post('/setup/generate', setupRateLimit, (req, res) => {
   }
 });
 
-// ---- 一键安装命令生成（Nezha 风格：服务端把地址 + 每客户端令牌预填进命令）----
+// ---- 一键安装命令生成（参考面板风格：服务端把地址 + 每客户端令牌预填进命令）----
 // 三条接入路径（2026-10 起全部为 Go 受控端，Python 版 agent/ 已下线）：
 // ① 原生版（Linux systemd，diting.sh 自举下载 agent-go 载荷）；
 // ② Docker 版（现场从源码 git 构建镜像并运行，无需任何仓库账号）；
@@ -139,7 +139,7 @@ function serverUrlUnconfigured(res) {
   });
 }
 
-// Nezha 风格：一条命令搞定对接。原生版走根 diting.sh（自动拉取 agent 载荷并装 systemd）；
+// 参考面板风格：一条命令搞定对接。原生版走根 diting.sh（自动拉取 agent 载荷并装 systemd）；
 // Docker 版现场从源码 git 构建镜像并运行，无需任何仓库账号。
 // probeTargets：网络质量自测目标（格式 label:host[:port] 逗号分隔），服务端可配置；
 // 为空则受控端回退到各自代码里的内置默认。部署时直接写进安装命令，免去手动改环境变量。
@@ -231,7 +231,7 @@ Stop-ScheduledTask -TaskName "HostMonitorAgent-$id"; Start-ScheduledTask -TaskNa
 }
 
 // ---- Agent report (push) ----
-// 自动续费（对齐 Komari utils/renewal/renewal.go）：
+// 自动续费（对齐参考面板 utils/renewal/renewal.go）：
 // 受控端每次上报即代表「当前在线」，此时若 auto_renewal 开启且已到期（或今天到期），
 // 就把到期日推进一个计费周期。周期 <= 0（白嫖/一次性）不动。
 function maybeAutoRenew(agent) {
@@ -356,7 +356,7 @@ router.get('/agents', adminOrReadonly, agentScope, (req, res) => {
     return Object.assign({}, a, {
       group: a.grp || '',
       online: !!online,
-      // 剩余价值/月均支出（Komari 口径，见 src/billing.js）
+      // 剩余价值/月均支出（参考面板口径，见 src/billing.js）
       ...computeBilling(a, now),
       has_counter: db.hasTrafficCounter(a.id),
       latest: latestOut,
@@ -460,7 +460,7 @@ router.get('/agents/:id', adminOrReadonly, agentScope, (req, res) => {
 });
 
 // ---- Admin: metrics time-series ----
-// 4h/12h：对齐 Glassmorphism 的负载图（4 小时）与延迟图（12 小时）档位。
+// 4h/12h：对齐玻璃拟态设计的负载图（4 小时）与延迟图（12 小时）档位。
 const RANGES = { '1h': 3600, '4h': 14400, '6h': 21600, '12h': 43200, '24h': 86400, '7d': 604800, '30d': 2592000 };
 // 各档默认点数（体检 L-6）：原先走 getMetrics(metricsRange=SELECT *) 全量拉取，
 // 30d 约 12.9 万行且含 probes/disks 大 JSON。改用 SQL 层均匀采样（保留首尾点）。
@@ -695,7 +695,7 @@ router.get('/public/agents', (req, res) => {
       price: a.price || 0,
       billing_cycle: a.billing_cycle || 30,
       currency: a.currency || '¥',
-      // 剩余价值 / 月均支出 / 剩余天数（Komari 口径，见 src/billing.js）
+      // 剩余价值 / 月均支出 / 剩余天数（参考面板口径，见 src/billing.js）
       ...computeBilling(a)
     });
   });
@@ -776,7 +776,7 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   const rows = onlyId
     ? db.getMetricsSparklinesOne(onlyId, since, mp, sqlUntil)
     : await heavyQuery('sparklinesAllSampled', since, mp, sqlUntil);
-  // 后端降采样（对齐 Komari max_points 契约）。
+  // 后端降采样（对齐参考面板 max_points 契约）。
   // 无 id 的全量请求（首页卡片迷你图，只需 ~120 点/agent）：用独立小上限 SPARK_ALL_MAX_POINTS，
   // 避免 100 台规模下返回 1500 点/agent 造成 40MB+ 传输灾难。
   // 有 id 的单节点请求（详情页磁盘耗尽预测）：SQL 层已按 range 上限采样（30d→2000 足够线性外推），
@@ -791,7 +791,7 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
       disk_r_rate: r.disk_r_rate, disk_w_rate: r.disk_w_rate,
       // Windows 卡片进程胶囊的迷你图（0/未采集 → null，前端显示 '—'）
       process_count: r.process_count || null,
-      // 磁盘耗尽预测用：整机已用/总字节时序（对齐 komari MetricDisk 口径）
+      // 磁盘耗尽预测用：整机已用/总字节时序（对齐上游 MetricDisk 口径）
       disk_used: r.disk_used, disk_total: r.disk_total
     }));
   }
@@ -799,7 +799,7 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   res.json(byAgent);
 }));
 
-// 后端降采样开关（对齐 Komari downsample/max_points 契约）：
+// 后端降采样开关（对齐参考面板 downsample/max_points 契约）：
 //   PROBES_DOWNSAMPLE=1（默认）启用后端时间桶聚合 + 每 label 点数上限；
 //   =0 关闭则原样返回桶内原始点（点数可能很大，供前端自行处理）。
 //   PROBES_MAX_POINTS：每 label 点数硬上限，默认 5000，可调（上限钳到 50000）。
@@ -817,7 +817,7 @@ function clampInt(v, min = 1, max = 50000) {
   return Math.floor(n);
 }
 
-// ---- sparklines 后端降采样（对齐 Komari max_points 契约）----
+// ---- sparklines 后端降采样（对齐参考面板 max_points 契约）----
 // 卡片迷你图只需 ~60 点，磁盘耗尽预测需较长序列（~2000 点足够）。
 // 全量 30d 单节点 9.5 万点，100 台规模下公开 sparklines 无 id 全量查询会雪崩（DoS 级）。
 // 故按 range 给每 agent 设定点数上限，做时间桶聚合，避免传输/序列化灾难。
@@ -937,9 +937,9 @@ router.get('/public/agents/:id/probes', async (req, res) => {
     }
   }
   if (PROBES_DOWNSAMPLE) {
-    // 请求参数化降采样（对齐 Komari downsample/max_points/aggregation 契约）：
+    // 请求参数化降采样（对齐参考面板 downsample/max_points/aggregation 契约）：
     //   max_points=N：每 label 目标点数上限（缺省用 PROBES_MAX_POINTS）。以该值反推动态桶宽做时间桶聚合。
-    //   aggregation=avg|last：avg（默认，对齐 Komari）取桶内延迟平均；last 取桶内最后一个点。
+    //   aggregation=avg|last：avg（默认，对齐参考面板）取桶内延迟平均；last 取桶内最后一个点。
     const maxPoints = reqMaxPoints;
     const agg = req.query.aggregation === 'last' ? 'last' : 'avg';
     for (const label of Object.keys(series)) {
@@ -1029,7 +1029,7 @@ router.get('/public/meta', (req, res) => {
     social_telegram: ui.social_telegram || '',
     social_qq: ui.social_qq || '',
     social_website: ui.social_website || '',
-    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    // 主题可视化配置（对齐玻璃拟态主题）
     glass_preset: ui.glass_preset || 'emerald',
     glass_custom: ui.glass_custom || {},
     color_vision: ui.color_vision || 'normal',
@@ -1045,7 +1045,7 @@ router.get('/public/meta', (req, res) => {
   });
 });
 
-// 访客信息条（对齐 komari 主题的 visitorInfoEnabled）：返回访客 IP 与 UA 摘要。
+// 访客信息条（对齐上游主题的 visitorInfoEnabled）：返回访客 IP 与 UA 摘要。
 router.get('/public/visitor', (req, res) => {
   const fwd = req.headers['x-forwarded-for'];
   let ip = req.ip || (typeof fwd === 'string' ? fwd.split(',')[0].trim() : '') || '';
@@ -1432,7 +1432,7 @@ router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   auditLog(req, 'update_settings', (tags + changed.join(' ')).trim());
 });
 
-// 后台仪表盘布局（对齐 Komari）：只写 ui.admin_dashboard_layout 一个字段。
+// 后台仪表盘布局（对齐参考面板）：只写 ui.admin_dashboard_layout 一个字段。
 // 独立接口而非复用 PUT /settings——后者是整体覆盖写库，若前端只带布局会把其他设置抹掉。
 router.put('/admin/dashboard/layout', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
   const v = validators.validateDashboardLayout(req.body && req.body.layout);

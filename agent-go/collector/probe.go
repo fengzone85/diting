@@ -242,7 +242,7 @@ var httpProbeClient = &http.Client{
 //
 // 与 TCP 探测的口径差异：不做 3 次重试——HTTP 是一次完整请求（含 TLS 握手与响应头），
 // 重试会成倍拉长单目标耗时（3×5s）；握手抖动已由 60s 一轮的后台节奏吸收。
-// 成功判定与 nezha/CF 一致：2xx/3xx 为 ok，4xx/5xx/超时/连接失败为 not-ok。
+// 成功判定与参考面板/CF 一致：2xx/3xx 为 ok，4xx/5xx/超时/连接失败为 not-ok。
 func probeHTTP(t ProbeTarget) Probe {
 	p := Probe{Type: "http"}
 	start := time.Now()

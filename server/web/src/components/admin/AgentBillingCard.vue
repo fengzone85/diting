@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 服务器列表里的「账单」图标 + 弹出账单卡片（对齐 Komari 后台服务器列表的账单弹卡）：
+// 服务器列表里的「账单」图标 + 弹出账单卡片（对齐参考面板后台服务器列表的账单弹卡）：
 // 价格（0 不显示 / -1 免费）、货币（9 种）、计费周期（-1 一次性 / 0 白嫖 / >0 天数）、
 // 到期时间、自动续费（附续费规则提示）。卡片内直接可编辑并保存。
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
@@ -16,7 +16,7 @@ const emit = defineEmits<{ (e: 'saved'): void }>();
 
 const { t } = useI18n();
 
-// 剩余价值（服务端 server/src/billing.js 计算，Komari 口径）：
+// 剩余价值（服务端 server/src/billing.js 计算，参考面板口径）：
 // 免费 → 显示「免费」；长期/未填价/日期非法 → —；其余按 价格×剩余天数÷周期天数。
 const currencyOf = computed(() => props.agent.currency || '¥');
 const remainingText = computed(() => {
@@ -51,7 +51,7 @@ const form = reactive({
   currency: DEFAULT_CURRENCY as Currency,
   billing_cycle: DEFAULT_CYCLE as number,
   expire_at: '',
-  /** 长期：无到期日（对齐 Komari：到期时间可设为「长期」，即不设过期时间） */
+  /** 长期：无到期日（对齐参考面板：到期时间可设为「长期」，即不设过期时间） */
   long_term: false,
   auto_renewal: true,
 });
@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
         <span v-if="form.long_term" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
       </div>
 
-      <!-- 只读汇总：剩余价值 / 剩余时间 / 月均支出（Komari 资产统计口径） -->
+      <!-- 只读汇总：剩余价值 / 剩余时间 / 月均支出（参考面板资产统计口径） -->
       <div class="inner-panel mb-3 px-3 py-2 text-[11px]">
         <div class="flex items-center justify-between py-0.5">
           <span class="text-slate-400">{{ t('node.billing.remainingValue') }}</span>

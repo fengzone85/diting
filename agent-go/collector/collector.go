@@ -75,7 +75,7 @@ type Metrics struct {
 
 	// 进程总数（0 = 未采集/不可用；Linux 数 /proc，Windows 用 PDH \System\Processes）。
 	// 仅"数量"这一个整数——不含任何进程明细（无进程名/命令行/PID 列表），零指纹面。
-	// 前端 Komari 兼容层 process.count 图消费此字段。
+	// 前端主题兼容层 process.count 图消费此字段。
 	ProcessCount int `json:"process_count"`
 
 	// 实际上报间隔（秒；0 = 未设置，如首轮）。审查 C-1/E2：服务端据此（并结合
@@ -108,7 +108,7 @@ type Metrics struct {
 	// （JSON 字段省略，服务端按「未知」处理，不影响任何既有逻辑）。
 	Meta *AgentMeta `json:"agent_meta,omitempty"`
 
-	// 流量重置日（Komari month_rotate；0=绝对累计，1–31=周期重置日；服务端 agents.month_rotate 未设置时采用）
+	// 流量重置日（上游 month_rotate；0=绝对累计，1–31=周期重置日；服务端 agents.month_rotate 未设置时采用）
 	MonthRotate int `json:"month_rotate,omitempty"`
 
 	// 磁盘 IO 速率（B/s，需要前次样本）

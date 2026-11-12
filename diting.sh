@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # 谛听轻量探针 — 一键部署脚本
-#   借鉴 Nezha / Komari / Pulse 的「单文件下载 + 交互菜单 + 统一管理」范式
+#   借鉴同类项目的「单文件下载 + 交互菜单 + 统一管理」范式
 # =============================================================================
 # 一条命令下载并运行（建议先下载审阅，再 sudo 执行）：
 #   # 最小化镜像可能未预装 curl，先安装（仅 Debian/Ubuntu 等 apt 系统需要）
@@ -478,7 +478,7 @@ ensure_docker() {
 
 # ── 服务端监听端口 ─────────────────────────────────────────────────────────────
 # 端口属于"宿主侧参数"：容器按创建时的 ports: 发布，容器内换端口后宿主没有对应发布，
-# 外部连不上。因此端口只能由安装器决定（对齐 komari 把端口写进 systemd ExecStart），
+# 外部连不上。因此端口只能由安装器决定（对齐上游把端口写进 systemd ExecStart），
 # 而网页向导只做只读展示。
 #   --port N        显式指定（CI/批量部署）
 #   已有 .env     沿用现值，避免重跑安装把端口改回 8081
@@ -564,7 +564,7 @@ install_server() {
         sed -i "s#^PORT=.*#PORT=${port}#" .env
         sed -i "s#^SESSION_SECRET=.*#SESSION_SECRET=${sess}#" .env
         sed -i "s#^SETUP_TOKEN=.*#SETUP_TOKEN=${setup}#" .env
-        # 管理员凭据不预生成：由浏览器 /install 向导创建（对齐 komari），库中只存 sha256 哈希，
+        # 管理员凭据不预生成：由浏览器 /install 向导创建（对齐上游），库中只存 sha256 哈希，
         # 明文只在向导完成页显示一次。预生成会让"未安装"判据恒为 false，
         # 安装向导永远不会出现 —— 这正是旧版首装不弹引导的原因。
         sed -i "s#^ADMIN_TOKEN=.*#ADMIN_TOKEN=#" .env
@@ -882,7 +882,7 @@ update_server() {
         _upgrade_rollback_hint "${_old:-}" "$_bak"
         return 1
     fi
-    # 对齐 komari 的 active 校验：`up -d` 返回 0 只代表容器创建成功，
+    # 对齐上游的 active 校验：`up -d` 返回 0 只代表容器创建成功，
     # 构建失败/启动即崩溃常在几秒后才暴露，必须再确认容器真的在运行。
     local _cid2=""
     _cid2="$(docker compose ps -q server 2>/dev/null | head -n1)"
@@ -3048,7 +3048,7 @@ declare -A I18N_EN=(
     [wl.node_hint]="Native deployments require a host node matching better-sqlite3 ABI; Docker deployments are unaffected."
 )
 
-# ── 交互层（纯文本，对齐 komari 风格）──────────────────────────────────────────
+# ── 交互层（纯文本，对齐上游风格）──────────────────────────────────────────
 # 菜单与输入统一走纯文本 read：装了图形库和没装，输出完全一致，
 # SSH / 容器 / 极简系统上不再存在"两套渲染路径"。
 #
@@ -3098,7 +3098,7 @@ ui_prompt() {
 }
 
 # ui_confirm <标题> <提示> → 0=yes 1=no。空输入 = 取消（安全优先）。
-# 刻意**不**照搬 komari ui_yesno 的"空=是"：本脚本的调用方含 uninstall_all /
+# 刻意**不**照搬上游 ui_yesno 的"空=是"：本脚本的调用方含 uninstall_all /
 # do_clear_ip_whitelist / --reset-admin-token，一次误回车就会卸载或使旧凭据失效。
 ui_confirm() {
     local _title="$1" text="$2"

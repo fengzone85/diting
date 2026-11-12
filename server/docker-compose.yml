@@ -43,7 +43,7 @@ services:
       # 备份目录与恢复请求文件（对应上面的备份卷挂载；容器内路径，一般无需改）
       - BACKUP_DIR=${BACKUP_DIR:-/data/backups}
       - RESTORE_TRIGGER=${RESTORE_TRIGGER:-/data/backups/restore.request}
-      # 延迟波形后端降采样（对齐 Komari downsample/max_points 契约）
+      # 延迟波形后端降采样（对齐参考面板 downsample/max_points 契约）
       - PROBES_DOWNSAMPLE=${PROBES_DOWNSAMPLE:-1}
       - PROBES_MAX_POINTS=${PROBES_MAX_POINTS:-5000}
       # AI 日报：Key 存放方式（1=只读环境变量 AI_API_KEY，不落库）与磁盘趋势窗口（天，0=回退旧算法）。

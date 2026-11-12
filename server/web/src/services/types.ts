@@ -109,9 +109,9 @@ export interface Agent {
   has_counter?: boolean;
   price?: number;
   billing_cycle?: number;
-  // 对齐 Komari：¥ 人民币 / $ 美元 / € 欧元 / £ 英镑 / ₽ 卢布 / ₣ 法郎 / ₹ 卢比 / ₫ 越南盾 / ฿ 泰铢
+  // 对齐参考面板：¥ 人民币 / $ 美元 / € 欧元 / £ 英镑 / ₽ 卢布 / ₣ 法郎 / ₹ 卢比 / ₫ 越南盾 / ฿ 泰铢
   currency?: string;   // 历史符号（¥/$/€…）或 ISO 码（JPY/HKD…），服务端统一归一化
-  // 服务端计费折算（server/src/billing.js，对齐 Komari 剩余价值口径）
+  // 服务端计费折算（server/src/billing.js，对齐参考面板剩余价值口径）
   remaining_days?: number | null;
   remaining_value?: number | null;
   monthly_cost?: number | null;
@@ -423,7 +423,7 @@ export interface PublicMeta {
   social_telegram?: string;
   social_qq?: string;
   social_website?: string;
-  // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+  // 主题可视化配置（对齐玻璃拟态主题）
   glass_preset?: GlassPreset;
   glass_custom?: GlassCustomColors;
   color_vision?: ColorVision;
@@ -485,7 +485,7 @@ export interface Billing {
   expiring_soon: { id: string; name: string; days_left: number }[];
 }
 
-// 后台仪表盘布局（对齐 Komari）：宽度三档、高度三档，数组顺序即渲染顺序
+// 后台仪表盘布局（对齐参考面板）：宽度三档、高度三档，数组顺序即渲染顺序
 export type DashboardWidgetWidth = 'compact' | 'wide' | 'full';
 export type DashboardWidgetHeight = 'short' | 'normal' | 'tall';
 export interface DashboardLayoutItem {

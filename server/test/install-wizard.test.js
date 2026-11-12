@@ -1,5 +1,5 @@
 'use strict';
-// 安装向导（复刻 komari install wizard）行为测试：
+// 安装向导（复刻上游 install wizard）行为测试：
 //   未安装拦截（页面 307 → /install、管理面 404、agent/SETUP_TOKEN 面放行）、
 //   complete 校验（sitename/description/站点与上报地址/自定义 Token 强度）、
 //   requireProto 的 SSH 隧道例外（回环 + 零代理头）、
@@ -52,7 +52,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // complete 端点有 60s/5 次的 IP 限流；测试进程同源同 IP（127.0.0.1），
 // 需在每个 complete 用例开头调用 install.resetInstallRateLimit() 清计数。
-// 来源口径对齐 komari：不校验来源 IP（公网域名反代、内网、SSH 隧道一视同仁），
+// 来源口径对齐上游：不校验来源 IP（公网域名反代、内网、SSH 隧道一视同仁），
 // 只保留 HTTPS 要求（X-Forwarded-Proto）与限流；排他性靠状态机 + 哈希锁。
 let xffSeq = 100;
 const XFF = () => ({ ...PROTO, 'X-Forwarded-For': `203.0.113.${xffSeq++}` });
@@ -84,7 +84,7 @@ test('GET /api/install/status：未安装 → required=true、state=ready、带�
   assert.ok(res.body.port > 0 && res.body.port <= 65535);
 });
 
-test('未安装时页面 GET 一律 307 → /install（复刻 komari guideNoRoute）', async () => {
+test('未安装时页面 GET 一律 307 → /install（复刻上游 guideNoRoute）', async () => {
   for (const p of ['/', '/login', '/node/x', '/whatever']) {
     const res = await request(app).get(p);
     assert.strictEqual(res.status, 307, `GET ${p} 应 307 进安装向导`);
@@ -102,7 +102,7 @@ test('未安装时 /install 本身可达（SPA 入口 200）', async () => {
   assert.match(res.text, /<div id="app">/);
 });
 
-test('未安装时管理面 API → 404 not_found（对齐 komari Not found in install mode）', async () => {
+test('未安装时管理面 API → 404 not_found（对齐上游 Not found in install mode）', async () => {
   const agents = await request(app).get('/api/admin/agents');
   assert.strictEqual(agents.status, 404);
   assert.strictEqual(agents.body.error, 'not_found');
@@ -124,7 +124,7 @@ test('未安装时 agent 面 / SETUP_TOKEN 注册 / 旧 setup 端点不受拦截
   assert.strictEqual(st.body.needs_setup, true);
 });
 
-// ---- complete 请求校验（对应 komari completeRequest 校验）----
+// ---- complete 请求校验（对应上游 completeRequest 校验）----
 
 test('complete：sitename 缺失/超长 → 400 invalid_sitename', async () => {
   install.resetInstallRateLimit();
@@ -202,8 +202,8 @@ test('requireProto：回环 + 带 X-Forwarded-Proto: http 仍 403（nginx 明文
   }
 });
 
-// ---- 来源口径（对齐 komari）：不校验来源 IP，公网域名反代可直达安装 ----------
-// komari 的未安装实例以最小路由集监听 0.0.0.0，向导不做 IP 校验、无 install_token，
+// ---- 来源口径（对齐上游）：不校验来源 IP，公网域名反代可直达安装 ----------
+// 上游的未安装实例以最小路由集监听 0.0.0.0，向导不做 IP 校验、无 install_token，
 // 排他性只由「未安装窗口 + 状态机 + 哈希锁」保证；diting 采用同一口径。
 
 test('来源：公网客户端经域名反代（XFF 公网 IP + https）→ 不因来源被拒，进入业务校验', async () => {

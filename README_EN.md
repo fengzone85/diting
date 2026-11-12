@@ -5,7 +5,7 @@
 
 <p align="center">
   <strong>Self-hosted VPS monitoring · zero inbound on agents · no command channel</strong><br>
-  <sub>Vue3 SPA · audit log · AI daily report · theme market · Komari theme compatibility · designed for 100 agents</sub><br>
+  <sub>Vue3 SPA · audit log · AI daily report · theme market · Community theme compatibility · designed for 100 agents</sub><br>
   <a href="README.md">中文</a> · <a href="https://fengzone85.github.io/diting/">Docs</a> · <a href="https://github.com/fengzone85/diting/issues">Issues</a>
 </p>
 
@@ -25,7 +25,7 @@
 **Diting** is a self-hosted VPS monitoring panel: every monitored host runs a single-binary Go agent that only
 makes outbound HTTPS reports — **no inbound port is opened and no server command is ever accepted**. The server
 renders a Vue3 admin UI on Node.js + SQLite, and ships alerting, audit logging, an AI daily report, billing and
-expiry tracking, backup/restore, and a compatibility layer for Komari community themes.
+expiry tracking, backup/restore, and a compatibility layer for third-party community themes.
 
 ## ✨ Highlights
 
@@ -77,7 +77,7 @@ expiry tracking, backup/restore, and a compatibility layer for Komari community 
 ### ⚡ Admin UI & ecosystem
 - **Vue3 SPA** — Vite + Tailwind v4 + TS, glassmorphism and light themes
 - **Theme market** — ZIP install / URL import / update / rollback, safe extraction + SSRF guards
-- **Komari theme compatibility** — official community skins run unmodified (`/?theme=<id>`)
+- **Community theme compatibility** — third-party community skins run unmodified (`/?theme=<id>`)
 - **WebSocket push** — offline/recovery/alert events in real time
 - **Dashboard customisation** — drag-to-sort, groups, card/list modes
 - **Backup management** — online snapshot, upload/download/restore, integrity spot-checks
@@ -153,7 +153,7 @@ GitHub release on failure. Both paths still enforce SHA256.
 │  Diting Server (Node.js 22, bound to 127.0.0.1:8081 only)   │
 │  ├─ REST API        /api/report · /api/agents · /api/admin  │
 │  ├─ SPA             / · /login · /admin · /node/:id         │
-│  ├─ Komari compat   /api/v1/* · /api/clients(WS) · /api/rpc2│
+│  ├─ Theme compat   /api/v1/* · /api/clients(WS) · /api/rpc2│
 │  ├─ Public view     /api/public/* (guest-safe, redacted)    │
 │  ├─ Agent relay     /api/releases/agent/:os/:arch (verified)│
 │  ├─ Theme engine    THEMES_DIR (next to the DB, persisted)  │
@@ -163,7 +163,7 @@ GitHub release on failure. Both paths still enforce SHA256.
 └────────────────────────────────────────────────────────────┘
              │
              ▼  Nginx + TLS reverse proxy (443, limit_req)
-   Browser dashboard / Grafana / third-party Komari themes
+   Browser dashboard / Grafana / third-party community themes
 ```
 
 **Key design points:**
@@ -171,7 +171,7 @@ GitHub release on failure. Both paths still enforce SHA256.
 - The server binds `127.0.0.1:8081` and is exposed through Nginx + TLS on 443
 - Tokens are stored as SHA-256 hashes, never in plaintext
 - Sessions use a signed `HttpOnly + Secure + SameSite=Strict` cookie
-- Third-party Komari themes are adapted **at response time by rewriting HTML references**; theme files on disk are untouched
+- third-party community themes are adapted **at response time by rewriting HTML references**; theme files on disk are untouched
 - The signed relay forwards only artifacts that pass ed25519 verification *and* match the requested arch, cached per concrete tag; `:os/:arch` is a whitelist lookup
 
 > **Default path (A)**: the server binds only `127.0.0.1:8081` and never occupies 443; HTTPS is provided by aaPanel / 1Panel / an existing Nginx reverse proxy, which also manages the certificate. ⚠️ The proxy must forward WebSocket upgrade headers: `/api/clients` and `/api/rpc2` are the realtime channels. Without `proxy_set_header Upgrade $http_upgrade` / `Connection $connection_upgrade`, theme pages show "offline" with `N/A` values while `127.0.0.1:8081` works fine. Paste-ready configs and panel steps: [Reverse Proxy & HTTPS](docs/src/content/docs/reverse-proxy.md); generic template: `nginx/monitor.conf.example`.
@@ -205,10 +205,10 @@ diting/
 │   │   ├── agent-relay.js   # signed agent relay (ed25519 verify, then forward)
 │   │   ├── distribution.js  # batch distribution: packages + binary-only swap scripts
 │   │   ├── agent-versions.js# expected version/sha comparison and status
-│   │   ├── compat.js        # Komari theme REST compatibility layer
-│   │   ├── compat-metrics.js# Komari /api/records/load|ping adapter
-│   │   ├── compat-rpc.js    # Komari /api/rpc2 adapter
-│   │   ├── v1.js            # standard /api/v1/* endpoints (Komari-shaped)
+│   │   ├── compat.js        # community theme REST compatibility layer
+│   │   ├── compat-metrics.js# community theme records adapter
+│   │   ├── compat-rpc.js    # community theme rpc2 adapter
+│   │   ├── v1.js            # standard /api/v1/* endpoints (theme-shaped)
 │   │   ├── totp.js          # RFC 6238 TOTP (zero dependency)
 │   │   ├── validate.js      # input validation + CSS sanitising
 │   │   └── ai/              # AI daily report (provider/prompt/report/schedule/summarizer)
@@ -336,7 +336,7 @@ both endpoint families return 403.
 | `ADAPTIVE` | no | on | Purely local adaptive sampling: fast tier `FAST_INTERVAL` ↔ steady tier `SLOW_INTERVAL`; never parses a server response |
 | `FAST_INTERVAL` / `SLOW_INTERVAL` | no | `10` / `60` | Adaptive tier intervals; the server's `OFFLINE_THRESHOLD_SEC` must exceed the slow tier |
 | `DISK_PATH` | no | `/` | Path used for disk statistics (usually `/host` in a container) |
-| `MONTH_ROTATE` | no | `0` | Traffic reset day: `0` = absolute counters, `1-31` = zero on that day each month (Komari `AGENT_MONTH_ROTATE` alias accepted) |
+| `MONTH_ROTATE` | no | `0` | Traffic reset day: `0` = absolute counters, `1-31` = zero on that day each month (upstream `AGENT_MONTH_ROTATE` alias accepted) |
 | `PROBE_TARGETS` | no | Mobile portal + CT/CU DNS + Google DNS | Probe targets (`label:host[:port]` TCP or `label:http(s)://host/path` HTTP, comma-separated, empty disables). Default `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` — carrier DNS rejects TCP outright, so `CM` measures "China Mobile ingress reachability" |
 | `PROBE_TIMEOUT_MS` | no | `900` | Per-attempt TCP handshake deadline (ms) |
 | `PROBE_RESOLVE_MS` | no | `900` | Hostname resolution deadline (ms); a timeout is "no sample", not packet loss (`ok=null`) |
@@ -448,14 +448,14 @@ automatic VACUUM.
 
 ---
 
-## 🎨 Komari theme compatibility and theme market
+## 🎨 Community theme compatibility and theme market
 
-`server/src/compat.js` implements the Komari community-theme compatibility layer, so official theme
+`server/src/compat.js` implements the third-party community-theme compatibility layer, so official theme
 ZIPs run **without a single edit**:
 
 - **REST**: `/api/me`, `/api/public`, `/api/version`, `/api/nodes`, `/api/nodes/:uuid`, `/api/recent/:uuid`, `/api/records/load`, `/api/records/ping`
 - **Realtime**: `/api/clients` (WebSocket, send `get` for a snapshot), `/api/clients/sse` (fallback), `/api/rpc2` (POST / WS)
-- **Response envelope**: all `/api/*` responses use `{status,message,data}`; records are flat arrays and task ids are numeric — the themes' internal normalisation chain reads the Komari shape, so a different envelope or id type silently renders "no data"
+- **Response envelope**: all `/api/*` responses use `{status,message,data}`; records are flat arrays and task ids are numeric — the themes' internal normalisation chain reads the community-theme shape, so a different envelope or id type silently renders "no data"
 - **Field mapping**: `cpu_cores` is real; `cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version` come from the admin-entered hardware/system profile (never collected by the agent; empty by default, per-field hideable, plus a global kill switch). `arch` falls back to the agent build platform when unset; `kernel_version` stays empty unless an admin enters it — never faked
 - **Static assets**: root-absolute references are rewritten **at response time** (theme files on disk untouched), and trailing-slash routes are handled
 - **CSP**: themes with inline scripts get a one-time nonce, relaxing `script-src` for that response only
@@ -472,7 +472,7 @@ with a single-flight lock, and downloads pin DNS and block private addresses (re
 module's SSRF rules).
 
 > Compatibility is cross-checked against two production artifacts from different stacks: Vue-based
-> Glassmorphism v3.4.4 and React-based PurCarte v1.2.5 — the six load charts, node detail and record
+> a Vue-based theme (v3.4.4) and a React-based theme (v1.2.5) — the six load charts, node detail and record
 > endpoints are verified; the latency chart's "no latency data" empty state is gone while its stat cards
 > and curve are still being aligned with the theme's internal components. The rule is to **adapt the
 > server, never the theme template** — so a community upgrade is just a new ZIP.
@@ -677,7 +677,7 @@ Our design assumes the opposite: **the server may be compromised, a single agent
 **③ Collected data carries no exploitable information**
 - The agent collects only basic state: online, load, CPU, memory, disk, traffic (incl. monthly totals), temperature, Swap, uptime. Temperature / Swap / uptime are **non-fingerprint** metrics (no kernel version / CVE targeting, no public IP, no GPU), so even a leak yields nothing actionable.
 - The agent does **not** collect kernel version, GPU model, public IP, connection count, or per-process details — fingerprints usable for targeted attack. Even if the server DB is exfiltrated, the leak is only "machine X had CPU/memory Y at time Z" — useless for targeted attacks (no kernel version → no CVE targeting, no public IP → no direct target, no GPU → no mining leverage).
-- Exception note (2026-11): the five **display fields** required by Komari themes (`cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version`) may be entered manually by the admin. They never come from the agent, the presets stop at "vendor + generation" or "integrated/discrete GPU", and both per-field hiding and a global kill switch exist. Kernel version has no generation-level preset (custom / unset / hidden only) and maps directly to CVEs, so it is the most sensitive item. Typing an exact model or kernel version is a voluntary disclosure by the admin.
+- Exception note (2026-11): the five **display fields** required by community themes (`cpu_name` / `arch` / `virtualization` / `gpu_name` / `kernel_version`) may be entered manually by the admin. They never come from the agent, the presets stop at "vendor + generation" or "integrated/discrete GPU", and both per-field hiding and a global kill switch exist. Kernel version has no generation-level preset (custom / unset / hidden only) and maps directly to CVEs, so it is the most sensitive item. Typing an exact model or kernel version is a voluntary disclosure by the admin.
 
 **③·b Fingerprints carry two distinct risks: location, and clustering**
 

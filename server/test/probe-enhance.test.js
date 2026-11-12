@@ -242,7 +242,7 @@ test('时间范围：4h/12h 档位与自定义 start/end 生效', async () => {
     ts: t1, cpu: 20, mem_used: 10, mem_total: 100, probes: JSON.stringify({ 公共: { ms: 20, ok: true } })
   });
 
-  // Glassmorphism 新增的 4h / 12h 档位必须被后端接受
+  // 玻璃拟态设计新增的 4h / 12h 档位必须被后端接受
   for (const range of ['4h', '12h']) {
     const r = await request(app).get(`/api/public/agents/sparklines?id=${id}&range=${range}`);
     assert.strictEqual(r.status, 200, range);

@@ -41,7 +41,7 @@ const route = useRoute();
 const router = useRouter();
 const { state, visibleAgents, isFavoriteNode, toggleFavoriteNode } = useApp();
 const agentId = computed(() => route.params.id as string);
-// 对齐 Komari：切 range 打后端，后端按 max_points 降采样返回（避免短 range 从 30d 全量截取导致点过稀）
+// 对齐参考面板：切 range 打后端，后端按 max_points 降采样返回（避免短 range 从 30d 全量截取导致点过稀）
 const probes = ref<Probes>({});
 // F4：可用率/证书元信息（与 probes 同一次请求返回，窗口 = currentRange）
 const availability = ref<Record<string, ProbeAvailability>>({});
@@ -64,14 +64,14 @@ const sparkRows = ref<SparklinePoint[]>([]);
 // 否则短窗口噪声会让「剩余天数」剧烈抖动，故与图表数据分开维护。
 const sparkRows30d = ref<SparklinePoint[]>([]);
 
-// 网络质量（延迟）图范围：对齐 Glassmorphism PingChart 的 1h/6h/12h/1d/7d + 自定义
+// 网络质量（延迟）图范围：对齐玻璃拟态设计 PingChart 的 1h/6h/12h/1d/7d + 自定义
 const RANGES = ['1h', '6h', '12h', '24h', '7d'];
 const currentRange = ref('1h');
-// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）范围：对齐 Glassmorphism LoadChart
+// 上方六图（CPU/内存/磁盘IO/负载/温度/swap）范围：对齐玻璃拟态设计 LoadChart
 // 的 实时/4h/1d/7d/30d + 自定义。磁盘耗尽预测不走这里，固定用 sparkRows30d。
 const CHART_RANGES = ['realtime', '4h', '24h', '7d', '30d'];
 const chartRange = ref('realtime');
-// 每段 range 各自的降采样点数（对齐 Komari：短 range 也保持点数合适，不互相挤占）
+// 每段 range 各自的降采样点数（对齐参考面板：短 range 也保持点数合适，不互相挤占）
 const RANGE_MAX_POINTS: Record<string, number> = { '1h': 600, '4h': 800, '6h': 1000, '12h': 1200, '24h': 1500, '7d': 2000, '30d': 3000 };
 
 // 六图标题图标：markRaw 避免组件对象被 reactive 代理；图标统一单色（继承标题文字色）。
@@ -109,7 +109,7 @@ const netUsagePct = computed(() => {
   return Math.min((used / quota) * 100, 100);
 });
 
-// 顶部计费卡片：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡）
+// 顶部计费卡片：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐参考面板顶部统计卡）
 const billingCards = computed(() => {
   const a = agent.value;
   if (!a) return [];
@@ -118,7 +118,7 @@ const billingCards = computed(() => {
   const currency = a.currency || '¥';
   const monthly = price != null && cycle != null ? price / cycle : null;
   const rem = formatRemaining(a.expire_at);
-  // 剩余价值：优先用服务端计算结果（server/src/billing.js，Komari 口径
+  // 剩余价值：优先用服务端计算结果（server/src/billing.js，参考面板口径
   // = 价格 × 剩余天数 ÷ 计费周期天数，UTC 整日）；接口未返回时回退本地折算。
   let remainingValue: number | null = null;
   if (typeof a.remaining_value === 'number') {
@@ -168,7 +168,7 @@ const billingCards = computed(() => {
   ];
 });
 
-// 剩余时间状态对应的文字颜色（对齐 Komari：过期/紧急红、警告橙、长期灰、正常绿）
+// 剩余时间状态对应的文字颜色（对齐参考面板：过期/紧急红、警告橙、长期灰、正常绿）
 const remainingStatusClass: Record<string, string> = {
   expired: 'text-rose-400',
   critical: 'text-rose-400',
@@ -183,7 +183,7 @@ const hwDynamic = computed(() => {
   const a = agent.value;
   if (!a) return [];
   const items: { label: string; value: string; icon: any }[] = [];
-  // 核心数不再单独占一项：并入 CPU 型号行（`型号 (N vCPU)`），与 Glassmorphism 对齐。
+  // 核心数不再单独占一项：并入 CPU 型号行（`型号 (N vCPU)`），与玻璃拟态设计对齐。
   // 架构（管理员手填优先；未填时服务端按受控端构建平台派生）
   items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
   // 虚拟化（管理员手填）
@@ -233,7 +233,7 @@ const diskAgg = computed(() => {
 });
 
 // 节点切换：按首页同一顺序（visibleAgents）取上一个/下一个，下拉列全部节点。
-// 对齐 Glassmorphism 顶栏下方的「← / 节点下拉 / →」控件。
+// 对齐玻璃拟态设计顶栏下方的「← / 节点下拉 / →」控件。
 const nodeList = computed(() => (visibleAgents.value.length ? visibleAgents.value : state.agents));
 const currentIndex = computed(() => nodeList.value.findIndex((a) => a.id === agentId.value));
 const prevNode = computed(() => (currentIndex.value > 0 ? nodeList.value[currentIndex.value - 1] : null));
@@ -262,7 +262,7 @@ const processSeries = computed<ChartPoint[]>(() =>
     .map(d => ({ t: d.ts, v: d.process_count as number }))
 );
 
-// —— 图表卡右上角当前值（对齐 Komari「标题 + 当前值」卡片风格）——
+// —— 图表卡右上角当前值（对齐参考面板「标题 + 当前值」卡片风格）——
 // 数据取实时 agent（与首页卡片同源）；agent 未加载/字段缺失返回 undefined → 不渲染。
 const cpuCurrent = computed(() => (agent.value ? formatPercent(agent.value.cpu ?? agent.value.cpu_percent) : undefined));
 const memCurrent = computed(() => (agent.value ? formatPercent(agent.value.mem_pct) : undefined));
@@ -456,11 +456,11 @@ async function load() {
     //（会被首页 5s 轮询清空，见 sparkRows 注释）。
     await loadSpark(chartRange.value);
     // 磁盘耗尽预测固定用 30d 长窗口，避免短窗口噪声导致 ETA 剧烈抖动
-    //（komari 仅 1d 留存，diting 有完整历史）。切 range 时不重拉这份。
+    //（上游仅 1d 留存，diting 有完整历史）。切 range 时不重拉这份。
     const sl30 = await publicApi.sparklines(id, '30d');
     if (!alive || id !== agentId.value) return;
     sparkRows30d.value = sl30?.[id] || [];
-    // 对齐 Komari：初始拉当前 range，后端按 max_points 降采样返回。
+    // 对齐参考面板：初始拉当前 range，后端按 max_points 降采样返回。
     await loadProbes(currentRange.value);
     // 在线时段独立于图表 range（固定 30 天）；失败不阻断整页
     const oh = await publicApi.onlineHistory(id, 30).catch(() => null);
@@ -491,7 +491,7 @@ async function switchChartRange(range: string) {
   }
 }
 
-// 对齐 Komari 的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
+// 对齐参考面板的 se()/me(R,()=>{b.value=[];se()})：切 range 即打后端，后端按 max_points 降采样返回，
 // 每段 range 各自保证点数合适（1h→600, 6h→1000, 12h→1200, 24h→1500, 7d→2000）。
 async function loadProbes(range: string) {
   const id = agentId.value;
@@ -504,7 +504,7 @@ async function loadProbes(range: string) {
   availability.value = data?.availability || {};
 }
 
-// 切范围：对齐 Komari，置 loading → 打后端 → 取消 loading（loading 反馈掩盖网络延迟，体验丝滑）
+// 切范围：对齐参考面板，置 loading → 打后端 → 取消 loading（loading 反馈掩盖网络延迟，体验丝滑）
 function switchRange(range: string) {
   if (range === 'custom') { openCustom('probes'); return; }
   if (range === currentRange.value) return;
@@ -700,7 +700,7 @@ onUnmounted(() => {
         </div>
 
         <div class="space-y-6">
-          <!-- 顶部信息条：对齐 glassmorphism 节点页顶部水平指标条 -->
+          <!-- 顶部信息条：对齐玻璃拟态节点页顶部水平指标条 -->
           <div class="flex flex-wrap gap-3">
             <div class="glass pill-card inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium leading-5 whitespace-nowrap">
               <svg class="h-4 w-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
@@ -730,7 +730,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐 Komari 顶部统计卡，统一毛玻璃） -->
+          <!-- 顶部计费四卡：节点价格 / 月均支出 / 剩余时间 / 剩余价值（对齐参考面板顶部统计卡，统一毛玻璃） -->
           <div v-if="agent.price != null || agent.expire_at" class="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div
               v-for="card in billingCards"
@@ -748,12 +748,12 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- 顶部四卡：严格对齐 Komari Glassmorphism 节点详情页（lg 以上 2 列，不强制等高） -->
+          <!-- 顶部四卡：严格对齐参考面板玻璃拟态设计节点详情页（lg 以上 2 列，不强制等高） -->
           <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <!-- 硬件信息：glass 毛玻璃卡 + 纵向条目 -->
             <div class="glass group flex flex-col rounded-md border-none p-3 transition-all">
               <h3 class="mb-2 text-xs font-medium tracking-wider text-secondary">{{ t('node.sec.hardware') }}</h3>
-              <!-- CPU 型号块（对齐 Komari 硬件卡顶部大块） -->
+              <!-- CPU 型号块（对齐参考面板硬件卡顶部大块） -->
               <div class="mb-3 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
                 <div class="flex items-center gap-1 text-xs text-muted-foreground">
                   <Cpu :size="14" />

@@ -1,13 +1,13 @@
 'use strict';
 // ============================================================
 // PR1 回归：兼容层与标准 API 字段映射修正
-// 方案：plans/2026-10-26-komari-compat-fields.md §3.3
+// 方案：字段换算方案文档 §3.3
 //
 // 断言要点：
 //   1. cpu_cores 取 agents.cores 真实值（未上报为 0）
 //   2. kernel_version 未填写时为空串（回归锁死：绝不能再等于 hostname）
 //   3. 实时态 process / 扁平态 temp、process 取 metrics 真实值
-//   4. 价格/周期/币种换算口径（diting ↔ Komari）
+//   4. 价格/周期/币种换算口径（diting ↔ 上游）
 //   5. billing_cycle = 0（白嫖/一次性）不被 || 30 吞掉
 //   6. CAPABILITY.cpu_cores = true
 //   7. 标准 API：未填 kernel = null，hostname 独立字段，cpu_cores 有值
@@ -59,7 +59,7 @@ test('cpu_cores 取 agents.cores 真实值，未上报为 0', () => {
   assert.strictEqual(compat.toNode(noCores, true).cpu_cores, 0);
 });
 
-test('merchant 映射到 tags（供 Glassmorphism 识别厂商），业务字段关闭时清空', () => {
+test('merchant 映射到 tags（供玻璃拟态设计识别厂商），业务字段关闭时清空', () => {
   const a = mkAgent({ name: 'compat-merchant', merchant: '家里云' });
   assert.strictEqual(compat.toNode(a, true).tags, '家里云');
   assert.strictEqual(compat.toNode(a, false).tags, '');
@@ -91,8 +91,8 @@ test('实时态 process 与扁平态 temp/process 取真实采集值', () => {
 
 test('价格换算：未设置 → -1、白嫖 → 0、正常原值、业务字段关闭 → -1', () => {
   const mk = (price) => mkAgent({ name: `compat-price-${price}-${Math.random()}`, price });
-  assert.strictEqual(compat.toNode(mk(0), true).price, -1, 'diting 0 = 未设置 → Komari -1');
-  assert.strictEqual(compat.toNode(mk(-1), true).price, 0, 'diting -1 = 白嫖 → Komari 0');
+  assert.strictEqual(compat.toNode(mk(0), true).price, -1, 'diting 0 = 未设置 → 上游 -1');
+  assert.strictEqual(compat.toNode(mk(-1), true).price, 0, 'diting -1 = 白嫖 → 上游 0');
   assert.strictEqual(compat.toNode(mk(100), true).price, 100);
   assert.strictEqual(compat.toNode(mk(100), false).price, -1, '业务字段关闭 → 未设置');
 });

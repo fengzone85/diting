@@ -1,5 +1,5 @@
 // 国家 / 地区映射（用于受控端国旗选择）。
-// flagEmoji 由 ISO 3166-1 alpha-2 代码动态生成 emoji 国旗（与 Komari 同款视觉，无需额外图片资源）。
+// flagEmoji 由 ISO 3166-1 alpha-2 代码动态生成 emoji 国旗（与 主流面板同款视觉，无需额外图片资源）。
 // 如需替换为本地面画 SVG 国旗库，仅需把 flagEmoji 改为查表返回 <img src="/flags/xx.svg"> 即可。
 const COUNTRIES = [
   { code: 'CN', name: '中国' },

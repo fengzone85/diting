@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 后台侧栏：按功能域分组（节点 / 告警与通知 / 站点与外观 / 安全 / 系统），
-// 对齐 Komari、nezha、cf-vps-monitor 的后台信息架构：先监控对象，再告警通知，
+// 对齐同类项目的后台信息架构：先监控对象，再告警通知，
 // 然后外观内容，最后安全与系统维护；配置类不再混进「监控」。
 // 桌面端可收起成图标轨（localStorage 记忆），移动端保持抽屉式全宽。
 import { computed, onMounted, onUnmounted, ref } from 'vue';
@@ -59,7 +59,7 @@ function toggleCollapsed() {
 // 用 computed 而非一次性数组：切换语言时菜单文案需要跟着变（t() 内部读取 locale ref）。
 const groups = computed(() => [
   {
-    // 节点域：清单 + 成本 + 分发物料（对齐 nezha 的「服务器」域，含批量与终端类操作）
+    // 节点域：清单 + 成本 + 分发物料（对齐参考面板的「服务器」域，含批量与终端类操作）
     key: 'nodes',
     title: t('nav.group.nodes'),
     items: [
@@ -256,7 +256,7 @@ function isActive(to: string) {
   .sidebar nav {
     min-height: 0;
   }
-  /* 收起态用「展开」图标顶替品牌位（对齐 Komari） */
+  /* 收起态用「展开」图标顶替品牌位（对齐参考面板） */
   .sidebar.is-collapsed .collapse-toggle {
     margin-left: auto;
     margin-right: auto;

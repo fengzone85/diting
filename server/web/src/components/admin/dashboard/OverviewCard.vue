@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 上线概览卡（对齐 Komari 的 overview 卡）：在线率圆环 + 健康结论 + 在线/离线数
+// 上线概览卡（对齐参考面板的 overview 卡）：在线率圆环 + 健康结论 + 在线/离线数
 import { computed } from 'vue';
 import { Dashboard } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';

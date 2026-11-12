@@ -19,7 +19,7 @@ const DB_PATH = process.env.DB_PATH || (() => {
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 // 负载曲线列集（不含 probes / disks 大字段）——统一定义在 heavy-queries.js，
-// 主线程与 worker 共用（process_count：2026-10-12 新增，Komari 兼容层消费）。
+// 主线程与 worker 共用（process_count：2026-10-12 新增，主题兼容层消费）。
 const LOAD_COLS = heavyQueries.LOAD_COLS;
 
 const db = new Database(DB_PATH);
@@ -985,7 +985,7 @@ function onlineHistory(agentId, days, nowMs) {
   }
 
   // 覆盖率分母从「窗口内第一条 session 起点」算起：功能上线前/新节点没有历史，
-  // 把那段算成停机会让上线率长期失真（nezha 同样只按已有观测统计）。
+  // 把那段算成停机会让上线率长期失真（参考面板同样只按已有观测统计）。
   const firstStart = rows.length ? Math.max(rows[0].started_at, since) : now;
   const covered = Math.max(0, Math.round((now - firstStart) / 1000));
   const uptime_pct = covered > 0 ? Math.round(Math.min(100, (upTotal / covered) * 100) * 10) / 10 : null;
@@ -1650,17 +1650,17 @@ function getUiSettings() {
     // 若公开页面向外部访客、不希望暴露经营信息，在后台设置里关闭即可，公开页会自动隐藏相关模块。
     public_show_business: true,
     // 公开接口（/api/public/agents、/api/v1/nodes、/api/nodes）是否透出硬件档案：
-    // 由管理员手工录入（受控端不自动采集），默认 true 以便 Komari 模板开箱即用；
+    // 由管理员手工录入（受控端不自动采集），默认 true 以便社区主题模板开箱即用；
     // 关闭后所有公开出口统一输出空值（字段级 hidden 仍然生效），管理面不受影响。
     public_show_hardware: true,
     home_layout: 'grid', public_theme: 'default', probe_targets: 'CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8', retention_days: 30, social_email: '', social_telegram: '', social_qq: '', social_website: '',
-    // 主题可视化配置（对齐 komari-theme-Glassmorphism）
+    // 主题可视化配置（对齐玻璃拟态主题）
     glass_preset: 'emerald',          // 毛玻璃配色预设：emerald/soft/high-contrast/midnight/custom
     glass_custom: {},                 // 自定义毛玻璃配色（light/dark 各 5 色）
     color_vision: 'normal',           // 色觉辅助：normal/protanopia/deuteranopia/tritanopia
     card_scheme: 'official',          // 首页总览卡片方案：official/basic/ops/resource/finance/traffic/gpu/asset/full
     card_size: 'comfortable',         // 节点卡片尺寸：mini/compact/comfortable/large
-    // 后台仪表盘布局（对齐 Komari）：[{id,width,height}] 有序数组；
+    // 后台仪表盘布局（对齐参考面板）：[{id,width,height}] 有序数组；
     // null = 从未配置（前端用默认布局），[] = 用户清空全部卡片
     admin_dashboard_layout: null,
     background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50 }, // 背景图/视频

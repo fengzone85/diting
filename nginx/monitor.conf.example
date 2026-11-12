@@ -60,7 +60,7 @@ server {
         client_max_body_size 16k;
     }
 
-    # 实时端点（Komari 兼容层）：必须放在 location / 之前 —— 正则 location 优先于前缀 location。
+    # 实时端点（主题兼容层）：必须放在 location / 之前 —— 正则 location 优先于前缀 location。
     # 不走 apilimit：长连接每次只占 1 次请求，限流无意义，且 SSE 被限流会静默断流。
     # 注意路径：SSE 是 /api/clients/sse（子路径，非 /api/clients-sse）；rpc2 为 POST 而非升级连接。
     location ~ ^/api/(clients(/sse)?|rpc2)$ {

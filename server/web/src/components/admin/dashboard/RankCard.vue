@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 排行卡（对齐 Komari 的 CPU / 内存 / 磁盘排行卡）：名称 + 数值 + 进度条 + 明细
+// 排行卡（对齐参考面板的 CPU / 内存 / 磁盘排行卡）：名称 + 数值 + 进度条 + 明细
 import type { Component } from 'vue';
 import { ChartLine } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';

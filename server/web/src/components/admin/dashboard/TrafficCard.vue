@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 流量概览卡（对齐 Komari 的 traffic 卡）：本月上下行 + 实时速率 + 月配额使用率
+// 流量概览卡（对齐参考面板的 traffic 卡）：本月上下行 + 实时速率 + 月配额使用率
 import { Speed } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';
 import { useI18n } from '../../../composables/useI18n';

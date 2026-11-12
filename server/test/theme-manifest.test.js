@@ -122,7 +122,7 @@ test('readManifest：needsRelaxedCsp 仅 true 时生效', () => {
 });
 
 test('readManifest：komari-theme.json 格式默认放宽 CSP（社区主题不写 diting 字段）', () => {
-  // 真实社区主题（如 Glassmorphism v3.4.4）的 komari-theme.json 只有 name/short/version/
+  // 真实社区主题（如玻璃拟态设计 v3.4.4）的 komari-theme.json 只有 name/short/version/
   // configuration，没有 diting.*；但产物含内联脚本 + 外部图标/汇率请求，严格 CSP 会阻断。
   const dir = mkTheme('kmdefault', { 'komari-theme.json': { ...BASE, short: 'kmdefault' } });
   const m = theme.readManifest(dir, 'kmdefault', false);
@@ -217,7 +217,7 @@ test('validateManifest：字段 key / select options / 数量上限', () => {
   });
   assert.strictEqual(tooMany.error, 'configuration_too_many_fields');
 
-  // Glassmorphism v3.4.4 的 63 项必须被接受（旧上限 50 会让 theme_settings 全空）
+  // 玻璃拟态设计 v3.4.4 的 63 项必须被接受（旧上限 50 会让 theme_settings 全空）
   const glass = validators.validateManifest({
     short: 'a', name: 'A', configuration: { type: 'managed', data: Array.from({ length: 63 }, (_, i) => ({ key: `k${i}` })) }
   });

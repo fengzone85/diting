@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 安装向导（复刻 komari 安装向导 UX，适配 diting 单管理员 Token 模型）。
+// 安装向导（复刻上游安装向导 UX，适配 diting 单管理员 Token 模型）。
 // 流程：探测 /api/install/status → required 表单 / 已初始化锁定 → 单步提交
 // （站点名称 + 描述 + Token 自动生成或自定义）→ 一次性展示 Token → 前往登录。
 // 服务端未安装时会把所有页面 307 到这里，本页是全站唯一入口。
@@ -119,7 +119,7 @@ onMounted(load);
       </button>
     </div>
 
-    <!-- 已初始化：向导锁定（对应 komari 安装完成后向导永久禁用） -->
+    <!-- 已初始化：向导锁定（对应上游安装完成后向导永久禁用） -->
     <div v-else-if="phase === 'locked'" class="glass w-full max-w-md p-8 text-center">
       <div class="mb-4 text-4xl">🔒</div>
       <h1 class="mb-2 text-2xl font-bold">{{ t('install.lockedTitle') }}</h1>
@@ -133,7 +133,7 @@ onMounted(load);
       </router-link>
     </div>
 
-    <!-- 安装表单（单步，对齐 komari complete：sitename/description/凭据） -->
+    <!-- 安装表单（单步，对齐上游 complete：sitename/description/凭据） -->
     <form v-else-if="phase === 'form'" class="glass w-full max-w-md p-8" @submit.prevent="submit">
       <h1 class="mb-1 text-center text-2xl font-bold">{{ t('install.title') }}</h1>
       <p class="mb-6 text-center text-sm text-slate-400">{{ t('install.subtitle') }}</p>

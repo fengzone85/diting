@@ -85,8 +85,8 @@ function hardwareVisible() {
   return ui.public_show_hardware !== false;
 }
 
-// 计费口径换算（diting ↔ Komari，见 plans/2026-10-26-komari-compat-fields.md §3.1）：
-//   price: diting 0（未设置）→ Komari -1（主题显示「—」）；diting <0（白嫖）→ 0；diting >0 原值
+// 计费口径换算（diting ↔ 上游，见 字段换算方案文档 §3.1）：
+//   price: diting 0（未设置）→ 上游 -1（主题显示「—」）；diting <0（白嫖）→ 0；diting >0 原值
 //   cycle: diting null/空/非数 → 30；0（白嫖/一次性）必须原样保留，不能被 || 30 吞掉
 function komariPrice(a) {
   const p = Number(a.price);
@@ -120,7 +120,7 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 内核版本：管理员手工录入（受控端不采集），未填写/隐藏/全局关闭时为空串。
     // 绝不回填 hostname 冒充。
     kernel_version: hw.kernel_version,
-    // Komari 约定：无 GPU 时 gpu_name = 'None'（Glassmorphism 据此整行隐藏）
+    // 参考面板约定：无 GPU 时 gpu_name = 'None'（玻璃拟态设计据此整行隐藏）
     gpu_name: hw.gpu_name || 'None',
     region: flagEmoji(a.country),
     mem_total: Number(m.mem_total) || 0,
@@ -137,7 +137,7 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 真实到期时间属业务字段，受 public_show_business 控制；关闭时回退到主题约定的"未设置"零值
     expired_at: show && a.expire_at ? a.expire_at : '0001-01-01T00:00:00.0000000+00:00',
     group: a.grp || '',
-    // Glassmorphism 的「厂商」不是独立字段：它从 name/public_remark/remark/tags/group/region
+    // 玻璃拟态设计的「厂商」不是独立字段：它从 name/public_remark/remark/tags/group/region
     // 里做关键词匹配。把 diting 的 merchant 放进 tags，主题才能识别到商家（tags 默认不显示）。
     // 属业务字段：public_show_business 关闭时一并清空。
     tags: show ? (a.merchant || '') : '',
@@ -185,7 +185,7 @@ function publicOpen() {
 }
 
 // 实时状态映射（供 JSON-RPC /api/rpc2 的 common:getNodesLatestStatus 使用）
-// 注意：这里返回的是 Komari 原版 recordLike 扁平格式（含 online 字段），
+// 注意：这里返回的是参考面板原版 recordLike 扁平格式（含 online 字段），
 // 而非 toRealtime 的嵌套结构。主题 updateNodeStatuses 期望扁平字段：
 // L(node, status) => { online, time, cpu, ram, ram_total, swap, ... }
 function getNodesLatestStatus() {
@@ -268,7 +268,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// 厂商别名：diting 的 merchant → 显示名映射，换算成 Glassmorphism 的
+// 厂商别名：diting 的 merchant → 显示名映射，换算成玻璃拟态设计的
 // `Provider:alias1,alias2;...` 格式；未显式映射的 merchant 自动映射为自己，
 // 让后台「商家」直接显示为「厂商」而不是「未知厂商」。
 // 含分隔符的值跳过（会破坏主题解析格式），管理员可改用主题自身的配置项。
@@ -313,7 +313,7 @@ function publicSettings() {
             try { merged[f.key] = JSON.parse(merged[f.key]); } catch (_) { /* 值非法时保持字符串 */ }
           }
         }
-        // 仅对声明了 providerAliases 的主题注入（当前为 Glassmorphism）：
+        // 仅对声明了 providerAliases 的主题注入（当前为玻璃拟态设计）：
         // 主题自身配置优先，diting 的 merchant→display 映射与未映射 merchant 追加在后。
         if (fields.some((f) => f.key === 'providerAliases')) {
           const own = String(merged.providerAliases || '').trim();
@@ -335,7 +335,7 @@ function publicSettings() {
     disable_password_login: true,
     oauth_enable: false, oauth_provider: '',
     // 官方语义：record_enabled = retention.AllPositive（database/utils.go:97）。
-    // 硬编码 false 会让 Glassmorphism 直接跳过全部 ping 历史请求（首页卡片延迟/丢包恒 "-"）。
+    // 硬编码 false 会让玻璃拟态设计直接跳过全部 ping 历史请求（首页卡片延迟/丢包恒 "-"）。
     // 保留时长按 diting 实际口径：探测在明细表（METRICS_DETAIL_DAYS，默认 7 天 = 168h），
     // 普通指标走 RETENTION_DAYS（默认 30 天 = 720h）。
     ping_record_preserve_time: metricsMerge.detailDays() * 24,
@@ -463,7 +463,7 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
       data.count = records.length;
       data.load_type = loadType;
     }
-    // Komari REST 标准外壳要求结果包在 data 里
+    // 参考面板 REST 标准外壳要求结果包在 data 里
     return { status: 'success', message: '', data };
   });
   res.json(payload);
@@ -545,9 +545,9 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
       min: s.min,
       max: s.max
     }));
-    // Komari REST 标准外壳：{ status, message, data:<result> }（Go 侧 jsonRpc.Bind →
-    // renderStandard，见 komari/web/rpc/jsonrpc/bridge.go）。此前把 count/records 放在顶层，
-    // React 系主题（PurCarte v1.2.5）读 `resp.data.records` 得到 undefined → 延迟图恒
+    // 参考面板 REST 标准外壳：{ status, message, data:<result> }（Go 侧 jsonRpc.Bind →
+    // renderStandard，见上游/web/rpc/jsonrpc/bridge.go）。此前把 count/records 放在顶层，
+    // React 系主题（v1.2.5）读 `resp.data.records` 得到 undefined → 延迟图恒
     // 「暂无数据」。records/tasks 必须包在 data 里。
     return {
       status: 'success',
@@ -563,7 +563,7 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
   res.json(payload);
 }));
 
-// GET /api/node/:uuid —— 社区主题 node detail 取数（参考 Komari getNode 形状）
+// GET /api/node/:uuid —— 社区主题 node detail 取数（参考参考面板 getNode 形状）
 // 返回 node 基础信息 + 实时 realtime + 历史 history（最近一段时间序列），供社区皮肤详情页渲染。
 router.get('/node/:uuid', guard, (req, res) => {
   const a = db.getAgent(req.params.uuid);
@@ -595,7 +595,7 @@ router.get('/node/:uuid', guard, (req, res) => {
 });
 
 // GET /api/me —— 官方主题初始化请求登录态（不加 guard，public_enabled=false 也需返回）
-// 与 Komari 原版 /api/me（jsonRpc.WithRaw）保持一致：返回扁平对象，不包裹 {status,message,data}。
+// 与参考面板原版 /api/me（jsonRpc.WithRaw）保持一致：返回扁平对象，不包裹 {status,message,data}。
 // 主题端 AccountContext 直接把整个响应体当 account 使用：account = await resp.json()，
 // 故必须扁平返回，否则 account.logged_in 为 undefined。
 router.get('/me', (req, res) => {

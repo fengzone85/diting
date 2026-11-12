@@ -632,7 +632,7 @@ async function batchRenew() {
     <div v-if="!filtered.length" class="glass p-8 text-center text-sm text-slate-500">
       {{ search ? t('agents.noMatch') : t('agents.empty') }}
     </div>
-    <!-- 表格形态（对齐 Komari 后台服务器列表的列）：
+    <!-- 表格形态（对齐参考面板后台服务器列表的列）：
          显示名称 / 国旗 / 客户端版本 / 分组 / 私有备注 / 账单 + 操作 -->
     <div v-else class="glass overflow-hidden">
       <div class="overflow-x-auto">

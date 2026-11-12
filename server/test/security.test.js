@@ -124,7 +124,7 @@ test('validateReport: 正常负载', () => {
   assert.strictEqual(m.cpu, 50);
   assert.strictEqual(m.mem_total, 2000);
   assert.strictEqual(m.temp, null);
-  // loss 由 validate.js 补齐：缺省且 ok=true 时补 0（对齐 Komari 延迟采集标准），见 src/validate.js
+  // loss 由 validate.js 补齐：缺省且 ok=true 时补 0（对齐 延迟采集标准），见 src/validate.js
   assert.deepStrictEqual(JSON.parse(m.probes), { '移动': { ms: 12, ok: true, loss: 0 } });
 });
 

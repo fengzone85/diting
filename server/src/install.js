@@ -1,19 +1,19 @@
 'use strict';
-// 安装向导（复刻 komari web/install/install.go 的机制，适配 diting 的单管理员 Token 模型）。
+// 安装向导（复刻上游 web/install/install.go 的机制，适配 diting 的单管理员 Token 模型）。
 //
-// 与 komari 的对应关系：
-//   komari：users 表为空 = 未安装（唯一判据，无安装标志位），启动独立 guide server，
+// 与上游的对应关系：
+//   上游：users 表为空 = 未安装（唯一判据，无安装标志位），启动独立 guide server，
 //           其他 API 一律 404、页面 GET 一律 307 → /install；
 //   diting：库中无 admin_token_hash = 未安装（同样唯一判据，不引入标志位），
 //           同一 Express 实例内由 server.js 的 installGate 收敛管理面 + 页面 307；
 //           agent 上报面（/api/v1/*、/api/report 等）与 SETUP_TOKEN 自助注册不受影响。
 //
-// 三层防重复安装（对应 komari：内存状态机 → users 计数 → 完成后路由消失）：
+// 三层防重复安装（对应上游：内存状态机 → users 计数 → 完成后路由消失）：
 //   1. 内存状态机 state（ready → completed），非 ready 一律 409 Conflict；
 //   2. 已存在 Token 哈希（hasAdminToken）→ 410 Gone；
 //   3. 原子抢写 setAdminTokenHashIfAbsent（INSERT OR IGNORE，防多实例竞态）→ 抢不到 410。
 //   "哈希存在"本身就是初始化锁，不再需要 admin_initialized 标志位（P0 已清理该键）。
-//   站点信息写失败 → 回滚哈希，向导保持可重试（对应 komari 安装失败回滚账户的语义）。
+//   站点信息写失败 → 回滚哈希，向导保持可重试（对应上游安装失败回滚账户的语义）。
 //
 // 凭据口径（P0 起）：库中**只存 sha256 哈希**，明文仅在 generate 模式的响应里一次性回显；
 // 不写 .env、不改进程 env —— 旧实现两个都做，而容器内 /app/.env 不持久，重启即丢 Token。
@@ -27,7 +27,7 @@ const { requireProto } = require('./auth');
 
 const router = express.Router();
 
-// ---- 内存状态机（对应 komari Controller.state 的 ready/completing/completed）----
+// ---- 内存状态机（对应上游 Controller.state 的 ready/completing/completed）----
 let state = 'ready';
 function getState() { return state; }
 
@@ -91,20 +91,20 @@ function urlWarnings(url) {
   return warnings;
 }
 
-// ---- 安装期访问口径：不限制来源 IP（与 komari 对齐）-------------------------
-// 参照 komari web/install + internal/server/guide_server.go：未安装时以最小路由集
+// ---- 安装期访问口径：不限制来源 IP（与上游对齐）-------------------------
+// 参照上游 web/install + internal/server/guide_server.go：未安装时以最小路由集
 // 监听正常监听地址（默认 0.0.0.0），**不校验来源 IP、不设 install_token**，公网
 // 域名（Nginx 反代）可直达安装页；初始化的排他性由三层状态机保证——
 //   ① 内存 state（ready → completing → completed）；
 //   ② 库中不存在 Token 哈希（users/管理员为空即"未安装"）；
 //   ③ 原子抢写 setAdminTokenHashIfAbsent，多实例竞态下只有一个能装成。
 // 装完立即收敛（向导 409/410、页面锁定），暴露窗口天然只有首次启动那几分钟。
-// 保留的额外约束（komari 没有，但代价为零）：/api/install/* 每 IP 每 60s 5 次限流，
+// 保留的额外约束（上游没有，但代价为零）：/api/install/* 每 IP 每 60s 5 次限流，
 // 以及 requireProto 要求 HTTPS 反代（安装会一次性回显管理员 Token，不应裸传）。
 // 被抢装可 `sudo bash diting.sh --reset-admin-token` 重置；若部署方想额外收紧，
 // 应在 Nginx 层对 /install 与 /api/install 做 IP/口令限制，而非依赖应用内闸。
 
-// ---- 请求校验（对应 komari completeRequest：sitename 1~100、description ≤1000）----
+// ---- 请求校验（对应上游 completeRequest：sitename 1~100、description ≤1000）----
 function validateInstall(body) {
   const b = body || {};
   const sitename = String(b.sitename || '').trim();
@@ -142,7 +142,7 @@ function validateInstall(body) {
     if (token.length < MIN_LEN) {
       return { error: 'weak_token', message: `自定义 Token 至少 ${MIN_LEN} 个字符` };
     }
-    // 复刻 komari 密码强度检查的精神（挡"够长但可猜"的值），口径对齐
+    // 复刻上游密码强度检查的精神（挡"够长但可猜"的值），口径对齐
     // /api/setup/register 的 isWeakSetupToken：纯数字、字符种类过少、连续序列一律拒绝。
     if (/^\d+$/.test(token) || new Set(token).size <= 4) {
       return { error: 'weak_token', message: '自定义 Token 强度不足（纯数字或字符种类过少），建议使用 openssl rand -hex 32 生成' };
@@ -159,14 +159,14 @@ function validateInstall(body) {
   };
 }
 
-// POST /api/install/complete：单步提交站点信息 + 管理员凭据（对应 komari complete）。
+// POST /api/install/complete：单步提交站点信息 + 管理员凭据（对应上游 complete）。
 // 注意：requireProto 是「返回 boolean 的辅助函数」而非 Express 中间件（auth.js 内部
 // 均以 if (!requireProto(req, res)) return; 调用），直接挂载会导致请求永久挂起。
 router.post('/complete', installRateLimit, (req, res) => {
   // 管理类凭证与 /api/setup/generate 同口径：必须经 HTTPS 反代；
   // 例外是 SSH 隧道直连回环（requireProto 内部判定，见 auth.js）。
   if (!requireProto(req, res)) return;
-  // 不校验来源 IP：公网域名（Nginx 反代）也可完成安装，口径同 komari。
+  // 不校验来源 IP：公网域名（Nginx 反代）也可完成安装，口径同上游。
   // 排他性由下方三层状态机保证，装完立即收敛。
   // 三层防重装之 ①：内存状态机。completed 状态一律 409。
   if (state !== 'ready') {

@@ -1,8 +1,8 @@
 'use strict';
 // ============================================================
-// 厂商别名注入：diting 的 merchant → Glassmorphism providerAliases
+// 厂商别名注入：diting 的 merchant → 玻璃拟态设计 providerAliases
 //
-// Glassmorphism 的「厂商」不是后端字段，而是从 name/public_remark/remark/tags/group/region
+// 玻璃拟态设计的「厂商」不是后端字段，而是从 name/public_remark/remark/tags/group/region
 // 做关键词匹配；diting 把 merchant 放进 tags，并把 merchant→display 映射换算成主题
 // 的 `Provider:alias1,alias2;...` 字符串注入 theme_settings.providerAliases。
 // ============================================================

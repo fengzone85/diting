@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 列表卡（对齐 Komari 的 expiry 卡）：标题 + 若干「名称 / 数值」行，支持严重度着色
+// 列表卡（对齐参考面板的 expiry 卡）：标题 + 若干「名称 / 数值」行，支持严重度着色
 import type { Component } from 'vue';
 import { Calendar } from '@icon-park/vue-next';
 import WidgetShell from './WidgetShell.vue';

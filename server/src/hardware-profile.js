@@ -1,5 +1,5 @@
 'use strict';
-// 管理员手工录入的硬件/系统档案 —— 对齐 Komari 节点的 cpu_name / arch / virtualization / gpu_name / kernel_version
+// 管理员手工录入的硬件/系统档案 —— 对齐参考面板节点的 cpu_name / arch / virtualization / gpu_name / kernel_version
 //
 // 安全口径（README.md / docs/security.md 同步）：
 //   - 受控端**不自动采集**任何个体级硬件指纹；本模块只做「管理员手填值的校验与合成」。
@@ -165,7 +165,7 @@ function deriveArch(platform) {
 }
 
 // 公开出口统一合成。showHardware=false（全局开关关闭）时全部为空；GPU 用 '' 表示「无/隐藏」，
-// 由调用方决定是否回退成 Komari 的 'None' 占位。
+// 由调用方决定是否回退成参考面板的 'None' 占位。
 function publicFields(agent, showHardware) {
   const p = parseProfile(agent && agent.hw_profile);
   const visible = showHardware !== false;

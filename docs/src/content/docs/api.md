@@ -454,9 +454,9 @@ GET /api/admin/agent-distribution/:pkg_id/download?t=<one_time_token>
 - `uptime_pct` 的分母从窗口内第一条 session 起算，避免把功能上线前/新节点没数据的时间算成停机；窗口内无 session 时为 `null`。
 - 在线时段由 `alerts` 的在线判定派生（不改 agent 协议），保留期与 `RETENTION_DAYS` 一致。
 
-## Komari 主题兼容层
+## 第三方主题兼容层
 
-第三方 Komari 皮肤通过 `server/src/compat.js` 接入，端点对齐 Komari 协议：
+第三方社区皮肤通过 `server/src/compat.js` 接入，端点对齐社区主题协议：
 
 - REST：`/api/me`、`/api/public`、`/api/version`、`/api/nodes`、`/api/node/:uuid`、`/api/recent/:uuid`、`/api/records/load`、`/api/records/ping`
 - 实时：`/api/clients`（WebSocket，任意消息即回推最新 snapshot）、`/api/clients/sse`（SSE）

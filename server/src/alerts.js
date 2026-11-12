@@ -3,11 +3,11 @@ const notify = require('./notify');
 const { daysUntil } = require('./util');
 
 // 采样窗口判定（S1/F1）：窗口内「超限样本占比 ≥ 触发比例」才触发/恢复。
-// - 默认：窗口 5 个采样、触发比例 0.7（对齐 nezha「70% 采样点」语义）。
+// - 默认：窗口 5 个采样、触发比例 0.7（对齐参考面板「70% 采样点」语义）。
 // - 兼容：显式设置 ALERT_SUSTAIN_SAMPLES=N 时退回旧行为（窗口 N、比例 1.0
 //   = 连续 N 次全超限），零重命名风险。
 // - known 语义：缺数据（null/undefined）样本直接排除；已知样本 < 2 本轮不判定
-//   —— 对齐 nezha known=false：缺数据既不触发也不恢复。
+//   —— 对齐参考面板 known=false：缺数据既不触发也不恢复。
 const LEGACY_SUSTAIN_MODE = process.env.ALERT_SUSTAIN_SAMPLES !== undefined
   && process.env.ALERT_SUSTAIN_SAMPLES !== '';
 const WINDOW_SAMPLES = LEGACY_SUSTAIN_MODE

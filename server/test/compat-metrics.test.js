@@ -143,7 +143,7 @@ test('L-7: 多节点查询时每个节点各自拿到数据（不再被全局配
   const e2 = out.series.filter(s => s.entity_id === A2);
   assert.ok(e1.length > 0, 'A1 应有 ping series');
   assert.ok(e2.length > 0, 'A2 应有 ping series（旧实现会被全局配额挤空）');
-  // 各自 task 正确：task_id 是稳定的数字标识（对齐 Komari，主题按数字关联 series），
+  // 各自 task 正确：task_id 是稳定的数字标识（对齐参考面板，主题按数字关联 series），
   // 中文名放 name/task_name
   assert.strictEqual(e1[0].task_name, '移动');
   assert.strictEqual(e1[0].task_id, probeTaskId('移动'));

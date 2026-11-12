@@ -5,11 +5,11 @@ const db = require('./db');
 
 // 探针任务对外上报的「执行间隔」（秒）。diting 没有独立 ping task 表，探针结果存在
 // metrics.probes 里，因此没有真实任务间隔；但社区主题会用它做时间轴与「任务是否有效」
-// 的判断，给 0 会被当成无间隔任务而跳过渲染。按 Komari 默认探测周期 60s 统一上报，
+// 的判断，给 0 会被当成无间隔任务而跳过渲染。按参考面板默认探测周期 60s 统一上报，
 // 且 REST(/records/ping) 与 RPC(任务/统计/指标) 三侧必须一致。
 const PROBE_TASK_INTERVAL = 60;
 
-// 探针任务的对外标识：diting 内部用 label（中文名，如「电信」）作 task 标识，而 Komari 的
+// 探针任务的对外标识：diting 内部用 label（中文名，如「电信」）作 task 标识，而参考面板的
 // task 标识是**数字**（PingTaskInfo.id / stats.task_id / series.task_id 三处同源）。社区主题
 // PingChart 会把 task_id 数值化后当 id 用（`normalizeMetricTaskId`），若拿到的是中文名，
 // backend task 列表与 series/stats 的 id 就对不上（选中态、图例、series 全部落空，表现为
@@ -22,7 +22,7 @@ function probeTaskId(label) {
   return (h % 1000000) + 1; // 1..1e6，避开 0（0 会被主题当成「无任务」）
 }
 
-// 注意：前端 LoadChart/PingChart 的 le 白名单与 listMetricDefinitions 返回值按【Komari 官方点分命名】匹配
+// 注意：前端 LoadChart/PingChart 的 le 白名单与 listMetricDefinitions 返回值按【上游官方点分命名】匹配
 // （如 cpu.usage / load.average / memory.used），因此此处 name 必须与点分命名对齐，否则 Nt() 过滤后为空导致全不渲染。
 const METRIC_DEFINITIONS = [
   { name: 'cpu.usage', description: 'CPU 使用率', type: 'percent', unit: '%', retention_days: 30 },
@@ -49,7 +49,7 @@ const METRIC_DEFINITIONS = [
   { name: 'ping.loss', description: '丢包率', type: 'percent', unit: '%', retention_days: 30 }
 ];
 
-// diting 内部字段名（metrics 表列）映射：键为 Komari 点分命名。
+// diting 内部字段名（metrics 表列）映射：键为参考面板点分命名。
 //
 // 只保留【diting 真实采集】的字段。此前 5 条占位映射
 // （process.count/connections.tcp/connections.udp/gpu.usage/gpu.device.usage → 'cpu'）
@@ -91,7 +91,7 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(v, max));
 }
 
-// Komari 官方命名 → diting 内部短命名（用于反向识别与兼容）
+// 上游官方命名 → diting 内部短命名（用于反向识别与兼容）
 const METRIC_KEY_TO_KOMARI = {
   cpu: 'cpu.usage',
   memory: 'memory.used',
@@ -107,13 +107,13 @@ const METRIC_KEY_TO_KOMARI = {
 };
 
 function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1, maxPoints = 100, max_points } = {}) {
-  // 兼容 Komari 官方社区主题参数命名（entity_id 单数 + max_points 下划线）
+  // 兼容上游官方社区主题参数命名（entity_id 单数 + max_points 下划线）
   if (entity_id != null) entity_ids = [entity_id];
   if (max_points != null) maxPoints = max_points;
   hours = clamp(Math.floor(Number(hours) || 0), 0, 720);
   maxPoints = clamp(Math.floor(Number(maxPoints) || 0), 0, 5000);
   // 长度钳制（体检 L-5 附带项）：防单请求携带超大数组导致 N 次 SQL 循环。
-  // 50 = Komari 官方 UI 单页节点上限；32 = 单次查询的合理指标数上限。
+  // 50 = 上游官方 UI 单页节点上限；32 = 单次查询的合理指标数上限。
   if (!Array.isArray(entity_ids)) entity_ids = [];
   if (!Array.isArray(metric_keys)) metric_keys = [];
   entity_ids = entity_ids.slice(0, 50);
@@ -128,7 +128,7 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
   const normalKeys = metric_keys.filter(k => k !== 'ping.latency_ms' && k !== 'ping.loss');
 
   // ping.latency_ms / ping.loss：从 metrics.probes 抽延迟，【按探针任务(task)拆分】多条 series，
-  // 以对齐 Komari 社区主题 PingChart 的期望结构（series 每项需含 task_id + points:[{time,value}]）。
+  // 以对齐第三方社区皮肤 PingChart 的期望结构（series 每项需含 task_id + points:[{time,value}]）。
   // diting 的 probes JSON 形如 { "移动": {ms, ok, loss}, "联通": {...}, ... }，每个 key 即一个 task。
   for (const entityId of entity_ids) {
     // L-7：按实体【独立】在 SQL 层采样（替代「全局采样 + JS filter」）。
@@ -184,7 +184,7 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
     const downsampled = rows.length >= maxPoints;
 
     for (const key of normalKeys) {
-      // 兼容两种命名：diting 短命名（cpu）或 Komari 官方点分命名（cpu.usage）
+      // 兼容两种命名：diting 短命名（cpu）或上游官方点分命名（cpu.usage）
       let def = METRIC_DEFINITIONS.find(d => d.name === key);
       if (!def) {
         const ditingName = Object.keys(METRIC_KEY_TO_KOMARI).find(k => METRIC_KEY_TO_KOMARI[k] === key);

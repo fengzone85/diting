@@ -589,7 +589,7 @@ export const enUS: Record<string, string> = {
   'login.tokenRequired': 'Admin token is required',
   'login.failed': 'Login failed',
 
-  // install wizard (/install, ported from komari)
+  // install wizard (/install, ported from 上游)
   'install.title': 'Welcome to diting',
   'install.subtitle': 'First-time setup: site info and admin token',
   'install.lockedTitle': 'Already initialized',

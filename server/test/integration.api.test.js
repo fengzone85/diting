@@ -304,7 +304,7 @@ test('P4：一键安装命令贯通 MONTH_ROTATE', async () => {
   });
 });
 
-test('Komari REST 外壳：/api/records/load 结果包在 data 里', async () => {
+test('参考面板 REST 外壳：/api/records/load 结果包在 data 里', async () => {
   const res = await request(app).get('/api/records/load?hours=1');
   assert.strictEqual(res.status, 200);
   assert.strictEqual(res.body.status, 'success');
@@ -317,7 +317,7 @@ test('Komari REST 外壳：/api/records/load 结果包在 data 里', async () =>
 test('M-01：/api/records/ping 能解析对象格式 probes（此前恒返回空）', async () => {
   const res = await request(app).get('/api/records/ping?hours=1');
   assert.strictEqual(res.status, 200);
-  // Komari REST 标准外壳：结果必须包在 data 里（PurCarte 等 React 主题读 resp.data.records）
+  // 参考面板 REST 标准外壳：结果必须包在 data 里（React 系主题读 resp.data.records）
   assert.ok(res.body.data, '应含 data 外壳');
   assert.ok(res.body.data.records.length >= 1, 'records 不应为空');
   assert.ok(res.body.data.tasks.some((t) => t.name === '移动'), 'tasks 应包含「移动」');

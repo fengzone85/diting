@@ -1,6 +1,6 @@
 'use strict';
 // P1 服务端流量口径累加器（纯函数，便于单测）。
-// 口径：Komari month_rotate；0=绝对累计，1-31=周期重置日；legacy（无绝对计数器）透传上报月累计。
+// 口径：上游 month_rotate；0=绝对累计，1-31=周期重置日；legacy（无绝对计数器）透传上报月累计。
 
 const MAX_SAFE_COUNTER = Number.MAX_SAFE_INTEGER;
 
@@ -25,7 +25,7 @@ const hasCounter = (report) =>
 const daysInMonth = (year, monthIndex0) =>
   new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
 
-// Komari getActualResetDate 等价：本月有 rotate 日则取本月该日 00:00；否则顺延到下月 1 日 00:00。
+// 参考面板 getActualResetDate 等价：本月有 rotate 日则取本月该日 00:00；否则顺延到下月 1 日 00:00。
 function actualResetMs(year, monthIndex0, rotate, tzOffsetHours) {
   const dim = daysInMonth(year, monthIndex0);
   let y = year;

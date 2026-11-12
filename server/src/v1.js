@@ -1,7 +1,7 @@
 'use strict';
 // 标准公开只读 API 层（/api/v1/*）—— 方案 C 的「标准 API」层
 // 与任何皮肤/主题协议解耦：diting 只暴露语义清晰的 RESTful 资源，
-// Komari/Glassmorphism 等协议的翻译由独立 adapter 仓库负责。
+// 参考面板/玻璃拟态设计等协议的翻译由独立 adapter 仓库负责。
 // 仅暴露只读、脱敏数据，且受 ui_settings.public_enabled 门控（与 /api/public/* 一致）。
 const express = require('express');
 const db = require('./db');

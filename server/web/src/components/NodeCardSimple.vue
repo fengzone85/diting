@@ -23,7 +23,7 @@ const emit = defineEmits<{
 const cpu = computed(() => props.agent.cpu ?? props.agent.cpu_percent ?? 0);
 const memPct = computed(() => props.agent.mem_pct ?? 0);
 const merchantName = computed(() => providerAlias(props.agent.id, props.agent.merchant));
-// 价格胶囊：0/未填 → 不显示；-1 → 免费；>0 → 货币 + 金额（对齐 Komari 后台口径）
+// 价格胶囊：0/未填 → 不显示；-1 → 免费；>0 → 货币 + 金额（对齐参考面板后台口径）
 const priceLabel = computed(() => {
   const p = props.agent.price;
   if (typeof p !== 'number' || p === 0) return '';
@@ -118,11 +118,11 @@ function parseProbes(): Record<string, { ts?: number; ms?: number; ok?: boolean;
   return p || {};
 }
 
-// 固定 20 根柱子（对齐 Komari 的 ps=20）
+// 固定 20 根柱子（对齐参考面板的 ps=20）
 const BAR_COUNT = 20;
 
-// 延迟柱状图数据 - 对齐 Komari 的 latencyRenderBars
-// 注意：Komari 的柱子高度完全相同（h-full），视觉区分只靠颜色和图案
+// 延迟柱状图数据 - 对齐参考面板的 latencyRenderBars
+// 注意：参考面板的柱子高度完全相同（h-full），视觉区分只靠颜色和图案
 const latencyBars = computed(() => {
   const probes = parseProbes();
   const entries = Object.entries(probes);
@@ -146,7 +146,7 @@ const latencyBars = computed(() => {
   });
 });
 
-// 丢包柱状图数据 - 对齐 Komari 的 lossRenderBars
+// 丢包柱状图数据 - 对齐参考面板的 lossRenderBars
 const lossBars = computed(() => {
   const probes = parseProbes();
   const entries = Object.entries(probes);
@@ -173,7 +173,7 @@ const lossBars = computed(() => {
   });
 });
 
-// 延迟颜色分级 - 对齐 Komari 的 ys 函数
+// 延迟颜色分级 - 对齐参考面板的 ys 函数
 function latencyColorClass(ms: number): string {
   if (ms <= 60) return 'bg-signal-1';
   if (ms <= 100) return 'bg-signal-2';
@@ -182,7 +182,7 @@ function latencyColorClass(ms: number): string {
   return 'bg-signal-5 ping-signal-pattern-4';
 }
 
-// 丢包颜色分级 - 对齐 Komari 的 ws 函数
+// 丢包颜色分级 - 对齐参考面板的 ws 函数
 function lossColorClass(loss: number): string {
   if (loss <= 1) return 'bg-signal-1';
   if (loss <= 3) return 'bg-signal-2';
@@ -234,7 +234,7 @@ const tags = computed(() => {
     @dragstart="emit('dragstart', $event)"
     @dragend="emit('dragend', $event)"
   >
-    <!-- Header: status + name + flag/tag - 对齐 Komari CardX header px-4 py-3 -->
+    <!-- Header: status + name + flag/tag - 对齐参考面板 CardX header px-4 py-3 -->
     <div class="flex items-center gap-2 min-w-0 px-4 py-3">
       <div class="relative size-2.5 shrink-0">
         <span class="size-2.5 rounded-full block" :style="{ background: agent.online ? 'var(--success)' : 'var(--danger)' }"></span>
@@ -253,20 +253,20 @@ const tags = computed(() => {
       </div>
     </div>
 
-    <!-- Content area: 对齐 Komari 内容区 p-4 pt-0 + flex flex-col gap-3 -->
+    <!-- Content area: 对齐参考面板内容区 p-4 pt-0 + flex flex-col gap-3 -->
     <div class="flex flex-col gap-3 px-4 pb-4">
     <!-- Uptime + Price row -->
     <div class="relative z-20 flex items-center gap-1.5 -mt-1 h-[19px] overflow-hidden">
       <span class="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
         {{ t('card.uptime') }} {{ uptimeDays }}d
       </span>
-      <!-- 价格口径对齐 Komari：0 = 不显示、-1 = 免费、>0 = 实际金额 -->
+      <!-- 价格口径对齐参考面板：0 = 不显示、-1 = 免费、>0 = 实际金额 -->
       <span v-if="priceLabel" class="min-w-0 truncate text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
         {{ priceLabel }}
       </span>
     </div>
 
-    <!-- Metrics: 2-col grid - 对齐 Komari wt: gap-x-4 gap-y-2.5 -->
+    <!-- Metrics: 2-col grid - 对齐参考面板 wt: gap-x-4 gap-y-2.5 -->
     <div class="grid grid-cols-2 gap-x-4 gap-y-2.5">
       <!-- CPU -->
       <div class="flex flex-col gap-1">
@@ -370,7 +370,7 @@ const tags = computed(() => {
       </div>
     </div>
 
-    <!-- Latency + Loss panels - 对齐 Komari Glassmorphism -->
+    <!-- Latency + Loss panels - 对齐参考面板玻璃拟态设计 -->
     <div class="grid grid-cols-2 gap-1.5">
       <!-- 延迟面板 -->
       <div class="group/panel relative flex flex-col rounded-lg bg-slate-500/5" style="gap: 6px; padding: 8px; height: 44px;">
@@ -451,7 +451,7 @@ const tags = computed(() => {
   overflow: hidden;
 }
 
-/* 信号颜色 - 对齐 Komari */
+/* 信号颜色 - 对齐参考面板 */
 .node-card-simple {
   --signal-1: #059669;
   --signal-2: #4ade80;
@@ -466,7 +466,7 @@ const tags = computed(() => {
 .bg-signal-4 { background-color: var(--signal-4); }
 .bg-signal-5 { background-color: var(--signal-5); }
 
-/* 信号图案 - 直接从 Komari CSS 复制 */
+/* 信号图案 - 直接从参考面板 CSS 复制 */
 .ping-signal-pattern-2 {
   background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgba(255,255,255,0.45) 2px 3px);
 }

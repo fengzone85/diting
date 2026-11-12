@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  /* 基础语义色 — 对齐 komari-theme-Glassmorphism dark */
+  /* 基础语义色 — 对齐玻璃拟态主题 dark */
   --bg-primary: #0c1117;
   --bg-secondary: rgb(10 14 22 / 0.82);
-  --text-primary: #fafafa;                           /* komari --foreground oklch(0.985) */
-  --text-secondary: #c7cdd4;                          /* komari --muted-foreground oklch(0.86) */
+  --text-primary: #fafafa;                           /* 上游 --foreground oklch(0.985) */
+  --text-secondary: #c7cdd4;                          /* 上游 --muted-foreground oklch(0.86) */
   --text-muted: #8b929a;                              /* 介于 secondary 和 divider 之间 */
-  --bg-surface: #3a3e44;                              /* komari --accent oklch(0.274) — hover 背景 */
-  --border-divider: rgb(255 255 255 / 0.10);          /* komari --border */
+  --bg-surface: #3a3e44;                              /* 上游 --accent oklch(0.274) — hover 背景 */
+  --border-divider: rgb(255 255 255 / 0.10);          /* 上游 --border */
   --accent: #3ccf91;
   --accent-hover: #48d9a0;
   --success: #31c99a;
@@ -23,8 +23,8 @@
   --glass-tint-hover: #0a0e16e6;                      /* 悬停 90% 深半透 */
   --glass-saturate: 145%;
   --glass-blur: 14px;
-  --glass-border: #ffffff2e;                          /* komari --glass-dark-border */
-  --glass-shadow: 0 8px 30px #0000007a;               /* komari --glass-dark-shadow */
+  --glass-border: #ffffff2e;                          /* 上游 --glass-dark-border */
+  --glass-shadow: 0 8px 30px #0000007a;               /* 上游 --glass-dark-shadow */
   /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透） */
   --glass-inner-tint: rgb(255 255 255 / 0.06);
   --glass-inner-border: rgb(255 255 255 / 0.12);
@@ -32,7 +32,7 @@
 }
 
 /* 毛玻璃预设：data-glass 由 useTheme 写入 <html>
-   默认 emerald 预设完全对齐 komari-theme-Glassmorphism 暗色配方 */
+   默认 emerald 预设完全对齐玻璃拟态主题 暗色配方 */
 [data-glass="emerald"] {
   --glass-tint: #0a0e16cc;
   --glass-tint-hover: #0a0e16e6;
@@ -81,26 +81,26 @@
   /* --glass-tint 等由 useTheme 内联覆盖 */
 }
 
-/* 明亮风格模板 — 对齐 komari glass-admin light */
+/* 明亮风格模板 — 对齐上游 glass-admin light */
 [data-theme="light"] {
-  --bg-primary: #eef2f5;                              /* komari --background */
-  --bg-secondary: rgb(255 255 255 / 0.68);            /* komari --card 68% */
-  --text-primary: #0f1b24;                            /* komari --foreground 更深 */
+  --bg-primary: #eef2f5;                              /* 上游 --background */
+  --bg-secondary: rgb(255 255 255 / 0.68);            /* 上游 --card 68% */
+  --text-primary: #0f1b24;                            /* 上游 --foreground 更深 */
   --text-secondary: #2b3942;                          /* 更深更清晰 */
   --text-muted: #46555f;                              /* 原 #5b6b75 偏淡易糊，加深 */
   --bg-surface: #eef1f4;                              /* hover 背景 */
   --border-divider: rgb(68 83 94 / 0.22);
-  --accent: #087f5b;                                 /* komari --primary */
+  --accent: #087f5b;                                 /* 上游 --primary */
   --accent-hover: #0b8f68;
-  --success: #079b75;                                /* komari --accent-9 */
+  --success: #079b75;                                /* 上游 --accent-9 */
   --warning: #ca8a04;
   --danger: #dc2626;
   --border: rgb(68 83 94 / 0.22);
-  --glass-tint: #ffffffad;                            /* komari 亮色卡片 68% 不透明白 */
+  --glass-tint: #ffffffad;                            /* 上游亮色卡片 68% 不透明白 */
   --glass-tint-hover: #ffffffe6;                      /* 悬停 90% 浅半透 */
-  --glass-border: #e2e8f0ad;                          /* komari --glass-light-border */
-  --glass-shadow: 0 8px 28px #0f172a2e;               /* komari --glass-light-shadow */
-  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透，对齐 komari --card 68%） */
+  --glass-border: #e2e8f0ad;                          /* 上游 --glass-light-border */
+  --glass-shadow: 0 8px 28px #0f172a2e;               /* 上游 --glass-light-shadow */
+  /* 内部胶囊（嵌套毛玻璃，比主卡片更浅更透，对齐上游 --card 68%） */
   --glass-inner-tint: rgb(255 255 255 / 0.55);
   --glass-inner-border: rgb(100 116 139 / 0.30);
 }
@@ -135,7 +135,7 @@
 }
 
 [data-theme="light"] body {
-  /* 对齐 Glassmorphism 亮色 aurora：浅冷白底 + 紫/粉/青柔光，让 68% 半透明白卡
+  /* 对齐玻璃拟态设计亮色 aurora：浅冷白底 + 紫/粉/青柔光，让 68% 半透明白卡
      透出色彩层次（原先单一极淡青光晕几乎看不出）。与 BG_LIGHT_FALLBACK 同色系。 */
   background:
     radial-gradient(ellipse 68% 58% at 10% 0%, rgb(167 139 250 / .30), transparent 70%),
@@ -245,7 +245,7 @@
   background-color: var(--glass-tint-hover) !important;
 }
 
-/* komari 字体颜色映射 — 卡片内文字/次级文字 */
+/* 上游字体颜色映射 — 卡片内文字/次级文字 */
 .glass {
   color: var(--text-primary) !important;
 }
@@ -265,9 +265,9 @@
 .text-muted { color: var(--text-muted); }
 .text-accent { color: var(--accent); }
 
-/* ---- Komari 类名兼容层（2026-10-12 列表模式审计发现并补齐）----
-   部分组件移植自 glassmorphism 主题，残留 text-foreground / text-muted-foreground /
-   bg-background 等 Komari 类名；本项目 Tailwind v4 默认色板不含这些名字（构建产物
+/* ---- 参考面板类名兼容层（2026-10-12 列表模式审计发现并补齐）----
+   部分组件移植自玻璃拟态主题，残留 text-foreground / text-muted-foreground /
+   bg-background 等参考面板类名；本项目 Tailwind v4 默认色板不含这些名字（构建产物
    零匹配），导致：
      ① 列表模式（NodeRow）文字层级全部失效（/60 /70 /75 不生效）、行无玻璃背景；
      ② text-muted-foreground（简约卡片/详情页 26 处）在暗色主题下失效（亮色有手写覆盖）。
@@ -303,7 +303,7 @@ body {
 }
 
 body {
-  /* 对齐 Glassmorphism 暗色 aurora：深靛黑底 + 紫/靛/青/洋红四角柔光。
+  /* 对齐玻璃拟态设计暗色 aurora：深靛黑底 + 紫/靛/青/洋红四角柔光。
      原先灰蓝光斑偏浊、底色半透明，卡片叠上去层次不足；这里加深底色并提高
      光斑饱和度，与 BG_DARK_FALLBACK 同色系（三处口径一致）。 */
   background:
@@ -408,7 +408,7 @@ button.pill-card:disabled { opacity: 0.55; pointer-events: none; }
   box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-/* komari 风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */
+/* 上游风格：header 初始透明，滚动后才出现毛玻璃（由 AppHeader 的 isScrolled 控制） */
 
 .card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
@@ -431,7 +431,7 @@ button.pill-card:disabled { opacity: 0.55; pointer-events: none; }
 .status-offline { background-color: var(--danger); box-shadow: 0 0 8px var(--danger); }
 .status-warn { background-color: var(--warning); box-shadow: 0 0 8px var(--warning); }
 
-/* 色觉辅助模式（data-color-vision 写入 <html>，对齐 komari 主题） */
+/* 色觉辅助模式（data-color-vision 写入 <html>，对齐上游主题） */
 [data-color-vision="protanopia"] { filter: url(#cv-protanopia); }
 [data-color-vision="deuteranopia"] { filter: url(#cv-deuteranopia); }
 [data-color-vision="tritanopia"] { filter: url(#cv-tritanopia); }

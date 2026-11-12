@@ -92,7 +92,7 @@ const cardMaxWidth = computed(() => {
   return map[size] || map.comfortable;
 });
 
-// 总览卡片方案（对齐 komari 首页总览卡片方案）
+// 总览卡片方案（对齐上游首页总览卡片方案）
 const overviewCards = computed(() => {
   const o = state.overview;
   const ags = state.agents;
@@ -123,7 +123,7 @@ const overviewCards = computed(() => {
   const quotaBytes = totalQuotaGb * 1024 ** 3;
   const quotaPct = quotaBytes > 0 ? (trafficUsed / quotaBytes) * 100 : 0;
   const usedText = trafficUsed > 0 ? fmtBytes(trafficUsed) : '0B';
-  // 月度费用（价格口径对齐 Komari）：>0 求和显示；全为 -1（免费）显示「免费」；
+  // 月度费用（价格口径对齐参考面板）：>0 求和显示；全为 -1（免费）显示「免费」；
   // 全为 0（未填写，不显示）则显示 '—'。
   const priced = ags.filter((a) => typeof a.price === 'number');
   const anyFree = priced.some((a) => a.price! < 0);
@@ -293,7 +293,7 @@ function billingTitle(field: 'total_value' | 'remaining_value' | 'monthly_cost')
   return rows.length ? rows.join('\n') : undefined;
 }
 
-// 快捷统计卡片（对齐 Glassmorphism 首页统计卡）：图标 + 数值 + 标签，玻璃卡样式。
+// 快捷统计卡片（对齐玻璃拟态设计首页统计卡）：图标 + 数值 + 标签，玻璃卡样式。
 const QUICK_ICONS = {
   fav: markRaw(Star),
   total: markRaw(Server),
@@ -351,7 +351,7 @@ function setListCols(n: 1 | 2) {
   localStorage.setItem('diting-list-cols', String(n));
 }
 
-// 布局控制栏（2026-10-12 图标化 + 对齐 Komari 精简）：去掉文字标签，按钮仅图标；
+// 布局控制栏（2026-10-12 图标化 + 对齐参考面板精简）：去掉文字标签，按钮仅图标；
 // compact 布局按钮已移除——其渲染与 grid 完全相同（cardSizeClass 只读 meta.card_size，
 // 与 layout 无关），属与实现脱钩的死按钮。state.layout 类型保留 'compact' 兼容存量配置。
 const LAYOUT_OPTS = [
@@ -556,7 +556,7 @@ const announcement = computed(() => {
         </div>
       </div>
 
-      <!-- 分组 Tabs：对齐 Glassmorphism 的 segmented tabs——浅槽（bg-muted + p-[3px] +
+      <!-- 分组 Tabs：对齐玻璃拟态设计的 segmented tabs——浅槽（bg-muted + p-[3px] +
            rounded-lg）内嵌分段按钮，选中项是「浅/深色块 + 细边框 + 主文字色」，
            而不是每个标签独立的毛玻璃卡片。 -->
       <div

@@ -60,7 +60,7 @@ description: 服务端与受控端环境变量参考
 | `RESTORE_TRIGGER` | 否 | `/data/restore.request` | 后台点「恢复」时投递的请求文件。代码兜底默认在 `/data/` 下；compose 示例传 `/data/backups/restore.request`（与 `BACKUP_DIR` 同卷）。宿主侧 `diting.sh --process-restore` 读取并执行 |
 | `BACKUP_UPLOAD_MAX_MB` | 否 | `1024` | 后台「上传备份」的单文件上限（MB，1–8192）。上传内容必须是 SQLite 或 gzip，文件名由服务端生成；超限返回 413 |
 
-> AI 日报、计费、审计、Komari 主题由后台「设置」页管理，无需环境变量。
+> AI 日报、计费、审计、第三方主题由后台「设置」页管理，无需环境变量。
 
 ### 备份相关（宿主机侧）
 
@@ -100,7 +100,7 @@ description: 服务端与受控端环境变量参考
 | `AGENT_ID` | ✅ | — | 节点标识 |
 | `AGENT_TOKEN` | ✅ | — | 认证令牌 |
 | `INTERVAL` | 否 | `20`（Docker 镜像与 Windows 为 `15`） | 上报间隔（秒），最小 5 |
-| `MONTH_ROTATE` | Go | `0` | 流量重置日（Komari `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。由服务端按此口径累计月流量（受控端不保存本地状态） |
+| `MONTH_ROTATE` | Go | `0` | 流量重置日（参考面板 `month_rotate`）：`0`=累计口径，`1–31`=每月重置日；兼容别名 `AGENT_MONTH_ROTATE`。由服务端按此口径累计月流量（受控端不保存本地状态） |
 | `DISK_PATH` | 否 | `/` | 磁盘统计路径（容器内通常为 `/host`） |
 | `PROBE_TARGETS` | 否 | `CM:www.10086.cn:443,CT:101.226.4.6,CU:202.106.0.20,GG:8.8.8.8` | 网络质量探测目标（`label:host[:port]` TCP / `label:http(s)://host/path` HTTP，逗号分隔，置空关闭）。`CM` 为**移动门户**——运营商 DNS 对 TCP 53/443/80 全拒，故用移动自家门户测「移动入口可达性」 |
 | `PROBE_TIMEOUT_MS` | 否 | `900` | TCP 单次握手死线（毫秒，≤60000）：压在 1s SYN 重传之下，避免把重传成功的 1200ms 记成 RTT |

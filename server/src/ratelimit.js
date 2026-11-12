@@ -87,7 +87,7 @@ function rateLimitTouch(map, ip, windowMs, max) {
 // ============================================================
 // 登录暴力防护（F9）：失败计数 + 指数封禁
 //
-// 公式对齐 nezha model/waf.go 的 count^4：连续失败 N 次 → 封禁 N^4 秒（上限 24h）。
+// 公式对齐参考面板 model/waf.go 的 count^4：连续失败 N 次 → 封禁 N^4 秒（上限 24h）。
 // 第 FAIL_LIMIT（默认 3）次失败即进入封禁；封禁期内请求直接 429 + Retry-After；
 // 成功登录清零。
 //

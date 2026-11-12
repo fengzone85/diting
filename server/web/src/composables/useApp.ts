@@ -148,7 +148,7 @@ const CARD_SCHEMES: Record<string, string[]> = {
   basic: ['online_total', 'cpu', 'mem'],
   ops: ['online_total', 'offline', 'warn', 'cpu', 'mem', 'load', 'disk'],
   resource: ['cpu', 'mem', 'disk', 'net', 'swap', 'instant_traffic'],
-  // remaining：剩余价值（Komari 资产统计口径，价格×剩余天数÷周期天数）
+  // remaining：剩余价值（参考面板资产统计口径，价格×剩余天数÷周期天数）
   finance: ['total', 'price', 'remaining', 'expire', 'quota'],
   traffic: ['traffic_total', 'rx_month', 'tx_month', 'net'],
   gpu: ['online_total', 'cpu', 'mem', 'gpu'],
