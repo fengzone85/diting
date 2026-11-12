@@ -30,7 +30,9 @@ jobs:
         run: npm audit --audit-level=high
       - name: Run server unit tests
         working-directory: server
-        run: npm test
+        run: npm test 2>&1 | tee /tmp/server-tap.txt; exit ${PIPESTATUS[0]}
+      - name: Test baseline gate (H9, 防 0 用例假绿)
+        run: node scripts/repo-hygiene-check.mjs --test-baseline --tap-file /tmp/server-tap.txt
 
       - name: Install web dependencies
         working-directory: server/web
@@ -45,6 +47,28 @@ jobs:
       - name: Run web unit tests (with coverage gate)
         working-directory: server/web
         run: npm run test:cov
+      - name: Run server lint
+        working-directory: server
+        run: npm run lint
+      # web lint 暂为非阻断：存在 5 处预有 vue/no-mutating-props error
+      # （BillingFxSettings.vue，计费功能遗留）；修复后去掉 continue-on-error 转阻断。
+      - name: Run web lint (non-blocking)
+        continue-on-error: true
+        working-directory: server/web
+        run: npm run lint
+
+  # 仓库纯净度闸门：tracked 全集扫描（白名单/禁扩展名/大文件/凭据/IDE 产物）。
+  # 与 pre-commit 同一脚本；钩子可被 --no-verify 绕过，此 job 是第二道防线。
+  repo-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Repo hygiene gate (H1–H8)
+        run: node scripts/repo-hygiene-check.mjs --full
 
   # 受控端（agent-go）此前只在 tag 发布流水线跑测试，master 的 push/PR 没有 Go 门禁。
   # go.mod 零第三方依赖（无 require、无 go.sum），整个 job 约 20s。

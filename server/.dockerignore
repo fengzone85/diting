@@ -17,3 +17,7 @@ public.bak-*/
 .env
 .env.*
 !.env.example
+# 测试代码不入生产镜像（对齐同类项目的多阶段构建效果）
+test/
+# 私钥目录绝不入镜像
+certs/

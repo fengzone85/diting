@@ -1,0 +1,4 @@
+#!/bin/sh
+# 仓库纯净度闸门（H1–H4/H6–H8）：非零退出即中止提交。
+# 启用：git config core.hooksPath .githooks（本机一次性，见 README 贡献段）。
+node "$(git rev-parse --show-toplevel)/scripts/repo-hygiene-check.mjs" --staged || exit 1

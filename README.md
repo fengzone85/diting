@@ -795,6 +795,12 @@ Agent 从**自身主机**主动做 TCP / HTTP(S) 探测**写死在本地配置�
 
 > 补充：GPU 型号（`nvidia-smi` / `lspci` 取得的硬件标识）属于**主机指纹**，与本项目「受控端不采内核/GPU/公网IP」原则冲突，因此**不做 GPU 监控**。模板所需的 `gpu_name` 只支持管理员手填「核显/独显」类目（或留空/隐藏），不来自受控端探测，也没有 GPU 使用率数据源。
 
+## 🛠️ 开发与贡献
+
+- **入库闸门**：仓库带纯净度检查（路径白名单 / 凭据扫描 / 测试基线防假绿）。clone 后执行一次 `git config core.hooksPath .githooks` 启用本地钩子；CI 会对 tracked 全集二次复查（`--no-verify` 绕过也会被抓）。
+- **测试**：服务端 `cd server && npm test`；前端 `cd server/web && npm test`（覆盖率门禁 `npm run test:cov`）。
+- **提交信息**：使用中性表述，不点名第三方产品或其它仓库；只显式 `git add <path>`。
+
 ---
 
 ## 📄 许可证

@@ -1,55 +1,13 @@
 # 依赖
 node_modules/
-__pycache__/
-*.pyc
-
-# 运行时 / 环境
+# 凭据不入库
 .env
-*.db
-*.err
-*.log
-server/run.log
-server/server.out
-data/
-test_data/
-
-# 本地运维/排查临时脚本
-.vps_test/
-
-# 操作系统 / 编辑器
-.DS_Store
-Thumbs.db
-*.swp
-.vscode/
-.idea/
-
-# 设计/模板稿（非项目源码）
-candyhouse.html
-
-# 构建前备份目录（非项目源码）
-server/public.bak-*/
-
-# 前端构建产物（Vite 输出，部署端 npm run build 重新生成，非源码）
+# 前端构建产物（Vite 输出，部署端 npm run build 重新生成）
 server/public/assets/
 server/public/index.html
-
-# 构建时间戳（diting.sh 部署时写入 build_time.txt，运行产物）
+# 部署写入的版本信息（diting.sh）
 server/build_time.txt
-# 构建 commit hash（diting.sh 部署时写入 git_hash.txt，运行产物）
 server/git_hash.txt
-
-# 测试覆盖率报告（vitest --coverage 输出，npm run test:cov 重新生成）
-server/web/coverage/
-
-# 文档站（Astro Starlight 构建产物与缓存，非源码）
-docs/dist/
-docs/.astro/
-
-# 本地开发日志（仅存于工作区，不纳入版本控制）
+# 工作区真相源（只写工作区，不进 GitHub）
 DEVLOG.md
-
-# 变更日志（只写工作区，不进 GitHub，2026-11-12 起）
 /CHANGELOG.md
-
-# 可选 B 路径的自签证书（含私钥，由 diting.sh --bundled-proxy 生成，严禁入库）
-server/certs/

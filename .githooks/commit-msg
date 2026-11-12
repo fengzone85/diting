@@ -1,0 +1,4 @@
+#!/bin/sh
+# 提交信息中性检查（H5，提示级，恒放行不阻断）。
+node "$(git rev-parse --show-toplevel)/scripts/repo-hygiene-check.mjs" --msg-file "$1"
+exit 0
