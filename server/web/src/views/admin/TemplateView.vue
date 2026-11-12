@@ -4,6 +4,7 @@ import { useAdmin, loadAdmin, setAutoRefreshPaused } from '../../composables/use
 import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
 import { refreshGlass } from '../../composables/useTheme';
+import ThemePanel from '../../components/admin/ThemePanel.vue';
 
 interface BgCfg {
   enabled: boolean;
@@ -461,9 +462,12 @@ async function save() {
     </div>
 
     <div class="mt-6">
-      <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-white hover:bg-sky-400 disabled:opacity-50" @click="save">
+      <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50" @click="save">
         {{ saving ? t('settings.saving') : t('common.save') }}
       </button>
     </div>
+
+    <!-- S5/F10：主题市场（已安装 / 市场 / 来源）。原挂在「设置」页，改归外观域。 -->
+    <ThemePanel class="mt-6" />
   </div>
 </template>

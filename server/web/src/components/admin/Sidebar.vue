@@ -1,62 +1,108 @@
 <script setup lang="ts">
-// 后台侧栏：参考 Komari 后台的信息架构——按「监控 / 运维 / 系统」分组，
+// 后台侧栏：按功能域分组（节点 / 告警与通知 / 站点与外观 / 安全 / 系统），
+// 对齐 Komari、nezha、cf-vps-monitor 的后台信息架构：先监控对象，再告警通知，
+// 然后外观内容，最后安全与系统维护；配置类不再混进「监控」。
 // 桌面端可收起成图标轨（localStorage 记忆），移动端保持抽屉式全宽。
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import {
   DashboardOne, Monitor, Wallet, Robot, Log, Key, SettingTwo, LayoutTwo, Folder,
-  Home, Logout, MenuFold, MenuUnfold, User,
+  Home, Logout, MenuFold, MenuUnfold, User, Alarm, Theme,
 } from '@icon-park/vue-next';
 import { useI18n } from '../../composables/useI18n';
 
-defineProps<{
+// collapsed 由父级 AdminLayout 持有（localStorage 记忆）：侧栏是 fixed 浮卡，
+// 展开/收起只改变自身宽度，顶栏 / 内容 / 页脚仍按视口居中、不随之移动。
+const props = defineProps<{
   open?: boolean;
+  collapsed?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (e: 'update:collapsed', value: boolean): void;
 }>();
 
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 
-const COLLAPSE_KEY = 'diting.admin.sidebar.collapsed';
-const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1');
+const collapsed = computed(() => !!props.collapsed);
+const rightAnchored = ref(false);
+let anchorQuery: MediaQueryList | null = null;
+
+function syncAnchor() {
+  rightAnchored.value = !!anchorQuery?.matches;
+}
+function onAnchorChange(e: MediaQueryListEvent) {
+  rightAnchored.value = e.matches;
+}
+onMounted(() => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+  anchorQuery = window.matchMedia('(min-width: 1808px)');
+  syncAnchor();
+  anchorQuery?.addEventListener('change', onAnchorChange);
+});
+onUnmounted(() => {
+  anchorQuery?.removeEventListener('change', onAnchorChange);
+});
+
+// 常驻档右缘锚定：收起向右、展开向左；抽屉档左缘锚定，方向相反。
+const toggleIcon = computed(() => (
+  collapsed.value === rightAnchored.value ? MenuFold : MenuUnfold
+));
 
 function toggleCollapsed() {
-  collapsed.value = !collapsed.value;
-  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0');
+  emit('update:collapsed', !collapsed.value);
 }
 
 // 用 computed 而非一次性数组：切换语言时菜单文案需要跟着变（t() 内部读取 locale ref）。
 const groups = computed(() => [
   {
-    key: 'monitor',
-    title: t('nav.group.monitor'),
+    // 节点域：清单 + 成本 + 分发物料（对齐 nezha 的「服务器」域，含批量与终端类操作）
+    key: 'nodes',
+    title: t('nav.group.nodes'),
     items: [
       { to: '/admin', label: t('nav.dashboard'), icon: DashboardOne },
       { to: '/admin/agents', label: t('nav.agents'), icon: Monitor },
-      { to: '/admin/agent-artifacts', label: t('nav.agentArtifacts'), icon: Folder },
       { to: '/admin/billing', label: t('nav.billing'), icon: Wallet },
+      { to: '/admin/agent-artifacts', label: t('nav.agentArtifacts'), icon: Folder },
     ],
   },
   {
-    key: 'ops',
-    title: t('nav.group.ops'),
+    // 告警域：阈值/分组覆盖/通知渠道同页，AI 分析报告与之同组
+    key: 'alerts',
+    title: t('nav.group.alerts'),
     items: [
+      { to: '/admin/alerting', label: t('nav.alerting'), icon: Alarm },
       { to: '/admin/ai', label: t('nav.ai'), icon: Robot },
+    ],
+  },
+  {
+    // 外观域：站点信息与默认主题、玻璃拟态外观与主题市场
+    key: 'site',
+    title: t('nav.group.site'),
+    items: [
+      { to: '/admin/site', label: t('nav.site'), icon: LayoutTwo },
+      { to: '/admin/template', label: t('nav.template'), icon: Theme },
+    ],
+  },
+  {
+    // 安全域：凭据、登录设备/2FA/IP 白名单、审计
+    key: 'security',
+    title: t('nav.group.security'),
+    items: [
+      { to: '/admin/api-tokens', label: t('nav.apiTokens'), icon: Key },
+      { to: '/admin/sessions', label: t('nav.sessions'), icon: User },
       { to: '/admin/audit-logs', label: t('nav.auditLogs'), icon: Log },
     ],
   },
   {
+    // 系统域：数据保留、备份恢复、容量保险丝
     key: 'system',
     title: t('nav.group.system'),
     items: [
-      { to: '/admin/api-tokens', label: t('nav.apiTokens'), icon: Key },
-      { to: '/admin/sessions', label: t('nav.sessions'), icon: User },
-      { to: '/admin/settings', label: t('nav.settings'), icon: SettingTwo },
-      { to: '/admin/template', label: t('nav.template'), icon: LayoutTwo },
+      { to: '/admin/maintenance', label: t('nav.maintenance'), icon: SettingTwo },
     ],
   },
 ]);
@@ -78,33 +124,29 @@ function isActive(to: string) {
 
 <template>
   <!-- mobile overlay -->
+  <!-- 遮罩：移动端抽屉 + 桌面悬浮抽屉（1024~1807）都需要；常驻模式（≥1808）隐藏 -->
   <div
     v-if="open"
-    class="fixed inset-0 z-40 bg-black/50 lg:hidden"
+    class="fixed inset-0 z-[45] bg-black/50 min-[1808px]:hidden"
     @click="emit('close')"
   />
   <aside
-    class="sidebar glass z-50 flex flex-shrink-0 flex-col p-3 transition-all duration-200 lg:static lg:translate-x-0"
+    class="sidebar glass z-50 flex flex-shrink-0 flex-col p-3 transition-all duration-200"
     :class="[
       open ? 'sidebar-open' : 'sidebar-closed',
       collapsed ? 'is-collapsed' : '',
     ]"
   >
-    <!-- 品牌 + 收起/展开 -->
+    <!-- 收起/展开（品牌 logo 与站名已移到后台顶栏，侧栏不再重复） -->
     <div class="mb-4 flex items-center gap-2 px-1">
-      <RouterLink to="/admin" class="brand flex min-w-0 items-center gap-2" :title="t('nav.admin')" @click="emit('close')">
-        <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-500/20 text-sm font-bold text-sky-300">D</span>
-        <span class="label truncate text-lg font-bold text-sky-400">Diting</span>
-      </RouterLink>
       <button
-        class="collapse-toggle ml-auto hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/40 hover:text-white lg:flex"
+        class="collapse-toggle hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-700/40 hover:text-white lg:flex"
         :title="collapsed ? t('nav.expand') : t('nav.collapse')"
         :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')"
         :aria-expanded="!collapsed"
         @click="toggleCollapsed"
       >
-        <MenuUnfold v-if="collapsed" :size="18" />
-        <MenuFold v-else :size="18" />
+        <component :is="toggleIcon" :size="18" />
       </button>
       <button
         class="ml-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:text-white lg:hidden"
@@ -163,6 +205,7 @@ function isActive(to: string) {
 </template>
 
 <style scoped>
+/* ---------- ① <1024：移动端全屏抽屉 ---------- */
 .sidebar {
   position: fixed;
   top: 0;
@@ -176,6 +219,8 @@ function isActive(to: string) {
 .sidebar-open {
   transform: translateX(0);
 }
+
+/* ---------- 桌面公共：浮卡外观（高度随视口自适应） ---------- */
 @media (min-width: 1024px) {
   /* 收起态：隐藏文案与分组标题、图标居中。
      必须只写在桌面端媒体查询内——否则「桌面收起后窗口变窄/手机打开同一浏览器」时，
@@ -190,32 +235,80 @@ function isActive(to: string) {
     padding-left: 0;
     padding-right: 0;
   }
-  /* 桌面端改为 sticky 满高：页面很长时「返回主页/退出」仍固定在视口底部，
-     中间菜单区自己滚动（此前 position: static 会让 footer 掉到长页面最下面）。 */
+  /* 高度按内容自适应 + 垂直居中：
+     top/bottom 只作为可用区间（顶栏下沿 ~ 底部 12px 缝），
+     height: fit-content 让卡片只包住菜单内容，margin-block: auto 把它居中在该区间内。
+     窗口过矮时 max-height 封顶，菜单区内部滚动。 */
   .sidebar {
-    position: sticky;
-    top: 0;
-    bottom: auto;
-    height: 100vh;
-    align-self: flex-start;
+    position: fixed;
+    top: 4.3125rem;                              /* 顶栏 56 + 边框 1 + 缝 12 */
+    bottom: 0.75rem;
+    height: fit-content;
+    max-height: calc(100vh - 5.0625rem);         /* 69 + 12 */
+    max-height: calc(100dvh - 5.0625rem);
+    margin-top: auto;
+    margin-bottom: auto;
+    border-radius: 0.75rem;
+    z-index: 50;
+    overflow: hidden;                            /* 圆角内裁切 */
+  }
+  /* flex 子项默认 min-height:auto 会让菜单撑破 max-height，必须归零才能内部滚动 */
+  .sidebar nav {
+    min-height: 0;
+  }
+  /* 收起态用「展开」图标顶替品牌位（对齐 Komari） */
+  .sidebar.is-collapsed .collapse-toggle {
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* ---------- ② 1024 ~ 1807：放不下「1280 内容 + 240 侧栏」→ 悬浮抽屉 ----------
+   默认完全移出屏幕，点顶栏菜单按钮滑出（覆盖内容，不推动任何元素），点遮罩/菜单项收回。 */
+@media (min-width: 1024px) and (max-width: 1807.98px) {
+  .sidebar {
+    left: 0.75rem;
+    right: auto;
+    /* 展开宽度由最长菜单文字决定；8rem 仅作底线，不压住中文自然宽度 */
+    width: max-content;
+    min-width: 8rem;
+    max-width: 18rem;
+    transform: translateX(calc(-100% - 1.5rem));
+  }
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+  .sidebar.sidebar-closed {
+    transform: translateX(calc(-100% - 1.5rem));
+  }
+  .sidebar.is-collapsed {
+    width: 4.5rem;
+    min-width: 4.5rem;
+  }
+}
+
+/* ---------- ③ ≥1808：常驻挂在内容区左外侧，右边缘锚点 ----------
+   锚点是右边缘（视口中心 - 640px - 12px），宽度变化只向左伸/向右收，
+   顶栏、内容页、页脚因此始终钉在视口正中、零位移。 */
+@media (min-width: 1808px) {
+  .sidebar {
+    left: auto;
+    /* 右边缘锚点 = 内容区左边缘（视口中心 - 640）再让 12px；与自身宽度无关 */
+    right: calc(50% + 652px);
+    /* 宽度随菜单文字自适应：max-content 由最长标签决定，8rem 兜底、20rem 封顶（超出则省略号） */
+    width: max-content;
+    min-width: 8rem;
+    max-width: 20rem;
   }
   .sidebar-closed,
   .sidebar-open {
     transform: translateX(0);
   }
-  /* 收起态宽度写在这里：Tailwind 的 lg:w-* 工具类会被上面 .sidebar 的 width
-     覆盖（scoped 样式注入更晚），只能同层覆盖。 */
   .sidebar.is-collapsed {
     width: 4.5rem;
-  }
-  /* 收起态用「展开」图标顶替品牌位（对齐 Komari）：隐藏 D 字标与站名，
-     收起/展开按钮居中占据原来 D 的位置，避免两个元素挤在一起重叠。 */
-  .sidebar.is-collapsed .brand {
-    display: none;
-  }
-  .sidebar.is-collapsed .collapse-toggle {
-    margin-left: auto;
-    margin-right: auto;
+    min-width: 4.5rem;
+    /* 右边缘仍是内容区左外侧，只是宽度变小 → 视觉上「向右收起」 */
+    right: calc(50% + 652px);
   }
 }
 </style>

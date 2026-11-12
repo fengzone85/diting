@@ -51,7 +51,7 @@ onMounted(load);
 
 <template>
   <div>
-    <h2 class="mb-4 text-xl font-semibold text-content">{{ t('audit.title') }}</h2>
+    <h1 class="mb-4 text-xl font-bold lg:text-2xl text-content">{{ t('audit.title') }}</h1>
     <ErrorMessage v-if="error" class="mb-4" :message="error" />
     <Loading v-if="loading && !logs.length" />
     <EmptyState v-else-if="!logs.length" />

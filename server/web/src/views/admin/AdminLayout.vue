@@ -1,14 +1,36 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import Sidebar from '../../components/admin/Sidebar.vue';
+import AppHeader from '../../components/AppHeader.vue';
 import { adminApi } from '../../services/adminApi';
 import type { RestoreAuditReport, CapacityStatus } from '../../services/types';
-import { loadAdmin, startAutoRefresh, stopAutoRefresh } from '../../composables/useAdmin';
+import { loadAdmin, startAutoRefresh, stopAutoRefresh, useAdmin } from '../../composables/useAdmin';
 import { setAutoRefreshPaused as setPublicAutoRefreshPaused } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 
 const menuOpen = ref(false);
 const { t } = useI18n();
+const router = useRouter();
+const { state } = useAdmin();
+
+// 顶栏直接复用公开页 AppHeader：站名/logo 取后台自己的 ui 设置，其余（主题/语言/形态）完全共用。
+const siteUi = computed(() => (state.settings?.ui || {}) as Record<string, unknown>);
+const siteTitle = computed(() => String(siteUi.value.site_title || ''));
+const siteLogo = computed(() => String(siteUi.value.logo_url || ''));
+
+async function logout() {
+  try {
+    await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+  } finally {
+    router.push('/login');
+  }
+}
+
+// 侧栏收起状态提升到这里（Sidebar 受控）：localStorage 记忆与展开/收起按钮都在外层统一处理。
+const COLLAPSE_KEY = 'diting.admin.sidebar.collapsed';
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1');
+watch(collapsed, (v) => localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'));
 
 // F8.6：恢复审查黄条。恢复自较早的备份时，下一次 prune 会删掉大量过期明细，
 // 必须在顶部提示，而不是等数据静默消失。关闭状态按「报告 ts」记在 sessionStorage，
@@ -96,16 +118,33 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-screen">
-    <Sidebar :open="menuOpen" @close="menuOpen = false" />
-    <main class="flex-1 p-4 lg:p-6">
-      <button
-        class="mb-4 flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 lg:hidden"
-        @click="menuOpen = true"
-      >
-        <span>☰</span>
-        {{ t('nav.menu') }}
-      </button>
+  <!-- 布局口径：顶栏全宽；侧栏固定在左侧，不参与内容居中；
+       内容列 max-w-[1280px]（见下方 main）在侧栏右侧的剩余空间里 mx-auto 居中。 -->
+  <div class="flex min-h-screen w-full flex-col">
+    <!-- 顶栏：直接复用公开页 AppHeader（透明 → 滚动毛玻璃），仅切换后台开关 -->
+    <AppHeader
+      :title="siteTitle || undefined"
+      :logo="siteLogo || undefined"
+      home-to="/admin"
+      :show-admin-link="false"
+      show-logout
+      show-menu
+      class="!z-40"
+      @open-menu="menuOpen = true"
+      @logout="logout"
+    />
+
+    <div class="flex min-h-0 flex-1">
+      <!-- 侧栏是浮动吸附卡片（自带外边距与圆角），不参与主内容居中 -->
+      <Sidebar
+        :open="menuOpen"
+        :collapsed="collapsed"
+        @update:collapsed="collapsed = $event"
+        @close="menuOpen = false"
+      />
+      <main class="min-w-0 flex-1 p-4 lg:p-6">
+        <!-- 内容列宽度与公开页一致（1280 上限），在侧栏右侧的剩余空间里居中 -->
+        <div class="mx-auto w-full max-w-[1280px]">
       <!-- F12：容量保险丝（比恢复审查更紧急，放最上面） -->
       <div
         v-if="capacityBanner"
@@ -157,6 +196,9 @@ onUnmounted(() => {
         </button>
       </div>
       <RouterView />
-    </main>
+        </div>
+      </main>
+    </div>
   </div>
 </template>
+

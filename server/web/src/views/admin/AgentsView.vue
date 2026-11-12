@@ -498,7 +498,7 @@ async function batchRenew() {
     <div class="glass mb-6 p-4">
       <div class="flex gap-3">
         <input v-model="newName" :placeholder="t('common.name')" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white" @keyup.enter="add" />
-        <button class="rounded-lg bg-sky-500 px-4 py-2 text-white hover:bg-sky-400" @click="add">{{ t('agents.add') }}</button>
+        <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-400" @click="add">{{ t('agents.add') }}</button>
       </div>
       <!-- 硬件档案（可选）：受控端不采集，建好后也可在详情页修改 -->
       <details class="mt-3">

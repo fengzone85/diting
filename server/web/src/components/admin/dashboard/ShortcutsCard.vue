@@ -14,7 +14,7 @@ const links = [
   { to: '/admin/ai', icon: Remind, label: 'nav.ai' },
   { to: '/admin/audit-logs', icon: FileText, label: 'nav.auditLogs' },
   { to: '/admin/api-tokens', icon: Link, label: 'nav.apiTokens' },
-  { to: '/admin/settings', icon: SettingTwo, label: 'nav.settings' },
+  { to: '/admin/maintenance', icon: SettingTwo, label: 'nav.maintenance' },
 ] as const;
 </script>
 

@@ -31,7 +31,7 @@ const socialItems = computed(() => {
 </script>
 
 <template>
-  <footer class="mx-auto mt-12 w-full max-w-[1280px] px-4 py-4 text-xs text-secondary">
+  <footer class="app-footer mx-auto mt-12 w-full max-w-[1280px] px-4 py-4 text-xs text-secondary">
     <div class="flex w-full flex-row flex-wrap items-center justify-between gap-3">
       <!-- 左侧：版权 + IP 两排 -->
       <div class="flex flex-col gap-0.5">

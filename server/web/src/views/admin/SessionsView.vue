@@ -2,14 +2,39 @@
 // S2/F6：登录会话管理。
 // 每条会话 = 一台已登录设备（sid 存服务端表，cookie 里只带 sid 签名）。
 // 踢出后该设备的 cookie 立即失效（服务端吊销时同步清校验缓存，不等 TTL）。
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { adminApi } from '../../services/adminApi';
 import type { AdminSession } from '../../services/types';
 import { t } from '../../composables/useI18n';
 import { apiErrorMessage } from '../../utils/apiError';
+import { useSettingsForm } from '../../composables/useSettingsForm';
 import Loading from '../../components/ui/Loading.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
 import ErrorMessage from '../../components/ui/ErrorMessage.vue';
+import FormInput from '../../components/ui/FormInput.vue';
+import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
+
+// 登录安全：IP 白名单（访问控制）+ 两步验证。原挂在「设置」页底部，按域归拢到安全组。
+const {
+  local, saving: settingsSaving, message: settingsMessage, ready: settingsReady, save: saveSettings,
+} = useSettingsForm();
+
+// 服务端实际识别到的客户端来源 IP（配合 IP 白名单 / TRUST_PROXY 排障）
+const clientIp = ref<{ ip: string; trust_proxy: string | number | string[]; x_forwarded_for: string } | null>(null);
+const isLoopbackTrust = computed(() => String(clientIp.value?.trust_proxy) === 'loopback');
+// 识别到的是内网/回环地址，而你显然是从外部访问后台 → 大概率是 trust proxy 未配置
+const isPrivateSeenIp = computed(() => {
+  const ip = clientIp.value?.ip || '';
+  return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|::1$|::ffff:127\.)/.test(ip);
+});
+
+async function loadClientIp() {
+  try {
+    clientIp.value = await adminApi.clientIp();
+  } catch {
+    // 只读 Token 或无权限时忽略，不影响其它区块
+  }
+}
 
 const sessions = ref<AdminSession[]>([]);
 const loading = ref(false);
@@ -87,7 +112,10 @@ async function revokeAll() {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  void load();
+  void loadClientIp();
+});
 </script>
 
 <template>
@@ -143,5 +171,37 @@ onMounted(load);
         >{{ t('sessions.kick') }}</button>
       </div>
     </div>
+
+    <!-- 访问控制：IP 白名单（配合 TRUST_PROXY 排障） -->
+    <div class="glass mt-6 p-6">
+      <h2 class="mb-4 text-lg font-semibold">{{ t('settings.accessControl') }}</h2>
+      <div v-if="settingsMessage" class="mb-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200">
+        {{ settingsMessage }}
+      </div>
+      <FormInput
+        v-model="local.ui.admin_allow_ips"
+        :label="t('settings.adminAllowIps')"
+        :hint="t('settings.adminAllowIpsHint')"
+      />
+      <p v-if="clientIp" class="mb-4 text-xs text-slate-400">
+        {{ t('settings.clientIpSeen') }}：<span class="font-mono text-slate-200">{{ clientIp.ip }}</span>
+        <span v-if="clientIp.x_forwarded_for && clientIp.x_forwarded_for !== clientIp.ip">
+          （{{ t('settings.clientIpHintXff', { xff: clientIp.x_forwarded_for }) }}）
+        </span>
+        <span v-if="!isLoopbackTrust"> · {{ t('settings.trustProxyValue', { value: String(clientIp.trust_proxy) }) }}</span>
+      </p>
+      <p v-if="clientIp && isPrivateSeenIp" class="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs leading-relaxed text-amber-200">
+        {{ t('settings.clientIpWarn') }}
+      </p>
+      <button
+        :disabled="settingsSaving || !settingsReady"
+        class="rounded-lg bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50"
+        @click="saveSettings"
+      >
+        {{ settingsSaving ? t('settings.saving') : t('common.save') }}
+      </button>
+    </div>
+
+    <TwoFactorPanel class="mt-6" />
   </div>
 </template>

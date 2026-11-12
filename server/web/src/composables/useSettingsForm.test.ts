@@ -9,7 +9,7 @@
 //
 // 这里把两个 watch 的注册封装为工厂，并用 testOrder 断言顺序语义，
 // 防止未来又被改回去。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ref, watch, nextTick } from 'vue';
 
 interface SettingsShape {
@@ -85,5 +85,109 @@ describe('设置页表单装配顺序', () => {
     settings.value = { ui: { site_title: '谛听' } };
     await nextTick();
     expect(local.value.ui.site_title).toBeUndefined(); // 回填被拦截
+  });
+});
+
+// ---- 真实实现：多个后台页面共用的 useSettingsForm ----
+const apiMock = vi.hoisted(() => ({ saveSettings: vi.fn() }));
+
+vi.mock('../services/adminApi', () => ({ adminApi: apiMock }));
+vi.mock('./useI18n', () => ({ t: (k: string) => k }));
+vi.mock('./useAdmin', async () => {
+  const { reactive } = await import('vue');
+  const state = reactive({ settings: null as Record<string, unknown> | null });
+  // 通过 globalThis 暴露同一个响应式实例：直接改原始对象不会触发 Proxy 的依赖通知
+  (globalThis as Record<string, unknown>).__ditingAdminState = state;
+  return {
+    useAdmin: () => ({ state }),
+    loadAdmin: vi.fn(async () => {}),
+    setAutoRefreshPaused: vi.fn(),
+  };
+});
+
+import { cloneSettings, emptySettingsForm, useSettingsForm } from './useSettingsForm';
+
+describe('useSettingsForm', () => {
+  const adminState = () => (globalThis as Record<string, { settings: unknown }>).__ditingAdminState as {
+    settings: Record<string, unknown> | null;
+  };
+
+  beforeEach(() => {
+    adminState().settings = null;
+    apiMock.saveSettings.mockReset();
+    apiMock.saveSettings.mockResolvedValue({ ok: true });
+  });
+
+  it('cloneSettings 深拷贝嵌套对象，编辑草稿不污染源设置', () => {
+    const src = {
+      ui: {
+        billing: { base_currency: 'CNY', rates: { USD: 7 }, updated_at: 1 },
+        announcement: { enabled: true, title: 'a', content: 'b' },
+      },
+      notify: { smtp_host: 'h' },
+    };
+    const draft = cloneSettings(src as never);
+    draft.ui.billing!.rates.USD = 9;
+    draft.ui.announcement!.title = 'changed';
+    draft.notify.smtp_host = 'x';
+    expect(src.ui.billing.rates.USD).toBe(7);
+    expect(src.ui.announcement.title).toBe('a');
+    expect(src.notify.smtp_host).toBe('h');
+  });
+
+  it('emptySettingsForm 提供与服务端一致的嵌套默认值', () => {
+    const f = emptySettingsForm();
+    expect(f.ui.alert).toEqual({ cpu_pct: 90, mem_pct: 90, offline_sec: 60 });
+    expect(f.ui.billing).toEqual({ base_currency: 'CNY', rates: {}, updated_at: 0 });
+    expect(f.ui.capacity_enabled).toBe(true);
+  });
+
+  it('冷加载（设置已就绪）回填且不误置 dirty；用户改动后不再被轮询覆盖', async () => {
+    adminState().settings = { ui: { site_title: '谛听' }, notify: { smtp_host: 'smtp' } };
+    const { local, dirty, ready } = useSettingsForm();
+    await nextTick();
+
+    expect(ready.value).toBe(true);
+    expect(local.value.ui.site_title).toBe('谛听');
+    expect(dirty.value).toBe(false);
+
+    local.value.ui.site_title = '编辑中';
+    await nextTick();
+    expect(dirty.value).toBe(true);
+
+    adminState().settings = { ui: { site_title: '轮询新值' } };
+    await nextTick();
+    expect(local.value.ui.site_title).toBe('编辑中');
+  });
+
+  it('设置晚到时也能回填（loadAdmin 完成后）', async () => {
+    const { local, ready } = useSettingsForm();
+    expect(ready.value).toBe(false);
+
+    adminState().settings = { ui: { site_title: '迟到' } };
+    await nextTick();
+    expect(ready.value).toBe(true);
+    expect(local.value.ui.site_title).toBe('迟到');
+  });
+
+  it('save 提交完整 ui+notify（后端整体覆盖写，不能只带本页字段）', async () => {
+    adminState().settings = { ui: { site_title: 'A', backup_keep_days: 30 }, notify: { smtp_host: 'h' } };
+    const { local, dirty, message, save } = useSettingsForm();
+    await nextTick();
+
+    local.value.ui.retention_days = 90;
+    await nextTick();
+    await save();
+
+    const payload = apiMock.saveSettings.mock.calls[0][0] as {
+      ui: Record<string, unknown>;
+      notify: Record<string, unknown>;
+    };
+    expect(payload.ui.site_title).toBe('A');
+    expect(payload.ui.backup_keep_days).toBe(30);
+    expect(payload.ui.retention_days).toBe(90);
+    expect(payload.notify.smtp_host).toBe('h');
+    expect(message.value).toBe('settings.saved');
+    expect(dirty.value).toBe(false);
   });
 });

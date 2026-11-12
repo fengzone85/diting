@@ -23,12 +23,17 @@ const routes = [
       { path: 'agents/:id', component: () => import('../views/admin/AgentDetailView.vue'), props: true },
       { path: 'agent-artifacts', component: () => import('../views/admin/AgentArtifactsView.vue') },
       { path: 'billing', component: () => import('../views/admin/BillingView.vue') },
+      { path: 'alerting', component: () => import('../views/admin/AlertingView.vue') },
       { path: 'ai', component: () => import('../views/admin/AiView.vue') },
-      { path: 'settings', component: () => import('../views/admin/SettingsView.vue') },
+      { path: 'site', component: () => import('../views/admin/SiteSettingsView.vue') },
       { path: 'template', component: () => import('../views/admin/TemplateView.vue') },
       { path: 'audit-logs', component: () => import('../views/admin/AuditLogView.vue') },
       { path: 'api-tokens', component: () => import('../views/admin/ApiTokensView.vue') },
       { path: 'sessions', component: () => import('../views/admin/SessionsView.vue') },
+      { path: 'maintenance', component: () => import('../views/admin/MaintenanceView.vue') },
+      // 旧「设置」页已按域拆开（2026-11 后台信息架构重组），保留深链兼容：
+      // 原页面里备份/容量位于最下方，重定向到承接它们的「系统维护」。
+      { path: 'settings', redirect: '/admin/maintenance' },
     ],
   },
   // catch-all 必须放在最后：服务端 SPA fallback 对未知路径返回 200 + index.html，

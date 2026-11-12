@@ -33,7 +33,9 @@ describe('formatCurrency', () => {
 });
 
 describe('formatRemaining', () => {
-  const days = (n: number) => new Date(Date.now() + n * 86400000).toISOString();
+  // +1s 缓冲：formatRemaining 内部会再次取 Date.now()，两次调用跨毫秒时
+  // floor(ms / 1day) 会把「整 10 天」算成 9 天（机器繁忙时必现的 flaky）。
+  const days = (n: number) => new Date(Date.now() + n * 86400000 + 1000).toISOString();
 
   it('无到期时间 / 非法时间 → 长期', () => {
     expect(formatRemaining(undefined)).toEqual({ text: '—', status: 'long_term' });

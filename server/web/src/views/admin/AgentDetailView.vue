@@ -396,7 +396,7 @@ function formatDate(ts?: number) {
           <FormInput v-model="form.probe_targets" :label="t('agent.probeTargetsLabel')" type="textarea" />
           <p class="mb-4 text-xs text-slate-500">{{ t('agent.probeHint') }}</p>
           <div class="flex gap-3">
-            <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-white hover:bg-sky-400 disabled:opacity-50" @click="save">
+            <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50" @click="save">
               {{ saving ? t('agent.saving') : t('common.save') }}
             </button>
             <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:border-slate-500" @click="resetForm(agent)">
