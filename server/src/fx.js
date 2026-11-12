@@ -16,8 +16,13 @@ const FX_TTL_MS = 24 * 3600 * 1000;
 const FX_RETRY_MS = 5 * 60 * 1000;
 
 // 汇率源白名单：URL 由基准币拼接，域名固定
+// 2026-11-12 实测：Frankfurter 可用的调用是 `api.frankfurter.dev/v1/latest?base=<base>&symbols=<列表>`
+//   （`/v2/rates` 会 301 → /v1/v2/rates → 404；`.app` 域名的 /v2 同样 301）；
+//   因此主源用 dev 的 v1/latest，参数名是 `symbols` 不是 `quotes`。
+//   备用源 open.er-api.com 也能用，但一次请求要 ~7s，故放在第二顺位。
+// 每个源的失败原因会写进 billing.api.error，便于排查而不必猜。
 const PROVIDERS = [
-  { key: 'frankfurter', host: 'api.frankfurter.dev', url: (base, quotes) => `https://api.frankfurter.dev/v2/rates?base=${base}&quotes=${quotes}` },
+  { key: 'frankfurter', host: 'api.frankfurter.dev', url: (base, symbols) => `https://api.frankfurter.dev/v1/latest?base=${base}&symbols=${symbols}` },
   { key: 'er-api', host: 'open.er-api.com', url: (base) => `https://open.er-api.com/v6/latest/${base}` },
 ];
 
@@ -66,19 +71,35 @@ function pickRates(json) {
 }
 
 function fetchLive(base) {
-  const quotes = CURRENCIES.filter((c) => c !== base).join(',');
-  let lastErr = new Error('failed');
+  const symbols = CURRENCIES.filter((c) => c !== base).join(',');
+  const errors = [];
   return (async () => {
+    const wanted = symbols.split(',').length;
+    const merged = {};
+    const used = [];
     for (const p of PROVIDERS) {
       try {
-        const rates = pickRates(await requestJson(p.url(base, quotes), p.host));
-        if (rates) return { rates, provider: p.key };
-        lastErr = new Error('no_rates');
+        const rates = pickRates(await requestJson(p.url(base, symbols), p.host));
+        if (!rates) {
+          errors.push(`${p.key}:no_rates`);
+          continue;
+        }
+        // 合并而非「首个成功即返回」：主源支持的币种比白名单少（如 MXN/VND），
+        // 缺的用下一个源补齐；已存在的键以先到的源为准（不覆盖）。
+        for (const [k, v] of Object.entries(rates)) {
+          if (!(k in merged)) merged[k] = v;
+        }
+        used.push(p.key);
+        if (Object.keys(merged).length >= wanted) break;   // 覆盖齐全就不用再打下一个源
       } catch (e) {
-        lastErr = e;
+        errors.push(`${p.key}:${(e && e.message) || e}`);
       }
     }
-    throw lastErr;
+    if (!Object.keys(merged).length) {
+      // 把每个源的失败原因都带上：只报最后一个错会让人误判是哪一环坏了
+      throw new Error(errors.join(' | ') || 'failed');
+    }
+    return { rates: merged, provider: used.join('+') };
   })();
 }
 
@@ -123,7 +144,7 @@ async function refresh(opts = {}) {
         ...api,
         base,
         status: 'failed',
-        error: String((e && e.message) || e).slice(0, 120),
+        error: String((e && e.message) || e).slice(0, 200),
         last_try_at: Date.now(),
       };
       writeApi(next);
@@ -135,4 +156,4 @@ async function refresh(opts = {}) {
   return inflight;
 }
 
-module.exports = { refresh, PROVIDERS, FX_TTL_MS };
+module.exports = { refresh, pickRates, PROVIDERS, FX_TTL_MS };
