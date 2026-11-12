@@ -110,7 +110,7 @@ export interface Agent {
   price?: number;
   billing_cycle?: number;
   // 对齐 Komari：¥ 人民币 / $ 美元 / € 欧元 / £ 英镑 / ₽ 卢布 / ₣ 法郎 / ₹ 卢比 / ₫ 越南盾 / ฿ 泰铢
-  currency?: '¥' | '$' | '€' | '£' | '₽' | '₣' | '₹' | '₫' | '฿';
+  currency?: string;   // 历史符号（¥/$/€…）或 ISO 码（JPY/HKD…），服务端统一归一化
   // 服务端计费折算（server/src/billing.js，对齐 Komari 剩余价值口径）
   remaining_days?: number | null;
   remaining_value?: number | null;
@@ -255,6 +255,42 @@ export interface NotifyGroup {
   updated_at?: number;
 }
 
+// 资产汇总（服务端折算结果，见 server/src/billing.js convertSummary）。
+// 金额先按币种分桶，再按 ui_settings.billing 的手工汇率折到标准货币；
+// 缺汇率的币种不计入总额，只出现在 missing 里。
+export interface BillingCurrencyBucket {
+  code: string;          // ISO 码（USD / CNY / JPY…）
+  symbol: string;        // 展示符号（$ / ¥ / JP¥）
+  rate: number | null;   // 1 单位本币 = N 标准货币；null = 缺汇率未折算
+  original: { total_value: number; remaining_value: number; monthly_cost: number };
+  converted: { total_value: number; remaining_value: number; monthly_cost: number } | null;
+}
+
+// 自动汇率快照（server/src/fx.js 写入；缺失/失败时保留上一次成功值）
+export interface FxApiSnapshot {
+  provider: string;
+  base: string;
+  rates: Record<string, number>;
+  updated_at: number;
+  last_try_at: number;
+  status: 'never' | 'ok' | 'failed' | string;
+  error: string;
+}
+
+export interface BillingSummary {
+  base_currency: string;       // 符号（兼容旧字段）
+  base_currency_code: string;  // ISO 码
+  base_symbol: string;
+  fx_updated_at: number;
+  total_value: number;
+  remaining_value: number;
+  monthly_cost: number;
+  by_currency: Record<string, BillingCurrencyBucket>;
+  missing: string[];
+  // 1 标准币 = N 目标币（只含有汇率的币种），供访客侧「显示币种」切换用
+  display_rates?: Record<string, number>;
+}
+
 export interface Overview {
   total: number;
   online: number;
@@ -263,6 +299,7 @@ export interface Overview {
   mem_avg?: number;
   groups?: { name: string; total: number; online: number }[];
   db_size_bytes?: number;
+  billing?: BillingSummary;
 }
 
 export interface SparklinePoint {

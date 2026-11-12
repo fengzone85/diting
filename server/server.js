@@ -729,6 +729,14 @@ runPrune();
 // unref：清理循环不应阻止进程退出（对集成测试尤其重要，否则测试进程会因该定时器挂起）
 setInterval(runPrune, 3600 * 1000).unref();
 
+// 汇率自动刷新（可选）：refresh 内部先看 ui_settings.billing.source，
+// manual 模式直接返回、零外呼；api 模式按 24h 有效期判断，失败会退避 5 分钟。
+// 启动 60s 后先试一次（给 DB 初始化留时间），之后每小时检查一次。
+const fxTimer = setInterval(() => { require('./src/fx').refresh().catch(() => {}); }, 3600 * 1000);
+if (fxTimer.unref) fxTimer.unref();
+const fxBootTimer = setTimeout(() => { require('./src/fx').refresh().catch(() => {}); }, 60 * 1000);
+if (fxBootTimer.unref) fxBootTimer.unref();
+
 // AI Key 明文残留清理（审查修复 P1-3）：切到 AI_KEY_FROM_ENV=1 后，历史配置里的明文
 // api_key 仍留在 admin_config；provider 侧已只读环境变量，但库泄露仍会暴露旧 Key。
 // 只在 env 模式执行；无残留时零日志、零写入（否则每条集成测试都会产出噪音并改写配置）。

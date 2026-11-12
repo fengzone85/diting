@@ -14,7 +14,10 @@ const online = require('./online');
 const capacity = require('./capacity');
 const { daysUntil, asyncHandler } = require('./util');
 const { nextExpire, autoRenewExpire } = require('./renew');
-const { computeBilling } = require('./billing');
+const {
+  computeBilling, summarizeByCurrency, convertSummary, CURRENCIES,
+  normalizeCurrency,
+} = require('./billing');
 const theme = require('./theme');
 const validators = require('./validate');
 // 管理员手工录入的硬件档案（受控端不自动采集；候选清单/校验/合成单一事实源）
@@ -25,9 +28,14 @@ const hardware = require('./hardware-profile');
 //   价格 price：0 = 不显示、-1 = 免费、>0 = 实际金额
 //   货币 currency：¥ $ € £ ₽ ₣ ₹ ₫ ฿
 //   计费周期 billing_cycle：-1 = 一次性（不续期）、0 = 白嫖/免费、>0 = 天数
-const CURRENCIES = ['¥', '$', '€', '£', '₽', '₣', '₹', '₫', '฿'];
+// CURRENCIES 与汇总函数统一放在 src/billing.js（单一事实源），此处仅解构使用。
 const BILLING_CYCLES = [-1, 0, 30, 60, 90, 180, 365, 730, 1095];
-const isValidCurrency = (c) => CURRENCIES.includes(c);
+// 接受 ISO 码（USD/CNY/JPY…）与历史符号（$ / ¥ / €…）；存储保留用户原值，
+// 汇总与汇率表内部统一归一化成 ISO（见 src/billing.js normalizeCurrency）。
+const isValidCurrency = (c) => {
+  const code = normalizeCurrency(c);
+  return !!code && CURRENCIES.includes(code);
+};
 const isValidCycle = (n) => BILLING_CYCLES.includes(n);
 // Admin Token 唯一来源（数据库哈希）与强度判定：统一在 ./token-policy（与 auth.js / server.js 共用）。
 const { hasAdminToken, verifyAdminToken, hashAdminToken } = require('./token-policy');
@@ -519,7 +527,10 @@ router.get('/overview', adminOrReadonly, agentScope, (req, res) => {
     total_quota_gb: totalQuotaGB,
     groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online })),
     // 数据库大小监控：SQLite 文件实际占用的磁盘字节数（含 journal）
-    db_size_bytes: db.getDbFileSize()
+    db_size_bytes: db.getDbFileSize(),
+    // 资产统计：先按币种分桶（不跨币种相加），再按设置里的手工汇率折算到标准货币。
+    // 缺汇率的币种不计入总额，列在 billing.missing（见 src/billing.js convertSummary）。
+    billing: convertSummary(summarizeByCurrency(agents, now), db.getUiSettings().billing)
   });
 });
 
@@ -528,24 +539,30 @@ router.get('/billing', adminOrReadonly, agentScope, (req, res) => {
   // S2/F5：月度总费用/分组费用/到期列表均为全集群聚合，节点白名单 Token 不开放。
   if (req.agentScope) return res.status(403).json({ error: 'forbidden_scope' });
   const agents = db.getMonitoredAgents();
-  let monthlyTotal = 0;
+  const now = Date.now();
+  const conv = convertSummary(summarizeByCurrency(agents, now), db.getUiSettings().billing);
   const perGroup = {};
   const expiringSoon = [];
   for (const a of agents) {
-    const price = Number(a.price) || 0;
-    const cycle = Number(a.billing_cycle) || 30;
-    const monthly = price > 0 && cycle > 0 ? price * (30 / cycle) : 0;
-    monthlyTotal += monthly;
     const g = (a.grp || '').trim() || '未分组';
-    perGroup[g] = (perGroup[g] || 0) + monthly;
+    const cur = a.currency || '¥';
+    const bucket = conv.by_currency[cur];
+    const rate = bucket && bucket.rate ? bucket.rate : null;
+    // 分组费用同样先折到标准货币再累加；缺汇率的节点不进总额（perGroup 保留 0 便于前端提示）
+    if (!(g in perGroup)) perGroup[g] = 0;
+    if (rate != null) perGroup[g] += (computeBilling(a, now).monthly_cost || 0) * rate;
     const daysLeft = daysUntil(a.expire_at);
     if (daysLeft !== null && daysLeft <= 7) {
       expiringSoon.push({ id: a.id, name: a.name, days_left: daysLeft });
     }
   }
   res.json({
-    monthly_total: +monthlyTotal.toFixed(2),
-    currency: '¥',
+    // 旧字段保留（前端/脚本可能仍在读）：monthly_total 现在已是折算到标准货币的值
+    monthly_total: conv.monthly_cost,
+    currency: conv.base_currency,
+    base_currency: conv.base_currency,
+    by_currency: conv.by_currency,
+    missing: conv.missing,
     agent_count: agents.length,
     per_group: Object.keys(perGroup).map(name => ({ name, cost: +perGroup[name].toFixed(2) })),
     expiring_soon: expiringSoon.sort((a, b) => a.days_left - b.days_left)
@@ -582,7 +599,12 @@ router.get('/public/overview', (req, res) => {
     total: agents.length, online: onlineCount, offline: agents.length - onlineCount,
     cpu_avg: cpuCount > 0 ? +(cpuSum / cpuCount).toFixed(1) : null,
     mem_avg: memCount > 0 ? +(memSum / memCount).toFixed(1) : null,
-    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online }))
+    groups: Object.keys(groups).map(name => ({ name, total: groups[name].total, online: groups[name].online })),
+    // 资产汇总跟随 public_show_business：关闭业务字段时连总额也不下发，
+    // 避免「开关已关但金额还挂在公开概览上」。公开页只拿折算结果，不下发汇率配置。
+    ...(ui.public_show_business !== false
+      ? { billing: convertSummary(summarizeByCurrency(agents, now), ui.billing) }
+      : {})
   });
 });
 
@@ -1304,11 +1326,76 @@ function sanitizeCapacitySettings(ui) {
   }
 }
 
+// 资产汇率配置：只接受白名单币种键 + 有限正数汇率（钳到 1e-4 ~ 1e5，保留 4 位小数）。
+// 非法项直接丢弃而不是整单 400 —— 与 capacity 的钳制口径一致，避免一个手误让整份设置保存失败。
+// updated_at 只在汇率/标准币真正变化时刷新，避免每次保存设置都把「汇率时间」刷新掉。
+function sanitizeBillingSettings(ui, prev) {
+  if (!ui || !ui.billing || typeof ui.billing !== 'object') return;
+  const b = ui.billing;
+  // 标准币与汇率键统一存 ISO（前端可能提交符号，这里归一化）；未知币种直接丢弃
+  const base = normalizeCurrency(b.base_currency) || 'CNY';
+  const rates = {};
+  const input = b.rates && typeof b.rates === 'object' ? b.rates : {};
+  for (const [cur, raw] of Object.entries(input)) {
+    const code = normalizeCurrency(cur);
+    if (!code || code === base) continue;   // 基准币自身恒为 1，不存
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    rates[code] = Math.round(Math.min(1e5, Math.max(1e-4, n)) * 1e4) / 1e4;
+  }
+  // 旧设置可能是符号键，比较前也归一化，否则每次保存都会误判为「汇率变了」
+  const prevBase = prev ? (normalizeCurrency(prev.base_currency) || '') : '';
+  const prevRates = {};
+  for (const [k, v] of Object.entries((prev && prev.rates) || {})) {
+    const code = normalizeCurrency(k);
+    if (code) prevRates[code] = Number(v);
+  }
+  const same = !!prev
+    && prevBase === base
+    && Object.keys(rates).length === Object.keys(prevRates).length
+    && Object.keys(rates).every((k) => prevRates[k] === rates[k]);
+  const prevTs = Number(prev && prev.updated_at);
+  // 汇率来源：manual（默认）/ api；切回 manual 不做外呼
+  const source = b.source === 'api' ? 'api' : 'manual';
+  // API 快照只能由 src/fx.js 写：保存设置时从旧值继承，换标准币则整份作废
+  const prevApi = prev && prev.api && typeof prev.api === 'object' ? prev.api : null;
+  let api = prevApi
+    ? { ...prevApi, rates: { ...(prevApi.rates || {}) } }
+    : { provider: '', base, rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' };
+  if (api.base !== base) {
+    api = { provider: '', base, rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' };
+  }
+  ui.billing = {
+    base_currency: base,
+    rates,
+    updated_at: same && Number.isFinite(prevTs) && prevTs > 0 ? Math.trunc(prevTs) : Date.now(),
+    source,
+    api,
+  };
+}
+
 
 // ---- 备份 / 容量 / 恢复审查（/admin/backup*、/admin/capacity、/admin/restore-audit）----
 // 已拆分到 routes/admin-billing.js。
 router.use(require('./routes/admin-billing'));
 
+
+// ---- 汇率自动刷新（可选；默认 manual = 零外呼）----
+router.get('/fx/status', adminOrReadonly, (req, res) => {
+  const billing = db.getUiSettings().billing || {};
+  res.json({
+    source: billing.source === 'api' ? 'api' : 'manual',
+    base_currency: normalizeCurrency(billing.base_currency) || 'CNY',
+    manual_updated_at: Number(billing.updated_at) || 0,
+    api: billing.api || null,
+  });
+});
+
+// 立即拉取一次（设置页「立即刷新」）；未启用 api 模式时 refresh 直接返回旧快照
+router.post('/fx/refresh', adminOnly, asyncHandler(async (req, res) => {
+  const api = await require('./fx').refresh({ force: true });
+  res.json({ ok: api.status === 'ok', api });
+}));
 
 router.get('/settings', adminOrReadonly, (req, res) => {
   const notify = db.getNotifyConfig();
@@ -1327,6 +1414,7 @@ router.put('/settings', adminOnly, agentScope, agentGlobalOnly, (req, res) => {
     if (typeof b.ui.custom_css === 'string') b.ui.custom_css = sanitizeCss(b.ui.custom_css);
     sanitizeBackupSettings(b.ui);
     sanitizeCapacitySettings(b.ui);
+    sanitizeBillingSettings(b.ui, uiBefore.billing);
     // setUiSettings 是整体覆盖写：仪表盘布局由专用接口 PUT /admin/dashboard/layout 管理，
     // 设置表单未携带该字段时沿用旧值，避免在设置页保存后把布局清空。
     if (!Object.prototype.hasOwnProperty.call(b.ui, 'admin_dashboard_layout')) {

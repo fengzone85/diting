@@ -8,6 +8,7 @@ import { adminApi } from '../../services/adminApi';
 import { useSettingsForm } from '../../composables/useSettingsForm';
 import FormInput from '../../components/ui/FormInput.vue';
 import PageShell from '../../components/admin/PageShell.vue';
+import BillingFxSettings from '../../components/admin/BillingFxSettings.vue';
 
 interface ThemeOption {
   id: string;
@@ -70,6 +71,7 @@ const sections = computed(() => [
   { id: 'sec-custom', label: t('site.custom') },
   { id: 'sec-social', label: t('settings.socialLinks') },
   { id: 'sec-token', label: t('settings.setupToken') },
+  { id: 'sec-billing', label: t('settings.billingTitle') },
 ]);
 
 onMounted(() => {
@@ -207,6 +209,11 @@ onMounted(() => {
           </button>
         </div>
         <p v-if="setupTokenError" class="mt-2 text-xs text-rose-400">{{ setupTokenError }}</p>
+      </section>
+
+      <!-- 资产与汇率：剩余价值 / 总价值按标准货币汇总（手工汇率或服务端每日自动拉取） -->
+      <section id="sec-billing" class="glass scroll-mt-28 rounded-xl p-5">
+        <BillingFxSettings v-if="local.ui.billing" :billing="local.ui.billing" />
       </section>
     </div>
   </PageShell>

@@ -10,6 +10,7 @@
 import { computed, getCurrentInstance, onMounted, onUnmounted, ref, watch } from 'vue';
 import { adminApi } from '../services/adminApi';
 import { t } from './useI18n';
+import type { FxApiSnapshot } from '../services/types';
 import { loadAdmin, setAutoRefreshPaused, useAdmin } from './useAdmin';
 import type { Settings } from '../services/types';
 
@@ -64,9 +65,16 @@ export interface UiSettings {
   capacity_enabled?: boolean;
   capacity_max_rows?: number;
   capacity_max_mb?: number;
-  // 资产汇率（管理员手工录入，不联网、不自动抓汇率）：
-  // base_currency = 标准货币；rates[c] = 1 单位 c 折合多少标准货币，缺项表示不折算。
-  billing?: { base_currency: string; rates: Record<string, number>; updated_at: number };
+  // 资产汇率：base_currency = 标准货币 ISO 码；rates[c] = 1 单位 c 折合多少标准货币。
+  // source=manual 只用手工汇率（默认，零外呼）；source=api 用 fx.js 每日拉取的快照，
+  // 缺的币种仍回退手工值；api 快照只由服务端写，这里只读。
+  billing?: {
+    base_currency: string;
+    rates: Record<string, number>;
+    updated_at: number;
+    source?: 'manual' | 'api';
+    api?: FxApiSnapshot;
+  };
 }
 
 export interface NotifySettings {
@@ -115,7 +123,13 @@ export function emptySettingsForm(): SettingsForm {
       // 与服务端默认值一致（db.js getUiSettings 的 alert 默认 90/90/60）
       alert: { cpu_pct: 90, mem_pct: 90, offline_sec: 60 },
       // 资产汇率：必须与 db.js 默认值一致，否则保存设置会把该键写成 undefined
-      billing: { base_currency: 'CNY', rates: {}, updated_at: 0 },
+      billing: {
+        base_currency: 'CNY',
+        rates: {},
+        updated_at: 0,
+        source: 'manual',
+        api: { provider: '', base: 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
+      },
     },
     notify: {},
   };
@@ -135,6 +149,11 @@ export function cloneSettings(src?: Settings | null): SettingsForm {
         base_currency: ui.billing?.base_currency || 'CNY',
         rates: { ...(ui.billing?.rates || {}) },
         updated_at: ui.billing?.updated_at || 0,
+        source: ui.billing?.source === 'api' ? 'api' : 'manual',
+        // api 快照原样带回；服务端保存时以旧值为准（客户端改不动它）
+        api: ui.billing?.api
+          ? { ...ui.billing.api, rates: { ...(ui.billing.api.rates || {}) } }
+          : { provider: '', base: 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
       },
       background: { enabled: false, type: 'image', url: '', blur: 8, overlay: 50, ...(ui.background || {}) },
       announcement: { enabled: false, title: '', content: '', ...(ui.announcement || {}) },

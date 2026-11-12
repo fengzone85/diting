@@ -4,10 +4,12 @@ import { describe, it, expect } from 'vitest';
 import { CURRENCIES, BILLING_CYCLES, DEFAULT_CURRENCY, DEFAULT_CYCLE } from './billing';
 
 describe('billing 选项口径', () => {
-  it('货币 9 种、符号不重复，首项为默认人民币', () => {
-    expect(CURRENCIES).toHaveLength(9);
-    expect(new Set(CURRENCIES.map((c) => c.symbol)).size).toBe(9);
+  it('货币 15 种、符号不重复，首项为默认人民币', () => {
+    // 前 9 个沿用历史符号作为 value（老节点回显），后 6 个用 ISO 码（$ / ¥ 有歧义）
+    expect(CURRENCIES).toHaveLength(15);
+    expect(new Set(CURRENCIES.map((c) => c.symbol)).size).toBe(15);
     expect(CURRENCIES[0]).toEqual({ symbol: '¥', key: 'cny' });
+    expect(CURRENCIES.map((c) => c.symbol)).toContain('JPY');
   });
 
   it('计费周期保留 -1 一次性 / 0 免费 的语义值', () => {

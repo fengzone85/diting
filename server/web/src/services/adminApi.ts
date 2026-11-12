@@ -1,5 +1,5 @@
 import { api } from './api';
-import type { Agent, AgentArtifact, AgentDistributionResult, AgentVersionSummary, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession, HardwareOptions } from './types';
+import type { Agent, AgentArtifact, AgentDistributionResult, AgentVersionSummary, DeletedAgent, Settings, InstallCommands, ModifyCommands, Billing, AiConfig, AiStatus, AiReport, AiReportList, AiRunResult, AiNodeAnalysis, AiNodeReportItem, AiUsage, BackupState, BackupList, RestoreAuditReport, CapacityStatus, AlertRules, AlertOverride, AlertOverrideInput, NotifyChannel, NotifyGroup, WebhookConfig, ApiToken, ApiTokenCreated, DashboardLayoutItem, AdminSession, HardwareOptions, FxApiSnapshot } from './types';
 
 export interface AuthStatus {
   logged_in: boolean;
@@ -209,6 +209,9 @@ export const adminApi = {
   overview: () => api.get<Record<string, unknown>>('/api/overview'),
   getSettings: () => api.get<Settings>('/api/settings'),
   saveSettings: (payload: Settings) => api.put<Settings>('/api/settings', payload),
+  // 汇率自动刷新（可选）：status 只读；refresh 立即拉一次（服务端 24h 有效期，force 忽略）
+  fxStatus: () => api.get<{ source: string; base_currency: string; manual_updated_at: number; api: FxApiSnapshot | null }>('/api/fx/status'),
+  fxRefresh: () => api.post<{ ok: boolean; api: FxApiSnapshot }>('/api/fx/refresh', {}),
   // 后台仪表盘布局（只写 ui.admin_dashboard_layout，不影响其他设置）
   saveDashboardLayout: (layout: DashboardLayoutItem[]) =>
     api.put<{ ok: boolean; layout: DashboardLayoutItem[] }>('/api/admin/dashboard/layout', { layout }),

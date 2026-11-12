@@ -15,7 +15,7 @@ import { useAdmin } from '../../composables/useAdmin';
 import { useApp } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 import { adminApi } from '../../services/adminApi';
-import type { Agent, Billing, ChartPoint, DashboardLayoutItem } from '../../services/types';
+import type { Agent, Billing, BillingSummary, ChartPoint, DashboardLayoutItem } from '../../services/types';
 import { formatBytes, formatDuration, formatPercent } from '../../utils/format';
 
 const admin = useAdmin();
@@ -174,12 +174,12 @@ const widgets = computed<DashboardWidgetDef[]>(() => {
       tone: (x.ms >= 200 ? 'danger' : x.ms >= 100 ? 'warning' : 'default') as 'danger' | 'warning' | 'default',
     }));
 
-  // 资产
-  const remainingTotal = sum((a) => (typeof a.remaining_value === 'number' ? a.remaining_value : 0));
-  const totalValue = sum((a) => (a.price && a.price > 0 ? a.price : 0));
-  const currency = ags.find((a) => a.price && a.price > 0)?.currency || '¥';
-  const remainingText = remainingTotal > 0 ? `${currency}${remainingTotal.toFixed(2)}` : '—';
-  const totalValueText = totalValue > 0 ? `${currency}${totalValue.toFixed(2)}` : '—';
+  // 资产：服务端已按「先分币种、再按手工汇率折算」口径算好（/api/overview 的 billing），
+  // 前端不再把 ¥/$/€ 直接相加。
+  const asset = (o?.billing || null) as BillingSummary | null;
+  const fmtAsset = (n?: number) => (asset && n != null && n > 0 ? `${asset.base_symbol || asset.base_currency}${n.toFixed(2)}` : '—');
+  const remainingText = fmtAsset(asset?.remaining_value);
+  const totalValueText = fmtAsset(asset?.total_value);
 
   const groups = ((o?.groups as { name: string; total: number; online: number }[] | undefined) ?? [])
     .slice()
@@ -203,7 +203,10 @@ const widgets = computed<DashboardWidgetDef[]>(() => {
     stat('offline', t('dashboard.offline'), (o?.offline as number) ?? '-', { variant: 'danger' }),
     stat('total', t('dashboard.totalAgents'), (o?.total as number) ?? '-'),
     stat('monthly_cost', t('dashboard.monthlyCost'),
-      billing.value ? billing.value.currency + billing.value.monthly_total.toFixed(2) : '-', { variant: 'warning' }),
+      asset && asset.monthly_cost > 0
+        ? (asset.base_symbol || asset.base_currency) + asset.monthly_cost.toFixed(2)
+        : (billing.value ? billing.value.currency + billing.value.monthly_total.toFixed(2) : '-'),
+      { variant: 'warning' }),
     stat('remaining_value', t('public.remainingValue'), remainingText,
       { variant: 'success', sub: `${t('public.totalValue')} ${totalValueText}` }),
     stat('avg_cpu', t('dashboard.avgCpu'), formatPercent(avgCpu.value)),

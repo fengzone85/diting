@@ -9,11 +9,12 @@ import Loading from '../components/ui/Loading.vue';
 import EmptyState from '../components/ui/EmptyState.vue';
 import ErrorMessage from '../components/ui/ErrorMessage.vue';
 import { useApp, cardSchemeKeys, customTag } from '../composables/useApp';
+import { useDisplayCurrency } from '../composables/useDisplayCurrency';
 import { useI18n } from '../composables/useI18n';
 import type { Agent } from '../services/types';
 import {
   GridFour, ListTwo, LayoutOne, LayoutFour, ApplicationMenu, GridTwo, Search,
-  Star, Server, Wifi, SpeedOne, Time,
+  Star, Server, Wifi, SpeedOne, Time, Wallet,
 } from '@icon-park/vue-next';
 
 const { state, visibleAgents, groupedAgents, setLayout, setTemplate, setSearch, reorderAgents, isFavoriteNode } = useApp();
@@ -125,14 +126,16 @@ const overviewCards = computed(() => {
   // 月度费用（价格口径对齐 Komari）：>0 求和显示；全为 -1（免费）显示「免费」；
   // 全为 0（未填写，不显示）则显示 '—'。
   const priced = ags.filter((a) => typeof a.price === 'number');
-  const paidTotal = priced.reduce((s, a) => s + (a.price! > 0 ? a.price! : 0), 0);
   const anyFree = priced.some((a) => a.price! < 0);
-  const costCurrency = priced.find((a) => a.price! > 0)?.currency || '¥';
-  const monthlyCostText = paidTotal > 0 ? `${costCurrency}${paidTotal.toFixed(2)}` : (anyFree ? t('public.free') : '—');
-  // 剩余价值（Komari 资产统计口径）：各节点服务端折算值之和；总价值 = 正价之和
-  const remainingTotal = ags.reduce((s, a) => s + (typeof a.remaining_value === 'number' ? a.remaining_value : 0), 0);
-  const assetTotalText = paidTotal > 0 ? `${costCurrency}${paidTotal.toFixed(2)}` : '—';
-  const remainingText = remainingTotal > 0 ? `${costCurrency}${remainingTotal.toFixed(2)}` : (anyFree ? t('public.free') : '—');
+  // 价格类汇总按币种分桶（见 sumByCurrency），不再把 ¥/$/€ 混加成一个数
+  const priceParts = sumByCurrency(priced, (a) => a.price);
+  const monthlyCostText = priceParts.length ? joinCurrencyParts(priceParts) : (anyFree ? t('public.free') : '—');
+  // 剩余价值 / 总价值：优先用服务端按标准货币折算的结果（billing），
+  // 没有折算结果时回退到分币种并列（避免出现「$100 + ¥100」被加成一个数）。
+  const remainingParts = sumByCurrency(ags, (a) => a.remaining_value);
+  const assetTotalText = billingMoney('total_value') || (priceParts.length ? joinCurrencyParts(priceParts) : '—');
+  const remainingText = billingMoney('remaining_value')
+    || (remainingParts.length ? joinCurrencyParts(remainingParts) : (anyFree ? t('public.free') : '—'));
   // 平均系统负载（ops 方案）：仅统计有 load1 上报的节点
   const loadValues = ags.map((a) => a.load1).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
   const avgLoad = loadValues.length ? loadValues.reduce((s, v) => s + v, 0) / loadValues.length : null;
@@ -228,6 +231,68 @@ function fmtRateCompact(n: number): string {
 }
 
 
+// 多币种金额汇总：¥ / $ / € 之间没有固定汇率，直接相加是错的（100 USD + 100 CNY ≠ 200），
+// 因此按节点自带 currency 分桶后各自求和，不做任何汇率换算（不联网、不引外部汇率源）。
+function sumByCurrency(list: Agent[], pick: (a: Agent) => number | null | undefined) {
+  const buckets = new Map<string, number>();
+  for (const a of list) {
+    const v = pick(a);
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
+    const c = a.currency || '¥';
+    buckets.set(c, (buckets.get(c) || 0) + v);
+  }
+  return [...buckets.entries()]
+    .sort((x, y) => y[1] - x[1])
+    .map(([currency, amount]) => `${currency}${amount.toFixed(2)}`);
+}
+// 单行展示：≤2 种币种全列，多于 2 种截断，完整明细放 title
+function joinCurrencyParts(parts: string[]) {
+  return parts.length > 2 ? `${parts.slice(0, 2).join(' + ')} …` : parts.join(' + ');
+}
+
+// 服务端已按标准货币折算好的金额（/api/overview 与 /api/public/overview 的 billing）。
+// 返回 null 表示该口径没有数据，调用方回退到前端分币种展示（旧响应 / 公开业务字段关闭）。
+// 访客侧显示币种（纯展示偏好，localStorage 记住；计算仍以标准货币为准）
+const {
+  options: displayOptions,
+  activeCode: displayActiveCode,
+  symbol: displaySymbol,
+  amount: toDisplayAmount,
+  setCode: setDisplayCode,
+} = useDisplayCurrency();
+
+function billingMoney(field: 'total_value' | 'remaining_value' | 'monthly_cost'): string | null {
+  const b = state.overview?.billing;
+  if (!b || !(b[field] > 0)) return null;
+  return `${displaySymbol.value || b.base_symbol || b.base_currency}${toDisplayAmount(b[field]).toFixed(2)}`;
+}
+// 悬浮明细：原币金额 [×汇率 → 标准货币]，附未折算币种与汇率时间
+function billingTitle(field: 'total_value' | 'remaining_value' | 'monthly_cost'): string | undefined {
+  const b = state.overview?.billing;
+  if (!b) return undefined;
+  const baseSym = b.base_symbol || b.base_currency;
+  const rows = Object.entries(b.by_currency)
+    .filter(([, x]) => (x.original[field] || 0) > 0)
+    .map(([, x]) => {
+      const sym = x.symbol || x.code;
+      const orig = `${sym}${x.original[field].toFixed(2)}`;
+      if (x.rate == null || !x.converted) return `${orig}（未折算）`;
+      return x.rate === 1 ? orig : `${orig} ×${x.rate} → ${baseSym}${x.converted[field].toFixed(2)}`;
+    });
+  if (b.missing.length) rows.push(t('public.fxMissing', { n: b.missing.length }));
+  if (b.fx_updated_at) rows.push(t('public.fxBasis', { time: new Date(b.fx_updated_at).toLocaleString() }));
+  // 访客切换了显示币种时，说明换算依据（避免误以为是后台改了标准货币）
+  const disp = displayActiveCode.value;
+  if (disp && disp !== b.base_currency_code) {
+    rows.push(t('public.fxDisplay', {
+      sym: displaySymbol.value,
+      base: b.base_symbol || b.base_currency,
+      rate: b.display_rates?.[disp] ?? '?',
+    }));
+  }
+  return rows.length ? rows.join('\n') : undefined;
+}
+
 // 快捷统计卡片（对齐 Glassmorphism 首页统计卡）：图标 + 数值 + 标签，玻璃卡样式。
 const QUICK_ICONS = {
   fav: markRaw(Star),
@@ -235,23 +300,51 @@ const QUICK_ICONS = {
   offline: markRaw(Wifi),
   highload: markRaw(SpeedOne),
   expiring: markRaw(Time),
+  remaining: markRaw(Wallet),
 };
 function quickIcon(key: string) {
   return (QUICK_ICONS as Record<string, unknown>)[key];
 }
-const quickFilters = computed(() => {
+type QuickStat = {
+  key: string;
+  label: string;
+  count: number;
+  value?: string;        // 有值则显示它（金额类），否则显示 count
+  title?: string;        // 悬浮提示，多币种明细
+  filterable?: boolean;  // false = 纯展示，不参与节点筛选
+};
+const quickFilters = computed<QuickStat[]>(() => {
   const ags = state.agents;
+  const remainingParts = sumByCurrency(ags, (a) => a.remaining_value);
   return [
     { key: 'fav', label: t('public.favorites'), count: ags.filter((a) => isFavoriteNode(a.id)).length },
     { key: 'total', label: t('public.totalAgents'), count: ags.length },
     { key: 'offline', label: t('public.offline'), count: ags.filter((a) => !a.online).length },
     { key: 'highload', label: t('public.highLoad'), count: ags.filter((a) => (a.cpu_percent ?? a.cpu ?? 0) >= 80).length },
     { key: 'expiring', label: t('public.expiring'), count: ags.filter((a) => a.expire_at && new Date(a.expire_at).getTime() - Date.now() < 30 * 864e5).length },
+    {
+      key: 'remaining',
+      label: t('public.remainingValue'),
+      count: 0,
+      value: billingMoney('remaining_value') || (remainingParts.length ? joinCurrencyParts(remainingParts) : '—'),
+      title: billingTitle('remaining_value') || (remainingParts.length ? remainingParts.join(' / ') : undefined),
+      filterable: false,
+    },
   ];
 });
 const activeQuick = ref<string | null>(null);
+function onQuickClick(q: QuickStat) {
+  if (q.filterable === false) return;
+  activeQuick.value = activeQuick.value === q.key ? null : q.key;
+}
 
 // 列表模式形态：横排 1 列（全列宽行）/ 横排 2 列（精简行，2xl 屏并排两列）
+// 离线节点后置（访客偏好，默认关；开启后在线整体在前，组内仍保持拖拽顺序）
+const offlineLast = ref(localStorage.getItem('diting-offline-last') === '1');
+function toggleOfflineLast() {
+  offlineLast.value = !offlineLast.value;
+  localStorage.setItem('diting-offline-last', offlineLast.value ? '1' : '0');
+}
 const listCols = ref<1 | 2>(localStorage.getItem('diting-list-cols') === '2' ? 2 : 1);
 function setListCols(n: 1 | 2) {
   listCols.value = n;
@@ -311,8 +404,21 @@ watch(groupTabs, (tabs) => {
   }
 });
 const groupFilteredAgents = computed(() => {
-  if (selectedGroup.value === 'all') return filteredAgents.value;
-  return filteredAgents.value.filter((a) => (a.group || a.grp || '默认分组') === selectedGroup.value);
+  const base = selectedGroup.value === 'all'
+    ? filteredAgents.value
+    : filteredAgents.value.filter((a) => (a.group || a.grp || '默认分组') === selectedGroup.value);
+  if (!offlineLast.value) return base;
+  // 稳定分区：在线在前、离线整体后移（组内仍保持用户拖拽的顺序）
+  return [...base.filter((a) => a.online), ...base.filter((a) => !a.online)];
+});
+
+// 公告：/api/public/meta 已下发；原生首页按纯文本渲染（CSP 禁 v-html，不解析 HTML/Markdown）
+const announcement = computed(() => {
+  const a = state.meta?.announcement;
+  if (!a || !a.enabled) return null;
+  const content = String(a.content || '').trim();
+  if (!content) return null;
+  return { title: String(a.title || '').trim(), content };
 });
 </script>
 
@@ -325,6 +431,12 @@ const groupFilteredAgents = computed(() => {
          而非放宽容器保证不溢出（余量 ~30px） -->
     <main class="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
       <ErrorMessage v-if="state.error" class="mb-6" :message="state.error" />
+
+      <!-- 公告：admin 在设置里开启后由 /api/public/meta 下发（纯文本，不渲染 HTML） -->
+      <div v-if="announcement" class="glass mb-4 rounded-xl px-4 py-3">
+        <h2 v-if="announcement.title" class="mb-1 text-sm font-semibold text-content">{{ announcement.title }}</h2>
+        <p class="whitespace-pre-line text-xs leading-relaxed text-secondary">{{ announcement.content }}</p>
+      </div>
 
       <!-- 总览卡片：列数随卡片数量自适应（合并卡片后不再固定 6 列留空格） -->
       <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 sm:gap-4">
@@ -343,22 +455,23 @@ const groupFilteredAgents = computed(() => {
         />
       </div>
 
-      <!-- 快捷统计卡：对齐 Glassmorphism 首页统计卡的玻璃卡样式 -->
-      <div class="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <!-- 快捷统计卡：与下方「分组 Tabs」同高——tabs 容器 = p-[3px]×2 + 按钮 h-8 = 38px，
+           故卡片固定 h-[38px]，字号也对齐 tabs 的 text-sm -->
+      <div class="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
         <button
           v-for="q in quickFilters"
           :key="q.key"
-          class="glass group flex min-w-0 items-center gap-3 rounded-xl p-3 text-left transition-all"
-          :class="activeQuick === q.key ? 'ring-1 ring-sky-400/70' : 'hover:ring-1 hover:ring-slate-500/40'"
-          @click="activeQuick = activeQuick === q.key ? null : q.key"
+          class="glass group flex h-[38px] min-w-0 items-center gap-2 rounded-md px-2.5 text-left transition-all"
+          :class="[
+            activeQuick === q.key ? 'ring-1 ring-sky-400/70' : '',
+            q.filterable === false ? 'cursor-default' : 'hover:ring-1 hover:ring-slate-500/40',
+          ]"
+          :title="q.title"
+          @click="onQuickClick(q)"
         >
-          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-500/15 text-secondary">
-            <component :is="quickIcon(q.key)" :size="18" />
-          </span>
-          <span class="min-w-0">
-            <span class="block text-lg font-semibold leading-tight text-content">{{ q.count }}</span>
-            <span class="block truncate text-xs text-secondary">{{ q.label }}</span>
-          </span>
+          <component :is="quickIcon(q.key)" :size="15" class="shrink-0 text-secondary" />
+          <span class="min-w-0 flex-1 truncate text-sm text-secondary">{{ q.label }}</span>
+          <span class="shrink-0 max-w-[65%] truncate text-sm font-semibold leading-none tabular-nums text-content">{{ q.value ?? q.count }}</span>
         </button>
       </div>
 
@@ -421,6 +534,25 @@ const groupFilteredAgents = computed(() => {
               <component :is="o.icon" :size="16" />
             </button>
           </template>
+          <!-- 显示币种：纯访客偏好，只列服务端给出了换算率的币种 -->
+          <template v-if="displayOptions.length > 1">
+            <span class="mx-1 h-4 w-px bg-slate-700"></span>
+            <select
+              :value="displayActiveCode"
+              class="h-7 rounded-lg border border-slate-700 bg-slate-900/50 px-1.5 text-xs text-white outline-none focus:border-sky-500"
+              :title="t('public.displayCurrency')"
+              @change="setDisplayCode(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="c in displayOptions" :key="c.code" :value="c.code">{{ c.symbol }} {{ c.code }}</option>
+            </select>
+          </template>
+          <!-- 离线节点后置（纯排序偏好，不改数据） -->
+          <button
+            class="flex h-7 items-center rounded-lg border px-2 text-xs"
+            :class="offlineLast ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+            :title="t('public.offlineLast')"
+            @click="toggleOfflineLast"
+          >↓</button>
         </div>
       </div>
 
@@ -495,6 +627,11 @@ const groupFilteredAgents = computed(() => {
           </div>
         </template>
       </template>
+
+      <!-- 访客信息：设置里开启 visitor_info 才会下发（IP + 浏览器） -->
+      <p v-if="state.visitor" class="mt-6 text-center text-xs text-slate-500">
+        {{ state.visitor.ip }} · {{ state.visitor.browser }}
+      </p>
     </main>
   </div>
 </template>

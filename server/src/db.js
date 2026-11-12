@@ -1681,13 +1681,38 @@ function getUiSettings() {
     capacity_enabled: true,
     capacity_max_rows: 2000000,       // 默认 200 万行（按 S2 折叠后口径的约 10 倍余量）
     capacity_max_mb: 2048,            // 默认库文件 2 GiB
-    backup_compress: true             // gzip 压缩（实测体积约 20%，强烈建议开启）
+    backup_compress: true,            // gzip 压缩（实测体积约 20%，强烈建议开启）
+    // 资产统计汇率（管理员手工录入，不联网、不自动抓汇率）：
+    // base_currency = 标准货币 ISO 码；rates[c] = 1 单位 c 折合多少标准货币，
+    // 缺失币种不计入总额（src/billing.js convertSummary 会列进 missing）。
+    billing: {
+      base_currency: 'CNY',
+      rates: {},
+      updated_at: 0,
+      // manual = 只用手工汇率（默认，零外呼）；api = 用 fx.js 拉取的快照
+      source: 'manual',
+      api: { provider: '', base: 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
+    }
   };
   try {
     const o = JSON.parse(getConfig(SETTINGS_KEY) || '{}');
     const merged = Object.assign(def, o);
     // 嵌套对象（alert）需单独合并，避免服务端缺字段时整体回退到默认
     merged.alert = Object.assign(def.alert, (o && o.alert) || {});
+    // billing 有两层（rates 子表）：逐层合并，旧库没有该键时回退到默认，浅合并会丢 rates
+    merged.billing = Object.assign({
+      base_currency: 'CNY',
+      rates: {},
+      updated_at: 0,
+      source: 'manual',
+      api: { provider: '', base: 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
+    }, (o && o.billing) || {});
+    merged.billing.rates = Object.assign({}, (o && o.billing && o.billing.rates) || {});
+    merged.billing.api = Object.assign(
+      { provider: '', base: merged.billing.base_currency || 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
+      (o && o.billing && o.billing.api) || {},
+    );
+    merged.billing.api.rates = Object.assign({}, (o && o.billing && o.billing.api && o.billing.api.rates) || {});
     return merged;
   }
   catch (e) { return def; }

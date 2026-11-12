@@ -115,6 +115,8 @@ export const visibleAgents = computed<Agent[]>(() => {
         a.name.toLowerCase().includes(q) ||
         (a.group || '').toLowerCase().includes(q) ||
         (a.hostname || '').toLowerCase().includes(q) ||
+        (a.os || '').toLowerCase().includes(q) ||
+        (a.note || '').toLowerCase().includes(q) ||
         (a.merchant || '').toLowerCase().includes(q) ||
         (a.country || '').toLowerCase().includes(q) ||
         (providerAlias(a.id, a.merchant).toLowerCase().includes(q)) ||

@@ -138,7 +138,14 @@ describe('useSettingsForm', () => {
   it('emptySettingsForm 提供与服务端一致的嵌套默认值', () => {
     const f = emptySettingsForm();
     expect(f.ui.alert).toEqual({ cpu_pct: 90, mem_pct: 90, offline_sec: 60 });
-    expect(f.ui.billing).toEqual({ base_currency: 'CNY', rates: {}, updated_at: 0 });
+    // billing 含汇率来源与 API 快照槽位（与服务端 db.js 默认值一致）
+    expect(f.ui.billing).toEqual({
+      base_currency: 'CNY',
+      rates: {},
+      updated_at: 0,
+      source: 'manual',
+      api: { provider: '', base: 'CNY', rates: {}, updated_at: 0, last_try_at: 0, status: 'never', error: '' },
+    });
     expect(f.ui.capacity_enabled).toBe(true);
   });
 
