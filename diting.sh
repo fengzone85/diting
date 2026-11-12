@@ -236,6 +236,8 @@ show_usage() {
   --start-server          启动服务端（原生 systemd 或 Docker，自动识别）
   --stop-server           停止服务端
   --restart-server        重启服务端（改完代码/配置后生效）
+  --deploy-server         同步服务端运行副本到仓库树外（默认 /data/simple-probe-data/server-data/app，
+                          DITING_APP_DIR 可覆盖；含 npm ci 与版本文件写入；不重启服务）
   --logs [行数|follow]    查看服务端日志（自动识别 systemd / Docker，默认最近 100 行）
   --uninstall             卸载服务端与受控端
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
@@ -975,13 +977,81 @@ server_workdir() {
     systemctl show -p WorkingDirectory --value diting-server.service 2>/dev/null | tr -d '\r\n' || true
 }
 
-# 原生部署的监听端口：优先读单元工作目录下的 .env（与 diting-server.service 同源），
-# 读不到时调用方回退 8081（server.js 默认值）。
-server_native_port() {
-    local wd
+# 服务端环境文件位置（运行目录分离）：优先取 systemd 单元的 EnvironmentFile
+#（.env 位于仓库树外 server-data/.env），回退单元工作目录下 .env（旧布局兼容）。
+server_env_file() {
+    local wd envf
+    envf="$(systemctl cat diting-server.service 2>/dev/null | sed -n 's/^EnvironmentFile=-\?//p' | head -n1 | tr -d '\r\n')"
     wd="$(server_workdir)"
-    [[ -n "$wd" && -f "$wd/.env" ]] || return 0
-    sed -n 's/^PORT=//p' "$wd/.env" 2>/dev/null | head -n1 | tr -d '\r\n'
+    for f in "$envf" "$wd/.env"; do
+        if [[ -n "$f" && -f "$f" ]]; then echo "$f"; return 0; fi
+    done
+    return 0
+}
+
+# 原生部署的监听端口：读服务端环境文件，读不到时调用方回退 8081（server.js 默认值）。
+server_native_port() {
+    local envf
+    envf="$(server_env_file)"
+    [[ -n "$envf" ]] || return 0
+    sed -n 's/^PORT=//p' "$envf" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+# deploy_server —— 运行目录分离（L2）：把服务端「运行副本」同步到仓库树外。
+# 默认目标 ${DITING_APP_DIR:-/data/simple-probe-data/server-data/app}。
+# 不同步 node_modules（目标内 npm ci 自建）、.env（配置在 server-data/.env，
+# 由 systemd EnvironmentFile 注入）、web/ 与 test/（非运行所需）。
+# 只做同步 + 依赖 + 版本文件 + 语法自检，**不重启服务**（切换 unit + 重启须单独请示）。
+deploy_server() {
+    local src="${SCRIPT_DIR}/server"
+    local app="${DITING_APP_DIR:-/data/simple-probe-data/server-data/app}"
+    [[ -d "$src" ]] || { echo -e "${RED}[错误] 未找到源码目录 $src${NC}" >&2; return 1; }
+    command -v rsync >/dev/null 2>&1 || { echo -e "${RED}[错误] 需要 rsync${NC}" >&2; return 1; }
+    command -v npm >/dev/null 2>&1 || { echo -e "${RED}[错误] 需要 npm${NC}" >&2; return 1; }
+
+    # 前置检查：构建产物（vite 输出）不在 git 内，必须先在仓库构建——
+    # 否则副本缺 public/index.html 与 assets/，SPA 直接 500（2026-11-12 实测）。
+    [[ -f "$src/public/index.html" ]] || {
+        echo -e "${RED}[错误] 构建产物缺失（$src/public/index.html）：请先执行 cd server/web \&\& npm run build${NC}" >&2
+        return 1
+    }
+
+    echo -e "${GREEN}[同步] $src/ → $app/${NC}"
+    mkdir -p "$app"
+    # --delete 把源侧删除同步到副本；exclude 的 node_modules 等不被删除（留作缓存）。
+    # ⚠ 排除名不得带尾斜杠：worktree 里 node_modules 常是指向主树的**符号链接**，
+    # 'node_modules/'（目录限定）不匹配链接本身，会被 rsync 复制进副本，
+    # npm ci 随后会透过链接删主树依赖（2026-11-12 实测险情，被环境护栏拦下）。
+    rsync -a --delete \
+        --exclude 'node_modules' \
+        --exclude 'web/' \
+        --exclude 'test/' \
+        --exclude 'coverage/' \
+        --exclude '.env' \
+        --exclude 'certs/' \
+        --exclude 'data/' \
+        --exclude '*.log' \
+        --exclude 'public.bak-*/' \
+        --exclude 'build_time.txt' \
+        --exclude 'git_hash.txt' \
+        --exclude 'version.txt' \
+        "$src/" "$app/" || { echo -e "${RED}[错误] rsync 失败${NC}" >&2; return 1; }
+
+    echo -e "${GREEN}[依赖] npm ci --omit=dev（node_modules 建于 $app 内）${NC}"
+    # 显式用真实 rm（绝对路径）清旧依赖：npm ci 的内部删除可能被环境的批量删除护栏
+    # 拦下（IDE shim），且绝不能让 npm 透过残留链接删外部目录。
+    [[ -e "$app/node_modules" ]] && /bin/rm -rf "$app/node_modules"
+    (cd "$app" && npm ci --omit=dev --no-audit --no-fund) || { echo -e "${RED}[错误] npm ci 失败${NC}" >&2; return 1; }
+
+    date +"%Y-%m-%d %H:%M:%S (%Z)" > "$app/build_time.txt"
+    git -C "$SCRIPT_DIR" rev-parse --short HEAD > "$app/git_hash.txt" 2>/dev/null || echo "-" > "$app/git_hash.txt"
+    # version.txt：git describe 转写（run-copy 无 .git，server.js 读它保持 tag 版本口径）
+    git -C "$SCRIPT_DIR" describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null | tr -d '\r\n' > "$app/version.txt" || true
+
+    node --check "$app/server.js" || { echo -e "${RED}[错误] server.js 语法自检失败${NC}" >&2; return 1; }
+    echo -e "${GREEN}[OK]   运行副本就绪：$app（版本 $(cat "$app/git_hash.txt")，构建 $(cat "$app/build_time.txt")）${NC}"
+    echo -e "${YELLOW}[提示] 环境文件应在 /data/simple-probe-data/server-data/.env（unit 的 EnvironmentFile 指向）；${NC}"
+    echo -e "${YELLOW}       切换 unit + 重启为独立动作，请单独执行并确认。${NC}"
 }
 
 # server_ctl start|stop|restart|status —— 按部署形态分派。
@@ -3203,6 +3273,7 @@ while [[ $# -gt 0 ]]; do
         --start-server)   ACTION="start-server"; shift ;;
         --stop-server)    ACTION="stop-server"; shift ;;
         --restart-server) ACTION="restart-server"; shift ;;
+        --deploy-server)  ACTION="deploy-server"; shift ;;
         --uninstall)      ACTION="uninstall"; shift ;;
         # 兼容两种调用：--backup（默认目录）与 --backup <输出路径>。
         # 路径以 / 或 . 开头才当作输出路径，避免把后续选项（如 --status）误吞。
@@ -3258,7 +3329,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── 入口 ───────────────────────────────────────────────────────────────────────
-if [[ "$(id -u)" -ne 0 ]]; then
+# deploy-server 只写目标运行副本目录（默认 server-data/app，属当前用户），无需 root；
+# 其余动作涉及 systemd/安装路径，仍要求 root。
+if [[ "$(id -u)" -ne 0 && "$ACTION" != "deploy-server" ]]; then
     echo -e "${RED}[错误] 必须以 root 运行（sudo bash diting.sh）${NC}" >&2
     exit 1
 fi
@@ -3275,6 +3348,7 @@ if [[ -n "$ACTION" ]]; then
         start-server)   server_ctl start ;;
         stop-server)    server_ctl stop ;;
         restart-server) server_ctl restart ;;
+        deploy-server)  deploy_server ;;
         uninstall)    uninstall_all ;;
         backup)       do_backup "${A_BACKUP_PATH:-}" "${A_BACKUP_KEEP:-}" ;;
         backup-schedule) do_backup_schedule "${A_BACKUP_SCHEDULE:-status}" "${A_BACKUP_KEEP:-}" ;;

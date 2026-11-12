@@ -799,6 +799,7 @@ Agent 从**自身主机**主动做 TCP / HTTP(S) 探测**写死在本地配置�
 
 - **入库闸门**：仓库带纯净度检查（路径白名单 / 凭据扫描 / 测试基线防假绿）。clone 后执行一次 `git config core.hooksPath .githooks` 启用本地钩子；CI 会对 tracked 全集二次复查（`--no-verify` 绕过也会被抓）。
 - **测试**：服务端 `cd server && npm test`；前端 `cd server/web && npm test`（覆盖率门禁 `npm run test:cov`）。
+- **运行目录分离**：生产运行副本由 `bash diting.sh --deploy-server`（无需 root）同步到 `/data/simple-probe-data/server-data/app/`（仓库树外），配置在 `server-data/.env`（unit 的 `EnvironmentFile` 指向）；仓库树只作源码与开发构建。
 - **提交信息**：使用中性表述，不点名第三方产品或其它仓库；只显式 `git add <path>`。
 
 ---

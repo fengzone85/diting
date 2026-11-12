@@ -1,4 +1,6 @@
-require('dotenv').config();
+// DITING_ENV_FILE：显式指定环境文件（运行目录分离后生产指向仓库树外的 server-data/.env）；
+// 未设置时保持默认（cwd/.env），Docker 与手工调试行为不变。
+require('dotenv').config({ path: process.env.DITING_ENV_FILE || '.env' });
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -43,6 +45,11 @@ const APP_VERSION = (() => {
       { cwd: __dirname, encoding: 'utf8' },
     ).trim();
     if (tag) return tag.replace(/^v/, '');
+  } catch (e) {}
+  // 运行目录分离：无 .git 的运行副本由部署写入 version.txt（git describe 转写，保留 v 前缀）
+  try {
+    const v = fs.readFileSync(path.join(__dirname, 'version.txt'), 'utf-8').trim();
+    if (v) return v.replace(/^v/, '');
   } catch (e) {}
   try { return require('./package.json').version || '1.0.0'; } catch (e) { return '1.0.0'; }
 })();
@@ -184,7 +191,7 @@ if (process.env.ADMIN_ALLOW_HTTP === '1') {
   console.warn('[warn] ADMIN_ALLOW_HTTP=1 已生效：非 HTTPS 管理请求将被放行，会话 Cookie 不带 Secure 标志。请确认这是本地开发环境；生产环境务必删除 .env 中的该行。');
 }
 try {
-  const envPath = path.join(__dirname, '.env');
+  const envPath = process.env.DITING_ENV_FILE || path.join(__dirname, '.env');
   const st = fs.statSync(envPath);
   if (st.mode & 0o077) {
     console.warn(`[warn] .env 权限过松（${(st.mode & 0o777).toString(8)}）：含 ADMIN_TOKEN/SESSION_SECRET 等密钥，同机其他用户可读。请执行 chmod 600 .env`);
