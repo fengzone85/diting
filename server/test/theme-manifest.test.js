@@ -227,18 +227,25 @@ test('validateManifest：字段 key / select options / 数量上限', () => {
 
 // ---- 4. 列表与内置主题 ------------------------------------------------------
 
-test('listInstalledThemes：内置主题（旧 manifest.json）被识别且标记 bundled/legacy', () => {
+test('listInstalledThemes：内置主题标记 bundled，旧 manifest.json 主题标记 legacy', () => {
+  // 合成旧 manifest.json 主题（测试自带夹具，不依赖发布包内的示例主题）
+  mkTheme('legacy-fix', {
+    'manifest.json': { id: 'legacy-fix', name: { zh_CN: '旧格式', en: 'Legacy' } }
+  });
   const list = theme.listInstalledThemes();
-  const demo = list.find((t) => t.short === 'komari-demo');
-  assert.ok(demo, '内置 komari-demo 应被识别');
-  assert.strictEqual(demo.bundled, true);
-  assert.strictEqual(demo.legacy, true);
-  assert.strictEqual(demo.version, '');
-  assert.strictEqual(typeof demo.name, 'string');
+
+  const legacy = list.find((t) => t.short === 'legacy-fix');
+  assert.ok(legacy, '旧 manifest.json 主题应被识别');
+  assert.strictEqual(legacy.bundled, false);
+  assert.strictEqual(legacy.legacy, true);
+  assert.strictEqual(legacy.version, '');
+  assert.strictEqual(typeof legacy.name, 'string');
 
   const neo = list.find((t) => t.short === 'neobrutalism');
   assert.ok(neo);
   assert.strictEqual(neo.bundled, true);
+
+  fs.rmSync(path.join(ROOT, 'legacy-fix'), { recursive: true, force: true });
 });
 
 test('listInstalledThemes：安装版同名主题覆盖内置版', () => {
@@ -263,7 +270,6 @@ test('rebuildNonceSet：干净安装下不包含任何内置主题', () => {
   const set = theme.rebuildNonceSet();
   assert.strictEqual(theme.themeNonceSet, set, '必须复用同一个 Set 实例（server.js 持有引用）');
   assert.strictEqual(set.has('neobrutalism'), false);
-  assert.strictEqual(set.has('komari-demo'), false);
 });
 
 test('rebuildNonceSet：needsRelaxedCsp=true 的主题被吸收，删除后移除', () => {

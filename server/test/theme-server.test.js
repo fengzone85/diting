@@ -233,12 +233,25 @@ test('public_enabled=false：config 端点 403，而 /api/public/themes 仍可�
 // ---- 5. 兼容 / 审计 / 删除 ----------------------------------------------------
 
 test('GET /api/public/themes：保留历史 id 字段且 name 已归一化', async () => {
+  // 合成旧 manifest.json 主题（测试自带夹具，不依赖发布包内的示例主题）
+  const dir = path.join(theme.INSTALLED_THEMES_DIR, 'legacy-fixture');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+    id: 'legacy-fixture',
+    name: { zh_CN: '旧格式夹具', en: 'Legacy Fixture' },
+    description: { zh_CN: '归一化验证', en: 'Normalization probe' }
+  }));
+  fs.writeFileSync(path.join(dir, 'index.html'), '<html></html>');
+
   const res = await request(app).get('/api/public/themes');
   assert.strictEqual(res.status, 200);
-  const legacy = res.body.find((t) => t.id === 'komari-demo');
+  const legacy = res.body.find((t) => t.id === 'legacy-fixture');
   assert.ok(legacy, '旧 manifest.json 主题应仍可识别');
-  assert.strictEqual(legacy.name, 'Komari 适配皮肤（演示）');
   assert.strictEqual(typeof legacy.name, 'string');
+  assert.ok(legacy.name.length > 0);
+  assert.strictEqual(typeof legacy.description, 'string');
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('审计：theme_action 的 detail 为字符串并成功入库', () => {

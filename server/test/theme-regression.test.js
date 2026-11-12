@@ -47,11 +47,10 @@ after(async () => {
 
 // ---- 1. 发布包兼容契约 ------------------------------------------------------
 
-test('themeNonceSet：干净安装为空（发布包 komari-demo / neobrutalism 无 needsRelaxedCsp）', () => {
+test('themeNonceSet：干净安装为空（发布包内置主题无 needsRelaxedCsp）', () => {
   theme.rebuildNonceSet();
   const s = theme.themeNonceSet;
   assert.strictEqual(s.size, 0, '发布包内无主题应声明 needsRelaxedCsp');
-  assert.strictEqual(theme.resolveThemeDir('komari-demo').bundled, true);
   assert.strictEqual(theme.resolveThemeDir('neobrutalism').bundled, true);
 });
 
@@ -87,19 +86,31 @@ test('ui_settings.public_theme 字段保持不变（启用流程走同一字段�
 // ---- 2. 公开接口契约 ---------------------------------------------------------
 
 test('GET /api/public/themes：保留 id 字段（= short），name/description 归一化为字符串', async () => {
+  // 合成旧 manifest.json 主题（测试自带夹具，不依赖发布包内的示例主题）
+  const dir = path.join(ROOT, 'legacy-fixture');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+    id: 'legacy-fixture',
+    name: { zh_CN: '旧格式夹具', en: 'Legacy Fixture' },
+    description: { zh_CN: '归一化验证', en: 'Normalization probe' }
+  }));
+  fs.writeFileSync(path.join(dir, 'index.html'), '<html></html>');
+
   const res = await supertest(app).get('/api/public/themes');
   assert.strictEqual(res.status, 200);
   const list = res.body;
   assert.ok(Array.isArray(list));
 
-  // 老 manifest.json 主题（如 komari-demo）必须带 id 字段（= short）
+  // 老 manifest.json 主题必须带 id 字段（= short）
   assert.ok(list.some((t) => t.id !== undefined), '至少有主题返回 id 字段');
 
-  const demo = list.find((t) => t.id === 'komari-demo');
-  assert.ok(demo);
-  assert.strictEqual(typeof demo.name, 'string');
-  assert.strictEqual(typeof demo.description, 'string');
-  assert.ok(demo.name.length > 0);
+  const legacy = list.find((t) => t.id === 'legacy-fixture');
+  assert.ok(legacy, '旧 manifest.json 主题应可识别');
+  assert.strictEqual(typeof legacy.name, 'string');
+  assert.strictEqual(typeof legacy.description, 'string');
+  assert.ok(legacy.name.length > 0);
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('GET /api/public/themes：不门控（public_enabled 关闭仍能返回列表）', async () => {
