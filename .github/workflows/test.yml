@@ -50,10 +50,7 @@ jobs:
       - name: Run server lint
         working-directory: server
         run: npm run lint
-      # web lint 暂为非阻断：存在 5 处预有 vue/no-mutating-props error
-      # （BillingFxSettings.vue，计费功能遗留）；修复后去掉 continue-on-error 转阻断。
-      - name: Run web lint (non-blocking)
-        continue-on-error: true
+      - name: Run web lint
         working-directory: server/web
         run: npm run lint
 

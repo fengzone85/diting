@@ -18,6 +18,12 @@ export interface BillingSettings {
 }
 
 const props = defineProps<{ billing: BillingSettings }>();
+const emit = defineEmits<{ (e: 'update:billing', v: BillingSettings): void }>();
+
+// 不可变更新：不直接改 props（vue/no-mutating-props），由父组件 v-model:billing 接收新对象
+function patch(p: Partial<BillingSettings>) {
+  emit('update:billing', { ...props.billing, ...p });
+}
 
 const FX_SOURCES = [
   { value: 'manual' as const, label: 'settings.fxSourceManual' },
@@ -44,20 +50,21 @@ const fxStatusText = computed(() => {
 // 换标准货币必须清空汇率表：现有数值都是「其他币 → 旧标准币」，直接沿用会算错
 function setBaseCurrency(code: string) {
   if (props.billing.base_currency === code) return;
-  props.billing.base_currency = code;
-  props.billing.rates = {};
+  patch({ base_currency: code, rates: {} });
 }
 
 // 汇率输入：留空 = 删除该币种（不参与折算）；非法值不改动已有输入
 function setRate(code: string, raw: string) {
   const v = String(raw || '').trim();
+  const rates = { ...props.billing.rates };
   if (!v) {
-    delete props.billing.rates[code];
-    return;
+    delete rates[code];
+  } else {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return;
+    rates[code] = n;
   }
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return;
-  props.billing.rates[code] = n;
+  patch({ rates });
 }
 
 async function loadFxStatus() {
@@ -96,7 +103,7 @@ onMounted(() => { void loadFxStatus(); });
         :key="o.value"
         class="h-8 rounded-lg border px-3 text-xs"
         :class="props.billing.source === o.value ? 'border-sky-500 bg-sky-500/20 text-content' : 'border-slate-700 text-secondary hover:border-slate-500'"
-        @click="props.billing.source = o.value"
+        @click="patch({ source: o.value })"
       >{{ t(o.label) }}</button>
       <!-- 只有切到「自动」并保存后服务端才会真正外呼；manual 下禁用避免误报失败 -->
       <button

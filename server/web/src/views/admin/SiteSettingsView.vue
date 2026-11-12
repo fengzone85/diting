@@ -213,7 +213,7 @@ onMounted(() => {
 
       <!-- 资产与汇率：剩余价值 / 总价值按标准货币汇总（手工汇率或服务端每日自动拉取） -->
       <section id="sec-billing" class="glass scroll-mt-28 rounded-xl p-5">
-        <BillingFxSettings v-if="local.ui.billing" :billing="local.ui.billing" />
+        <BillingFxSettings v-if="local.ui.billing" v-model:billing="local.ui.billing" />
       </section>
     </div>
   </PageShell>

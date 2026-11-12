@@ -12,8 +12,12 @@ services:
     build: ./server
     container_name: diting-server
     restart: unless-stopped
+    # env_file 可缺省（长语法 required: false，需 compose v2.24+）：仓库树不带
+    # server/.env 时也能通过 config 校验；文件存在时照常注入。quick-start 仍建议
+    # 先 `cp server/.env.example server/.env`（SESSION_SECRET/SETUP_TOKEN 等由此提供）。
     env_file:
-      - ./server/.env
+      - path: ./server/.env
+        required: false
     # 快速测试为明文 http，需显式放行（生产经 Nginx+TLS 无需此变量）。
     environment:
       - ADMIN_ALLOW_HTTP=1
