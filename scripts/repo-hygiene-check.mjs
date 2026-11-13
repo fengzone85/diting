@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/repo-hygiene-check.mjs — 仓库纯净度闸门（H1–H9）
+// scripts/repo-hygiene-check.mjs — 仓库纯净度闸门（H1–H10）
 // 零依赖（纯 node 内置模块），入库。
 //
 // 用法：
@@ -26,7 +26,7 @@ const ALLOW_PREFIXES = [
   'server/', 'agent-go/', 'docs/', '.github/', 'scripts/', 'nginx/', '.githooks/',
 ];
 const ALLOW_FILES = new Set([
-  'README.md', 'README_EN.md', 'LICENSE', 'diting.sh', 'docker-compose.yml', '.gitignore',
+  'README.md', 'README_EN.md', 'LICENSE', 'diting.sh', 'docker-compose.yml', '.gitignore', '.gitattributes',
 ]);
 const DENY_PREFIXES = [
   'server/node_modules/', 'server/web/node_modules/', 'server/public/assets/',
@@ -152,6 +152,27 @@ function checkTracked(files) {
   }
 }
 
+// ── H10 PowerShell 脚本编码（N-02：zh-CN PS 5.1 须 UTF-8 BOM + CRLF）──────
+// 无 BOM 时 PS 5.1 按 GBK 解码中文注释 → 变量解析错乱（真机已证）；裸 LF 在
+// 部分 PS 宿主下同样触发解析异常。入库 .ps1 一律 BOM + CRLF（配合 .gitattributes）。
+function checkPs1Encoding(files) {
+  for (const p of files) {
+    if (!p.endsWith('.ps1')) continue;
+    const fp = path.join(ROOT, p);
+    if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) continue;
+    const buf = fs.readFileSync(fp);
+    if (!(buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)) {
+      err('H10', `${p}：缺 UTF-8 BOM（zh-CN PS 5.1 会按 GBK 解码吞字符，N-02）`);
+    }
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] === 0x0a && (i === 0 || buf[i - 1] !== 0x0d)) {
+        err('H10', `${p}：含裸 LF（须 CRLF）`);
+        break;
+      }
+    }
+  }
+}
+
 // ── H8 IDE/AI 工具目录 ──────────────────────────────────────────────────
 function checkIdeDirs(files) {
   const ide = ['.vscode', '.idea', '.codebuddy', '.zcode', '.workbuddy', '.trae'];
@@ -266,6 +287,9 @@ if (mode === '--msg-file' && msgFile) {
     const text = readWorktree(p);
     if (text != null) scanCredentials(p, text);
   }
+
+  // H10：入库 .ps1 编码（BOM + CRLF）
+  checkPs1Encoding(scanTargets);
 } else {
   console.error('用法：--staged | --full | --msg-file <path> | --test-baseline [--tap-file <path>]');
   process.exit(2);

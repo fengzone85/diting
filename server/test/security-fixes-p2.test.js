@@ -36,6 +36,7 @@ for (const suffix of ['', '-journal', '-wal', '-shm']) {
 const { app, server } = require('../server');
 const db = require('../src/db');
 const alerts = require('../src/alerts');
+const notify = require('../src/notify');
 const { rateLimitTouch } = require('../src/ratelimit');
 
 // 测试环境禁服真实通知：仓库 .env 含 SMTP 占位符，会激活邮件通道并真实联网
@@ -183,14 +184,18 @@ test('checkAgent：单样本 spike 不报；连续 N 个采样才报；恢复发
   r = await alerts.checkAgent({ id: a2.id, name: 'sustain-node', last_seen: now }, now, CFG);
   assert.strictEqual(r.length, 1, '连续 N 个采样超限应触发');
 
-  // 场景 3：state 存在（曾告警）且持续低于阈值 → 发一次恢复并清状态
+  // 场景 3：state 存在（曾告警）且持续低于阈值 → 发一次恢复；REL-07：投递成功才清状态
   const a3 = db.createAgent({ name: 'recover-node' });
   put(a3.id, now - 30000, false);
   put(a3.id, now - 15000, false);
   db.setAlertState(a3.id, 'cpu', now - 3600000);
-  r = await alerts.checkAgent({ id: a3.id, name: 'recover-node', last_seen: now }, now, CFG);
+  const realSend = notify.sendEvent;
+  notify.sendEvent = async () => true; // 桩成功投递（测试环境无真实通道，直接发必失败）
+  try {
+    r = await alerts.checkAgent({ id: a3.id, name: 'recover-node', last_seen: now }, now, CFG);
+  } finally { notify.sendEvent = realSend; }
   assert.strictEqual(r.length, 1, '恢复应发一次通知');
-  assert.ok(!db.getAlertState(a3.id, 'cpu'), '恢复后应清除状态（不会重复发送）');
+  assert.ok(!db.getAlertState(a3.id, 'cpu'), '投递成功后应清除状态（不会重复发送）');
 });
 
 test('checkAgent：磁盘/温度超限同样按连续 N 采样触发（审查 E6）', async () => {

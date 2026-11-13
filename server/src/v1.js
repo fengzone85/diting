@@ -13,6 +13,7 @@ const router = express.Router();
 const online = require('./online');
 // 管理员手工录入的硬件档案（受控端不自动采集）
 const hardware = require('./hardware-profile');
+const { rateLimitTouch, bucketKey } = require('./ratelimit');
 
 // 统一响应信封：{ code, message, data }
 function ok(res, data) { res.json({ code: 0, message: '', data }); }
@@ -127,21 +128,15 @@ router.use((req, res, next) => {
   next();
 });
 
-// 应用层限流（兜底，Nginx 限流才是真实边界）：每 IP 每 10s 最多 30 次
-const V1_RATE_WINDOW = 10000, V1_RATE_MAX = 30, V1_MAP_CAP = 10000;
+// 应用层限流（兜底，Nginx 限流才是真实边界）：每 IP 每 10s 最多 30 次。
+// 统一走 src/ratelimit.js：惰性过期+淘汰最旧+当前 IP 永不淘汰；
+// 旧版 setInterval 整表清（窗口截断）与容量满整表清（审查 C3/C-3）已移除。
+const V1_RATE_WINDOW = 10000, V1_RATE_MAX = 30;
 const v1RateHits = new Map();
-setInterval(() => v1RateHits.clear(), V1_RATE_WINDOW).unref?.();
 router.use((req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  const rec = v1RateHits.get(ip);
-  if (!rec || now > rec.reset) {
-    if (v1RateHits.size >= V1_MAP_CAP) v1RateHits.clear();
-    v1RateHits.set(ip, { reset: now + V1_RATE_WINDOW, count: 1 });
-    return next();
+  if (!rateLimitTouch(v1RateHits, bucketKey(req.ip || req.socket.remoteAddress), V1_RATE_WINDOW, V1_RATE_MAX)) {
+    return res.status(429).json({ code: 1, message: 'too many requests', data: null });
   }
-  rec.count++;
-  if (rec.count > V1_RATE_MAX) return res.status(429).json({ code: 1, message: 'too many requests', data: null });
   next();
 });
 

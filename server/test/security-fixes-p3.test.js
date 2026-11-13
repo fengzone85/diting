@@ -59,8 +59,8 @@ test('heavyQuerySync：主线程回退入口与委托路径一致；未知函数
 });
 
 test('heavyQuery：worker 超时后回退主线程，结果仍正确（C4 可用性兜底）', async () => {
-  // 以 1ms 超时强制走回退路径（worker 里的查询仍会跑完，结果丢弃——同步查询
-  // 无法中断，此为已知限制；超时值可经 HEAVY_QUERY_TIMEOUT_MS 调整）。
+  // 以 1ms 超时强制走回退路径（G1/REL-06a 起超时先 terminate worker 杀死僵尸
+  // 查询再回退，不再双执行；超时值可经 HEAVY_QUERY_TIMEOUT_MS 调整）。
   const mod = require.resolve('../src/heavy-db');
   delete require.cache[mod];
   process.env.HEAVY_QUERY_TIMEOUT_MS = '1';

@@ -772,6 +772,14 @@ const server = app.listen(PORT, () => {
 // ② 按客户端 IP 限制并发连接数与新建速率，防资源耗尽型攻击。
 const WS_MAX_CONCURRENT = 5;   // 单 IP 最大并发连接
 const WS_MAX_PER_MIN = 20;     // 单 IP 每分钟最大新建连接数
+// E1（SEC-02）：/api/rpc2 每连接消息级令牌桶。连接级限额挡不住「单连接高频发消息」
+// （每条都触发 handleRpc，重方法可打满 worker）。阈值按真实社区主题流量校准：
+// 最重的 glass 主题轮询下限 1s/次（dataUpdateInterval∈[1,60]，默认 3s）+ 60s 节点刷新
+// ≈ 1.02 msg/s；purcarte 2s/次 = 0.5 msg/s；初始化突发 <10 条。burst 20 / refill 10/s
+// 对最坏持续流量留 ~10 倍余量（2026-11-13 隔离实例 + headless 实测见方案 Batch E 验收）。
+const WS_RPC_BURST = 20;          // 桶容量（初始化突发 + 详情页并发查询）
+const WS_RPC_REFILL_PER_SEC = 10; // 每秒补充令牌数
+const WS_RPC_MAX_VIOLATIONS = 100; // 累计超额次数超过即断连（正常主题永不触达）
 const wsConns = new Map();     // ip -> Set(ws)
 const wsHits = new Map();      // ip -> { reset, count }
 // 审查 C3/C-3：计数走公共实现（惰性过期 + 淘汰最旧）；原整表 clear 定时器会把
@@ -886,7 +894,29 @@ try {
     const pushStatus = () => { if (statusSnapStr) { try { ws.send(statusSnapStr); } catch (_) {} } };
     pushStatus();
 
+    // E1：每连接令牌桶（懒补充，无定时器）。所有入站帧都计费——含非法 JSON，
+    // 否则攻击者可用解析失败帧免费耗 CPU。违规计数累计不清零：合法主题有 ~10 倍
+    // 余量永不触达，只有持续滥用才会攒满断连。
+    let rpcTokens = WS_RPC_BURST;
+    let rpcLastRefill = Date.now();
+    let rpcViolations = 0;
+
     ws.on('message', (data) => {
+      const now = Date.now();
+      rpcTokens = Math.min(WS_RPC_BURST, rpcTokens + (now - rpcLastRefill) / 1000 * WS_RPC_REFILL_PER_SEC);
+      rpcLastRefill = now;
+      if (rpcTokens < 1) {
+        rpcViolations++;
+        if (rpcViolations > WS_RPC_MAX_VIOLATIONS) {
+          try { ws.close(1008, 'rate limited'); } catch (_) {}
+          return;
+        }
+        // id 未知（尚未解析）→ null，符合 JSON-RPC 对解析前错误的约定；
+        // 主题客户端把 id=null 当推送忽略，不会误配对到正常请求。
+        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'rate limited' }, id: null })); } catch (_) {}
+        return;
+      }
+      rpcTokens -= 1;
       let msg = null;
       try {
         msg = JSON.parse(data.toString());

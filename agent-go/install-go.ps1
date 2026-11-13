@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Diting Agent (Go) Windows installer: download exe + scheduled task.
@@ -98,12 +98,15 @@ try {
 # S5：优先走服务端签名中继（连不上 GitHub 的节点，如电信出口），失败回落 GitHub Release。
 # 中继只对「验签通过 + 架构匹配」的产物放行，方向仍是本机出站，零入站不破。
 $exe = Join-Path $InstallDir 'diting-agent.exe'
+# REL-01：先下载到临时文件并验 SHA256，通过后才替换正式 exe。
+# 旧实现直写 $exe 再校验，哈希不符时好的旧二进制已被毁掉。
+$tmp = "$exe.download"
 $relayUrl = "$($ServerUrl.TrimEnd('/'))/api/releases/agent/windows/amd64"
 $fromRelay = $false
 if ($ServerUrl) {
     try {
         Write-Host "Downloading $relayUrl ..."
-        Invoke-WebRequest $relayUrl -OutFile $exe -UseBasicParsing -TimeoutSec 180
+        Invoke-WebRequest $relayUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 180
         $fromRelay = $true
         Write-Host '[OK] downloaded via server relay'
     } catch {
@@ -112,7 +115,8 @@ if ($ServerUrl) {
 }
 if (-not $fromRelay) {
     Write-Host "Downloading $RepoBase/diting-agent-windows-amd64.exe ..."
-    Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe" -OutFile $exe -UseBasicParsing
+    # B-15：GitHub 回落补超时（与中继路径口径一致），避免无响应时永久挂起
+    Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe" -OutFile $tmp -UseBasicParsing -TimeoutSec 180
 }
 # PS 5.1 在部分响应下 Content 为 Byte[]，无 .Trim()；统一按 ASCII 解码后去空白
 $sumResp = $null
@@ -125,16 +129,37 @@ if ($fromRelay) {
     }
 }
 if ($null -eq $sumResp) {
-    $sumResp = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing).Content
+    # B-15：GitHub sha256 抓取同样补超时
+    $sumResp = (Invoke-WebRequest "$RepoBase/diting-agent-windows-amd64.exe.sha256" -UseBasicParsing -TimeoutSec 60).Content
 }
 if ($sumResp -is [byte[]]) { $sumResp = [System.Text.Encoding]::ASCII.GetString($sumResp) }
 $expected = ($sumResp -split '\s+')[0].Trim().ToLower()
-$actual = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+$actual = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) {
-    Write-Error "SHA256 mismatch: want $expected got $actual"
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Write-Error "SHA256 mismatch: want $expected got $actual (existing agent left untouched)"
     exit 1
 }
 Write-Host '[OK] SHA256 verified'
+
+# REL-01：校验通过才替换正式 exe。Windows 会锁定运行中的 exe，先停计划任务并
+# 等进程退出（有界等待），再 Move-Item。失败则清理临时文件、保留旧 exe。
+$taskName = "HostMonitorAgent-$AgentId"
+if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+}
+$deadline = (Get-Date).AddSeconds(15)
+while ((Get-Process -Name 'diting-agent' -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
+    Start-Sleep -Milliseconds 500
+}
+try {
+    Move-Item -Force $tmp $exe
+} catch {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    Write-Error "failed to replace exe: $($_.Exception.Message)"
+    exit 1
+}
+Write-Host '[OK] agent binary updated'
 
 # 2. run.bat with single-instance guard (belt and braces alongside IgnoreNew)
 # Keep the Python agent's file name run_scheduled.bat: the server's modify-probe
@@ -182,7 +207,7 @@ Write-Host "[OK] hidden launcher written: $vbs"
 # 3. Scheduled task: AtStartup + LocalService + auto-restart + single instance.
 # Task name stays HostMonitorAgent-<id> (same as the Python installer) so the
 # server-side modify command's Stop/Start-ScheduledTask keeps targeting it.
-$taskName = "HostMonitorAgent-$AgentId"
+# ($taskName already defined above before the binary swap.)
 $action   = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $InstallDir
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet `

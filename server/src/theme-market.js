@@ -252,12 +252,12 @@ function cmpVersion(a, b) {
 
 function satisfies(version, range) {
   const v = parseVersion(version);
-  if (!v) return true; // 无法解析的版本不放行也不误杀：交由安装者自行判断
+  if (!v) return false; // fail-closed：解析不了的版本一律视为不兼容，防畸形版本绕过校验
   const r = String(range || '').trim();
   if (!r) return true;
   return r.split(/\s+/).filter(Boolean).every((part) => {
     const m = /^(>=|<=|>|<|=|\^|~)?\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(part);
-    if (!m) return true;
+    if (!m) return false; // fail-closed：畸形 range 段不放行（空 range 已在上方放行=无约束）
     const op = m[1] || '>=';
     const t = [Number(m[2]), Number(m[3] || 0), Number(m[4] || 0)];
     if (op === '^') return v[0] === t[0] && cmpVersion(v, t) >= 0;
@@ -420,8 +420,22 @@ async function installFromZip(buf, expect = {}) {
       try { existing = fs.statSync(dest).isDirectory(); } catch (e) { existing = false; }
       if (existing) theme.backupTheme(manifest.short);
 
-      fs.rmSync(dest, { recursive: true, force: true });
-      fs.cpSync(tmp, dest, { recursive: true });
+      // 原子替换（REL-13）：tmp 在 os.tmpdir()，可能与 themes 跨文件系统（rename EXDEV），
+      // 先拷入同目录 staging（'.' 前缀不匹配 SHORT_RE，不会被当主题列出/serve），
+      // 再「旧目录移开 + staging rename 就位」，消除 rm→cp 的缺失/半截窗口；失败回滚旧目录。
+      const staging = fs.mkdtempSync(path.join(theme.INSTALLED_THEMES_DIR, '.staging-'));
+      fs.cpSync(tmp, staging, { recursive: true });
+      const old = `${dest}.old-${process.pid}-${Date.now()}`;
+      let movedOld = false;
+      try {
+        if (existing) { fs.renameSync(dest, old); movedOld = true; }
+        fs.renameSync(staging, dest);
+      } catch (e) {
+        try { fs.rmSync(staging, { recursive: true, force: true }); } catch (e2) { /* 忽略 */ }
+        if (movedOld) { try { fs.renameSync(old, dest); } catch (e2) { /* 忽略 */ } }
+        throw e;
+      }
+      if (movedOld) { try { fs.rmSync(old, { recursive: true, force: true }); } catch (e) { /* 忽略 */ } }
       theme.rebuildNonceSet();
       return theme.getTheme(manifest.short);
     } finally {

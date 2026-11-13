@@ -24,8 +24,12 @@ const ONLINE_GRACE_SEC = Math.max(0, Number(process.env.ONLINE_NOTIFY_GRACE_SEC 
 // 只对带 cert_days 的目标生效；非 https / 握手未取到证书（null）跳过——known 语义。
 const CERT_WARN_DAYS = Math.max(0, Math.floor(Number(process.env.CERT_WARN_DAYS) || 14));
 // 内存态离线起点：agent_id -> 首次观测到离线的时刻。
-// 进程重启后为空——首个检查轮只会记录起点，不会误发上线通知。
+// 进程重启后为空——回退取持久化在线时段的 ended_at（REL-08，见 checkAgent 恢复分支）。
 const OFFLINE_SINCE = new Map();
+// 恢复通知「已处理」标记（REL-07/08）：上线通知已投递成功或被宽限期抑制。
+// 防止回退路径在成功后每轮重发；新离线段开始时重新置位。只需内存态：重启后
+// cleanupOnlineSessions 会把当前在线段关闭到 last_seen，回退时长≈0 被宽限期天然抑制。
+const RECOVERY_HANDLED = new Set();
 
 // 阈值解析链（S1/F1）：节点覆盖 > 分组覆盖 > 全局（UI/env/默认），字段独立继承。
 // ctx 可传入预取的 Map（groupCache/nodeCache），避免逐节点重复查询。
@@ -123,6 +127,8 @@ function checkAgent(a, now, cfg, ctx) {
     if (!online) {
       // 记录离线起点（内存态）：供上线通知的宽限期判定。
       if (!OFFLINE_SINCE.has(a.id)) OFFLINE_SINCE.set(a.id, now);
+      // 新离线段开始：恢复通知重新置位（上一段恢复无论发没发过都作废）
+      RECOVERY_HANDLED.delete(a.id);
       const st = db.getAlertState(a.id, 'offline');
       if (!st || now - st.last_sent > c.cooldown * 1000) {
         return sendAlertGuarded(a.id, 'offline', `[监控] ${a.name} 离线`, `客户端 ${a.name}(${a.id}) 已超过 ${c.offlineSec}s 未上报，可能已宕机或断网。`, a.name);
@@ -133,12 +139,32 @@ function checkAgent(a, now, cfg, ctx) {
     db.clearAlertState(a.id, 'offline');
     const jobs = [];
     // 上线通知（S1/F1）：离线时长 ≥ 宽限期才发，防抖动刷屏；不受 muted 压制。
-    const offlineSince = OFFLINE_SINCE.get(a.id);
+    // REL-07：投递成功才标记「已处理」；失败保留离线起点、下一轮 check 重试，
+    // 与触发方向 sendAlertGuarded 的失败回滚对称。恢复重试无独立冷却：每轮重试
+    // 直至成功（通道永久故障时两方向同样持续重试，口径对称）。
+    let offlineSince = OFFLINE_SINCE.get(a.id);
+    if (offlineSince === undefined && !RECOVERY_HANDLED.has(a.id)) {
+      // REL-08：进程重启后内存起点丢失，回退取上一「已关闭」在线时段的 ended_at
+      //（F7 已持久化）。不能用 getLastOnlineSession：syncOnlineSession 已为本次
+      // 恢复新开段，那条查询会取到 ended_at=NULL 的新段。服务端长时间停机同样
+      // 会被视为一段离线（口径＝服务端视角的不可见时长）。
+      const last = db.getLastClosedOnlineSession(a.id);
+      if (last && last.ended_at) offlineSince = last.ended_at;
+    }
     if (offlineSince !== undefined) {
-      OFFLINE_SINCE.delete(a.id);
       const offlineSec = Math.round((now - offlineSince) / 1000);
+      const markHandled = () => {
+        RECOVERY_HANDLED.add(a.id);
+        // 仅当起点未被新离线段覆盖时才删（防覆盖新离线段）
+        if (OFFLINE_SINCE.get(a.id) === offlineSince) OFFLINE_SINCE.delete(a.id);
+      };
       if (ONLINE_GRACE_SEC > 0 && offlineSec >= ONLINE_GRACE_SEC) {
-        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`, 'online', { agentId: a.id, agentName: a.name }));
+        jobs.push(sendAlert(`[监控] ${a.name} 已上线`, `客户端 ${a.name}(${a.id}) 离线约 ${offlineSec}s 后恢复上报。`, 'online', { agentId: a.id, agentName: a.name })
+          .then((ok) => { if (ok) markHandled(); }));
+      } else {
+        // 宽限期内或关闭通知：不发，但仍要标记已处理——否则内存起点清除后，
+        // 回退路径会按持久化段重算出不断增长的离线时长，迟早越过宽限期补发。
+        markHandled();
       }
     }
     const m = db.getLatestMetric(a.id);
@@ -167,10 +193,11 @@ function checkAgent(a, now, cfg, ctx) {
           jobs.push(alertThreshold(a, type, `${label} ${detail}`, now, c.cooldown));
         }
       } else if (st && below / vals.length >= TRIGGER_RATIO) {
-        // 持续低于阈值：发一次"已恢复"并清状态（清除后不会重复发送）
-        db.clearAlertState(a.id, type);
+        // 持续低于阈值：发一次"已恢复"。REL-07：投递成功才清 state，失败保留
+        // → 下轮仍低于阈值时重试；若指标回升，触发路径按 st.last_sent 冷却，语义不变。
         // 恢复与对应指标同事件组投递（不设独立 recovery 事件，避免 '*' 组重复投递）
-        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`, type, { agentId: a.id, agentName: a.name }));
+        jobs.push(sendAlert(`[监控] ${a.name} ${label} 已恢复`, `客户端 ${a.name}(${a.id}) ${label} 已回落至 ${limit}${unit} 以下（当前 ${cur.toFixed(1)}${unit}）。`, type, { agentId: a.id, agentName: a.name })
+          .then((ok) => { if (ok) db.clearAlertState(a.id, type); }));
       }
     };
     checkMetric('cpu', 'cpu', c.cpuAlert, '%', 'CPU');
@@ -207,9 +234,10 @@ async function check() {
       groupCache: new Map(db.listGroupAlertOverrides().map((r) => [r.grp, r])),
       nodeCache: new Map(db.listAlertOverrides().map((r) => [r.agent_id, r]))
     };
-    // 清理已删除节点的内存离线起点，防 Map 无界增长。
+    // 清理已删除节点的内存离线起点与恢复标记，防 Map/Set 无界增长。
     const alive = new Set(agents.map((a) => a.id));
     for (const k of OFFLINE_SINCE.keys()) if (!alive.has(k)) OFFLINE_SINCE.delete(k);
+    for (const k of RECOVERY_HANDLED) if (!alive.has(k)) RECOVERY_HANDLED.delete(k);
     // 限并发而非全并发：SMTP 普遍有速率/连接限制，100 台同时离线时一次性并发易被拒收。
     const CONCURRENCY = Math.max(1, Number(process.env.ALERT_CONCURRENCY || 8));
     for (let i = 0; i < agents.length; i += CONCURRENCY) {

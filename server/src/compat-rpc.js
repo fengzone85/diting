@@ -9,10 +9,15 @@ const { METRIC_DEFINITIONS, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL } = r
 const { heavyQuery } = require('./heavy-db');
 
 const METHODS = new Map();
+// E2（SEC-03）：重查询方法集。走 heavyQuery worker 的方法（loadOne/probesOne/probesAll）
+// 单次可扫数十万行；queryMetrics 虽在主线程，但单调用最多 50 实体 × 2 条采样 SQL，
+// 同属未认证可触发的重查询放大面，一并计入。别名注册时继承标记。
+const HEAVY_METHODS = new Set();
 
-function registerMethod(name, handler) {
+function registerMethod(name, handler, heavy = false) {
   if (METHODS.has(name)) throw new Error(`method ${name} already registered`);
   METHODS.set(name, handler);
+  if (heavy) HEAVY_METHODS.add(name);
 }
 
 function getPublicInfo() {
@@ -513,7 +518,7 @@ registerMethod('common:getNodeRecentStatus', (params = {}) => {
   return { count: 1, records: [toFlatRecent(a.id, m)] };
 });
 // 官方 common:getRecords 默认 hours=1（common.record.go:56-59）。
-registerMethod('common:getRecords', (params = {}) => getRecords(params, 1));
+registerMethod('common:getRecords', (params = {}) => getRecords(params, 1), true);
 // 官方 Common RPC（上游/web/rpc/jsonrpc/README.md）：与 public:* 共用同一真源。
 registerMethod('common:getMe', () => ({ logged_in: false, username: 'Guest', sso_id: '', sso_type: '', uuid: '' }));
 registerMethod('common:getPublicInfo', getPublicInfo);
@@ -532,17 +537,17 @@ registerMethod('public:getClientRecentRecords', (params = {}) => {
   return rt ? [rt] : [];
 });
 // 官方 public:getRecordsByUUID 默认 hours=4（public.go:148-151），与 common:getRecords 不同。
-registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params, 4));
+registerMethod('public:getRecordsByUUID', (params = {}) => getRecords(params, 4), true);
 registerMethod('public:getPublicPingTasks', getPublicPingTasks);
 // 官方记录端点（router.go:61），与 /api/records/ping 是两条不同绑定。
-registerMethod('public:getPingRecords', getPublicPingRecords);
+registerMethod('public:getPingRecords', getPublicPingRecords, true);
 registerMethod('public:listMetricDefinitions', () => METRIC_DEFINITIONS);
 // 返回结构：保持 { start, end, series } 信封。实测玻璃拟态设计 v3.4.4 的 LoadChart 直接读
 // `o.series`（`We(o.series)`），若按上游 Go 侧的 []publicMetricSeries 裸数组返回，`o.series`
 // 为 undefined → 全部图表判定「暂无数据」。（曾按官方 Go 结构改成裸数组，实测反而六张负载图全空，
 // 已回退——以真实主题行为为准。）
-registerMethod('public:queryMetrics', queryMetrics);
-registerMethod('public:getPingMetricStats', getPingMetricStats);
+registerMethod('public:queryMetrics', queryMetrics, true);
+registerMethod('public:getPingMetricStats', getPingMetricStats, true);
 
 // 上游官方社区主题（玻璃拟态设计）底层 MetricsService 调用的原生方法名
 // metrics:query 使用【位置参数数组】而非对象：
@@ -557,12 +562,12 @@ registerMethod('metrics:query', (params) => {
     p = { metric_keys, entity_id, entity_ids, hours, start_time, end_time, max_points, aggregation, fill_empty };
   }
   return queryMetrics(p);
-});
+}, true);
 registerMethod('metrics:ping', (params = {}) => {
   const p = Array.isArray(params) ? (params[0] || {}) : params;
   // metrics:* 是 diting 自造方法，官方源码无此命名空间、无 hours 基准，保持 1（Phase 3 登记）。
   return getRecords({ ...p, type: 'ping' }, 1);
-});
+}, true);
 
 // 别名注册：第三方社区主题（如上游官方玻璃拟态设计）常以「无命名空间」形式
 // 调用方法（getNodes / getNodesLatestStatus / ping / getVersion 等），而非 common:* / rpc.* 前缀。
@@ -572,7 +577,11 @@ registerMethod('metrics:ping', (params = {}) => {
     const idx = full.search(/[:.]/);
     if (idx > 0) {
       const short = full.slice(idx + 1);
-      if (short && !METHODS.has(short)) METHODS.set(short, METHODS.get(full));
+      if (short && !METHODS.has(short)) {
+        METHODS.set(short, METHODS.get(full));
+        // E2：别名继承 heavy 标记，否则主题用无命名空间名即可绕过批内配额。
+        if (HEAVY_METHODS.has(full)) HEAVY_METHODS.add(short);
+      }
     }
   }
 })();
@@ -610,6 +619,10 @@ function rpcError(id, code, message) {
 
 // 批量上限：官方无此限制，diting 为防未认证请求放大 heavyQuery worker 附加（方案 R9）。
 const MAX_RPC_BATCH = 50;
+// E2（SEC-03）：单批 heavy 调用上限。50 条全 heavy 时最坏可独占 worker ~7.5s；
+// 限 5 把最坏独占压到 ~750ms。真实社区主题单批 heavy 极少 >5（联调校准见方案 Batch E），
+// 轻方法（getNodes/getNodesLatestStatus/getVersion 等）不受此配额影响。
+const MAX_HEAVY_PER_BATCH = 5;
 
 function rpcMiddleware(req, res) {
   if (!publicOpen()) {
@@ -624,9 +637,16 @@ function rpcMiddleware(req, res) {
   // 且官方返回 HTTP 400（transport.go:129），不是 diting 此前的 200。
   if (messages.length === 0) return res.status(400).json(rpcError(null, -32600, 'empty batch'));
   if (messages.length > MAX_RPC_BATCH) return res.status(400).json(rpcError(null, -32600, 'batch too large'));
+  let heavyCount = 0;
   for (const msg of messages) {
     const err = validateRpcMessage(msg);
     if (err) return res.status(400).json(rpcError(null, -32600, err));
+    if (HEAVY_METHODS.has(msg.method)) heavyCount++;
+  }
+  // E2：heavy 配额超限 → 整批拒（与批校验同语义 -32600/400），不做部分执行，
+  // 避免攻击者用「轻+重混批」绕过，也避免半批结果让主题难以对账。
+  if (heavyCount > MAX_HEAVY_PER_BATCH) {
+    return res.status(400).json(rpcError(null, -32600, 'too many heavy queries in batch'));
   }
   // 方法执行阶段：逐条独立 dispatch，错误只落在自身的 error 对象上（transport.go:133-141）。
   // notification（无 id）也回包：response.go 注释说不回，但 servePost 无条件 append，
@@ -641,4 +661,4 @@ function rpcMiddleware(req, res) {
   });
 }
 
-module.exports = { handleRpc, registerMethod, rpcMiddleware, METHODS, officialPingTasks };
+module.exports = { handleRpc, registerMethod, rpcMiddleware, METHODS, HEAVY_METHODS, MAX_HEAVY_PER_BATCH, officialPingTasks };

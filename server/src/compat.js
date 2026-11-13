@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('./db');
 const { asyncHandler } = require('./util');
+const { rateLimitTouch, bucketKey } = require('./ratelimit');
 // 审查 C4：公开兼容层的重聚合（720h 全窗、未认证即可触发）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
 // task id 必须与 RPC（getPublicPingTasks / getPingMetricStats / queryMetrics）同源：
@@ -251,20 +252,14 @@ const guard = (req, res, next) => {
 };
 
 // 社区主题公开接口应用层限流（Nginx 兜底外的应用层保险）：每 IP 每 10s 最多 30 次。
-const COMPAT_RATE_WINDOW = 10000, COMPAT_RATE_MAX = 30, COMPAT_MAP_CAP = 10000;
+// 统一走 src/ratelimit.js：惰性过期+淘汰最旧+当前 IP 永不淘汰；
+// 旧版 setInterval 整表清（窗口截断）与容量满整表清（审查 C3/C-3）已移除。
+const COMPAT_RATE_WINDOW = 10000, COMPAT_RATE_MAX = 30;
 const compatRateHits = new Map();
-setInterval(() => compatRateHits.clear(), COMPAT_RATE_WINDOW).unref?.();
 router.use((req, res, next) => {
-  const ip = req.ip || req.socket.remoteAddress;
-  const now = Date.now();
-  const rec = compatRateHits.get(ip);
-  if (!rec || now > rec.reset) {
-    if (compatRateHits.size >= COMPAT_MAP_CAP) compatRateHits.clear();
-    compatRateHits.set(ip, { reset: now + COMPAT_RATE_WINDOW, count: 1 });
-    return next();
+  if (!rateLimitTouch(compatRateHits, bucketKey(req.ip || req.socket.remoteAddress), COMPAT_RATE_WINDOW, COMPAT_RATE_MAX)) {
+    return res.status(429).json({ status: 'error', message: 'too many requests' });
   }
-  rec.count++;
-  if (rec.count > COMPAT_RATE_MAX) return res.status(429).json({ status: 'error', message: 'too many requests' });
   next();
 });
 

@@ -39,6 +39,7 @@ for (const suffix of ['', '-journal', '-wal', '-shm']) {
 const { app, server } = require('../server');
 const db = require('../src/db');
 const alerts = require('../src/alerts');
+const notify = require('../src/notify');
 
 db.setConfig('notify_config', JSON.stringify({ smtp_user: '', smtp_pass: '', telegram_bot_token: '', telegram_chat_id: '' }));
 
@@ -155,13 +156,17 @@ test('采样窗口：5 样本中 4 个超限触发；3 个不触发；恢复同�
   r = await alerts.checkAgent({ id: b.id, name: 'window-miss', last_seen: NOW }, NOW);
   assert.strictEqual(r.length, 0, '3/5 超限不应触发');
 
-  // 恢复：已有 state + 4/5 低于阈值 → 发一次并清状态
+  // 恢复：已有 state + 4/5 低于阈值 → 发一次；REL-07：投递成功才清状态
   const c = db.createAgent({ name: 'window-recover' });
   [95, 10, 10, 10, 10].forEach((v, i) => put(c.id, NOW - 50000 + i * 10000, { cpu: v }));
   db.setAlertState(c.id, 'cpu', NOW - 1000);
-  r = await alerts.checkAgent({ id: c.id, name: 'window-recover', last_seen: NOW }, NOW);
+  const realSend = notify.sendEvent;
+  notify.sendEvent = async () => true; // 桩成功投递（测试环境无真实通道，直接发必失败）
+  try {
+    r = await alerts.checkAgent({ id: c.id, name: 'window-recover', last_seen: NOW }, NOW);
+  } finally { notify.sendEvent = realSend; }
   assert.strictEqual(r.length, 1, '恢复应发一次通知');
-  assert.ok(!db.getAlertState(c.id, 'cpu'), '恢复后清除状态');
+  assert.ok(!db.getAlertState(c.id, 'cpu'), '投递成功后清除状态');
 });
 
 test('ALERT_SUSTAIN_SAMPLES 兼容模式：窗口=N、比例=1.0（连续 N 次全超限）', () => {

@@ -117,7 +117,9 @@ Agent 之间互不通信，互不知道彼此存在。
 - **吊销立即生效**：吊销时同步失效服务端会话校验缓存（5 秒 TTL），不等缓存过期。
 - **DB 故障时的取舍**：查 `sessions` 表抛错时**默认 fail-open**（Cookie 签名有效且未过全局水位线
   即放行并记错误日志），避免单机 SQLite 损坏把管理员永久锁死；设 `STRICT_SESSION_DB=1` 切换
-  fail-close（DB 故障时拒绝一切会话，仅登录页本身可用）。
+  fail-close（DB 故障时拒绝一切会话，仅登录页本身可用）。fail-open 仅作用于「单会话踢出」这一层
+  校验——签名、过期、全局吊销水位线仍照常校验，故**非匿名绕过**；残留面是 DB 故障期间已被单独
+  踢出的会话可能短暂放行至自然过期（12 小时 TTL）。
 - **兼容性**：升级前签发、不带 `sid` 的旧 Cookie 仍放行至自然过期（12 小时 TTL）。
 - 会话行由每小时 prune 任务清理（`last_seen` 超过 2×SESSION_TTL）。
 
@@ -147,6 +149,17 @@ Agent 之间互不通信，互不知道彼此存在。
 | XSS 防护 | 所有用户输入经转义 |
 | CSRF 防护 | Cookie + SameSite |
 | 输入校验 | `validate.js` 统一校验 |
+| 自定义 CSS 清洗 | `sanitizeCss` 递归校验，杜绝外链/脚本向量（见下） |
+
+#### 自定义 CSS 的威胁模型与清洗（SEC-08）
+
+后台「自定义 CSS」（`custom_css`）由**管理员**写入，投放到公开主题页。威胁模型不是匿名注入，而是**恶意管理员借 CSS 对公开访客做 XSS / 数据外泄 / 字体指纹追踪**。`sanitizeCss`（`validate.js`）据此清洗：
+
+- 全局剥离 `@import` / `@charset` / `@namespace` / `@font-face`、所有 `url(...)`、`expression(...)`。
+- **递归括号匹配**逐条校验声明：非法属性名、危险属性（`behavior` / `-moz-binding`）、危险值（`javascript:` / `vbscript:` / 非图片 `data:`）一律丢弃。`@media` / `@keyframes` / `@supports` 等嵌套 at-rule 的**内层声明走同一套校验**——早期版本对 `@` 块整体放行，致 `javascript:` / `data:` 值在 `@media` 内绕过，已修复（G2）。
+- 引号感知（防 `content:"}"` 误配括号）+ 嵌套深度上限（防病态输入栈溢出）+ 长度上限 20000。
+
+**残留面**：清洗基于正则/括号匹配而非完整 CSS AST，极端构造（如属性值内复杂转义）可能存在边界绕过；因输入源仅限管理员，风险等级受限。如需更强保证可引入 CSS AST parser（新增依赖，暂未采用）。
 
 ## 数据保留
 

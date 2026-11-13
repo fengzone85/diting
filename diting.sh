@@ -229,7 +229,8 @@ show_usage() {
   --port N                服务端监听端口（1-65535，默认 8081；配合 --install-server）
   --install-agent         安装受控端（systemd）
   --update-script         更新本安装脚本为最新版
-  --update-server         更新服务端（git pull + 重建容器；升级前自动备份数据库）
+  --update-server         更新服务端（升级前自动备份数据库；原生 systemd 形态做应用级就绪探测，
+                          失败自动回滚代码与数据库；Docker 形态 git pull + 重建容器）
   --force                 跳过保护性检查（升级前备份失败时仍继续，谨慎使用）
   --update-agent          更新受控端（systemd，保留原连接配置）
   --status                查看服务端/受控端状态（自动识别 systemd / Docker）
@@ -240,6 +241,8 @@ show_usage() {
                           DITING_APP_DIR 可覆盖；含 npm ci 与版本文件写入；不重启服务）
   --logs [行数|follow]    查看服务端日志（自动识别 systemd / Docker，默认最近 100 行）
   --uninstall             卸载服务端与受控端
+  --uninstall-server      只卸载服务端（原生 systemd 停止/disable/清理 unit，Docker compose down；
+                          保留数据库与 .env，不动受控端）
   --backup [路径]         备份数据库（不指定路径则存到 /var/backups/diting/）
   --keep-days N           备份保留天数（默认 14，超出自动清理；0=不清理）
   --compress / --no-compress   是否 gzip 压缩备份（默认压缩，体积约 20%）
@@ -746,7 +749,224 @@ _upgrade_rollback_hint() {
     fi
 }
 
+# ── Batch F：原生 systemd 升级 readiness + 自动回滚（REL-03）──────────────────
+# 原生形态（运行目录分离）升级＝部署当前源码树 → 重启 → 应用级 readiness →
+# 失败自动回滚旧副本+库。**不自动 git reset**：SCRIPT_DIR 是含 WIP 的开发仓库，
+# reset --hard 会毁未提交工作；源码由操作者自管 git（与 docker 一键 pull 区分）。
+
+# 从 env 文件读键值（去引号/尾空白），读不到输出空。
+_env_get() {
+    local f="$1" k="$2" v=""
+    [[ -n "$f" && -f "$f" ]] || { echo ""; return 0; }
+    v="$(sed -n "s/^[[:space:]]*${k}[[:space:]]*=[[:space:]]*//p" "$f" 2>/dev/null | tail -n1)"
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    v="${v%%[[:space:]]*}"
+    echo "$v"
+}
+
+# JSON 字符串转义（反斜杠/双引号），零新依赖。
+_json_esc() { local s="$1"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
+
+# 升级事务元数据：独立键 upgrade_state.json（不并入 ui_settings，不记秘密）。
+# 用法：_upgrade_state <file> <txid> <stage> <old_hash> <old_ver> <bak> <rollback_dir> <new_hash> [error]
+_upgrade_state() {
+    local f="$1" txid="$2" stage="$3" oh="$4" ov="$5" bak="$6" rd="$7" nh="$8" err="${9:-}"
+    local ts; ts="$(date +%Y-%m-%dT%H:%M:%S%z 2>/dev/null || date)"
+    {
+        printf '{\n'
+        printf '  "txid": "%s",\n' "$(_json_esc "$txid")"
+        printf '  "stage": "%s",\n' "$(_json_esc "$stage")"
+        printf '  "old_hash": "%s",\n' "$(_json_esc "$oh")"
+        printf '  "old_version": "%s",\n' "$(_json_esc "$ov")"
+        printf '  "new_hash": "%s",\n' "$(_json_esc "$nh")"
+        printf '  "backup": "%s",\n' "$(_json_esc "$bak")"
+        printf '  "rollback_dir": "%s",\n' "$(_json_esc "$rd")"
+        printf '  "error": "%s",\n' "$(_json_esc "$err")"
+        printf '  "ts": "%s"\n' "$(_json_esc "$ts")"
+        printf '}\n'
+    } > "$f" 2>/dev/null || true
+}
+
+# 应用级 readiness：/api/version 连续 need 次 200 且版本符（校验新副本生效 + DB 可读）。
+# 崩溃循环保护：NRestarts>=3 提前判失败。超时 DITING_READY_TIMEOUT（默认 60s）。
+# 用法：_wait_readiness <port> [expected_version]
+_wait_readiness() {
+    local port="$1" expect="${2:-}"
+    local timeout="${DITING_READY_TIMEOUT:-60}" interval="${DITING_READY_INTERVAL:-2}" need="${DITING_READY_NEED:-3}"
+    local ok=0 deadline code ver nrestarts tmp
+    deadline=$(( $(date +%s) + timeout ))
+    tmp="$(mktemp 2>/dev/null || echo "/tmp/diting-ready.$$")"
+    while (( $(date +%s) < deadline )); do
+        nrestarts="$(systemctl show diting-server -p NRestarts --value 2>/dev/null || echo 0)"
+        [[ "$nrestarts" =~ ^[0-9]+$ ]] || nrestarts=0
+        if (( nrestarts >= 3 )); then
+            echo -e "${RED}[readiness] 崩溃循环（NRestarts=$nrestarts）${NC}" >&2
+            rm -f "$tmp" 2>/dev/null || true
+            return 1
+        fi
+        code="$(curl -s -m 5 -o "$tmp" -w '%{http_code}' "http://127.0.0.1:${port}/api/version" 2>/dev/null)" || code=000
+        if [[ "$code" == "200" ]]; then
+            ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp" 2>/dev/null || true)"
+            if [[ -z "$expect" || "$ver" == "$expect" ]]; then
+                ok=$(( ok + 1 ))
+                if (( ok >= need )); then rm -f "$tmp" 2>/dev/null || true; return 0; fi
+            else
+                ok=0
+            fi
+        else
+            ok=0
+        fi
+        sleep "$interval"
+    done
+    rm -f "$tmp" 2>/dev/null || true
+    echo -e "${RED}[readiness] 超时（${timeout}s 内未连续 ${need} 次健康）${NC}" >&2
+    return 1
+}
+
+# F6 自动回滚：恢复旧副本（快照排除 node_modules → 重 npm ci）+ 恢复升级前库
+# （迁移不可逆保护）+ 重启 + 再探 readiness。非仅打印 hint。
+# 用法：_native_rollback <rollback_dir> <app> <bak> <port> <old_ver> <db> <state_file> <txid> <old_hash>
+_native_rollback() {
+    local rd="$1" app="$2" bak="$3" port="$4" ov="$5" db="$6" sf="$7" txid="$8" oh="$9"
+    echo -e "${YELLOW}[回滚] readiness 失败，恢复升级前状态…${NC}" >&2
+    _upgrade_state "$sf" "$txid" rolling_back "$oh" "$ov" "$bak" "$rd" "" "readiness failed"
+    if [[ -d "$rd" ]]; then
+        # --checksum：按内容比对而非 size+mtime。回滚必须确定性还原旧副本——
+        # 新旧文件可能恰好同长度同秒 mtime（如 version.txt），-a 快查会跳过导致还原不全。
+        rsync -a --checksum --delete --exclude node_modules "$rd/" "$app/" 2>/dev/null || true
+        ( cd "$app" && npm ci --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) || \
+            echo -e "${YELLOW}[回滚] npm ci 失败，旧副本依赖可能不完整${NC}" >&2
+    fi
+    if [[ -n "$bak" && -f "$bak" && -n "$db" ]]; then
+        systemctl stop diting-server 2>/dev/null || true
+        case "$bak" in
+            *.gz) gzip -dc "$bak" > "$db" 2>/dev/null || true ;;
+            *)    cp -p "$bak" "$db" 2>/dev/null || true ;;
+        esac
+        local u; u="$(server_run_user)"
+        [[ -n "$u" ]] && chown "$u" "$db" 2>/dev/null || true
+    fi
+    server_ctl restart >/dev/null 2>&1 || true
+    if _wait_readiness "$port" "$ov"; then
+        echo -e "${GREEN}[回滚] 旧版本已恢复并就绪${NC}" >&2
+        _upgrade_state "$sf" "$txid" rolled_back "$oh" "$ov" "$bak" "$rd" "" "readiness failed; old version restored"
+        return 0
+    fi
+    echo -e "${RED}[回滚] 旧版本仍不健康，需人工介入（备份：${bak:-无}）${NC}" >&2
+    _upgrade_state "$sf" "$txid" rollback_failed "$oh" "$ov" "$bak" "$rd" "" "old version unhealthy after rollback"
+    return 1
+}
+
+# 原生 systemd 升级事务：备份 → 快照旧副本 → deploy → 重启 → readiness → 失败回滚。
+update_server_native() {
+    local app="${DITING_APP_DIR:-/data/simple-probe-data/server-data/app}"
+    [[ -d "$app" ]] || { echo -e "${RED}[错误] 未找到运行副本 $app（请先 --deploy-server）${NC}" >&2; return 1; }
+    local envf port db
+    envf="$(server_env_file)"
+    port="$(server_native_port)"; port="${port:-8081}"
+    db="$(_env_get "$envf" DB_PATH)"
+    local txid; txid="$(date +%Y%m%d_%H%M%S)_$$"
+    local sf; sf="$(dirname "$app")/upgrade_state.json"
+    local oh ov
+    oh="$(cat "$app/git_hash.txt" 2>/dev/null || echo '')"
+    ov="$(cat "$app/version.txt" 2>/dev/null || echo '')"; ov="${ov#v}"
+    echo -e "${GREEN}[升级] 原生 systemd：部署当前源码树 → 重启 → readiness（失败自动回滚）${NC}"
+    echo -e "${YELLOW}[信息] 源码由操作者自管 git（不自动 reset 开发仓库）；事务 ${txid}${NC}"
+    _upgrade_state "$sf" "$txid" backup "$oh" "$ov" "" "" ""
+
+    _init_backup_dir
+    local _bak="${DB_BACKUP_DIR}/monitor_$(date +%Y%m%d_%H%M%S)_pre-upgrade.db"
+    if do_backup "$_bak" 0; then
+        [[ -f "${_bak}.gz" && ! -f "$_bak" ]] && _bak="${_bak}.gz"
+        echo -e "${GREEN}[OK]   升级前备份 → ${_bak}${NC}"
+    else
+        if [[ "${A_FORCE:-0}" == "1" ]]; then
+            echo -e "${YELLOW}[警告] 备份失败，按 --force 继续（风险自负）${NC}"; _bak=""
+        else
+            echo -e "${RED}[错误] 升级前备份失败，中止（当前服务仍在跑旧版）；--force 可跳过${NC}" >&2
+            _upgrade_state "$sf" "$txid" failed "$oh" "$ov" "" "" "" "backup failed"
+            return 1
+        fi
+    fi
+
+    local rd="${app}.rollback-${txid}"
+    if ! rsync -a --exclude node_modules "$app/" "$rd/" 2>/dev/null; then
+        echo -e "${RED}[错误] 旧副本快照失败，中止${NC}" >&2
+        _upgrade_state "$sf" "$txid" failed "$oh" "$ov" "$_bak" "" "" "snapshot failed"
+        return 1
+    fi
+    _upgrade_state "$sf" "$txid" deploy "$oh" "$ov" "$_bak" "$rd" ""
+
+    if ! deploy_server; then
+        echo -e "${RED}[错误] 部署失败，回滚${NC}" >&2
+        _native_rollback "$rd" "$app" "$_bak" "$port" "$ov" "$db" "$sf" "$txid" "$oh" || true
+        return 1
+    fi
+    local nh nv
+    nh="$(cat "$app/git_hash.txt" 2>/dev/null || echo '')"
+    nv="$(cat "$app/version.txt" 2>/dev/null || echo '')"; nv="${nv#v}"
+    if ! server_ctl restart; then
+        echo -e "${RED}[错误] 重启失败，回滚${NC}" >&2
+        _native_rollback "$rd" "$app" "$_bak" "$port" "$ov" "$db" "$sf" "$txid" "$oh" || true
+        return 1
+    fi
+    _upgrade_state "$sf" "$txid" readiness "$oh" "$ov" "$_bak" "$rd" "$nh"
+
+    if _wait_readiness "$port" "$nv"; then
+        _upgrade_state "$sf" "$txid" done "$oh" "$ov" "$_bak" "$rd" "$nh"
+        echo -e "${GREEN}[OK]   升级完成并就绪（${oh:-?} → ${nh:-?}，版本 ${nv:-?}）${NC}"
+        [[ -n "$_bak" && -f "$_bak" ]] && echo -e "       升级前备份：${_bak}"
+        rm -rf "$rd" 2>/dev/null || true
+        return 0
+    fi
+    _native_rollback "$rd" "$app" "$_bak" "$port" "$ov" "$db" "$sf" "$txid" "$oh" || true
+    return 1
+}
+
+# ── Batch F：原生 systemd 服务端卸载（REL-15）─────────────────────────────────
+# 只卸服务端（不连带 agent）；默认保留 DB/数据卷/.env/源码（不误删用户数据）。
+_uninstall_server_systemd() {
+    local unit_file="${DITING_SERVER_UNIT_FILE:-/etc/systemd/system/diting-server.service}"
+    echo "== 卸载服务端 (systemd) =="
+    if systemctl cat diting-server.service >/dev/null 2>&1 || [[ -f "$unit_file" ]]; then
+        systemctl stop diting-server 2>/dev/null || true
+        systemctl disable diting-server 2>/dev/null || true
+        [[ -f "$unit_file" ]] && rm -f "$unit_file" 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        systemctl reset-failed diting-server 2>/dev/null || true
+        echo -e "${GREEN}[OK]   diting-server.service 已停止 / disable / 清理${NC}"
+    else
+        echo "  未检测到 diting-server.service"
+    fi
+    echo -e "${YELLOW}[提示] 数据库 / .env / 源码均保留；如需彻底清除请手动删除（运行副本目录与 unit 的 EnvironmentFile）。${NC}"
+}
+
+_uninstall_server_docker() {
+    echo "== 卸载服务端 (Docker) =="
+    if [[ ! -d "$SRC_DIR/server" ]]; then
+        echo "  服务端未安装"
+        return 0
+    fi
+    ( cd "$SRC_DIR/server" && docker compose down ) || true
+}
+
+# --uninstall-server：只卸服务端，按形态分派，不动 agent。
+uninstall_server() {
+    local mode; mode="$(server_deploy_mode)"
+    case "$mode" in
+        systemd) _uninstall_server_systemd ;;
+        docker)  _uninstall_server_docker ;;
+        *) echo -e "${RED}[错误] 未找到可卸载的服务端（无 diting-server.service，也无 Docker compose 项目）${NC}" >&2; return 1 ;;
+    esac
+}
+
 update_server() {
+    # Batch F：原生 systemd 形态走 readiness + 自动回滚；docker 形态保持原逻辑。
+    if [[ "$(server_deploy_mode)" == "systemd" ]]; then
+        local _rc=0
+        update_server_native || _rc=$?
+        return $_rc
+    fi
     ensure_docker || return 1
     if ! command -v git >/dev/null 2>&1; then
         echo -e "${YELLOW}[信息] 未检测到 git，尝试安装…${NC}"
@@ -3047,12 +3267,16 @@ uninstall_all() {
     else
         echo "  受控端未安装"
     fi
-    echo "== 卸载服务端 (Docker) =="
-    if [[ ! -d "$SRC_DIR/server" ]]; then
+    # Batch F：服务端卸载按形态分派（原生 systemd 也停/disable/清理）；agent 已在上面卸载。
+    local _smode; _smode="$(server_deploy_mode)"
+    if [[ -z "$_smode" ]]; then
         echo "  服务端未安装"
         return 0
     fi
-    ( cd "$SRC_DIR/server" && docker compose down ) || true
+    case "$_smode" in
+        systemd) _uninstall_server_systemd ;;
+        docker)  _uninstall_server_docker ;;
+    esac
 
     # 残留凭据检测：卸载只删容器，数据卷与 .env 都保留；若其中有管理员凭据，
     # 重装后会判定「已安装」，安装向导不会再出现（见 db_admin_token_probe 注释）。
@@ -3452,6 +3676,7 @@ while [[ $# -gt 0 ]]; do
         --restart-server) ACTION="restart-server"; shift ;;
         --deploy-server)  ACTION="deploy-server"; shift ;;
         --uninstall)      ACTION="uninstall"; shift ;;
+        --uninstall-server) ACTION="uninstall-server"; shift ;;
         # 兼容两种调用：--backup（默认目录）与 --backup <输出路径>。
         # 路径以 / 或 . 开头才当作输出路径，避免把后续选项（如 --status）误吞。
         --backup)
@@ -3527,6 +3752,7 @@ if [[ -n "$ACTION" ]]; then
         restart-server) server_ctl restart ;;
         deploy-server)  deploy_server ;;
         uninstall)    uninstall_all ;;
+        uninstall-server) uninstall_server ;;
         backup)       do_backup "${A_BACKUP_PATH:-}" "${A_BACKUP_KEEP:-}" ;;
         backup-schedule) do_backup_schedule "${A_BACKUP_SCHEDULE:-status}" "${A_BACKUP_KEEP:-}" ;;
         restore)      do_restore "${A_RESTORE_PATH:-}" ;;

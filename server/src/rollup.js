@@ -182,33 +182,41 @@ function ensureWatermark(now) {
 
 // 一次追赶：从水位线折到「已封口」的最新小时。
 // maxHours 供测试/首次回填限流；每 24 小时让出一次事件循环。
+// 单飞（REL-09）：启动追赶与整点定时可能重叠，重叠触发直接跳过（折叠幂等，只省重复劳动）。
+let inFlight = false;
 async function runOnce(options = {}) {
   if (!ENABLED) return { folded: 0, disabled: true };
-  const now = Number(options.now) || Date.now();
-  const keepDays = db.getRetentionDays();
-  const floor = hourStart(now - keepDays * 86400000);
-  // 可折叠的最大小时起点：该小时已结束且超过迟到容忍
-  const upper = hourStart(now - HOUR - LATE);
+  if (inFlight) return { folded: 0, skipped: true };
+  inFlight = true;
+  try {
+    const now = Number(options.now) || Date.now();
+    const keepDays = db.getRetentionDays();
+    const floor = hourStart(now - keepDays * 86400000);
+    // 可折叠的最大小时起点：该小时已结束且超过迟到容忍
+    const upper = hourStart(now - HOUR - LATE);
 
-  let wm = ensureWatermark(now);
-  if (wm < floor) {
-    // 超出保留窗口的旧明细不再折叠（马上会被 prune 删除），水位线直接抬到 floor
-    wm = floor;
-    db.setMetricsWatermark(wm);
-  }
+    let wm = ensureWatermark(now);
+    if (wm < floor) {
+      // 超出保留窗口的旧明细不再折叠（马上会被 prune 删除），水位线直接抬到 floor
+      wm = floor;
+      db.setMetricsWatermark(wm);
+    }
 
-  let folded = 0;
-  const max = Number(options.maxHours) > 0 ? Number(options.maxHours) : Infinity;
-  while (wm <= upper && folded < max) {
-    foldHour(wm);
-    wm += HOUR;
-    folded++;
-    if (folded % 24 === 0) await new Promise((resolve) => setImmediate(resolve));
+    let folded = 0;
+    const max = Number(options.maxHours) > 0 ? Number(options.maxHours) : Infinity;
+    while (wm <= upper && folded < max) {
+      foldHour(wm);
+      wm += HOUR;
+      folded++;
+      if (folded % 24 === 0) await new Promise((resolve) => setImmediate(resolve));
+    }
+    if (folded) {
+      console.log(`[rollup] folded ${folded} hour(s), watermark=${new Date(wm).toISOString()}`);
+    }
+    return { folded, watermark: wm };
+  } finally {
+    inFlight = false;
   }
-  if (folded) {
-    console.log(`[rollup] folded ${folded} hour(s), watermark=${new Date(wm).toISOString()}`);
-  }
-  return { folded, watermark: wm };
 }
 
 let timer = null;

@@ -8,8 +8,9 @@
 //   - 单 worker 串行执行（SQLite 单写者，聚合查询并发无收益，反而争锁）；
 //   - worker 启动失败/崩溃/超时 → 自动回退主线程同步执行（db.heavyQuerySync），
 //     行为与修复前一致，可用性优先；回退打 Warning 便于观测；
-//   - HEAVY_QUERY_TIMEOUT_MS 超时的请求 reject 并由调用方回退（worker 中的
-//     查询仍会跑完，结果丢弃——同步查询无法中断，此为已知限制）；
+//   - HEAVY_QUERY_TIMEOUT_MS 超时：先 terminate worker 杀死僵尸查询（同步 SQL
+//     不可中断，唯有 terminate 能停），再 reject 由调用方回退——避免「worker
+//     跑完 + 主线程再跑一遍」的双执行；下次查询自动 respawn（REL-06a）；
 //   - stop() 供测试与优雅退出。
 // ============================================================
 const { Worker } = require('node:worker_threads');
@@ -89,6 +90,11 @@ async function heavyQuery(fn, ...args) {
     const rows = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
+        // REL-06a：超时先终止 worker——同步查询不可中断，唯有 terminate 能杀死
+        // 僵尸查询，避免它与主线程 fallback 双执行。worker=null 后下次查询 respawn；
+        // 其余 pending 由 terminate 触发的 exit→failAll 一并回退。
+        try { worker && worker.terminate(); } catch (_) {}
+        worker = null;
         reject(new Error('heavy query timeout'));
       }, QUERY_TIMEOUT_MS);
       timer.unref?.();

@@ -1,0 +1,4 @@
+# PowerShell 脚本钉 CRLF：zh-CN PS 5.1 须 UTF-8 BOM + CRLF（N-02）。
+# BOM 由文件自身携带（git 不管理 BOM），eol=crlf 保证 checkout/回写不被改成 LF，
+# 配合 scripts/repo-hygiene-check.mjs 的 H10 闸门防回归。
+*.ps1 text eol=crlf

@@ -264,10 +264,13 @@ function requestRestore(name, actor) {
   }
   ensureDir();
   const payload = JSON.stringify({ file: full, name, ts: Date.now(), by: actor || 'admin' });
+  const tmp = `${RESTORE_TRIGGER}.tmp-${process.pid}-${Date.now()}`;
   try {
-    fs.writeFileSync(RESTORE_TRIGGER, payload, { mode: 0o600 });
+    fs.writeFileSync(tmp, payload, { mode: 0o600 });
+    fs.renameSync(tmp, RESTORE_TRIGGER);   // 原子落盘：宿主脚本不会读到半截 JSON
     return { ok: true, name, trigger: RESTORE_TRIGGER };
   } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
     return { ok: false, code: 500, error: e.message || 'cannot write restore request' };
   }
 }

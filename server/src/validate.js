@@ -32,30 +32,72 @@ function sanitizeCss(input) {
   css = css.replace(/@font-face\s*\{[^}]*\}/gi, '');    // @font-face 块（字体指纹）
   css = css.replace(/url\(\s*[^)]*\)/gi, '');           // 所有 url(...) 外链/数据
   css = css.replace(/expression\s*\(/gi, '');           // IE expression 向量
-  const blocks = css.split('}');
+  return sanitizeCssBlocks(css, 0).slice(0, CSS_MAX);
+}
+
+// SEC-08/G2：递归括号匹配清洗。@media/@keyframes/@supports 等嵌套 at-rule 的内层
+// 声明必须走与普通规则同一套逐条校验——旧版按 '}' 切块并对 @ 块整体放行，致
+// javascript:/data: 值与 behavior/binding 属性在 @media 内绕过。零新依赖；
+// 引号感知防 content:"}" 误配括号，深度上限防病态嵌套栈溢出。
+const CSS_NESTED_ATRULE = /^@(?:media|supports|container|layer|(?:-webkit-|-moz-)?keyframes)\b/i;
+const CSS_MAX_DEPTH = 10;
+
+function sanitizeCssDecls(text) {
+  return text.split(';')
+    .map(s => s.trim()).filter(Boolean)
+    .map((decl) => {
+      const c = decl.indexOf(':');
+      if (c < 0) return null;
+      const prop = decl.slice(0, c).trim().toLowerCase();
+      const value = decl.slice(c + 1).trim();
+      if (!/^-?[a-z][a-z0-9-]*$/.test(prop)) return null;   // 非法属性名
+      if (CSS_DANGEROUS_PROP.test(prop)) return null;       // 危险属性
+      if (/javascript:|vbscript:|data:\s*(?!image\/)/i.test(value)) return null; // 危险值
+      return decl;
+    }).filter(Boolean)
+    .join(';');
+}
+
+function sanitizeCssBlocks(css, depth) {
+  if (depth > CSS_MAX_DEPTH) return '';
   const out = [];
-  for (const raw of blocks) {
-    const t = raw.trim();
-    if (!t) continue;
-    const i = t.indexOf('{');
-    if (i < 0) { out.push(t); continue; }               // 游离片段/at-rule 续接
-    const selector = t.slice(0, i).trim();
-    if (selector.startsWith('@')) { out.push(t + '}'); continue; } // @media/@keyframes：已去 url/字体，整体放行
-    const decls = t.slice(i + 1).split(';')
-      .map(s => s.trim()).filter(Boolean)
-      .map((decl) => {
-        const c = decl.indexOf(':');
-        if (c < 0) return null;
-        const prop = decl.slice(0, c).trim().toLowerCase();
-        const value = decl.slice(c + 1).trim();
-        if (!/^-?[a-z][a-z0-9-]*$/.test(prop)) return null;   // 非法属性名
-        if (CSS_DANGEROUS_PROP.test(prop)) return null;       // 危险属性
-        if (/javascript:|vbscript:|data:\s*(?!image\/)/i.test(value)) return null; // 危险值
-        return decl;
-      }).filter(Boolean);
-    if (decls.length && selector) out.push(`${selector}{${decls.join(';')}}`);
+  const n = css.length;
+  let i = 0;
+  while (i < n) {
+    while (i < n && /\s/.test(css[i])) i++;
+    if (i >= n) break;
+    let j = i;
+    while (j < n && css[j] !== '{' && css[j] !== ';') j++;
+    if (j >= n) break;                          // 游离片段（无块）：丢弃
+    if (css[j] === ';') { i = j + 1; continue; } // 游离语句：丢弃
+    const selector = css.slice(i, j).trim();
+    let k = j + 1, d = 1, quote = null;         // 匹配平衡闭括号（跳过引号串内花括号）
+    while (k < n && d > 0) {
+      const ch = css[k];
+      if (quote) {
+        if (ch === '\\') { k += 2; continue; }
+        if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === '{') {
+        d++;
+      } else if (ch === '}') {
+        d--; if (d === 0) break;
+      }
+      k++;
+    }
+    const inner = css.slice(j + 1, k);
+    i = k + 1;
+    if (!selector) continue;
+    if (CSS_NESTED_ATRULE.test(selector)) {
+      const innerClean = sanitizeCssBlocks(inner, depth + 1);
+      if (innerClean) out.push(`${selector}{${innerClean}}`);
+    } else {
+      const decls = sanitizeCssDecls(inner);
+      if (decls) out.push(`${selector}{${decls}}`);
+    }
   }
-  return out.join(' ').slice(0, CSS_MAX);
+  return out.join(' ');
 }
 
 // Report payload validation. Rejects malformed/implausible data.

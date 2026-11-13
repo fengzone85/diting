@@ -8,8 +8,14 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; NC='\033[0m'
 sha256_of() { local f="$1"; (sha256sum "$f" 2>/dev/null || shasum -a 256 "$f" 2>/dev/null) | awk '{print $1}'; }
 download() {
     local url="$1" out="$2"
-    if command -v curl >/dev/null 2>&1; then curl -fsSL "$url" -o "$out"
-    elif command -v wget >/dev/null 2>&1; then wget -qO "$out" "$url"
+    # 本地目录（--repo 放行 /* ./* ../*）：curl/wget 均拒绝裸路径
+    # （curl: No host part；wget: 误补 http://），直接 cp。
+    case "$url" in
+        /*|./*|../*) cp -- "$url" "$out"; return ;;
+    esac
+    # B-15：补超时，避免无响应时永久挂起（curl --max-time / wget -T）
+    if command -v curl >/dev/null 2>&1; then curl -fsSL --max-time 180 --connect-timeout 15 "$url" -o "$out"
+    elif command -v wget >/dev/null 2>&1; then wget -T 180 -qO "$out" "$url"
     else echo -e "${RED}[error] curl or wget required${NC}" >&2; return 1; fi
 }
 validate_server_url() {
@@ -75,7 +81,8 @@ case "$(uname -m)" in
 esac
 BIN_NAME="diting-agent-linux-${GOARCH}"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# REL-02：TMP_ENV 若因中途失败残留也一并清理（正常路径 mv 后已不存在，rm -f 无副作用）
+trap 'rm -rf "$TMP"; if [[ -n "${TMP_ENV:-}" ]]; then rm -f "$TMP_ENV"; fi' EXIT
 
 # S5：优先走服务端签名中继（连不上 GitHub 的节点，如电信出口），失败回落 GitHub Release。
 # 中继只对「验签通过 + 架构匹配」的产物放行；SHA256 校验两条路径都保留。
@@ -133,7 +140,7 @@ import json, os
 with open(os.environ["REGFILE"], "w") as f:
     json.dump({"setup_token": os.environ["SETUP_TOKEN"], "name": os.environ.get("SETUP_NAME", "")}, f)
 PYEOF
-    REG_JSON="$(curl -fsSL -X POST -H 'Content-Type: application/json' --data @"$REGFILE" "${SERVER_URL%/}/api/setup/register")"
+    REG_JSON="$(curl -fsSL --max-time 180 --connect-timeout 15 -X POST -H 'Content-Type: application/json' --data @"$REGFILE" "${SERVER_URL%/}/api/setup/register")"
     rm -f "$REGFILE"
     AGENT_ID="$(echo "$REG_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("agent_id",""))')"
     AGENT_TOKEN="$(echo "$REG_JSON" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("agent_token",""))')"
@@ -160,14 +167,17 @@ DISK_PATH=/
 "
 [[ -n "${PROBE_TARGETS:-}" ]] && ENV_CONTENT="${ENV_CONTENT}PROBE_TARGETS=${PROBE_TARGETS}
 "
-TMP_ENV="$(mktemp)"; chmod 600 "$TMP_ENV"
+# REL-02：临时文件建在目标同目录（/etc/diting，上方已 mkdir），保证 mv 为同文件系统
+# 原子 rename。默认 mktemp 落 /tmp（常为 tmpfs），跨设备 mv 退化为 copy+unlink，
+# 掉电可能留下半截凭据文件（J4125 实测 /tmp dev 37 ≠ /etc dev 2049）。
+TMP_ENV="$(mktemp /etc/diting/.agent.env.XXXXXX)"; chmod 600 "$TMP_ENV"
 echo "$ENV_CONTENT" > "$TMP_ENV"
 mv "$TMP_ENV" /etc/diting/agent.env
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${SCRIPT_DIR}/diting-agent.service" ]]; then
     cp "${SCRIPT_DIR}/diting-agent.service" /etc/systemd/system/
 else
-    curl -fsSL "https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/diting-agent.service" -o /etc/systemd/system/diting-agent.service
+    curl -fsSL --max-time 180 --connect-timeout 15 "https://raw.githubusercontent.com/fengzone85/diting/master/agent-go/diting-agent.service" -o /etc/systemd/system/diting-agent.service
 fi
 chmod 644 /etc/systemd/system/diting-agent.service
 # 部署卸载脚本（diting.sh 的 uninstall_all 依赖 /opt/diting/uninstall.sh）

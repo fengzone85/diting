@@ -136,6 +136,14 @@ User=diting
 WantedBy=multi-user.target
 ```
 
+### 异常处理与可用性取舍
+
+服务端对 `uncaughtException` / `unhandledRejection` 采取**「记录 + 存活」**策略：仅打印错误日志，不主动退出进程。这是有意的可用性取舍——单个请求的异常不应让整个监控站不可用（受控端仍在上报，面板仍可访问）。
+
+- **兜底**：systemd `Restart=always` 覆盖真正致命的崩溃（进程退出即自动拉起）。
+- **根治方向**：异步路由统一套 `asyncHandler`（`src/util.js`）捕获拒绝，从源头减少逃逸到全局处理器的异常；全局处理器只是最后防线。
+- 若偏好「异常即受控退出再由 systemd 重启」的语义，可自行改全局处理器为 `process.exit(1)`，但会牺牲单请求故障下的持续可用性。
+
 ## HTTPS 配置
 
 受控端强制 HTTPS（非 localhost 请求 `exit(1)`），服务端需配置有效证书。

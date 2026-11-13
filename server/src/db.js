@@ -577,6 +577,8 @@ const stmts = {
   listOpenOnlineSessions: db.prepare('SELECT * FROM online_sessions WHERE ended_at IS NULL ORDER BY started_at ASC'),
   // 上一条（任意状态）session：用于把新 session 起点钳到上一段 ended_at 之后，避免重叠双计
   getLastOnlineSession: db.prepare('SELECT * FROM online_sessions WHERE agent_id=? ORDER BY started_at DESC LIMIT 1'),
+  // 上一条已关闭 session：重启后恢复离线起点用（新开的 open 段 ended_at 为 NULL，不能用 getLastOnlineSession）
+  getLastClosedOnlineSession: db.prepare('SELECT * FROM online_sessions WHERE agent_id=? AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT 1'),
   openOnlineSession: db.prepare('INSERT INTO online_sessions(agent_id, started_at) VALUES (?, ?)'),
   closeOnlineSession: db.prepare('UPDATE online_sessions SET ended_at=?, end_reason=? WHERE id=? AND ended_at IS NULL'),
   // 删除/清理用；window 查询取与 [since, now] 有交集的全部 session（含进行中）
@@ -931,6 +933,7 @@ const openOnlineSession = (agentId, startedAt) => {
 };
 const getOpenOnlineSession = (agentId) => stmts.getOpenOnlineSession.get(agentId);
 const getLastOnlineSession = (agentId) => stmts.getLastOnlineSession.get(agentId);
+const getLastClosedOnlineSession = (agentId) => stmts.getLastClosedOnlineSession.get(agentId);
 const closeOnlineSession = (id, endedAt, reason) => stmts.closeOnlineSession.run(endedAt, reason || '', id).changes > 0;
 
 // 本地日 0 点（按主机时区；跨 DST 由 Date 构造器处理）
@@ -2184,7 +2187,7 @@ module.exports = {
   getMetricsSparklines, getMetricsSparklinesOne, metricsSparklinesAllSampled, metricsProbesAll, metricsClusterAvg, metricsDiskTrendAll,
   prune, getAlertState, setAlertState, clearAlertState,
   // F7 在线时段
-  getOpenOnlineSession, getLastOnlineSession, openOnlineSession, closeOnlineSession,
+  getOpenOnlineSession, getLastOnlineSession, getLastClosedOnlineSession, openOnlineSession, closeOnlineSession,
   onlineHistory, onlineUptimeAll, cleanupOnlineSessions,
   getAlertOverride, listAlertOverrides, upsertAlertOverride, deleteAlertOverride,
   getGroupAlertOverride, listGroupAlertOverrides, upsertGroupAlertOverride, deleteGroupAlertOverride,
