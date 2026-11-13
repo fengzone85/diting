@@ -126,6 +126,17 @@ test('unit 模板携带 DITING_ENV_FILE，否则权限自检被 catch 静默跳�
   assert.match(unit, /^EnvironmentFile=/m);
 });
 
+test('ProtectSystem=strict 必须配 ReadWritePaths（2026-11-13 线上事故回归）', () => {
+  // strict = 整个文件系统只读（仅豁免 /dev、/proc、/sys），不是只读 /usr//etc；
+  // 不放行写路径时 SQLite 报 "attempt to write a readonly database"，全部上报中断。
+  const unit = fs.readFileSync(UNIT, 'utf8');
+  if (/^ProtectSystem=strict$/m.test(unit)) {
+    assert.match(unit, /^ReadWritePaths=.*server-data/m,
+      'ProtectSystem=strict 必须 ReadWritePaths 放行数据库目录');
+    assert.match(unit, /ReadWritePaths=.*backups/, '备份目录同样需要写权限');
+  }
+});
+
 test('install_server 走 init_env_file，diting.sh 语法通过', () => {
   assert.match(fnBody('install_server'), /init_env_file "\$port"/, '首装分支应调用 init_env_file');
   const r = spawnSync('bash', ['-n', SCRIPT], { encoding: 'utf8' });
