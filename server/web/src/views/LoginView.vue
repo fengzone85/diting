@@ -64,11 +64,11 @@ async function submit() {
       <div class="space-y-4">
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('login.token') }}</label>
-          <input v-model="token" type="password" :placeholder="t('login.token')" required class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-sky-500" />
+          <input v-model="token" type="password" :placeholder="t('login.token')" required class="field-control w-full" />
         </div>
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('login.totp') }}</label>
-          <input v-model="totp" type="text" inputmode="numeric" :placeholder="'123456'" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-sky-500" />
+          <input v-model="totp" type="text" inputmode="numeric" :placeholder="'123456'" class="field-control w-full" />
         </div>
         <button type="submit" :disabled="loading" class="w-full rounded-lg bg-sky-500 py-2 font-medium text-white hover:bg-sky-400 disabled:opacity-50">
           {{ loading ? '…' : t('login.submit') }}

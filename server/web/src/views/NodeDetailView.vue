@@ -641,7 +641,7 @@ onUnmounted(() => {
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <RouterLink
           to="/"
-          class="glass flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-secondary transition-colors hover:text-content"
+          class="inner-panel flex items-center gap-1.5 px-3 py-1.5 text-sm text-secondary transition-colors hover:text-content"
         ><ArrowLeft :size="16" />{{ t('node.backHome') }}</RouterLink>
         <button
           class="glass flex h-8 w-8 items-center justify-center rounded-lg"
@@ -666,7 +666,7 @@ onUnmounted(() => {
             :title="t('node.switchNode')"
             @change="goNode(($event.target as HTMLSelectElement).value)"
           >
-            <option v-for="n in nodeList" :key="n.id" :value="n.id" class="bg-slate-800 text-content">{{ n.name }}</option>
+            <option v-for="n in nodeList" :key="n.id" :value="n.id" style="color: var(--text-primary); background: var(--bg-primary)">{{ n.name }}</option>
           </select>
           <button
             class="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors hover:text-content disabled:opacity-30"
@@ -686,7 +686,7 @@ onUnmounted(() => {
         <div class="glass p-5">
           <div class="flex flex-wrap items-center gap-3">
             <img v-if="agent.country || agent.country_code" :src="`/flags/${(agent.country_code || agent.country || '').toLowerCase()}.svg`" class="h-6 w-8 rounded-sm" :alt="agent.country" />
-            <h1 class="text-2xl font-bold">{{ agent.name }}</h1>
+            <h1 class="text-xl font-bold lg:text-2xl">{{ agent.name }}</h1>
             <span class="status-dot" :class="agent.online ? 'status-online' : 'status-offline'" />
             <span
               class="rounded-full px-3 py-1 text-xs"
@@ -1086,7 +1086,7 @@ onUnmounted(() => {
             <input
               v-model="customStart"
               type="datetime-local"
-              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+              class="field-control mt-1 w-full"
             />
           </label>
           <label class="mb-4 block text-xs text-secondary">
@@ -1094,7 +1094,7 @@ onUnmounted(() => {
             <input
               v-model="customEnd"
               type="datetime-local"
-              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+              class="field-control mt-1 w-full"
             />
           </label>
           <div class="flex justify-end gap-2">

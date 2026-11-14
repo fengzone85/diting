@@ -74,7 +74,7 @@ function formatDate(days: number) {
 </script>
 
 <template>
-  <PageShell wide :title="t('billing.title')">
+  <PageShell :title="t('billing.title')">
     <template #actions>
       <button
         :disabled="saving || !ready"
@@ -94,26 +94,26 @@ function formatDate(days: number) {
     <div v-else-if="data" class="grid gap-6">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">{{ t('billing.monthlyTotal') }}</p>
+          <p class="text-sm text-secondary">{{ t('billing.monthlyTotal') }}</p>
           <p class="mt-1 text-2xl font-semibold text-emerald-400">{{ data.currency }}{{ data.monthly_total.toFixed(2) }}</p>
         </div>
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">{{ t('billing.agentCount') }}</p>
+          <p class="text-sm text-secondary">{{ t('billing.agentCount') }}</p>
           <p class="mt-1 text-2xl font-semibold text-sky-400">{{ data.agent_count }}</p>
         </div>
         <div class="glass p-5">
-          <p class="text-sm text-slate-400">{{ t('billing.expire7d') }}</p>
+          <p class="text-sm text-secondary">{{ t('billing.expire7d') }}</p>
           <p class="mt-1 text-2xl font-semibold" :class="data.expiring_soon.length ? 'text-amber-400' : 'text-slate-200'">{{ data.expiring_soon.length }}</p>
         </div>
       </div>
 
       <div class="glass p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('billing.perGroupMonthly') }}</h2>
-        <div v-if="!data.per_group.length" class="py-8 text-center text-sm text-slate-500">{{ t('billing.noGroupData') }}</div>
+        <div v-if="!data.per_group.length" class="py-8 text-center text-sm text-muted">{{ t('billing.noGroupData') }}</div>
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-slate-700 text-left text-slate-400">
+              <tr class="border-b border-slate-700 text-left text-secondary">
                 <th class="py-2 font-medium">{{ t('billing.group') }}</th>
                 <th class="py-2 font-medium text-right">{{ t('billing.monthlyAvg') }}</th>
               </tr>
@@ -130,11 +130,11 @@ function formatDate(days: number) {
 
       <div class="glass p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('billing.expiringSoon') }}</h2>
-        <div v-if="!data.expiring_soon.length" class="py-8 text-center text-sm text-slate-500">{{ t('billing.noExpiring') }}</div>
+        <div v-if="!data.expiring_soon.length" class="py-8 text-center text-sm text-muted">{{ t('billing.noExpiring') }}</div>
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-slate-700 text-left text-slate-400">
+              <tr class="border-b border-slate-700 text-left text-secondary">
                 <th class="py-2 font-medium">{{ t('billing.machine') }}</th>
                 <th class="py-2 font-medium">{{ t('billing.timeLeft') }}</th>
               </tr>
@@ -161,7 +161,7 @@ function formatDate(days: number) {
       <label class="mb-1 block text-sm text-secondary">{{ t('settings.billingBase') }}</label>
       <select
         :value="local.ui.billing!.base_currency"
-        class="mb-4 h-9 w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-sm text-white outline-none focus:border-sky-500 sm:w-72"
+        class="field-control mb-4 h-9 w-full sm:w-72"
         @change="setBaseCurrency(($event.target as HTMLSelectElement).value)"
       >
         <option v-for="c in CURRENCY_OPTIONS" :key="c.code" :value="c.code">{{ c.symbol }} {{ c.code }} · {{ t('billing.cur.' + c.code) }}</option>
@@ -175,12 +175,12 @@ function formatDate(days: number) {
             min="0"
             step="0.0001"
             :placeholder="t('settings.billingRateEmpty')"
-            class="h-9 w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-sm text-white outline-none focus:border-sky-500"
+            class="field-control h-9 w-full"
             @input="setRate(c.code, ($event.target as HTMLInputElement).value)"
           />
         </div>
       </div>
-      <p v-if="local.ui.billing!.updated_at" class="mt-3 text-xs text-slate-500">
+      <p v-if="local.ui.billing!.updated_at" class="mt-3 text-xs text-muted">
         {{ t('settings.billingUpdatedAt', { time: new Date(local.ui.billing!.updated_at).toLocaleString() }) }}
       </p>
     </div>

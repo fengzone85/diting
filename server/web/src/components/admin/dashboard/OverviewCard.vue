@@ -34,16 +34,16 @@ const ringStyle = computed(() => ({
         <p class="text-sm font-medium" :class="offline ? 'text-amber-300' : 'text-emerald-400'">
           {{ offline ? t('dashboard.someOffline') : t('dashboard.allOnline') }}
         </p>
-        <p class="text-xs text-slate-400">
+        <p class="text-xs text-secondary">
           {{ t('dashboard.onlineNodes', { online, total }) }}
         </p>
-        <p class="text-xs text-slate-400">
+        <p class="text-xs text-secondary">
           {{ t('dashboard.offlineNodes') }}
           <span class="font-medium" :class="offline ? 'text-rose-300' : 'text-slate-300'">{{ offline }}</span>
         </p>
         <p
           v-if="offlineNames.length"
-          class="truncate text-[11px] text-slate-500"
+          class="truncate text-[11px] text-muted"
           :title="offlineNames.join('、')"
         >
           {{ offlineNames.join('、') }}

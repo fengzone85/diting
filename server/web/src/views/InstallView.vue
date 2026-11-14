@@ -124,9 +124,9 @@ onMounted(load);
       <div class="mb-4 text-4xl">🔒</div>
       <h1 class="mb-2 text-2xl font-bold">{{ t('install.lockedTitle') }}</h1>
       <p class="mb-4 text-sm text-slate-400">{{ t('install.lockedDesc') }}</p>
-      <div class="mb-6 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-left text-xs text-slate-300">
+      <div class="inner-panel mb-6 p-3 text-left text-xs text-secondary">
         {{ t('install.lockedReset') }}<br>
-        <code class="mt-1 block rounded bg-black/40 p-2 font-mono break-all">sudo bash diting.sh --reset-admin-token</code>
+        <code class="inner-panel mt-1 block p-2 font-mono break-all text-secondary">sudo bash diting.sh --reset-admin-token</code>
       </div>
       <router-link to="/login" class="block w-full rounded-lg bg-sky-500 py-2 text-center font-medium text-white no-underline hover:bg-sky-400">
         {{ t('install.goLogin') }}
@@ -146,12 +146,12 @@ onMounted(load);
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.sitename') }}</label>
           <input v-model="sitename" type="text" maxlength="100" :placeholder="t('install.sitenamePh')" required
-            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-sky-500" />
+            class="field-control w-full" />
         </div>
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.description') }}</label>
           <textarea v-model="description" rows="2" maxlength="1000" :placeholder="t('install.descriptionPh')"
-            class="w-full resize-none rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-sky-500"></textarea>
+            class="field-control w-full resize-none"></textarea>
         </div>
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.siteUrl') }}</label>
@@ -168,9 +168,9 @@ onMounted(load);
           <p v-if="!agentServerUrlOk" class="mt-1 text-xs text-rose-400">{{ t('install.agentServerUrlRequired') }}</p>
           <p v-else-if="agentWarn" class="mt-1 text-xs text-amber-400">⚠️ {{ t(agentWarn) }}</p>
         </div>
-        <div class="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+        <div class="inner-panel flex items-center justify-between px-3 py-2">
           <span class="text-xs text-slate-400">{{ t('install.listenPort') }}</span>
-          <code class="rounded bg-black/40 px-2 py-0.5 font-mono text-xs text-slate-200">{{ listenPort ?? '—' }}</code>
+          <code class="rounded px-2 py-0.5 font-mono text-xs text-secondary" style="background: var(--glass-inner-tint)">{{ listenPort ?? '—' }}</code>
         </div>
         <div>
           <label class="mb-1 block text-sm text-slate-400">{{ t('install.tokenMode') }}</label>
@@ -216,7 +216,7 @@ onMounted(load);
         </div>
         <div class="mb-4 flex gap-2">
           <button type="button" @click="copyToken"
-            class="flex-1 rounded-lg border border-slate-600 py-2 text-sm text-slate-200 hover:border-slate-400">
+            class="btn-ghost flex-1 py-2 text-sm">
             {{ copied ? t('install.copied') : t('install.copy') }}
           </button>
         </div>

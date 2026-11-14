@@ -14,12 +14,12 @@ const { t } = useI18n();
 
 <template>
   <WidgetShell :title="title" :icon="Data">
-    <div v-if="!rows.length" class="text-xs text-slate-500">{{ t('dashboard.noData') }}</div>
+    <div v-if="!rows.length" class="text-xs text-muted">{{ t('dashboard.noData') }}</div>
     <div v-else class="space-y-2">
       <div v-for="g in rows" :key="g.name" class="space-y-1">
         <div class="flex items-center justify-between gap-2 text-xs">
           <span class="truncate text-slate-300" :title="g.name">{{ g.name }}</span>
-          <span class="shrink-0 tabular-nums text-slate-400">
+          <span class="shrink-0 tabular-nums text-secondary">
             <span :class="g.online < g.total ? 'text-amber-300' : 'text-emerald-400'">{{ g.online }}</span>
             / {{ g.total }}
           </span>

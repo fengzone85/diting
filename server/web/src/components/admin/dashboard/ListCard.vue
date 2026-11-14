@@ -31,7 +31,7 @@ const toneClass: Record<string, string> = {
 
 <template>
   <WidgetShell :title="title" :icon="icon">
-    <div v-if="!rows.length" class="text-xs text-slate-500">{{ empty || t('dashboard.noData') }}</div>
+    <div v-if="!rows.length" class="text-xs text-muted">{{ empty || t('dashboard.noData') }}</div>
     <div v-else class="space-y-1.5">
       <div
         v-for="r in rows"

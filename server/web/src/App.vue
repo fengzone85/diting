@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useApp } from './composables/useApp';
 import { t } from './composables/useI18n';
 import { publicApi } from './services/publicApi';
@@ -32,6 +32,10 @@ async function loadVersion() {
 // 首屏加载态：router.beforeEach 里 await getAuthStatus() 是异步的，慢网络下
 // RouterView 会长时间空白；等路由就绪再渲染，避免「假死」观感。
 const router = useRouter();
+const route = useRoute();
+// 后台是固定视口高的停靠壳（内容列内滚），全局页脚由 AdminLayout 渲染进滚动列，
+// 这里不再重复挂载，否则页脚落在壳外会把整页撑出滚动条。
+const isAdminRoute = computed(() => route.path.startsWith('/admin'));
 const ready = ref(false);
 onMounted(async () => {
   // 版本信息与路由就绪互不依赖，并行发起，不拖慢首屏
@@ -65,6 +69,7 @@ const cvLabel: Record<string, string> = {
   <template v-else>
     <RouterView />
     <AppFooter
+      v-if="!isAdminRoute"
       :meta="state.meta"
       :version="version"
       :build-time="buildTime"
@@ -75,7 +80,7 @@ const cvLabel: Record<string, string> = {
     />
 
     <!-- 色觉辅助提示条 -->
-    <div v-if="colorVision !== 'normal'" class="cv-banner glass text-muted">
+    <div v-if="colorVision !== 'normal'" class="cv-banner inner-panel text-muted">
       {{ t('theme.colorVision') }}: {{ cvLabel[colorVision] }}
     </div>
 

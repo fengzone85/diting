@@ -491,7 +491,7 @@ const announcement = computed(() => {
             ref="searchEl"
             v-model="searchInput"
             :placeholder="t('public.searchPlaceholder')"
-            class="h-7 rounded-lg border border-slate-700 bg-slate-900/50 px-2.5 text-xs text-white outline-none focus:border-sky-500 sm:w-52"
+            class="field-control field-sm h-7 sm:w-52"
             @keydown.esc="toggleSearch"
           />
           <span class="whitespace-nowrap text-xs text-slate-500">{{ t('public.nodeCount', { n: groupFilteredAgents.length }) }}</span>
@@ -539,7 +539,7 @@ const announcement = computed(() => {
             <span class="mx-1 h-4 w-px bg-slate-700"></span>
             <select
               :value="displayActiveCode"
-              class="h-7 rounded-lg border border-slate-700 bg-slate-900/50 px-1.5 text-xs text-white outline-none focus:border-sky-500"
+              class="field-control field-sm h-7"
               :title="t('public.displayCurrency')"
               @change="setDisplayCode(($event.target as HTMLSelectElement).value)"
             >
@@ -568,7 +568,7 @@ const announcement = computed(() => {
           v-for="g in groupTabs"
           :key="g.key"
           type="button"
-          class="relative inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2.5 text-sm font-medium transition-colors hover:bg-white/10"
+          class="relative inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-transparent px-2.5 text-sm font-medium transition-colors hover-inner"
           :style="selectedGroup === g.key
             ? { backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border-divider)', color: 'var(--text-primary)' }
             : undefined"

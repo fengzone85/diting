@@ -20,15 +20,18 @@ const props = withDefaults(defineProps<{
   showAdminLink?: boolean;
   /** 后台：右侧显示退出 */
   showLogout?: boolean;
-  /** 后台：左侧显示移动端菜单按钮 */
+  /** 后台：左侧显示侧栏开关（桌面常驻） */
   showMenu?: boolean;
+  /** 布局变体：public 居中 1280 + 滚动毛玻璃；admin 全宽 + 静态边框（应用壳内不滚 window） */
+  variant?: 'public' | 'admin';
 }>(), {
   // Boolean prop 未传时 Vue 会转成 false，这里显式给默认值，保证公开页仍显示「管理后台」入口
   showAdminLink: true,
+  variant: 'public',
 });
 
 const emit = defineEmits<{
-  (e: 'open-menu'): void;
+  (e: 'toggle-sidebar'): void;
   (e: 'logout'): void;
 }>();
 
@@ -43,6 +46,7 @@ const displayTitle = computed(() => props.title || props.meta?.site_title || 'Di
 const logoSrc = computed(() => props.logo || props.meta?.logo_url || '/logo.png');
 const homeTo = computed(() => props.homeTo || '/');
 const showAdminLink = computed(() => props.showAdminLink);
+const isAdmin = computed(() => props.variant === 'admin');
 
 const themeOptions = computed(() => [
   { id: 'auto' as const, label: t('theme.auto') },
@@ -67,18 +71,20 @@ const themeIcon = computed(() => {
 </script>
 
 <template>
-  <!-- 对齐上游: 无 <header> 标签，无固定毛玻璃，滚动才出现 blur -->
+  <!-- public: 无 <header> 标签、滚动才出现 blur；admin: 应用壳内静态边框（window 不滚） -->
   <div
-    class="sticky top-0 z-10 border-b border-transparent transition-all duration-200"
-    :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
+    class="z-10 border-b transition-all duration-200"
+    :class="isAdmin
+      ? 'border-divider bg-[var(--bg-primary)]'
+      : ['sticky top-0 border-transparent', isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent']"
   >
-    <div class="mx-auto flex h-14 max-w-[1280px] items-center px-4">
-      <!-- 后台：移动端菜单入口（桌面端用侧栏） -->
+    <div class="flex h-14 items-center px-4" :class="isAdmin ? 'w-full' : 'mx-auto max-w-[1280px]'">
+      <!-- 后台：侧栏开关（桌面常驻；公开页不传 showMenu 故不显示） -->
       <button
         v-if="showMenu"
-        class="mr-2 flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-surface min-[1808px]:hidden"
+        class="mr-2 flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-surface"
         :aria-label="t('nav.menu')"
-        @click="emit('open-menu')"
+        @click="emit('toggle-sidebar')"
       >
         ☰
       </button>

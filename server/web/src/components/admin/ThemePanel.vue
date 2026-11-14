@@ -265,7 +265,7 @@ function onSelect(key: string, e: Event) {
           class="rounded-lg border px-3 py-1"
           :class="tab === item
             ? 'border-sky-500 text-sky-300'
-            : 'border-slate-700 text-slate-400 hover:border-sky-500'"
+            : 'border-slate-700 text-secondary hover:border-sky-500'"
           @click="switchTab(item)"
         >{{ tabKey(item) }}</button>
       </div>
@@ -404,7 +404,7 @@ function onSelect(key: string, e: Event) {
           <input
             v-model="importUrl"
             placeholder="https://github.com/owner/theme 或 https://.../theme.zip"
-            class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+            class="field-control min-w-0 flex-1"
           >
           <button
             class="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:border-sky-500 disabled:opacity-40"
@@ -428,7 +428,7 @@ function onSelect(key: string, e: Event) {
 
     <!-- 来源管理弹窗 -->
     <div v-if="sourceDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div class="max-h-[80vh] w-full max-w-xl overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-5">
+      <div class="glass max-h-[80vh] w-full max-w-xl overflow-auto rounded-xl p-5">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-base font-semibold">{{ t('theme.sourceManage') }}</h3>
           <button class="text-sm opacity-60 hover:opacity-100" @click="sourceDialog = false">{{ t('theme.close') }}</button>
@@ -471,12 +471,12 @@ function onSelect(key: string, e: Event) {
             <input
               v-model="newSource.name"
               :placeholder="t('theme.sourceName')"
-              class="w-40 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+              class="field-control w-40"
             >
             <input
               v-model="newSource.url"
               placeholder="https://example.com/v1.json"
-              class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+              class="field-control min-w-0 flex-1"
             >
             <button
               class="rounded-lg border border-sky-700 px-3 py-2 text-sm text-sky-300 hover:border-sky-400 disabled:opacity-40"
@@ -491,7 +491,7 @@ function onSelect(key: string, e: Event) {
 
     <!-- 备份弹窗 -->
     <div v-if="backups" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div class="max-h-[80vh] w-full max-w-md overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-5">
+      <div class="glass max-h-[80vh] w-full max-w-md overflow-auto rounded-xl p-5">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-base font-semibold">{{ t('theme.backupsTitle', { short: backupsFor }) }}</h3>
           <button class="text-sm opacity-60 hover:opacity-100" @click="backups = null">{{ t('theme.close') }}</button>
@@ -519,19 +519,19 @@ function onSelect(key: string, e: Event) {
 
     <!-- 配置弹窗 -->
     <div v-if="configEditor" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div class="max-h-[80vh] w-full max-w-lg overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-5">
+      <div class="glass max-h-[80vh] w-full max-w-lg overflow-auto rounded-xl p-5">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-base font-semibold">{{ t('theme.configTitle', { name: configEditor.name }) }}</h3>
           <button class="text-sm opacity-60 hover:opacity-100" @click="configEditor = null">{{ t('theme.close') }}</button>
         </div>
         <div v-for="f in configEditor.fields" :key="f.key" class="mb-3">
-          <label class="mb-1 block text-sm text-slate-400">
+          <label class="mb-1 block text-sm text-secondary">
             {{ f.name }}<span v-if="f.required" class="text-rose-400"> *</span>
           </label>
           <select
             v-if="f.type === 'select'"
             :value="String(configEditor.values[f.key] ?? '')"
-            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+            class="field-control w-full"
             @change="onSelect(f.key, $event)"
           >
             <option v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</option>
@@ -540,12 +540,13 @@ function onSelect(key: string, e: Event) {
             v-else-if="f.type === 'textarea' || f.type === 'richtext'"
             :value="String(configEditor.values[f.key] ?? '')"
             rows="3"
-            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+            class="field-control w-full"
             @input="onText(f.key, $event)"
           />
           <input
             v-else-if="f.type === 'boolean' || f.type === 'switch'"
             type="checkbox"
+            class="switch"
             :checked="configEditor.values[f.key] === true || configEditor.values[f.key] === 'true'"
             @change="onCheck(f.key, $event)"
           >
@@ -553,7 +554,7 @@ function onSelect(key: string, e: Event) {
             v-else
             :type="f.type === 'number' ? 'number' : (f.type === 'color' ? 'color' : 'text')"
             :value="String(configEditor.values[f.key] ?? '')"
-            class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+            class="field-control w-full"
             @input="onText(f.key, $event)"
           >
           <p v-if="f.help" class="mt-1 text-xs opacity-50">{{ f.help }}</p>

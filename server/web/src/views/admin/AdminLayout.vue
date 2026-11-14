@@ -1,20 +1,44 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import Sidebar from '../../components/admin/Sidebar.vue';
 import AppHeader from '../../components/AppHeader.vue';
+import AppFooter from '../../components/AppFooter.vue';
 import { adminApi } from '../../services/adminApi';
+import { publicApi } from '../../services/publicApi';
 import type { RestoreAuditReport, CapacityStatus } from '../../services/types';
 import { loadAdmin, startAutoRefresh, stopAutoRefresh, useAdmin } from '../../composables/useAdmin';
-import { setAutoRefreshPaused as setPublicAutoRefreshPaused } from '../../composables/useApp';
+import { setAutoRefreshPaused as setPublicAutoRefreshPaused, useApp } from '../../composables/useApp';
 import { useI18n } from '../../composables/useI18n';
 
-const menuOpen = ref(false);
 const { t } = useI18n();
 const router = useRouter();
+const route = useRoute();
 const { state } = useAdmin();
+const { state: appState } = useApp();
 
-// 顶栏直接复用公开页 AppHeader：站名/logo 取后台自己的 ui 设置，其余（主题/语言/形态）完全共用。
+// 页脚版本/构建信息：后台的全局 AppFooter 改由本布局渲染进滚动列（App.vue 按 isAdminRoute 隐藏），
+// 数据与公开页同源（/api/version，服务端 6h 缓存），并行加载不阻塞首屏。
+const version = ref('');
+const buildTime = ref('');
+const hash = ref('');
+const agentLatest = ref('');
+async function loadVersion() {
+  try {
+    const info = await publicApi.version();
+    version.value = info.version || info.data?.version || '';
+    buildTime.value = info.build_time || info.data?.build_time || '';
+    hash.value = info.hash || info.data?.hash || '';
+    agentLatest.value = info.agent_latest || info.data?.agent_latest || '';
+  } catch {
+    version.value = '';
+    buildTime.value = '';
+    hash.value = '';
+    agentLatest.value = '';
+  }
+}
+
+// 顶栏直接复用公开页 AppHeader（admin 变体：全宽 + 静态边框），站名/logo 取后台自己的 ui 设置。
 const siteUi = computed(() => (state.settings?.ui || {}) as Record<string, unknown>);
 const siteTitle = computed(() => String(siteUi.value.site_title || ''));
 const siteLogo = computed(() => String(siteUi.value.logo_url || ''));
@@ -27,10 +51,36 @@ async function logout() {
   }
 }
 
-// 侧栏收起状态提升到这里（Sidebar 受控）：localStorage 记忆与展开/收起按钮都在外层统一处理。
-const COLLAPSE_KEY = 'diting.admin.sidebar.collapsed';
-const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1');
-watch(collapsed, (v) => localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'));
+// 侧栏开合（参考设计单状态）：桌面是真实停靠列（默认开），移动是抽屉（默认关）。
+// 桌面偏好持久化；跨断点回桌面时优先读偏好，不强制展开（缩放鲁棒）。
+const SIDEBAR_KEY = 'diting.admin.sidebar.open';
+const MOBILE_QUERY = '(max-width: 1023.98px)';
+function mobileNow(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(MOBILE_QUERY).matches
+    : false;
+}
+function readPref(): boolean {
+  const v = localStorage.getItem(SIDEBAR_KEY);
+  return v === null ? true : v === '1';
+}
+const isMobile = ref(mobileNow());
+const sidebarOpen = ref(isMobile.value ? false : readPref());
+let mql: MediaQueryList | null = null;
+function onBreakpointChange(e: MediaQueryListEvent) {
+  isMobile.value = e.matches;
+  sidebarOpen.value = e.matches ? false : readPref();
+}
+watch(sidebarOpen, (v) => {
+  if (!isMobile.value) localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0');
+});
+
+// 内容列是页面唯一滚动容器。子路由切换（侧栏二级菜单）时回到顶部：
+// 同一视图组件跨子路由复用实例，不重置会带着上一页的滚动位置进新分节。
+const scrollEl = ref<HTMLElement | null>(null);
+watch(() => route.path, () => {
+  if (scrollEl.value) scrollEl.value.scrollTop = 0;
+});
 
 // F8.6：恢复审查黄条。恢复自较早的备份时，下一次 prune 会删掉大量过期明细，
 // 必须在顶部提示，而不是等数据静默消失。关闭状态按「报告 ts」记在 sessionStorage，
@@ -102,15 +152,23 @@ async function cleanupCapacity() {
 }
 
 onMounted(() => {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    mql = window.matchMedia(MOBILE_QUERY);
+    isMobile.value = mql.matches;
+    sidebarOpen.value = mql.matches ? false : readPref();
+    mql.addEventListener('change', onBreakpointChange);
+  }
   loadAdmin();
   loadRestoreAudit();
   loadCapacity();
+  void loadVersion();
   startAutoRefresh();
   // 后台管理页不需要公开页实时数据（DashboardView 等仍 useApp() 读 meta，
   // 其 onMounted 会启动 10s 轮询，这里暂停掉，避免后台无谓拉 public/agents+meta+overview）。
   setPublicAutoRefreshPaused(true);
 });
 onUnmounted(() => {
+  mql?.removeEventListener('change', onBreakpointChange);
   stopAutoRefresh();
   // 离开后台恢复公开页轮询
   setPublicAutoRefreshPaused(false);
@@ -118,11 +176,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- 布局口径：顶栏全宽；侧栏固定在左侧，不参与内容居中；
-       内容列 max-w-[1280px]（见下方 main）在侧栏右侧的剩余空间里 mx-auto 居中。 -->
-  <div class="flex min-h-screen w-full flex-col">
-    <!-- 顶栏：直接复用公开页 AppHeader（透明 → 滚动毛玻璃），仅切换后台开关 -->
+  <!-- 经典停靠布局（参考设计）：固定视口高应用壳、整页不滚；顶栏全宽（admin 变体）；
+       侧栏是真实停靠列（桌面展开 15rem ↔ 收起 4rem 图标栏），内容列在其右侧内滚。无浮卡、无视口阈值、无预留槽。 -->
+  <div class="flex h-screen w-full flex-col overflow-hidden">
+    <!-- 顶栏：复用公开页 AppHeader 的 admin 变体（全宽 + 静态边框），菜单开关桌面常驻 -->
     <AppHeader
+      variant="admin"
       :title="siteTitle || undefined"
       :logo="siteLogo || undefined"
       home-to="/admin"
@@ -130,21 +189,22 @@ onUnmounted(() => {
       show-logout
       show-menu
       class="!z-40"
-      @open-menu="menuOpen = true"
+      @toggle-sidebar="sidebarOpen = !sidebarOpen"
       @logout="logout"
     />
 
     <div class="flex min-h-0 flex-1">
-      <!-- 侧栏是浮动吸附卡片（自带外边距与圆角），不参与主内容居中 -->
+      <!-- 侧栏：桌面停靠列（占真实宽度），移动抽屉 + 遮罩 -->
       <Sidebar
-        :open="menuOpen"
-        :collapsed="collapsed"
-        @update:collapsed="collapsed = $event"
-        @close="menuOpen = false"
+        :open="sidebarOpen"
+        :is-mobile="isMobile"
+        @close="sidebarOpen = false"
+        @open="sidebarOpen = true"
       />
-      <main class="min-w-0 flex-1 p-4 lg:p-6">
-        <!-- 内容列宽度与公开页一致（1280 上限），在侧栏右侧的剩余空间里居中 -->
-        <div class="mx-auto w-full max-w-[1280px]">
+      <main ref="scrollEl" class="min-w-0 flex-1 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable] lg:px-6 lg:pb-6">
+        <!-- 内容列：1280 可读性上限，居中于剩余宽度（侧栏已占真实列，无需预留槽）。
+             顶部留白放在列上而非 main：main 无 padding-top，吸顶标题栏才能贴齐滚动口顶。 -->
+        <div class="mx-auto w-full max-w-[1280px] pt-4 lg:pt-6">
       <!-- F12：容量保险丝（比恢复审查更紧急，放最上面） -->
       <div
         v-if="capacityBanner"
@@ -162,13 +222,13 @@ onUnmounted(() => {
         </span>
         <button
           :disabled="capacityBusy"
-          class="rounded border px-2 py-1 text-xs hover:bg-white/10 disabled:opacity-50"
+          class="btn-ghost px-2 py-1 text-xs"
           :class="capacityBanner.level === 'full' ? 'border-rose-400/40' : 'border-amber-400/40'"
           @click="cleanupCapacity"
         >
           {{ capacityBusy ? t('capacityBanner.cleaning') : t('capacityBanner.cleanup') }}
         </button>
-        <RouterLink to="/admin/settings" class="ml-auto text-xs underline">
+        <RouterLink to="/admin/maintenance/capacity" class="ml-auto text-xs underline">
           {{ t('capacityBanner.settings') }}
         </RouterLink>
       </div>
@@ -186,7 +246,7 @@ onUnmounted(() => {
           }}
         </span>
         <RouterLink
-          to="/admin/settings"
+          to="/admin/maintenance/restore"
           class="rounded border border-amber-400/40 px-2 py-1 text-xs hover:bg-amber-500/20"
         >
           {{ t('restoreAudit.view') }}
@@ -197,8 +257,17 @@ onUnmounted(() => {
       </div>
       <RouterView />
         </div>
+        <!-- 全局页脚移入滚动列：随内容内滚，不再落在 h-screen 壳外撑出整页滚动条 -->
+        <AppFooter
+          :meta="appState.meta"
+          :version="version"
+          :build-time="buildTime"
+          :hash="hash"
+          :agent-latest="agentLatest"
+          :ip="appState.visitor?.ip"
+          :browser="appState.visitor?.browser"
+        />
       </main>
     </div>
   </div>
 </template>
-

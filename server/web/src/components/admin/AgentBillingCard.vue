@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
   <button
     ref="trigger"
     type="button"
-    class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-orange-500/10"
+    class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-orange-500/10"
     :title="t('billing.card')"
     :aria-label="t('billing.card')"
     :aria-expanded="open"
@@ -162,25 +162,25 @@ onBeforeUnmount(() => {
     >
       <div class="mb-3 flex items-center justify-between">
         <span class="font-semibold text-slate-100">{{ t('billing.card') }}</span>
-        <span class="truncate pl-2 text-xs text-slate-500">{{ agent.name }}</span>
+        <span class="truncate pl-2 text-xs text-muted">{{ agent.name }}</span>
       </div>
 
-      <label class="mb-3 block text-xs text-slate-400">
+      <label class="mb-3 block text-xs text-secondary">
         {{ t('agent.price') }}
         <input
           v-model.number="form.price"
           type="number"
           step="0.01"
-          class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control mt-1 w-full"
         />
-        <span class="mt-1 block text-[11px] text-slate-500">{{ t('agent.priceHint') }}</span>
+        <span class="mt-1 block text-[11px] text-muted">{{ t('agent.priceHint') }}</span>
       </label>
 
-      <label class="mb-3 block text-xs text-slate-400">
+      <label class="mb-3 block text-xs text-secondary">
         {{ t('agent.currency') }}
         <select
           v-model="form.currency"
-          class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control mt-1 w-full"
         >
           <option v-for="c in CURRENCIES" :key="c.symbol" :value="c.symbol">
             {{ c.symbol }} {{ t('agent.currency.' + c.key) }}
@@ -188,11 +188,11 @@ onBeforeUnmount(() => {
         </select>
       </label>
 
-      <label class="mb-3 block text-xs text-slate-400">
+      <label class="mb-3 block text-xs text-secondary">
         {{ t('agent.billingCycle') }}
         <select
           v-model.number="form.billing_cycle"
-          class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control mt-1 w-full"
         >
           <option v-for="o in BILLING_CYCLES" :key="o.value" :value="o.value">
             {{ o.value === -1 ? '-1 ' : '' }}{{ t('agent.cycle.' + o.key) }}{{ o.value > 0 ? ` (${o.value}d)` : '' }}
@@ -200,14 +200,14 @@ onBeforeUnmount(() => {
         </select>
       </label>
 
-      <div class="mb-3 text-xs text-slate-400">
+      <div class="mb-3 text-xs text-secondary">
         <div class="mb-1 flex items-center justify-between">
           <span>{{ t('agent.expireDate') }}</span>
           <label class="flex cursor-pointer items-center gap-1 text-slate-300">
             <input
               v-model="form.long_term"
               type="checkbox"
-              class="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 text-sky-500"
+              class="switch"
             />
             {{ t('agent.longTerm') }}
           </label>
@@ -216,26 +216,26 @@ onBeforeUnmount(() => {
           v-model="form.expire_at"
           type="date"
           :disabled="form.long_term"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+          class="field-control w-full disabled:cursor-not-allowed"
         />
-        <span v-if="form.long_term" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
+        <span v-if="form.long_term" class="mt-1 block text-[11px] text-muted">{{ t('agent.longTermHint') }}</span>
       </div>
 
       <!-- 只读汇总：剩余价值 / 剩余时间 / 月均支出（参考面板资产统计口径） -->
       <div class="inner-panel mb-3 px-3 py-2 text-[11px]">
         <div class="flex items-center justify-between py-0.5">
-          <span class="text-slate-400">{{ t('node.billing.remainingValue') }}</span>
+          <span class="text-secondary">{{ t('node.billing.remainingValue') }}</span>
           <span class="tabular-nums text-slate-200">{{ remainingText }}</span>
         </div>
         <div class="flex items-center justify-between py-0.5">
-          <span class="text-slate-400">{{ t('node.billing.remainingTime') }}</span>
+          <span class="text-secondary">{{ t('node.billing.remainingTime') }}</span>
           <span class="tabular-nums text-slate-200">
             {{ remainingTimeText }}
-            <span v-if="remainingDaysText !== '—'" class="text-slate-500">· {{ remainingDaysText }}</span>
+            <span v-if="remainingDaysText !== '—'" class="text-muted">· {{ remainingDaysText }}</span>
           </span>
         </div>
         <div class="flex items-center justify-between py-0.5">
-          <span class="text-slate-400">{{ t('node.billing.monthlyCost') }}</span>
+          <span class="text-secondary">{{ t('node.billing.monthlyCost') }}</span>
           <span class="tabular-nums text-slate-200">{{ monthlyCostText }}</span>
         </div>
       </div>
@@ -244,16 +244,16 @@ onBeforeUnmount(() => {
         <input
           v-model="form.auto_renewal"
           type="checkbox"
-          class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500"
+          class="switch"
         />
         {{ t('agent.autoRenew') }}
       </label>
-      <p class="mt-1 text-[11px] leading-relaxed text-slate-500">{{ t('agent.autoRenewHint') }}</p>
+      <p class="mt-1 text-[11px] leading-relaxed text-muted">{{ t('agent.autoRenewHint') }}</p>
 
       <p v-if="err" class="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200">{{ err }}</p>
 
       <div class="mt-4 flex justify-end gap-2">
-        <button class="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800" @click="open = false">
+        <button class="btn-ghost px-3 py-1.5 text-xs" @click="open = false">
           {{ t('common.cancel') }}
         </button>
         <button

@@ -31,13 +31,13 @@ const rows = computed(() => [
         :key="r.key"
         class="flex items-center justify-between gap-2 border-b border-slate-700/40 pb-1.5 text-xs last:border-0"
       >
-        <span class="flex min-w-0 items-center gap-1.5 text-slate-400">
+        <span class="flex min-w-0 items-center gap-1.5 text-secondary">
           <component :is="r.icon" :size="14" />
           <span class="truncate">{{ r.label }}</span>
         </span>
         <span class="shrink-0 font-semibold tabular-nums text-slate-200">{{ r.value }}</span>
       </div>
-      <p class="pt-1 text-[11px] text-slate-500">{{ t('dashboard.capacityCount', { n: nodeCount }) }}</p>
+      <p class="pt-1 text-[11px] text-muted">{{ t('dashboard.capacityCount', { n: nodeCount }) }}</p>
     </div>
   </WidgetShell>
 </template>

@@ -5,6 +5,7 @@
 // 服务端按内容寻址存储（文件名 = <sha256>.bin|.exe，由服务端生成），同内容天然去重；
 // 本页只负责上传与挑选，**不做任何执行动作**（执行始终由管理员在节点上发起）。
 import { ref, onMounted, computed } from 'vue';
+import PageShell from '../../components/admin/PageShell.vue';
 import { adminApi } from '../../services/adminApi';
 import { apiErrorMessage } from '../../utils/apiError';
 import { useI18n } from '../../composables/useI18n';
@@ -111,34 +112,33 @@ onMounted(load);
 </script>
 
 <template>
-  <div>
-    <div class="mb-6 flex items-center justify-between">
-      <h1 class="text-2xl font-bold text-white">{{ t('artifacts.title') }}</h1>
-      <button class="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800" :disabled="loading" @click="load">
+  <PageShell :title="t('artifacts.title')">
+    <template #actions>
+      <button class="btn-ghost flex items-center gap-1 px-3 py-1.5 text-sm" :disabled="loading" @click="load">
         <Refresh :size="14" /> {{ t('common.refresh') }}
       </button>
-    </div>
+    </template>
 
-    <p class="mb-4 text-sm text-slate-400">{{ t('artifacts.hint') }}</p>
+    <p class="mb-4 text-sm text-secondary">{{ t('artifacts.hint') }}</p>
 
     <div v-if="error" class="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">{{ error }}</div>
     <div v-if="message" class="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{{ message }}</div>
 
     <!-- 上传 -->
     <div class="glass mb-6 p-4">
-      <h2 class="mb-3 text-lg font-semibold text-white">{{ t('artifacts.uploadTitle') }}</h2>
+      <h2 class="mb-3 text-lg font-semibold">{{ t('artifacts.uploadTitle') }}</h2>
       <div class="flex flex-wrap items-end gap-3">
-        <label class="flex flex-col gap-1 text-xs text-slate-400">
+        <label class="flex flex-col gap-1 text-xs text-secondary">
           {{ t('artifacts.platform') }}
-          <select v-model="platform" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white">
+          <select v-model="platform" class="field-control">
             <option v-for="p in PLATFORMS" :key="p" :value="p">{{ p }}</option>
           </select>
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-400">
+        <label class="flex flex-col gap-1 text-xs text-secondary">
           {{ t('artifacts.note') }}
-          <input v-model="sourceNote" :placeholder="t('artifacts.notePlaceholder')" class="w-56 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+          <input v-model="sourceNote" :placeholder="t('artifacts.notePlaceholder')" class="field-control w-56" />
         </label>
-        <label class="flex flex-col gap-1 text-xs text-slate-400">
+        <label class="flex flex-col gap-1 text-xs text-secondary">
           {{ t('artifacts.file') }}
           <input id="artifact-file-input" type="file" class="text-sm text-slate-300" @change="pickFile" />
         </label>
@@ -146,20 +146,20 @@ onMounted(load);
           <Upload :size="14" /> {{ uploading ? `${uploadPct}%` : t('artifacts.upload') }}
         </button>
       </div>
-      <p v-if="file" class="mt-2 text-xs text-slate-500">{{ file.name }} · {{ fmtSize(file.size) }}</p>
+      <p v-if="file" class="mt-2 text-xs text-muted">{{ file.name }} · {{ fmtSize(file.size) }}</p>
     </div>
 
     <!-- 列表 -->
     <div class="glass p-4">
-      <h2 class="mb-3 text-lg font-semibold text-white">{{ t('artifacts.listTitle') }} ({{ list.length }})</h2>
-      <div v-if="!list.length && !loading" class="py-8 text-center text-sm text-slate-500">{{ t('artifacts.empty') }}</div>
+      <h2 class="mb-3 text-lg font-semibold">{{ t('artifacts.listTitle') }} ({{ list.length }})</h2>
+      <div v-if="!list.length && !loading" class="py-8 text-center text-sm text-muted">{{ t('artifacts.empty') }}</div>
 
       <div v-for="[plat, items] in grouped" :key="plat" class="mb-4">
-        <div class="mb-2 text-xs uppercase tracking-wide text-slate-500">{{ plat }}</div>
+        <div class="mb-2 text-xs uppercase tracking-wide text-muted">{{ plat }}</div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
-              <tr class="border-b border-slate-700 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr class="border-b border-slate-700 text-left text-xs uppercase tracking-wide text-muted">
                 <th class="px-3 py-2">{{ t('artifacts.sha256') }}</th>
                 <th class="px-3 py-2">{{ t('artifacts.size') }}</th>
                 <th class="px-3 py-2">{{ t('artifacts.note') }}</th>
@@ -175,11 +175,11 @@ onMounted(load);
                     <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(a.sha256)">{{ t('common.copy') }}</button>
                   </span>
                 </td>
-                <td class="px-3 py-2 text-slate-400">{{ fmtSize(a.size) }}</td>
-                <td class="px-3 py-2 text-slate-400">{{ a.source_note || '—' }}</td>
-                <td class="px-3 py-2 text-slate-400">{{ fmtTime(a.created_at) }}</td>
+                <td class="px-3 py-2 text-secondary">{{ fmtSize(a.size) }}</td>
+                <td class="px-3 py-2 text-secondary">{{ a.source_note || '—' }}</td>
+                <td class="px-3 py-2 text-secondary">{{ fmtTime(a.created_at) }}</td>
                 <td class="px-3 py-2 text-right">
-                  <button class="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-2 py-1 text-xs text-slate-400 hover:bg-rose-500/10" @click="remove(a)">
+                  <button class="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-2 py-1 text-xs text-secondary hover:bg-rose-500/10" @click="remove(a)">
                     <Delete :size="12" /> {{ t('common.delete') }}
                   </button>
                 </td>
@@ -189,5 +189,5 @@ onMounted(load);
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>

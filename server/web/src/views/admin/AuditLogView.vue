@@ -5,6 +5,7 @@ import { t } from '../../composables/useI18n';
 import Loading from '../../components/ui/Loading.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
 import ErrorMessage from '../../components/ui/ErrorMessage.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 
 const logs = ref<AuditLogEntry[]>([]);
 const total = ref(0);
@@ -50,8 +51,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-4 text-xl font-bold lg:text-2xl text-content">{{ t('audit.title') }}</h1>
+  <PageShell :title="t('audit.title')">
     <ErrorMessage v-if="error" class="mb-4" :message="error" />
     <Loading v-if="loading && !logs.length" />
     <EmptyState v-else-if="!logs.length" />
@@ -94,5 +94,5 @@ onMounted(load);
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>

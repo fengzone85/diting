@@ -125,8 +125,6 @@ export const enUS: Record<string, string> = {
   'nav.group.security': 'Security',
   'nav.group.system': 'System',
   'nav.home': 'Back to site',
-  'nav.collapse': 'Collapse sidebar',
-  'nav.expand': 'Expand sidebar',
 
   // agents
   'agents.title': 'Agents',
@@ -899,6 +897,20 @@ export const enUS: Record<string, string> = {
   'ai.config': 'Config',
   'ai.status': 'Status',
   'ai.reports': 'Reports',
+  'ai.prevMonth': 'Previous month',
+  'ai.nextMonth': 'Next month',
+  'ai.today': 'Today',
+  'ai.wk1': 'Mon',
+  'ai.wk2': 'Tue',
+  'ai.wk3': 'Wed',
+  'ai.wk4': 'Thu',
+  'ai.wk5': 'Fri',
+  'ai.wk6': 'Sat',
+  'ai.wk7': 'Sun',
+  'ai.riskLow': 'Low',
+  'ai.riskMedium': 'Medium',
+  'ai.riskHigh': 'High',
+  'ai.back': 'Back',
   'ai.noReports': 'No reports',
   'ai.run': 'Run now',
   'ai.enabled': 'Enable AI analysis',
@@ -975,8 +987,6 @@ export const enUS: Record<string, string> = {
   'ai.win30d': '30 days',
   'ai.reanalyze': 'Re-analyze',
   'ai.analyzeNodeHint': 'Read-only AI interpretation of this node\u2019s recent metrics; conclusions are probabilistic and no commands are issued.',
-  'ai.prevPage': 'Prev',
-  'ai.nextPage': 'Next',
 
   // agent detail (admin)
   'agent.back': 'Back to list',

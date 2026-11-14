@@ -11,6 +11,7 @@ import { useSettingsForm } from '../../composables/useSettingsForm';
 import Loading from '../../components/ui/Loading.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
 import ErrorMessage from '../../components/ui/ErrorMessage.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 import FormInput from '../../components/ui/FormInput.vue';
 import TwoFactorPanel from '../../components/admin/TwoFactorPanel.vue';
 
@@ -119,9 +120,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-2 text-2xl font-bold">{{ t('sessions.title') }}</h1>
-    <p class="mb-6 text-sm text-slate-400">{{ t('sessions.desc') }}</p>
+  <PageShell :title="t('sessions.title')">
+    <p class="mb-6 text-sm text-secondary">{{ t('sessions.desc') }}</p>
 
     <ErrorMessage v-if="error" class="mb-4" :message="error" />
 
@@ -137,10 +137,10 @@ onMounted(() => {
           :disabled="bulkBusy"
           @click="revokeAll"
         >{{ t('sessions.revokeAll') }}</button>
-        <span class="text-xs text-slate-500">{{ t('sessions.count', { n: sessions.length }) }}</span>
+        <span class="text-xs text-muted">{{ t('sessions.count', { n: sessions.length }) }}</span>
         <button class="text-xs text-sky-400 hover:underline" @click="load">{{ t('common.refresh') }}</button>
       </div>
-      <p class="mt-3 text-xs leading-relaxed text-slate-500">{{ t('sessions.hint') }}</p>
+      <p class="mt-3 text-xs leading-relaxed text-muted">{{ t('sessions.hint') }}</p>
     </div>
 
     <Loading v-if="loading && !sessions.length" />
@@ -150,7 +150,7 @@ onMounted(() => {
         v-for="s in sessions"
         :key="s.id"
         class="rounded-lg border p-3 text-sm"
-        :class="s.current ? 'border-sky-500/40 bg-sky-500/5' : 'border-white/10'"
+        :class="s.current ? 'border-sky-500/40 bg-sky-500/5' : 'border-divider'"
       >
         <div class="mb-1 flex items-center justify-between gap-2">
           <span class="font-semibold text-content">{{ s.ip || t('sessions.unknownIp') }}</span>
@@ -158,7 +158,7 @@ onMounted(() => {
             {{ t('sessions.current') }}
           </span>
         </div>
-        <div class="space-y-0.5 text-xs text-slate-400">
+        <div class="space-y-0.5 text-xs text-secondary">
           <div class="break-all">{{ shortUa(s.ua) }}</div>
           <div>{{ t('sessions.createdAt') }}：{{ fmtDateTime(s.created_at) }}</div>
           <div>{{ t('sessions.lastSeen') }}：{{ fmtDateTime(s.last_seen) }}</div>
@@ -183,7 +183,7 @@ onMounted(() => {
         :label="t('settings.adminAllowIps')"
         :hint="t('settings.adminAllowIpsHint')"
       />
-      <p v-if="clientIp" class="mb-4 text-xs text-slate-400">
+      <p v-if="clientIp" class="mb-4 text-xs text-secondary">
         {{ t('settings.clientIpSeen') }}：<span class="font-mono text-slate-200">{{ clientIp.ip }}</span>
         <span v-if="clientIp.x_forwarded_for && clientIp.x_forwarded_for !== clientIp.ip">
           （{{ t('settings.clientIpHintXff', { xff: clientIp.x_forwarded_for }) }}）
@@ -203,5 +203,5 @@ onMounted(() => {
     </div>
 
     <TwoFactorPanel class="mt-6" />
-  </div>
+  </PageShell>
 </template>

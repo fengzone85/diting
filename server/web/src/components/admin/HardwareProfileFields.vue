@@ -132,14 +132,14 @@ function setHwMode(key: HardwareFieldKey, mode: string) {
   }
 }
 
-const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:opacity-40';
+const fieldCls = 'field-control w-full disabled:opacity-40';
 </script>
 
 <template>
   <div class="space-y-3">
     <!-- CPU：预设（厂商 + 代际）/ 手填 / 隐藏 -->
     <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
-      <label class="text-sm text-slate-400">{{ t('hw.cpu') }}</label>
+      <label class="text-sm text-secondary">{{ t('hw.cpu') }}</label>
       <select :value="hwMode('cpu')" :class="fieldCls" @change="setHwMode('cpu', ($event.target as HTMLSelectElement).value)">
         <option value="">{{ t('hw.mode.unset') }}</option>
         <option value="enum">{{ t('hw.mode.enum') }}</option>
@@ -147,7 +147,7 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
         <option value="hidden">{{ t('hw.mode.hidden') }}</option>
       </select>
       <div>
-        <span v-if="hwMode('cpu') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <span v-if="hwMode('cpu') === 'hidden'" class="text-xs text-muted">{{ t('hw.hiddenHint') }}</span>
         <div v-else-if="hwMode('cpu') === 'enum'" class="flex gap-2">
           <select v-model="state.cpu.vendor" :class="fieldCls" @change="state.cpu.tag = ''">
             <option value="">{{ t('hw.cpuVendor') }}</option>
@@ -165,13 +165,13 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :placeholder="t('hw.customPlaceholder')"
           :class="fieldCls"
         />
-        <span v-else class="text-xs text-slate-500">{{ t('hw.unset') }}</span>
+        <span v-else class="text-xs text-muted">{{ t('hw.unset') }}</span>
       </div>
     </div>
 
     <!-- 架构：未填写时按受控端构建平台派生；隐藏可压住派生 -->
     <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
-      <label class="text-sm text-slate-400">{{ t('hw.arch') }}</label>
+      <label class="text-sm text-secondary">{{ t('hw.arch') }}</label>
       <select :value="hwMode('arch')" :class="fieldCls" @change="setHwMode('arch', ($event.target as HTMLSelectElement).value)">
         <option value="">{{ t('hw.mode.unset') }}</option>
         <option value="enum">{{ t('hw.mode.enum') }}</option>
@@ -179,7 +179,7 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
         <option value="hidden">{{ t('hw.mode.hidden') }}</option>
       </select>
       <div>
-        <span v-if="hwMode('arch') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <span v-if="hwMode('arch') === 'hidden'" class="text-xs text-muted">{{ t('hw.hiddenHint') }}</span>
         <select v-else-if="hwMode('arch') === 'enum'" v-model="state.arch.value" :class="fieldCls">
           <option value="">{{ t('hw.pick') }}</option>
           <option v-for="a in (options?.archs || [])" :key="a" :value="a">{{ a }}</option>
@@ -191,13 +191,13 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :placeholder="t('hw.customPlaceholder')"
           :class="fieldCls"
         />
-        <span v-else class="text-xs text-slate-500">{{ t('hw.archDerived') }}</span>
+        <span v-else class="text-xs text-muted">{{ t('hw.archDerived') }}</span>
       </div>
     </div>
 
     <!-- 虚拟化 -->
     <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
-      <label class="text-sm text-slate-400">{{ t('hw.virt') }}</label>
+      <label class="text-sm text-secondary">{{ t('hw.virt') }}</label>
       <select :value="hwMode('virt')" :class="fieldCls" @change="setHwMode('virt', ($event.target as HTMLSelectElement).value)">
         <option value="">{{ t('hw.mode.unset') }}</option>
         <option value="enum">{{ t('hw.mode.enum') }}</option>
@@ -205,7 +205,7 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
         <option value="hidden">{{ t('hw.mode.hidden') }}</option>
       </select>
       <div>
-        <span v-if="hwMode('virt') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <span v-if="hwMode('virt') === 'hidden'" class="text-xs text-muted">{{ t('hw.hiddenHint') }}</span>
         <select v-else-if="hwMode('virt') === 'enum'" v-model="state.virt.value" :class="fieldCls">
           <option value="">{{ t('hw.pick') }}</option>
           <option v-for="v in (options?.virtualizations || [])" :key="v" :value="v">{{ v }}</option>
@@ -217,13 +217,13 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :placeholder="t('hw.customPlaceholder')"
           :class="fieldCls"
         />
-        <span v-else class="text-xs text-slate-500">{{ t('hw.unset') }}</span>
+        <span v-else class="text-xs text-muted">{{ t('hw.unset') }}</span>
       </div>
     </div>
 
     <!-- GPU：预设只有「核显 / 独显」；无使用率数据源 -->
     <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
-      <label class="text-sm text-slate-400">{{ t('hw.gpu') }}</label>
+      <label class="text-sm text-secondary">{{ t('hw.gpu') }}</label>
       <select :value="hwMode('gpu')" :class="fieldCls" @change="setHwMode('gpu', ($event.target as HTMLSelectElement).value)">
         <option value="">{{ t('hw.mode.unset') }}</option>
         <option value="enum">{{ t('hw.mode.enum') }}</option>
@@ -231,7 +231,7 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
         <option value="hidden">{{ t('hw.mode.hidden') }}</option>
       </select>
       <div>
-        <span v-if="hwMode('gpu') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <span v-if="hwMode('gpu') === 'hidden'" class="text-xs text-muted">{{ t('hw.hiddenHint') }}</span>
         <select v-else-if="hwMode('gpu') === 'enum'" v-model="state.gpu.value" :class="fieldCls">
           <option value="">{{ t('hw.pick') }}</option>
           <option v-for="g in (options?.gpu_types || [])" :key="g" :value="g">{{ g }}</option>
@@ -243,20 +243,20 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :placeholder="t('hw.customPlaceholder')"
           :class="fieldCls"
         />
-        <span v-else class="text-xs text-slate-500">{{ t('hw.unset') }}</span>
+        <span v-else class="text-xs text-muted">{{ t('hw.unset') }}</span>
       </div>
     </div>
 
     <!-- 内核版本：没有「代际」粒度，只支持手填 / 隐藏；可直接匹配 CVE，属最高敏感项 -->
     <div class="grid grid-cols-1 items-center gap-2 md:grid-cols-[72px_120px_1fr]">
-      <label class="text-sm text-slate-400">{{ t('hw.kernel') }}</label>
+      <label class="text-sm text-secondary">{{ t('hw.kernel') }}</label>
       <select :value="hwMode('kernel')" :class="fieldCls" @change="setHwMode('kernel', ($event.target as HTMLSelectElement).value)">
         <option value="">{{ t('hw.mode.unset') }}</option>
         <option value="custom">{{ t('hw.mode.custom') }}</option>
         <option value="hidden">{{ t('hw.mode.hidden') }}</option>
       </select>
       <div>
-        <span v-if="hwMode('kernel') === 'hidden'" class="text-xs text-slate-500">{{ t('hw.hiddenHint') }}</span>
+        <span v-if="hwMode('kernel') === 'hidden'" class="text-xs text-muted">{{ t('hw.hiddenHint') }}</span>
         <input
           v-else-if="hwMode('kernel') === 'custom'"
           v-model="state.kernel.text"
@@ -264,7 +264,7 @@ const fieldCls = 'w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3
           :placeholder="t('hw.kernelPlaceholder')"
           :class="fieldCls"
         />
-        <span v-else class="text-xs text-slate-500">{{ t('hw.kernelHint') }}</span>
+        <span v-else class="text-xs text-muted">{{ t('hw.kernelHint') }}</span>
       </div>
     </div>
   </div>

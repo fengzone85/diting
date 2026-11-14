@@ -12,6 +12,7 @@ import type { Agent, InstallCommands, ModifyCommands, ChartPoint, HardwareOption
 import ChartLatency from '../../components/ChartLatency.vue';
 import FormInput from '../../components/ui/FormInput.vue';
 import HardwareProfileFields from '../../components/admin/HardwareProfileFields.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 import AiNodeAnalysisDialog from '../../components/ai/AiNodeAnalysisDialog.vue';
 
 const route = useRoute();
@@ -292,17 +293,16 @@ function formatDate(ts?: number) {
 </script>
 
 <template>
-  <div>
-    <div class="mb-4 flex items-center gap-3">
-      <button class="text-sm text-slate-400 hover:text-white" @click="$router.push('/admin/agents')">← {{ t('agent.back') }}</button>
-      <h1 class="text-2xl font-bold">{{ agent?.name || agentId }}</h1>
+  <PageShell :title="agent?.name || agentId">
+    <template #actions>
       <span
         class="rounded-full px-2 py-0.5 text-xs"
         :class="agent?.online ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'"
       >
         {{ agent?.online ? t('common.online') : t('common.offline') }}
       </span>
-    </div>
+      <button class="btn-ghost px-3 py-1.5 text-sm" @click="$router.push('/admin/agents')">← {{ t('agent.back') }}</button>
+    </template>
 
     <div v-if="message" class="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
       {{ message }}
@@ -311,7 +311,7 @@ function formatDate(ts?: number) {
       {{ error }}
     </div>
 
-    <div v-if="loading" class="py-12 text-center text-slate-400">{{ t('common.loading') }}</div>
+    <div v-if="loading" class="py-12 text-center text-secondary">{{ t('common.loading') }}</div>
 
     <div v-else class="grid grid-cols-1 gap-6 xl:grid-cols-3">
       <div class="xl:col-span-2 space-y-6">
@@ -331,9 +331,9 @@ function formatDate(ts?: number) {
         <!-- 硬件档案（管理员手工录入；受控端不自动采集） -->
         <div class="glass p-6">
           <h2 class="mb-1 text-lg font-semibold">{{ t('hw.title') }}</h2>
-          <p class="mb-4 text-xs leading-relaxed text-slate-500">{{ t('hw.hint') }}</p>
+          <p class="mb-4 text-xs leading-relaxed text-muted">{{ t('hw.hint') }}</p>
           <HardwareProfileFields ref="hwFields" :options="hwOptions" @change="onHardwareChange" />
-          <p class="mt-3 text-[11px] leading-relaxed text-slate-500">{{ t('hw.disclaimer') }}</p>
+          <p class="mt-3 text-[11px] leading-relaxed text-muted">{{ t('hw.disclaimer') }}</p>
         </div>
 
         <div class="glass p-6">
@@ -341,22 +341,22 @@ function formatDate(ts?: number) {
           <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
             <FormInput v-model="form.price" :label="t('agent.price')" type="number" />
             <div>
-              <label class="mb-1 block text-sm text-slate-400">{{ t('agent.currency') }}</label>
-              <select v-model="form.currency" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
+              <label class="mb-1 block text-sm text-secondary">{{ t('agent.currency') }}</label>
+              <select v-model="form.currency" class="field-control w-full">
                 <option v-for="c in currencies" :key="c.symbol" :value="c.symbol">{{ c.symbol }} {{ t('agent.currency.' + c.key) }}</option>
               </select>
             </div>
             <div>
-              <label class="mb-1 block text-sm text-slate-400">{{ t('agent.billingCycle') }}</label>
-              <select v-model="form.billing_cycle" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500">
+              <label class="mb-1 block text-sm text-secondary">{{ t('agent.billingCycle') }}</label>
+              <select v-model="form.billing_cycle" class="field-control w-full">
                 <option v-for="opt in billingCycles" :key="opt.value" :value="opt.value">{{ t('agent.cycle.' + opt.key) }}</option>
               </select>
             </div>
             <div>
               <div class="mb-1 flex items-center justify-between">
-                <label class="block text-sm text-slate-400">{{ t('agent.expireDate') }}</label>
+                <label class="block text-sm text-secondary">{{ t('agent.expireDate') }}</label>
                 <label class="flex cursor-pointer items-center gap-1 text-xs text-slate-300">
-                  <input v-model="longTerm" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900/50 text-sky-500" />
+                  <input v-model="longTerm" type="checkbox" class="switch" />
                   {{ t('agent.longTerm') }}
                 </label>
               </div>
@@ -364,9 +364,9 @@ function formatDate(ts?: number) {
                 v-model="form.expire_at"
                 type="date"
                 :disabled="longTerm"
-                class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+                class="field-control w-full disabled:cursor-not-allowed"
               />
-              <span v-if="longTerm" class="mt-1 block text-[11px] text-slate-500">{{ t('agent.longTermHint') }}</span>
+              <span v-if="longTerm" class="mt-1 block text-[11px] text-muted">{{ t('agent.longTermHint') }}</span>
             </div>
             <FormInput v-model="form.monthly_quota_gb" :label="t('agent.monthlyQuota')" type="number" />
             <FormInput
@@ -379,7 +379,7 @@ function formatDate(ts?: number) {
             />
             <div class="flex items-end">
               <label class="flex items-center gap-2 text-sm text-slate-300">
-                <input v-model="form.auto_renewal" type="checkbox" class="h-4 w-4 rounded border-slate-700 bg-slate-900/50 text-sky-500" />
+                <input v-model="form.auto_renewal" type="checkbox" class="switch" />
                 {{ t('agent.autoRenew') }}
               </label>
             </div>
@@ -394,12 +394,12 @@ function formatDate(ts?: number) {
         <div class="glass p-6">
           <h2 class="mb-4 text-lg font-semibold">{{ t('agent.probeTargets') }}</h2>
           <FormInput v-model="form.probe_targets" :label="t('agent.probeTargetsLabel')" type="textarea" />
-          <p class="mb-4 text-xs text-slate-500">{{ t('agent.probeHint') }}</p>
+          <p class="mb-4 text-xs text-muted">{{ t('agent.probeHint') }}</p>
           <div class="flex gap-3">
             <button :disabled="saving" class="rounded-lg bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50" @click="save">
               {{ saving ? t('agent.saving') : t('common.save') }}
             </button>
-            <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:border-slate-500" @click="resetForm(agent)">
+            <button class="btn-ghost px-4 py-2 text-sm" @click="resetForm(agent)">
               {{ t('common.reset') }}
             </button>
             <button class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300 hover:bg-rose-500/20" @click="remove">
@@ -413,65 +413,65 @@ function formatDate(ts?: number) {
         <div class="glass p-6">
           <h2 class="mb-4 text-lg font-semibold">{{ t('agent.installCmds') }}</h2>
           <div class="mb-4">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('agent.cmdProbePreview') }}</label>
+            <label class="mb-1 block text-sm text-secondary">{{ t('agent.cmdProbePreview') }}</label>
             <div class="flex gap-2">
-              <input v-model="commandProbeTargets" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" />
-              <button class="rounded-lg bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-600" @click="fetchCommands">{{ t('agent.refresh') }}</button>
+              <input v-model="commandProbeTargets" class="field-control min-w-0 flex-1" />
+              <button class="btn-ghost px-3 py-2 text-sm" @click="fetchCommands">{{ t('agent.refresh') }}</button>
             </div>
           </div>
 
           <div class="mb-4 space-y-3">
             <div>
               <div class="mb-1 flex items-center justify-between">
-                <label class="text-xs text-slate-400">{{ t('agents.linux') }}</label>
+                <label class="text-xs text-secondary">{{ t('agents.linux') }}</label>
                 <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(commands.install?.native_cmd || '')">{{ t('common.copy') }}</button>
               </div>
-              <textarea readonly rows="4" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="commands.install?.native_cmd" />
+              <textarea readonly rows="4" class="field-control field-mono w-full" :value="commands.install?.native_cmd" />
             </div>
             <div>
               <div class="mb-1 flex items-center justify-between">
-                <label class="text-xs text-slate-400">{{ t('agents.docker') }}</label>
+                <label class="text-xs text-secondary">{{ t('agents.docker') }}</label>
                 <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(commands.install?.docker_cmd || '')">{{ t('common.copy') }}</button>
               </div>
-              <textarea readonly rows="4" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="commands.install?.docker_cmd" />
+              <textarea readonly rows="4" class="field-control field-mono w-full" :value="commands.install?.docker_cmd" />
             </div>
             <div>
               <div class="mb-1 flex items-center justify-between">
-                <label class="text-xs text-slate-400">{{ t('agents.windows') }}</label>
+                <label class="text-xs text-secondary">{{ t('agents.windows') }}</label>
                 <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(commands.install?.windows_cmd || '')">{{ t('common.copy') }}</button>
               </div>
-              <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="commands.install?.windows_cmd" />
+              <textarea readonly rows="3" class="field-control field-mono w-full" :value="commands.install?.windows_cmd" />
             </div>
           </div>
 
-          <div class="border-t border-slate-700 pt-4">
+          <div class="border-t border-divider pt-4">
             <h3 class="mb-2 text-sm font-semibold">{{ t('agent.modifyProbeTargets') }}</h3>
             <div class="mb-2">
               <div class="mb-1 flex items-center justify-between">
-                <label class="text-xs text-slate-400">Linux</label>
+                <label class="text-xs text-secondary">Linux</label>
                 <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(commands.modify?.linux_cmd || '')">{{ t('common.copy') }}</button>
               </div>
-              <textarea readonly rows="4" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="commands.modify?.linux_cmd" />
+              <textarea readonly rows="4" class="field-control field-mono w-full" :value="commands.modify?.linux_cmd" />
             </div>
             <div>
               <div class="mb-1 flex items-center justify-between">
-                <label class="text-xs text-slate-400">Windows</label>
+                <label class="text-xs text-secondary">Windows</label>
                 <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(commands.modify?.windows_cmd || '')">{{ t('common.copy') }}</button>
               </div>
-              <textarea readonly rows="4" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="commands.modify?.windows_cmd" />
+              <textarea readonly rows="4" class="field-control field-mono w-full" :value="commands.modify?.windows_cmd" />
             </div>
           </div>
 
-          <div class="mt-4 border-t border-slate-700 pt-4">
+          <div class="mt-4 border-t border-divider pt-4">
             <button class="w-full rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-300 hover:bg-amber-500/20" @click="resetToken">
               {{ t('agent.resetTokenBtn') }}
             </button>
             <div v-if="newToken" class="mt-3">
-              <label class="mb-1 block text-xs text-slate-400">{{ t('agent.newToken') }}</label>
+              <label class="mb-1 block text-xs text-secondary">{{ t('agent.newToken') }}</label>
               <div class="flex gap-2">
-                <input :type="showToken ? 'text' : 'password'" readonly class="flex-1 rounded-lg border border-slate-700 bg-slate-900/30 px-3 py-2 text-xs text-slate-300" :value="newToken" />
-                <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="showToken = !showToken">{{ showToken ? t('common.hide') : t('common.show') }}</button>
-                <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(newToken)">{{ t('common.copy') }}</button>
+                <input :type="showToken ? 'text' : 'password'" readonly class="field-control field-mono min-w-0 flex-1" :value="newToken" />
+                <button class="btn-ghost px-3 py-2 text-xs" @click="showToken = !showToken">{{ showToken ? t('common.hide') : t('common.show') }}</button>
+                <button class="btn-ghost px-3 py-2 text-xs" @click="copy(newToken)">{{ t('common.copy') }}</button>
               </div>
             </div>
           </div>
@@ -485,7 +485,7 @@ function formatDate(ts?: number) {
               @click="showNodeDialog = true"
             >{{ t('ai.analyzeNode') }}</button>
           </div>
-          <p class="mt-2 text-xs text-slate-500">{{ t('ai.analyzeNodeHint') }}</p>
+          <p class="mt-2 text-xs text-muted">{{ t('ai.analyzeNodeHint') }}</p>
         </div>
 
         <AiNodeAnalysisDialog
@@ -499,7 +499,7 @@ function formatDate(ts?: number) {
           <div class="mb-3 flex items-center justify-between">
             <h2 class="text-lg font-semibold">{{ t('agent.resourceTrend') }}</h2>
             <div class="flex gap-1 text-xs">
-              <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-400'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
+              <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-secondary'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
             </div>
           </div>
           <div v-if="chartError" class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{{ chartError }}</div>
@@ -513,10 +513,10 @@ function formatDate(ts?: number) {
         <div class="glass p-6">
           <h2 class="mb-4 text-lg font-semibold">{{ t('agent.status') }}</h2>
           <div class="space-y-2 text-sm">
-            <div class="flex justify-between"><span class="text-slate-400">ID</span><span class="font-mono text-slate-200">{{ agent?.id }}</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.os') }}</span><span class="text-slate-200">{{ agent?.os || '-' }}</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('node.hostname') }}</span><span class="text-slate-200">{{ agent?.hostname || '-' }}</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.version') }}</span>
+            <div class="flex justify-between"><span class="text-secondary">ID</span><span class="font-mono text-slate-200">{{ agent?.id }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('agent.os') }}</span><span class="text-slate-200">{{ agent?.os || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('node.hostname') }}</span><span class="text-slate-200">{{ agent?.hostname || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('agent.version') }}</span>
               <span class="text-slate-200">{{ agent?.version || '-' }}
                 <!-- S5.3-4：落后于最新 Release 时给可操作提示（含目标 tag） -->
                 <span v-if="versionOutdated" class="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">
@@ -524,7 +524,7 @@ function formatDate(ts?: number) {
                 </span>
               </span>
             </div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('agent.lastSeen') }}</span><span class="text-slate-200">{{ formatDate(agent?.last_seen) }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('agent.lastSeen') }}</span><span class="text-slate-200">{{ formatDate(agent?.last_seen) }}</span></div>
           </div>
         </div>
 
@@ -533,22 +533,22 @@ function formatDate(ts?: number) {
           <h2 class="mb-4 text-lg font-semibold">{{ t('agent.buildInfo') }}</h2>
           <div class="space-y-2 text-sm">
             <div class="flex items-center justify-between">
-              <span class="text-slate-400">{{ t('node.buildSha') }}</span>
+              <span class="text-secondary">{{ t('node.buildSha') }}</span>
               <span class="flex items-center gap-2">
                 <span class="font-mono text-slate-200">{{ agent?.build_sha || '-' }}</span>
                 <button v-if="agent?.build_sha" class="text-xs text-sky-400 hover:text-sky-300" @click="copy(agent.build_sha)">{{ t('common.copy') }}</button>
               </span>
             </div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('node.buildTime') }}</span><span class="text-slate-200">{{ agent?.build_time || '-' }}</span></div>
-            <div class="flex justify-between"><span class="text-slate-400">{{ t('node.platform') }}</span><span class="text-slate-200">{{ agent?.agent_platform || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('node.buildTime') }}</span><span class="text-slate-200">{{ agent?.build_time || '-' }}</span></div>
+            <div class="flex justify-between"><span class="text-secondary">{{ t('node.platform') }}</span><span class="text-slate-200">{{ agent?.agent_platform || '-' }}</span></div>
             <div class="flex items-center justify-between gap-3">
-              <span class="shrink-0 text-slate-400">{{ t('node.buildTag') }}</span>
+              <span class="shrink-0 text-secondary">{{ t('node.buildTag') }}</span>
               <span class="flex flex-1 items-center justify-end gap-2">
                 <input
                   v-model="buildTag"
                   :placeholder="t('node.buildTagPlaceholder')"
                   maxlength="32"
-                  class="w-40 rounded-lg border border-slate-700 bg-slate-900/50 px-2 py-1 text-xs text-white"
+                  class="field-control field-sm w-40"
                   @input="buildTagDirty = true"
                 />
                 <button class="rounded-lg bg-sky-600 px-2 py-1 text-xs text-white hover:bg-sky-500 disabled:opacity-50" :disabled="buildTagBusy" @click="saveBuildTag">
@@ -556,11 +556,11 @@ function formatDate(ts?: number) {
                 </button>
               </span>
             </div>
-            <p class="pt-1 text-xs text-slate-500">{{ t('node.buildTagHint') }}</p>
-            <p class="pt-1 text-xs leading-relaxed text-slate-500">{{ t('node.buildInfoHint') }}</p>
+            <p class="pt-1 text-xs text-muted">{{ t('node.buildTagHint') }}</p>
+            <p class="pt-1 text-xs leading-relaxed text-muted">{{ t('node.buildInfoHint') }}</p>
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>

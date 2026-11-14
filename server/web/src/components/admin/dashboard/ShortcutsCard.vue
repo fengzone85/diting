@@ -27,9 +27,9 @@ const links = [
         :to="l.to"
         class="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-slate-300 hover:bg-slate-700/40 hover:text-white"
       >
-        <component :is="l.icon" :size="15" class="text-slate-400" />
+        <component :is="l.icon" :size="15" class="text-secondary" />
         <span class="flex-1 truncate">{{ t(l.label) }}</span>
-        <span class="text-slate-500">›</span>
+        <span class="text-muted">›</span>
       </router-link>
     </div>
   </WidgetShell>

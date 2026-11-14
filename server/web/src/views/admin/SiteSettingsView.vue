@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 站点设置：站点信息 / 公开页开关 / 自定义代码 / 默认主题 / 社交链接 / 受控端注册令牌。
 // 从原 864 行「设置」万物桶中拆出（后台信息架构重组）。
-// 排版：A + D —— PageShell（吸顶保存 + 左目录锚点）+ 一卡一节的限宽内容列。
+// 二级导航对齐参考面板：七个分节是 /admin/site/* 子路由，侧栏父子菜单承载；
+// 同一组件实例跨子路由复用（useSettingsForm 状态不丢），props.section 选定渲染分节。
 import { computed, onMounted, ref } from 'vue';
 import { t } from '../../composables/useI18n';
 import { adminApi } from '../../services/adminApi';
@@ -9,6 +10,8 @@ import { useSettingsForm } from '../../composables/useSettingsForm';
 import FormInput from '../../components/ui/FormInput.vue';
 import PageShell from '../../components/admin/PageShell.vue';
 import BillingFxSettings from '../../components/admin/BillingFxSettings.vue';
+
+defineProps<{ section: string }>();
 
 interface ThemeOption {
   id: string;
@@ -64,16 +67,6 @@ const setupTokenSourceLabel = computed(() => {
   return map[setupToken.value.source] || setupToken.value.source;
 });
 
-const sections = computed(() => [
-  { id: 'sec-basic', label: t('site.basic') },
-  { id: 'sec-display', label: t('site.display') },
-  { id: 'sec-public', label: t('site.public') },
-  { id: 'sec-custom', label: t('site.custom') },
-  { id: 'sec-social', label: t('settings.socialLinks') },
-  { id: 'sec-token', label: t('settings.setupToken') },
-  { id: 'sec-billing', label: t('settings.billingTitle') },
-]);
-
 onMounted(() => {
   void loadThemes();
   void loadSetupToken();
@@ -81,7 +74,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageShell :title="t('site.title')" :sections="sections">
+  <PageShell :title="t('site.title')">
     <template #actions>
       <button
         :disabled="saving || !ready"
@@ -100,26 +93,26 @@ onMounted(() => {
 
     <div class="space-y-4">
       <!-- 基础信息 -->
-      <section id="sec-basic" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-basic'" id="sec-basic" class="glass rounded-xl p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('site.basic') }}</h2>
         <div class="grid gap-x-6 sm:grid-cols-2">
           <FormInput v-model="local.ui.site_title" :label="t('settings.siteTitle')" />
           <FormInput v-model="local.ui.site_url" :label="t('settings.siteUrl')" />
+          <FormInput v-model="local.ui.site_description" :label="t('settings.siteDescription')" />
+          <FormInput v-model="local.ui.logo_url" :label="t('settings.logoUrl')" />
         </div>
-        <FormInput v-model="local.ui.site_description" :label="t('settings.siteDescription')" />
-        <FormInput v-model="local.ui.logo_url" :label="t('settings.logoUrl')" />
       </section>
 
       <!-- 展示与布局 -->
-      <section id="sec-display" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-display'" id="sec-display" class="glass rounded-xl p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('site.display') }}</h2>
         <div class="grid gap-x-6 sm:grid-cols-2">
           <div class="mb-4">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.defaultTheme') }}</label>
+            <label class="mb-1 block text-sm text-secondary">{{ t('settings.defaultTheme') }}</label>
             <div class="flex gap-2">
               <select
                 v-model="local.ui.public_theme"
-                class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+                class="field-control min-w-0 flex-1"
               >
                 <option v-for="t2 in themes" :key="t2.id" :value="t2.id">{{ t2.name }}</option>
               </select>
@@ -127,16 +120,16 @@ onMounted(() => {
                 v-if="local.ui.public_theme && local.ui.public_theme !== 'default'"
                 :href="`/?theme=${local.ui.public_theme}`"
                 target="_blank"
-                class="flex-shrink-0 rounded-lg border border-slate-700 px-3 py-2 text-sm text-sky-400 hover:border-sky-500"
+                class="btn-ghost flex-shrink-0 px-3 py-2 text-sm text-sky-400 hover:border-sky-500"
               >{{ t('settings.preview') }}</a>
             </div>
-            <p class="mt-1 text-xs text-slate-500">{{ t('settings.themeHint') }}</p>
+            <p class="mt-1 text-xs text-muted">{{ t('settings.themeHint') }}</p>
           </div>
           <div class="mb-4">
-            <label class="mb-1 block text-sm text-slate-400">{{ t('settings.homeLayout') }}</label>
+            <label class="mb-1 block text-sm text-secondary">{{ t('settings.homeLayout') }}</label>
             <select
               v-model="local.ui.home_layout"
-              class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+              class="field-control w-full"
             >
               <option value="grid">{{ t('public.grid') }}</option>
               <option value="list">{{ t('public.list') }}</option>
@@ -149,20 +142,22 @@ onMounted(() => {
       </section>
 
       <!-- 公开页开关 -->
-      <section id="sec-public" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-public'" id="sec-public" class="glass rounded-xl p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('site.public') }}</h2>
-        <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
-        <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />
-        <FormInput
-          v-model="local.ui.public_show_hardware"
-          :label="t('settings.publicShowHardware')"
-          :hint="t('settings.publicShowHardwareHint')"
-          type="checkbox"
-        />
+        <div class="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
+          <FormInput v-model="local.ui.public_enabled" :label="t('settings.publicEnabled')" type="checkbox" />
+          <FormInput v-model="local.ui.public_show_business" :label="t('settings.publicShowBusiness')" type="checkbox" />
+          <FormInput
+            v-model="local.ui.public_show_hardware"
+            :label="t('settings.publicShowHardware')"
+            :hint="t('settings.publicShowHardwareHint')"
+            type="checkbox"
+          />
+        </div>
       </section>
 
       <!-- 自定义代码 -->
-      <section id="sec-custom" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-custom'" id="sec-custom" class="glass rounded-xl p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('site.custom') }}</h2>
         <FormInput v-model="local.ui.custom_css" :label="t('settings.customCss')" type="textarea" />
         <FormInput v-model="local.ui.custom_head" :label="t('settings.customHead')" type="textarea" />
@@ -170,7 +165,7 @@ onMounted(() => {
       </section>
 
       <!-- 社交链接 -->
-      <section id="sec-social" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-social'" id="sec-social" class="glass rounded-xl p-5">
         <h2 class="mb-4 text-lg font-semibold">{{ t('settings.socialLinks') }}</h2>
         <div class="grid gap-x-6 sm:grid-cols-2">
           <FormInput v-model="local.ui.social_email" :label="t('footer.email')" />
@@ -181,30 +176,30 @@ onMounted(() => {
       </section>
 
       <!-- 受控端自助注册令牌 -->
-      <section id="sec-token" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-token'" id="sec-token" class="glass rounded-xl p-5">
         <div class="mb-1 flex items-center justify-between">
           <h2 class="text-lg font-semibold">{{ t('settings.setupToken') }}</h2>
           <span
             class="rounded-full px-2 py-0.5 text-xs"
-            :class="setupToken.configured ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-500/15 text-slate-400'"
+            :class="setupToken.configured ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-500/15 text-secondary'"
           >
             {{ setupToken.configured ? t('settings.setupTokenConfigured') : t('settings.setupTokenNotConfigured') }}
           </span>
         </div>
-        <p class="mb-3 text-xs text-slate-400">{{ t('settings.setupTokenHint') }}</p>
-        <div class="mb-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-          <span>{{ t('settings.setupTokenSource') }}：<code class="text-slate-300">{{ setupTokenSourceLabel }}</code></span>
+        <p class="mb-3 text-xs text-secondary">{{ t('settings.setupTokenHint') }}</p>
+        <div class="mb-3 flex flex-wrap items-center gap-3 text-xs text-muted">
+          <span>{{ t('settings.setupTokenSource') }}：<code class="text-secondary">{{ setupTokenSourceLabel }}</code></span>
           <span v-if="setupToken.weak" class="text-amber-300">⚠️ {{ t('settings.setupTokenWeak') }}</span>
         </div>
         <div v-if="setupTokenPlain" class="mb-3">
           <div class="mb-1 text-xs text-amber-300">{{ t('settings.setupTokenOnce') }}</div>
-          <code class="block break-all rounded-lg bg-black/40 p-2 font-mono text-xs text-slate-200">{{ setupTokenPlain }}</code>
+          <code class="inner-panel block break-all p-2 font-mono text-xs text-secondary">{{ setupTokenPlain }}</code>
         </div>
         <div class="flex gap-2">
-          <button type="button" class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/30 disabled:opacity-50" :disabled="setupTokenBusy" @click="rotateSetupToken('generate')">
+          <button type="button" class="btn-ghost px-4 py-2 text-sm" :disabled="setupTokenBusy" @click="rotateSetupToken('generate')">
             {{ t('settings.setupTokenGenerate') }}
           </button>
-          <button type="button" class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700/30 disabled:opacity-50" :disabled="setupTokenBusy" @click="rotateSetupToken('clear')">
+          <button type="button" class="btn-ghost px-4 py-2 text-sm" :disabled="setupTokenBusy" @click="rotateSetupToken('clear')">
             {{ t('settings.setupTokenClear') }}
           </button>
         </div>
@@ -212,7 +207,7 @@ onMounted(() => {
       </section>
 
       <!-- 资产与汇率：剩余价值 / 总价值按标准货币汇总（手工汇率或服务端每日自动拉取） -->
-      <section id="sec-billing" class="glass scroll-mt-28 rounded-xl p-5">
+      <section v-show="section === 'sec-billing'" id="sec-billing" class="glass rounded-xl p-5">
         <BillingFxSettings v-if="local.ui.billing" v-model:billing="local.ui.billing" />
       </section>
     </div>

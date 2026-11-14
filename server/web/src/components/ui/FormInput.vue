@@ -29,33 +29,39 @@ function onInput(e: Event) {
 
 <template>
   <div class="mb-4">
-    <label class="mb-1 block text-sm text-slate-400">{{ label }}</label>
+    <label v-if="type !== 'checkbox'" class="mb-1 block text-sm text-secondary">{{ label }}</label>
     <textarea
       v-if="type === 'textarea'"
       :value="modelValue as string"
       rows="3"
-      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+      class="field-control w-full"
       :placeholder="placeholder"
       :disabled="disabled"
       @input="onInput"
     />
-    <input
+    <label
       v-else-if="type === 'checkbox'"
-      :checked="modelValue as boolean"
-      type="checkbox"
-      class="h-4 w-4 rounded border-slate-700 bg-slate-900/50 text-sky-500 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
-      :disabled="disabled"
-      @change="onInput"
-    />
+      class="flex items-center gap-3"
+      :class="disabled ? 'cursor-not-allowed' : 'cursor-pointer'"
+    >
+      <input
+        :checked="modelValue as boolean"
+        type="checkbox"
+        class="switch"
+        :disabled="disabled"
+        @change="onInput"
+      />
+      <span class="text-sm text-secondary">{{ label }}</span>
+    </label>
     <input
       v-else
       :value="modelValue"
       :type="type || 'text'"
-      class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+      class="field-control w-full"
       :placeholder="placeholder"
       :disabled="disabled"
       @input="onInput"
     />
-    <p v-if="hint" class="mt-1 whitespace-pre-line text-xs leading-relaxed text-slate-500">{{ hint }}</p>
+    <p v-if="hint" class="mt-1 whitespace-pre-line text-xs leading-relaxed text-muted">{{ hint }}</p>
   </div>
 </template>

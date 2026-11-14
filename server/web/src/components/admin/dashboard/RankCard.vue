@@ -39,7 +39,7 @@ function bar(pct: number) {
 
 <template>
   <WidgetShell :title="title" :icon="icon">
-    <div v-if="!rows.length" class="text-xs text-slate-500">{{ t('dashboard.noData') }}</div>
+    <div v-if="!rows.length" class="text-xs text-muted">{{ t('dashboard.noData') }}</div>
     <div v-else class="space-y-2.5">
       <div v-for="r in rows" :key="r.name" class="space-y-1">
         <div class="flex items-center justify-between gap-2 text-xs">
@@ -49,7 +49,7 @@ function bar(pct: number) {
         <div class="h-1.5 overflow-hidden rounded bg-slate-700/60">
           <div class="h-full rounded" :class="bar(r.pct)" :style="{ width: `${Math.min(100, Math.max(0, r.pct))}%` }"></div>
         </div>
-        <p v-if="r.sub" class="text-[11px] text-slate-500">{{ r.sub }}</p>
+        <p v-if="r.sub" class="text-[11px] text-muted">{{ r.sub }}</p>
       </div>
     </div>
   </WidgetShell>

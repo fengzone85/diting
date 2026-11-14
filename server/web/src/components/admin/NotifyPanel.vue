@@ -223,7 +223,7 @@ async function removeGroup(g: NotifyGroup) {
 <template>
   <div>
     <h2 class="mb-1 mt-8 text-lg font-semibold">{{ t('settings.notifyChannels') }}</h2>
-    <p class="mb-3 text-xs text-slate-500">{{ t('settings.notifyChannelsHint') }}</p>
+    <p class="mb-3 text-xs text-muted">{{ t('settings.notifyChannelsHint') }}</p>
 
     <!-- S2/F2：旧配置迁移提示（关闭后不再出现） -->
     <div
@@ -249,12 +249,12 @@ async function removeGroup(g: NotifyGroup) {
         class="rounded-lg bg-sky-500 px-3 py-1.5 text-sm text-white hover:bg-sky-400"
         @click="openNewChannel"
       >{{ t('settings.addWebhook') }}</button>
-      <span v-if="message" class="text-xs text-slate-400">{{ message }}</span>
+      <span v-if="message" class="text-xs text-secondary">{{ message }}</span>
     </div>
 
     <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
-        <thead class="text-xs text-slate-500">
+        <thead class="text-xs text-muted">
           <tr>
             <th class="py-2">{{ t('settings.channelName') }}</th>
             <th class="py-2">{{ t('settings.channelType') }}</th>
@@ -265,11 +265,11 @@ async function removeGroup(g: NotifyGroup) {
           <tr v-for="ch in channels" :key="ch.id" class="border-t border-slate-800">
             <td class="py-2 pr-3">
               {{ ch.name }}
-              <span v-if="!ch.enabled" class="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">{{ t('settings.disabled') }}</span>
+              <span v-if="!ch.enabled" class="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-secondary">{{ t('settings.disabled') }}</span>
             </td>
-            <td class="py-2 pr-3 text-xs text-slate-400">
+            <td class="py-2 pr-3 text-xs text-secondary">
               {{ ch.type }}
-              <span v-if="ch.type !== 'webhook'" class="ml-1 text-slate-500">({{ t('settings.builtinChannel') }})</span>
+              <span v-if="ch.type !== 'webhook'" class="ml-1 text-muted">({{ t('settings.builtinChannel') }})</span>
             </td>
             <td class="py-2">
               <div class="flex flex-wrap gap-2 text-xs">
@@ -289,7 +289,7 @@ async function removeGroup(g: NotifyGroup) {
     </div>
 
     <h2 class="mb-1 mt-8 text-lg font-semibold">{{ t('settings.notifyGroups') }}</h2>
-    <p class="mb-3 text-xs text-slate-500">{{ t('settings.notifyGroupsHint') }}</p>
+    <p class="mb-3 text-xs text-muted">{{ t('settings.notifyGroupsHint') }}</p>
 
     <div class="mb-3">
       <button
@@ -301,7 +301,7 @@ async function removeGroup(g: NotifyGroup) {
 
     <div class="overflow-x-auto">
       <table class="w-full text-left text-sm">
-        <thead class="text-xs text-slate-500">
+        <thead class="text-xs text-muted">
           <tr>
             <th class="py-2">{{ t('settings.groupName') }}</th>
             <th class="py-2">{{ t('settings.groupEvents') }}</th>
@@ -313,10 +313,10 @@ async function removeGroup(g: NotifyGroup) {
           <tr v-for="g in groups" :key="g.id" class="border-t border-slate-800">
             <td class="py-2 pr-3">
               {{ g.name }}
-              <span v-if="!g.enabled" class="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">{{ t('settings.disabled') }}</span>
+              <span v-if="!g.enabled" class="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-secondary">{{ t('settings.disabled') }}</span>
             </td>
-            <td class="py-2 pr-3 text-xs text-slate-400">{{ g.events.join(', ') || '—' }}</td>
-            <td class="py-2 pr-3 text-xs text-slate-400">{{ g.channel_ids.map(channelName).join(', ') || '—' }}</td>
+            <td class="py-2 pr-3 text-xs text-secondary">{{ g.events.join(', ') || '—' }}</td>
+            <td class="py-2 pr-3 text-xs text-secondary">{{ g.channel_ids.map(channelName).join(', ') || '—' }}</td>
             <td class="py-2">
               <div class="flex flex-wrap gap-2 text-xs">
                 <button type="button" class="text-violet-400 hover:underline" @click="openEditGroup(g)">{{ t('common.edit') }}</button>
@@ -338,44 +338,44 @@ async function removeGroup(g: NotifyGroup) {
           {{ channelEditor.id ? t('settings.editWebhook') : t('settings.addWebhook') }}
         </h3>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label class="text-xs text-slate-400">
+          <label class="text-xs text-secondary">
             {{ t('settings.channelName') }}
-            <input v-model="channelEditor.name" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+            <input v-model="channelEditor.name" class="field-control mt-1 w-full" />
           </label>
-          <label class="text-xs text-slate-400">
+          <label class="text-xs text-secondary">
             {{ t('settings.webhookMethod') }}
-            <select v-model="channelEditor.method" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white">
+            <select v-model="channelEditor.method" class="field-control mt-1 w-full">
               <option value="POST">POST</option>
               <option value="GET">GET</option>
             </select>
           </label>
-          <label class="text-xs text-slate-400 sm:col-span-2">
+          <label class="text-xs text-secondary sm:col-span-2">
             {{ t('settings.webhookUrl') }}
-            <input v-model="channelEditor.url" placeholder="https://example.com/hook" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+            <input v-model="channelEditor.url" placeholder="https://example.com/hook" class="field-control mt-1 w-full" />
           </label>
-          <label class="text-xs text-slate-400">
+          <label class="text-xs text-secondary">
             {{ t('settings.webhookContentType') }}
-            <select v-model="channelEditor.content_type" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white">
+            <select v-model="channelEditor.content_type" class="field-control mt-1 w-full">
               <option value="json">application/json</option>
               <option value="form">application/x-www-form-urlencoded</option>
             </select>
           </label>
           <label class="flex items-end gap-2 pb-2 text-sm text-slate-300">
-            <input v-model="channelEditor.verify_tls" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800" />
+            <input v-model="channelEditor.verify_tls" type="checkbox" class="switch" />
             {{ t('settings.verifyTls') }}
           </label>
-          <label class="text-xs text-slate-400 sm:col-span-2">
+          <label class="text-xs text-secondary sm:col-span-2">
             {{ t('settings.webhookHeaders') }}
-            <textarea v-model="channelEditor.headersText" rows="3" :placeholder="t('settings.webhookHeadersHint')" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white" />
+            <textarea v-model="channelEditor.headersText" rows="3" :placeholder="t('settings.webhookHeadersHint')" class="field-control field-mono mt-1 w-full" />
           </label>
-          <label class="text-xs text-slate-400 sm:col-span-2">
+          <label class="text-xs text-secondary sm:col-span-2">
             {{ t('settings.webhookBody') }}
-            <textarea v-model="channelEditor.body_template" rows="3" :placeholder="t('settings.webhookBodyHint')" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white" />
+            <textarea v-model="channelEditor.body_template" rows="3" :placeholder="t('settings.webhookBodyHint')" class="field-control field-mono mt-1 w-full" />
           </label>
         </div>
-        <p class="mt-3 text-[11px] leading-relaxed text-slate-500">{{ t('settings.webhookPlaceholderHint') }}</p>
+        <p class="mt-3 text-[11px] leading-relaxed text-muted">{{ t('settings.webhookPlaceholderHint') }}</p>
         <div class="mt-4 flex justify-end gap-2">
-          <button type="button" class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800" @click="channelEditor = null">{{ t('common.cancel') }}</button>
+          <button type="button" class="btn-ghost px-4 py-2 text-sm" @click="channelEditor = null">{{ t('common.cancel') }}</button>
           <button type="button" class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50" :disabled="busy" @click="saveChannel">{{ t('common.save') }}</button>
         </div>
       </div>
@@ -387,12 +387,12 @@ async function removeGroup(g: NotifyGroup) {
         <h3 class="mb-4 text-lg font-semibold">
           {{ groupEditor.id ? t('settings.editGroup') : t('settings.addGroup') }}
         </h3>
-        <label class="text-xs text-slate-400">
+        <label class="text-xs text-secondary">
           {{ t('settings.groupName') }}
-          <input v-model="groupEditor.name" class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+          <input v-model="groupEditor.name" class="field-control mt-1 w-full" />
         </label>
         <div class="mt-4">
-          <p class="mb-2 text-xs text-slate-400">{{ t('settings.groupEvents') }}</p>
+          <p class="mb-2 text-xs text-secondary">{{ t('settings.groupEvents') }}</p>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="ev in events"
@@ -401,13 +401,13 @@ async function removeGroup(g: NotifyGroup) {
               class="rounded-full border px-2.5 py-1 text-xs"
               :class="groupEditor.events.includes(ev)
                 ? 'border-sky-400 bg-sky-500/20 text-sky-300'
-                : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+                : 'border-slate-700 text-secondary hover:border-slate-500'"
               @click="toggleEvent(ev)"
             >{{ ev }}</button>
           </div>
         </div>
         <div class="mt-4">
-          <p class="mb-2 text-xs text-slate-400">{{ t('settings.groupChannels') }}</p>
+          <p class="mb-2 text-xs text-secondary">{{ t('settings.groupChannels') }}</p>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="ch in channels"
@@ -416,17 +416,17 @@ async function removeGroup(g: NotifyGroup) {
               class="rounded-full border px-2.5 py-1 text-xs"
               :class="groupEditor.channel_ids.includes(ch.id)
                 ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
-                : 'border-slate-700 text-slate-400 hover:border-slate-500'"
+                : 'border-slate-700 text-secondary hover:border-slate-500'"
               @click="toggleGroupChannel(ch.id)"
             >{{ ch.name }}</button>
           </div>
         </div>
         <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-          <input v-model="groupEditor.enabled" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800" />
+          <input v-model="groupEditor.enabled" type="checkbox" class="switch" />
           {{ t('settings.enable') }}
         </label>
         <div class="mt-4 flex justify-end gap-2">
-          <button type="button" class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800" @click="groupEditor = null">{{ t('common.cancel') }}</button>
+          <button type="button" class="btn-ghost px-4 py-2 text-sm" @click="groupEditor = null">{{ t('common.cancel') }}</button>
           <button type="button" class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50" :disabled="busy" @click="saveGroup">{{ t('common.save') }}</button>
         </div>
       </div>

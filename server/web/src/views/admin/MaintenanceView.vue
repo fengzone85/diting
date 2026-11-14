@@ -1,12 +1,15 @@
 <script setup lang="ts">
 // 系统维护：数据保留 / 数据库备份与恢复 / 容量保险丝。
 // 从原 864 行「设置」万物桶中拆出（后台信息架构重组）。
-import { computed } from 'vue';
+// 二级导航对齐参考面板：五个分节是 /admin/maintenance/* 子路由，侧栏父子菜单承载；
+// 同一组件实例跨子路由复用（useSettingsForm/useBackupPanel 状态不丢），props.section 选定渲染分节。
 import { t } from '../../composables/useI18n';
 import { useSettingsForm } from '../../composables/useSettingsForm';
 import { useBackupPanel } from '../../composables/useBackupPanel';
 import FormInput from '../../components/ui/FormInput.vue';
 import PageShell from '../../components/admin/PageShell.vue';
+
+defineProps<{ section: string }>();
 
 const { local, saving, message, ready, save } = useSettingsForm();
 
@@ -20,18 +23,10 @@ const {
   restoreCheckName, restoreStatusName, restoreStatusClass, restoreCheckText, restoreRetention,
   integrityClass, integrityText,
 } = useBackupPanel();
-
-const sections = computed(() => [
-  { id: 'sec-retention', label: t('settings.retentionTitle') },
-  { id: 'sec-backup', label: t('settings.backup') },
-  { id: 'sec-restore', label: t('settings.restoreAuditTitle') },
-  { id: 'sec-files', label: t('settings.backupFiles') },
-  { id: 'sec-capacity', label: t('settings.capacityTitle') },
-]);
 </script>
 
 <template>
-  <PageShell :title="t('maintenance.title')" :sections="sections">
+  <PageShell :title="t('maintenance.title')">
     <template #actions>
       <button
         :disabled="saving || !ready"
@@ -49,14 +44,16 @@ const sections = computed(() => [
     </template>
 
     <div class="space-y-4">
-    <section id="sec-retention" class="glass scroll-mt-28 rounded-xl p-5">
+    <section v-show="section === 'sec-retention'" id="sec-retention" class="glass rounded-xl p-5">
       <h2 class="mb-1 text-lg font-semibold">{{ t('settings.retentionTitle') }}</h2>
       <p class="mb-4 text-xs text-muted">{{ t('settings.retentionHint') }}</p>
-      <FormInput v-model="local.ui.retention_days" :label="t('settings.retentionDays')" type="number" />
+      <div class="grid gap-x-6 sm:grid-cols-3">
+        <FormInput v-model="local.ui.retention_days" :label="t('settings.retentionDays')" type="number" />
+      </div>
     </section>
 
     <!-- 数据库备份：策略由本页下发，实际执行在宿主机（diting.sh + cron） -->
-    <section id="sec-backup" class="glass scroll-mt-28 rounded-xl p-5">
+    <section v-show="section === 'sec-backup'" id="sec-backup" class="glass rounded-xl p-5">
       <h2 class="mb-1 text-lg font-semibold">{{ t('settings.backup') }}</h2>
       <p class="mb-4 text-xs text-muted">{{ t('settings.backupHint') }}</p>
 
@@ -65,7 +62,7 @@ const sections = computed(() => [
           <label class="mb-1 block text-sm text-secondary">{{ t('settings.backupSchedule') }}</label>
           <select
             v-model="local.ui.backup_schedule"
-            class="mb-3 w-full rounded-lg border border-white/20 bg-transparent px-3 py-2 text-sm"
+            class="field-control mb-3 w-full"
           >
             <option value="off">{{ t('settings.backupScheduleOff') }}</option>
             <option value="daily">{{ t('settings.backupScheduleDaily') }}</option>
@@ -98,7 +95,7 @@ const sections = computed(() => [
           />
         </div>
 
-        <div class="rounded-lg border border-white/10 p-4 text-sm">
+        <div class="inner-panel p-4 text-sm">
           <h3 class="mb-3 font-semibold">{{ t('settings.backupMonitor') }}</h3>
           <div v-if="!backupState" class="text-muted">{{ t('settings.backupNoState') }}</div>
           <dl v-else class="space-y-2">
@@ -140,7 +137,7 @@ const sections = computed(() => [
     </section>
 
     <!-- F8.6：最近一次恢复审查（恢复后服务端启动时生成，只读） -->
-    <section id="sec-restore" class="glass scroll-mt-28 rounded-xl p-5">
+    <section v-show="section === 'sec-restore'" id="sec-restore" class="glass rounded-xl p-5">
       <h2 class="mb-1 text-lg font-semibold">{{ t('settings.restoreAuditTitle') }}</h2>
       <p class="mb-3 text-xs text-muted">{{ t('settings.restoreAuditHint') }}</p>
         <div v-if="!restoreAudit" class="text-sm text-muted">{{ t('settings.restoreAuditNone') }}</div>
@@ -173,7 +170,7 @@ const sections = computed(() => [
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="c in restoreAudit.checks || []" :key="c.id" class="border-t border-white/10">
+                <tr v-for="c in restoreAudit.checks || []" :key="c.id" class="border-t border-divider">
                   <td class="py-2 pr-4 whitespace-nowrap">{{ restoreCheckName(c) }}</td>
                   <td class="py-2 pr-4 whitespace-nowrap" :class="restoreStatusClass(c.status)">
                     {{ restoreStatusName(c) }}
@@ -183,7 +180,7 @@ const sections = computed(() => [
               </tbody>
             </table>
           </div>
-          <div v-if="restoreRetention" class="mt-3 rounded border border-white/10 p-2 text-xs">
+          <div v-if="restoreRetention" class="mt-3 rounded border border-divider p-2 text-xs">
             <div class="text-muted">
               {{ t('settings.restoreAuditExpiredRange', {
                 from: fmtTime(restoreRetention.earliest),
@@ -214,12 +211,12 @@ const sections = computed(() => [
     </section>
 
     <!-- 备份文件列表：下载 / 恢复 / 删除 -->
-    <section id="sec-files" class="glass scroll-mt-28 rounded-xl p-5">
+    <section v-show="section === 'sec-files'" id="sec-files" class="glass rounded-xl p-5">
       <div class="mb-3 flex flex-wrap items-center gap-3">
           <h2 class="text-lg font-semibold">{{ t('settings.backupFiles') }}</h2>
           <span v-if="backupDir" class="text-xs text-muted">{{ backupDir }}</span>
           <button
-            class="rounded border border-white/20 px-3 py-1 text-xs hover:bg-white/10"
+            class="btn-ghost px-3 py-1 text-xs"
             @click="loadBackups"
           >
             {{ t('common.refresh') }}
@@ -243,7 +240,7 @@ const sections = computed(() => [
           <input ref="backupFileInput" type="file" accept=".db,.gz" class="hidden" @change="onPickBackup" />
           <button
             :disabled="backupUploading"
-            class="rounded border border-white/20 px-3 py-1 hover:bg-white/10 disabled:opacity-50"
+            class="btn-ghost px-3 py-1"
             @click="backupFileInput?.click()"
           >
             {{ backupUploading ? `${t('settings.backupUploading')} ${backupUploadPct}%` : t('settings.backupUpload') }}
@@ -273,7 +270,7 @@ const sections = computed(() => [
               </tr>
             </thead>
             <tbody>
-              <tr v-for="f in backupFiles" :key="f.name" class="border-t border-white/10">
+              <tr v-for="f in backupFiles" :key="f.name" class="border-t border-divider">
                 <td class="py-2 pr-4 break-all">
                   {{ f.name }}
                   <span v-if="f.kind === 'pre_restore'" class="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">
@@ -287,7 +284,7 @@ const sections = computed(() => [
                 </td>
                 <td class="py-2 text-right whitespace-nowrap">
                   <button
-                    class="mr-2 rounded border border-white/20 px-2 py-1 text-xs hover:bg-white/10"
+                    class="btn-ghost mr-2 px-2 py-1 text-xs"
                     @click="downloadBackup(f)"
                   >
                     {{ t('settings.backupDownload') }}
@@ -315,11 +312,11 @@ const sections = computed(() => [
     </section>
 
     <!-- F12：容量保险丝（metrics 行数 + 库文件双水位） -->
-    <section id="sec-capacity" class="glass scroll-mt-28 rounded-xl p-5">
+    <section v-show="section === 'sec-capacity'" id="sec-capacity" class="glass rounded-xl p-5">
       <h2 class="mb-1 text-lg font-semibold">{{ t('settings.capacityTitle') }}</h2>
       <p class="mb-4 text-xs text-muted">{{ t('settings.capacityHint') }}</p>
 
-      <div v-if="capacityStatus" class="mb-4 rounded-lg border border-white/10 p-3 text-sm">
+      <div v-if="capacityStatus" class="inner-panel mb-4 p-3 text-sm">
         <div class="mb-2 flex flex-wrap items-center gap-2">
           <span
             class="rounded px-2 py-0.5 text-xs"

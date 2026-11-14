@@ -118,7 +118,7 @@ onMounted(() => { void loadFxStatus(); });
     <label class="mb-1 block text-sm text-secondary">{{ t('settings.billingBase') }}</label>
     <select
       :value="base"
-      class="mb-4 h-9 w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-sm text-content outline-none focus:border-sky-500"
+      class="field-control mb-4 h-9 w-full"
       @change="setBaseCurrency(($event.target as HTMLSelectElement).value)"
     >
       <option v-for="c in CURRENCY_OPTIONS" :key="c.code" :value="c.code">{{ c.symbol }} {{ c.code }} · {{ t('billing.cur.' + c.code) }}</option>
@@ -133,7 +133,7 @@ onMounted(() => { void loadFxStatus(); });
           min="0"
           step="0.0001"
           :placeholder="t('settings.billingRateEmpty')"
-          class="h-9 w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 text-sm text-content outline-none focus:border-sky-500"
+          class="field-control h-9 w-full"
           @input="setRate(c.code, ($event.target as HTMLInputElement).value)"
         />
       </div>

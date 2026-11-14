@@ -10,6 +10,7 @@ import { apiErrorMessage } from '../../utils/apiError';
 import Loading from '../../components/ui/Loading.vue';
 import EmptyState from '../../components/ui/EmptyState.vue';
 import ErrorMessage from '../../components/ui/ErrorMessage.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 
 const { state } = useAdmin();
 const agents = computed(() => state.agents);
@@ -57,7 +58,7 @@ function statusClass(tok: ApiToken) {
   const s = statusOf(tok);
   if (s === 'active') return 'text-emerald-400';
   if (s === 'expired') return 'text-amber-400';
-  return 'text-slate-500';
+  return 'text-muted';
 }
 
 async function load() {
@@ -164,9 +165,8 @@ onMounted(load);
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-2 text-2xl font-bold">{{ t('tokens.title') }}</h1>
-    <p class="mb-6 text-sm text-slate-400">{{ t('tokens.desc') }}</p>
+  <PageShell :title="t('tokens.title')">
+    <p class="mb-6 text-sm text-secondary">{{ t('tokens.desc') }}</p>
 
     <ErrorMessage v-if="error" class="mb-4" :message="error" />
 
@@ -178,7 +178,7 @@ onMounted(load);
       <h2 class="mb-1 font-semibold text-emerald-200">{{ t('tokens.createdTitle') }}</h2>
       <p class="mb-3 text-xs leading-relaxed text-emerald-200/80">{{ t('tokens.createdHint') }}</p>
       <div class="flex flex-wrap items-center gap-2">
-        <code class="flex-1 break-all rounded bg-slate-900/70 px-3 py-2 text-sm text-emerald-300">{{ created.token }}</code>
+        <code class="inner-panel flex-1 break-all px-3 py-2 text-sm text-emerald-300">{{ created.token }}</code>
         <button
           class="rounded-lg border border-emerald-500/50 px-3 py-2 text-sm text-emerald-200 hover:bg-emerald-500/20"
           @click="copyToken"
@@ -195,33 +195,33 @@ onMounted(load);
       <div class="glass p-6">
         <h2 class="mb-4 text-lg font-semibold">{{ t('tokens.formTitle') }}</h2>
 
-        <label class="mb-1 block text-sm text-slate-400">{{ t('tokens.name') }}</label>
+        <label class="mb-1 block text-sm text-secondary">{{ t('tokens.name') }}</label>
         <input
           v-model="form.name"
           type="text"
           maxlength="64"
           :placeholder="t('tokens.namePlaceholder')"
-          class="mb-4 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control mb-4 w-full"
         />
 
-        <label class="mb-1 block text-sm text-slate-400">{{ t('tokens.scope') }}</label>
+        <label class="mb-1 block text-sm text-secondary">{{ t('tokens.scope') }}</label>
         <select
           v-model="form.scope"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control w-full"
         >
           <option value="readonly">{{ t('tokens.scopeReadonly') }}</option>
           <option value="admin">{{ t('tokens.scopeAdmin') }}</option>
         </select>
-        <p class="mb-4 mt-1 text-xs text-slate-500">{{ t('tokens.scopeHint') }}</p>
+        <p class="mb-4 mt-1 text-xs text-muted">{{ t('tokens.scopeHint') }}</p>
 
         <div class="mb-1 flex items-center justify-between">
-          <label class="text-sm text-slate-400">{{ t('tokens.nodes') }}</label>
+          <label class="text-sm text-secondary">{{ t('tokens.nodes') }}</label>
           <div class="flex gap-2 text-xs">
             <button class="text-sky-400 hover:underline" @click="selectAllAgents">{{ t('tokens.selectAll') }}</button>
-            <button class="text-slate-400 hover:underline" @click="clearAgents">{{ t('tokens.clear') }}</button>
+            <button class="text-secondary hover:underline" @click="clearAgents">{{ t('tokens.clear') }}</button>
           </div>
         </div>
-        <div class="mb-1 max-h-48 overflow-y-auto rounded-lg border border-slate-700 bg-slate-900/40 p-2">
+        <div class="inner-panel mb-1 max-h-48 overflow-y-auto p-2">
           <label
             v-for="a in agents"
             :key="a.id"
@@ -229,27 +229,27 @@ onMounted(load);
           >
             <input
               type="checkbox"
-              class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500"
+              class="switch"
               :checked="form.agentIds.includes(a.id)"
               @change="toggleAgent(a.id, ($event.target as HTMLInputElement).checked)"
             />
             <span class="truncate">{{ a.name }}</span>
-            <span class="ml-auto font-mono text-xs text-slate-500">{{ a.id }}</span>
+            <span class="ml-auto font-mono text-xs text-muted">{{ a.id }}</span>
           </label>
-          <p v-if="!agents.length" class="px-2 py-1 text-xs text-slate-500">{{ t('common.loading') }}</p>
+          <p v-if="!agents.length" class="px-2 py-1 text-xs text-muted">{{ t('common.loading') }}</p>
         </div>
-        <p class="mb-4 mt-1 text-xs leading-relaxed text-slate-500">{{ t('tokens.nodesHint') }}</p>
+        <p class="mb-4 mt-1 text-xs leading-relaxed text-muted">{{ t('tokens.nodesHint') }}</p>
 
-        <label class="mb-1 block text-sm text-slate-400">{{ t('tokens.expiresInDays') }}</label>
+        <label class="mb-1 block text-sm text-secondary">{{ t('tokens.expiresInDays') }}</label>
         <input
           v-model="form.expiresInDays"
           type="number"
           min="1"
           max="3650"
           :placeholder="t('tokens.expiresPlaceholder')"
-          class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white outline-none focus:border-sky-500"
+          class="field-control w-full"
         />
-        <p class="mb-4 mt-1 text-xs text-slate-500">{{ t('tokens.expiresHint') }}</p>
+        <p class="mb-4 mt-1 text-xs text-muted">{{ t('tokens.expiresHint') }}</p>
 
         <button
           class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50"
@@ -263,7 +263,7 @@ onMounted(load);
         <div class="mb-4 flex items-center justify-between">
           <h2 class="text-lg font-semibold">{{ t('tokens.listTitle') }}</h2>
           <div class="flex items-center gap-3">
-            <span class="text-xs text-slate-500">{{ t('tokens.count', { n: tokens.length }) }}</span>
+            <span class="text-xs text-muted">{{ t('tokens.count', { n: tokens.length }) }}</span>
             <button class="text-xs text-sky-400 hover:underline" @click="load">{{ t('common.refresh') }}</button>
           </div>
         </div>
@@ -274,13 +274,13 @@ onMounted(load);
           <div
             v-for="tok in tokens"
             :key="tok.id"
-            class="rounded-lg border border-white/10 p-3 text-sm"
+            class="inner-panel p-3 text-sm"
           >
             <div class="mb-1 flex items-center justify-between gap-2">
               <span class="font-semibold text-content">{{ tok.name }}</span>
               <span class="text-xs" :class="statusClass(tok)">{{ statusLabel(tok) }}</span>
             </div>
-            <div class="space-y-0.5 text-xs text-slate-400">
+            <div class="space-y-0.5 text-xs text-secondary">
               <div class="font-mono">{{ tok.id }} · {{ tok.scope }}</div>
               <div>
                 {{ t('tokens.nodes') }}：
@@ -308,5 +308,5 @@ onMounted(load);
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>

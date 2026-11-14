@@ -125,8 +125,6 @@ export const zhCN: Record<string, string> = {
   'nav.group.security': '安全',
   'nav.group.system': '系统',
   'nav.home': '返回主页',
-  'nav.collapse': '收起侧栏',
-  'nav.expand': '展开侧栏',
 
   // 受控端列表
   'agents.title': '受控端',
@@ -901,6 +899,20 @@ export const zhCN: Record<string, string> = {
   'ai.config': '配置',
   'ai.status': '运行状态',
   'ai.reports': '历史报告',
+  'ai.prevMonth': '上个月',
+  'ai.nextMonth': '下个月',
+  'ai.today': '今天',
+  'ai.wk1': '一',
+  'ai.wk2': '二',
+  'ai.wk3': '三',
+  'ai.wk4': '四',
+  'ai.wk5': '五',
+  'ai.wk6': '六',
+  'ai.wk7': '日',
+  'ai.riskLow': '低风险',
+  'ai.riskMedium': '中风险',
+  'ai.riskHigh': '高风险',
+  'ai.back': '返回',
   'ai.noReports': '暂无报告',
   'ai.run': '立即运行',
   'ai.enabled': '启用 AI 运维分析',
@@ -977,8 +989,6 @@ export const zhCN: Record<string, string> = {
   'ai.win30d': '30 天',
   'ai.reanalyze': '重新分析',
   'ai.analyzeNodeHint': '由 AI 对该节点近期指标做只读解读，结论为概率性判断，不会下发任何指令。',
-  'ai.prevPage': '上一页',
-  'ai.nextPage': '下一页',
 
   // 受控端详情（后台）
   'agent.back': '返回列表',

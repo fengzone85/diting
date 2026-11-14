@@ -3,6 +3,7 @@ import { computed, markRaw, ref, onMounted } from 'vue';
 import ChartLatency from '../../components/ChartLatency.vue';
 import StatCard from '../../components/ui/StatCard.vue';
 import DashboardBoard from '../../components/admin/DashboardBoard.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 import OverviewCard from '../../components/admin/dashboard/OverviewCard.vue';
 import CapacityCard from '../../components/admin/dashboard/CapacityCard.vue';
 import RankCard from '../../components/admin/dashboard/RankCard.vue';
@@ -353,8 +354,7 @@ async function testAlert() {
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-5 text-2xl font-bold">{{ t('dashboard.title') }}</h1>
+  <PageShell :title="t('dashboard.title')">
     <div v-if="admin.state.error" class="mb-6 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-rose-200">
       {{ admin.state.error }}
     </div>
@@ -368,7 +368,7 @@ async function testAlert() {
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-lg font-semibold">{{ t('dashboard.avgCpu') }} / {{ t('dashboard.avgMem') }} {{ t('dashboard.trend') }}</h2>
         <div class="flex gap-1 text-xs">
-          <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-400'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
+          <button v-for="r in (['1h','6h','24h','7d','30d'] as const)" :key="r" :class="chartRange === r ? 'bg-sky-500 text-white' : 'bg-slate-800 text-secondary'" class="rounded px-2 py-1 hover:opacity-80" @click="changeRange(r)">{{ r }}</button>
         </div>
       </div>
       <div v-if="sparkError" class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{{ sparkError }}</div>
@@ -386,11 +386,11 @@ async function testAlert() {
     <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div class="glass p-4">
         <h2 class="mb-4 text-lg font-semibold">{{ t('dashboard.offline') }}</h2>
-        <div v-if="!offlineAgents.length" class="text-sm text-slate-500">{{ t('agents.empty') }}</div>
+        <div v-if="!offlineAgents.length" class="text-sm text-muted">{{ t('agents.empty') }}</div>
         <div class="space-y-2">
           <div v-for="a in offlineAgents" :key="a.id" class="flex items-center justify-between rounded-lg bg-slate-800/40 px-4 py-2 text-sm">
             <span class="text-slate-300">{{ a.name }}</span>
-            <span class="text-slate-500">{{ formatDuration(Math.floor(Date.now() / 1000) - (a.last_seen || 0)) }} 前</span>
+            <span class="text-muted">{{ formatDuration(Math.floor(Date.now() / 1000) - (a.last_seen || 0)) }} 前</span>
           </div>
         </div>
       </div>
@@ -404,5 +404,5 @@ async function testAlert() {
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 </template>

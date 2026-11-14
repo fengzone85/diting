@@ -105,28 +105,28 @@ function copy(text: string) {
       {{ error }}
     </div>
 
-    <div v-if="loading" class="py-4 text-center text-slate-400">{{ t('common.loading') }}</div>
+    <div v-if="loading" class="py-4 text-center text-secondary">{{ t('common.loading') }}</div>
 
     <div v-else>
       <div class="mb-4 flex items-center gap-3">
-        <span class="text-sm text-slate-400">{{ t('twofa.status') }}</span>
+        <span class="text-sm text-secondary">{{ t('twofa.status') }}</span>
         <span
           class="rounded-full px-2 py-0.5 text-xs"
-          :class="enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'"
+          :class="enabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-secondary'"
         >
           {{ enabled ? t('twofa.enabled') : t('twofa.disabled') }}
         </span>
       </div>
 
       <div v-if="!enabled && !secret" class="space-y-4">
-        <p class="text-sm text-slate-400">{{ t('twofa.intro') }}</p>
+        <p class="text-sm text-secondary">{{ t('twofa.intro') }}</p>
         <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400" @click="setup">
           {{ t('twofa.generate') }}
         </button>
       </div>
 
       <div v-else-if="secret" class="space-y-4">
-        <p class="text-sm text-slate-400">{{ t('twofa.scanTip') }}</p>
+        <p class="text-sm text-secondary">{{ t('twofa.scanTip') }}</p>
         <div v-if="qrDataUrl" class="inline-block rounded-lg bg-white p-2">
           <img :src="qrDataUrl" :alt="t('twofa.qrAlt')" class="h-40 w-40" />
         </div>
@@ -141,7 +141,7 @@ function copy(text: string) {
       </div>
 
       <div v-else-if="enabled" class="space-y-4">
-        <p class="text-sm text-slate-400">{{ t('twofa.disableTip') }}</p>
+        <p class="text-sm text-secondary">{{ t('twofa.disableTip') }}</p>
         <FormInput v-model="code" :label="t('twofa.enterCurrentCode')" maxlength="6" />
         <button class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300 hover:bg-rose-500/20" @click="disable">
           {{ t('twofa.disable') }}

@@ -5,6 +5,7 @@ import { adminApi } from '../../services/adminApi';
 import { t } from '../../composables/useI18n';
 import { refreshGlass } from '../../composables/useTheme';
 import ThemePanel from '../../components/admin/ThemePanel.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 
 interface BgCfg {
   enabled: boolean;
@@ -283,8 +284,7 @@ async function save() {
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-2 text-2xl font-bold">{{ t('template.title') }}</h1>
+  <PageShell :title="t('template.title')">
     <p class="mb-6 text-sm text-muted">{{ t('template.desc') }}</p>
 
     <div v-if="message" class="mb-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200">
@@ -316,20 +316,20 @@ async function save() {
       <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('template.background') }}</h3>
       <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-secondary">
-          <input type="checkbox" v-model="form.background_dark!.enabled" class="rounded" />
+          <input type="checkbox" v-model="form.background_dark!.enabled" class="switch" />
           {{ t('settings.backgroundEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label class="mb-1 block text-sm text-muted">{{ t('settings.type') }}</label>
-            <select v-model="form.background_dark!.type" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+            <select v-model="form.background_dark!.type" class="field-control w-full">
               <option value="image">{{ t('settings.image') }}</option>
               <option value="video">{{ t('settings.video') }}</option>
             </select>
           </div>
           <div class="sm:col-span-2">
             <label class="mb-1 block text-sm text-muted">{{ t('settings.url') }}</label>
-            <input v-model="form.background_dark!.url" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" placeholder="https://..." />
+            <input v-model="form.background_dark!.url" class="field-control w-full" placeholder="https://..." />
           </div>
         </div>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -370,20 +370,20 @@ async function save() {
       <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('template.background') }}</h3>
       <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-secondary">
-          <input type="checkbox" v-model="form.background_light!.enabled" class="rounded" />
+          <input type="checkbox" v-model="form.background_light!.enabled" class="switch" />
           {{ t('settings.backgroundEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label class="mb-1 block text-sm text-muted">{{ t('settings.type') }}</label>
-            <select v-model="form.background_light!.type" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+            <select v-model="form.background_light!.type" class="field-control w-full">
               <option value="image">{{ t('settings.image') }}</option>
               <option value="video">{{ t('settings.video') }}</option>
             </select>
           </div>
           <div class="sm:col-span-2">
             <label class="mb-1 block text-sm text-muted">{{ t('settings.url') }}</label>
-            <input v-model="form.background_light!.url" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" placeholder="https://..." />
+            <input v-model="form.background_light!.url" class="field-control w-full" placeholder="https://..." />
           </div>
         </div>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -405,32 +405,32 @@ async function save() {
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <label class="mb-1 block text-sm text-muted">{{ t('theme.glassPreset') }}</label>
-          <select v-model="form.glass_preset" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+          <select v-model="form.glass_preset" class="field-control w-full">
             <option v-for="o in presetOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
           <label class="mb-1 block text-sm text-muted">{{ t('theme.colorVisionMode') }}</label>
-          <select v-model="form.color_vision" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+          <select v-model="form.color_vision" class="field-control w-full">
             <option v-for="o in cvOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
           <label class="mb-1 block text-sm text-muted">{{ t('theme.cardScheme') }}</label>
-          <select v-model="form.card_scheme" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+          <select v-model="form.card_scheme" class="field-control w-full">
             <option v-for="o in schemeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
           <label class="mb-1 block text-sm text-muted">{{ t('theme.cardSize') }}</label>
-          <select v-model="form.card_size" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+          <select v-model="form.card_size" class="field-control w-full">
             <option v-for="o in sizeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
       </div>
 
       <label class="mt-4 flex items-center gap-2 text-sm text-secondary">
-        <input type="checkbox" v-model="form.visitor_info" class="rounded" />
+        <input type="checkbox" v-model="form.visitor_info" class="switch" />
         {{ t('settings.visitorInfo') }}
       </label>
 
@@ -438,27 +438,27 @@ async function save() {
       <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('theme.announcement') }}</h3>
       <div class="inner-panel p-4">
         <label class="flex items-center gap-2 text-sm text-secondary">
-          <input type="checkbox" v-model="form.announcement!.enabled" class="rounded" />
+          <input type="checkbox" v-model="form.announcement!.enabled" class="switch" />
           {{ t('settings.announcementEnabled') }}
         </label>
         <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label class="mb-1 block text-sm text-muted">{{ t('settings.announcementTitle') }}</label>
-            <input v-model="form.announcement!.title" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" />
+            <input v-model="form.announcement!.title" class="field-control w-full" />
           </div>
           <div>
             <label class="mb-1 block text-sm text-muted">{{ t('settings.announcementContent') }}</label>
-            <input v-model="form.announcement!.content" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500" />
+            <input v-model="form.announcement!.content" class="field-control w-full" />
           </div>
         </div>
       </div>
 
       <!-- 厂商别名 / 自定义标签 -->
       <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('settings.providerAliases') }}</h3>
-      <textarea v-model="aliasesText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500"></textarea>
+      <textarea v-model="aliasesText" rows="3" class="field-control field-mono w-full"></textarea>
 
       <h3 class="mb-3 mt-6 text-sm font-medium text-secondary">{{ t('settings.customTags') }}</h3>
-      <textarea v-model="tagsText" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 font-mono text-xs text-white outline-none focus:border-sky-500"></textarea>
+      <textarea v-model="tagsText" rows="3" class="field-control field-mono w-full"></textarea>
     </div>
 
     <div class="mt-6">
@@ -469,5 +469,5 @@ async function save() {
 
     <!-- S5/F10：主题市场（已安装 / 市场 / 来源）。原挂在「设置」页，改归外观域。 -->
     <ThemePanel class="mt-6" />
-  </div>
+  </PageShell>
 </template>

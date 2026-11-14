@@ -9,6 +9,7 @@ import { isOlderVersion } from '../../utils/version';
 import { useI18n } from '../../composables/useI18n';
 import AgentBillingCard from '../../components/admin/AgentBillingCard.vue';
 import HardwareProfileFields from '../../components/admin/HardwareProfileFields.vue';
+import PageShell from '../../components/admin/PageShell.vue';
 import { Delete, FileText, Refresh, Remind, Time } from '@icon-park/vue-next';
 import type { InstallCommands, Agent, DeletedAgent, AgentVersionSummary, AgentVersionStatus, AgentArtifact, AgentDistributionResult, HardwareOptions } from '../../services/types';
 import { publicApi } from '../../services/publicApi';
@@ -492,8 +493,7 @@ async function batchRenew() {
 </script>
 
 <template>
-  <div>
-    <h1 class="mb-6 text-2xl font-bold">{{ t('agents.title') }}</h1>
+  <PageShell :title="t('agents.title')">
     <div v-if="error" class="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
       {{ error }}
     </div>
@@ -503,64 +503,64 @@ async function batchRenew() {
 
     <div class="glass mb-6 p-4">
       <div class="flex gap-3">
-        <input v-model="newName" :placeholder="t('common.name')" class="flex-1 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-white" @keyup.enter="add" />
+        <input v-model="newName" :placeholder="t('common.name')" class="field-control flex-1" @keyup.enter="add" />
         <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white hover:bg-sky-400" @click="add">{{ t('agents.add') }}</button>
       </div>
       <!-- 硬件档案（可选）：受控端不采集，建好后也可在详情页修改 -->
       <details class="mt-3">
-        <summary class="cursor-pointer select-none text-sm text-slate-400">
+        <summary class="cursor-pointer select-none text-sm text-secondary">
           {{ t('hw.title') }}
-          <span class="ml-2 text-xs text-slate-500">{{ t('hw.createHint') }}</span>
+          <span class="ml-2 text-xs text-muted">{{ t('hw.createHint') }}</span>
         </summary>
         <div class="mt-3">
           <HardwareProfileFields ref="hwFields" :options="hwOptions" />
         </div>
       </details>
-      <div v-if="created" class="mt-4 space-y-3 border-t border-slate-700 pt-4">
+      <div v-if="created" class="mt-4 space-y-3 border-t border-divider pt-4">
         <div class="flex items-center gap-3">
           <span class="text-sm text-emerald-300">{{ t('agents.created', { id: created.id }) }}</span>
-          <span class="text-xs text-slate-500">{{ t('agents.tokenOnce') }}</span>
+          <span class="text-xs text-muted">{{ t('agents.tokenOnce') }}</span>
         </div>
         <div class="flex gap-2">
-          <input :type="showToken ? 'text' : 'password'" readonly class="flex-1 rounded-lg border border-slate-700 bg-slate-900/30 px-3 py-2 text-xs text-slate-300" :value="created.token" />
-          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="showToken = !showToken">{{ showToken ? t('common.hide') : t('common.show') }}</button>
-          <button class="rounded-lg bg-slate-700 px-3 py-2 text-xs text-white" @click="copy(created.token)">{{ t('common.copy') }}</button>
+          <input :type="showToken ? 'text' : 'password'" readonly class="field-control field-mono min-w-0 flex-1" :value="created.token" />
+          <button class="btn-ghost px-3 py-2 text-xs" @click="showToken = !showToken">{{ showToken ? t('common.hide') : t('common.show') }}</button>
+          <button class="btn-ghost px-3 py-2 text-xs" @click="copy(created.token)">{{ t('common.copy') }}</button>
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
-            <label class="text-xs text-slate-400">{{ t('agents.linux') }}</label>
+            <label class="text-xs text-secondary">{{ t('agents.linux') }}</label>
             <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.native_cmd)">{{ t('common.copy') }}</button>
           </div>
-          <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.native_cmd" />
+          <textarea readonly rows="3" class="field-control field-mono w-full" :value="created.install.native_cmd" />
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
-            <label class="text-xs text-slate-400">{{ t('agents.docker') }}</label>
+            <label class="text-xs text-secondary">{{ t('agents.docker') }}</label>
             <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.docker_cmd)">{{ t('common.copy') }}</button>
           </div>
-          <textarea readonly rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.docker_cmd" />
+          <textarea readonly rows="3" class="field-control field-mono w-full" :value="created.install.docker_cmd" />
         </div>
         <div>
           <div class="mb-1 flex items-center justify-between">
-            <label class="text-xs text-slate-400">{{ t('agents.windows') }}</label>
+            <label class="text-xs text-secondary">{{ t('agents.windows') }}</label>
             <button class="text-xs text-sky-400 hover:text-sky-300" @click="copy(created.install.windows_cmd)">{{ t('common.copy') }}</button>
           </div>
-          <textarea readonly rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-900/30 p-2 text-xs text-slate-300" :value="created.install.windows_cmd" />
+          <textarea readonly rows="2" class="field-control field-mono w-full" :value="created.install.windows_cmd" />
         </div>
       </div>
     </div>
 
     <!-- V 阶段：版本分布汇总条（期望版本对照） -->
     <div v-if="versionSummary" class="glass mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm">
-      <span class="text-slate-400">{{ t('agents.versionSummary', { n: versionSummary.counts.total }) }}</span>
+      <span class="text-secondary">{{ t('agents.versionSummary', { n: versionSummary.counts.total }) }}</span>
       <span class="text-emerald-300">{{ t('agents.versionUpToDate') }}: {{ versionSummary.counts.up_to_date }}</span>
       <span class="text-amber-300">{{ t('agents.versionOutdated') }}: {{ versionSummary.counts.outdated }}</span>
       <span class="text-violet-300">{{ t('agents.versionCustom') }}: {{ versionSummary.counts.custom }}</span>
-      <span class="text-slate-500">{{ t('agents.versionUnknown') }}: {{ versionSummary.counts.unknown }}</span>
-      <span class="text-slate-400">
+      <span class="text-muted">{{ t('agents.versionUnknown') }}: {{ versionSummary.counts.unknown }}</span>
+      <span class="text-secondary">
         {{ t('agents.versionExpected') }}: {{ versionSummary.expected.version || t('agents.versionNotSet') }}
       </span>
-      <button class="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800" @click="openExpected">
+      <button class="btn-ghost px-3 py-1 text-xs" @click="openExpected">
         {{ t('agents.versionSetExpected') }}
       </button>
     </div>
@@ -570,51 +570,51 @@ async function batchRenew() {
       <input
         v-model="expectedVersion"
         :placeholder="t('agents.versionExpectedPlaceholder')"
-        class="w-40 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+        class="field-control w-40"
       />
       <input
         v-model="expectedSha"
         :placeholder="t('agents.versionExpectedShaPlaceholder')"
-        class="w-52 rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+        class="field-control w-52"
       />
       <button class="rounded-lg bg-sky-600 px-3 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-50" :disabled="expectedBusy" @click="saveExpected">
         {{ t('common.save') }}
       </button>
-      <button class="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50" :disabled="expectedBusy" @click="clearExpected">
+      <button class="btn-ghost px-3 py-2 text-sm" :disabled="expectedBusy" @click="clearExpected">
         {{ t('agents.versionClearExpected') }}
       </button>
-      <button class="rounded-lg px-3 py-2 text-sm text-slate-400 hover:text-white" @click="expectedOpen = false">{{ t('common.cancel') }}</button>
-      <p class="w-full text-xs text-slate-500">{{ t('agents.versionExpectedHint') }}</p>
+      <button class="rounded-lg px-3 py-2 text-sm text-secondary hover:text-content" @click="expectedOpen = false">{{ t('common.cancel') }}</button>
+      <p class="w-full text-xs text-muted">{{ t('agents.versionExpectedHint') }}</p>
     </div>
 
     <!-- B3: 工具栏 搜索 / 排序 / 批量 -->
     <div class="mb-4 flex flex-wrap items-center gap-3">
-      <input v-model="search" :placeholder="t('agents.searchPlaceholder')" class="flex-1 min-w-[160px] rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2 text-sm text-white" />
-      <select v-model="sortKey" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+      <input v-model="search" :placeholder="t('agents.searchPlaceholder')" class="field-control min-w-[160px] flex-1" />
+      <select v-model="sortKey" class="field-control">
         <option value="name">{{ t('agents.sortByName') }}</option>
         <option value="cpu">{{ t('agents.sortByCpu') }}</option>
         <option value="mem">{{ t('agents.sortByMem') }}</option>
         <option value="status">{{ t('agents.sortByStatus') }}</option>
       </select>
-      <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-400">
-        <input type="checkbox" :checked="allSelected" @change="toggleAll" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500" />
+      <label class="flex cursor-pointer items-center gap-2 text-sm text-secondary">
+        <input type="checkbox" :checked="allSelected" @change="toggleAll" class="switch" />
         {{ t('agents.selectAll') }}
       </label>
     </div>
 
     <!-- F11: 最近删除（7 天缓冲期内可恢复） -->
     <div class="mb-4 flex items-center justify-between">
-      <button class="text-xs text-slate-400 hover:text-sky-300" @click="toggleDeleted">
+      <button class="text-xs text-secondary hover:text-sky-300" @click="toggleDeleted">
         {{ showDeleted ? t('agents.deletedHide') : t('agents.deletedToggle') }}
       </button>
-      <span v-if="showDeleted" class="text-xs text-slate-500">{{ t('agents.deletedHint') }}</span>
+      <span v-if="showDeleted" class="text-xs text-muted">{{ t('agents.deletedHint') }}</span>
     </div>
     <div v-if="showDeleted" class="glass mb-4 p-4">
-      <div v-if="!deletedAgents.length" class="text-xs text-slate-500">{{ t('agents.deletedEmpty') }}</div>
+      <div v-if="!deletedAgents.length" class="text-xs text-muted">{{ t('agents.deletedEmpty') }}</div>
       <ul v-else class="space-y-2">
         <li v-for="d in deletedAgents" :key="d.id" class="flex items-center justify-between gap-3 text-sm">
           <span class="truncate text-slate-300">
-            {{ d.name }}<span class="ml-2 text-xs text-slate-500">{{ d.id }}</span>
+            {{ d.name }}<span class="ml-2 text-xs text-muted">{{ d.id }}</span>
           </span>
           <span class="flex shrink-0 items-center gap-3">
             <span class="text-xs text-amber-300">{{ t('agents.daysLeft', { n: d.days_left }) }}</span>
@@ -635,8 +635,8 @@ async function batchRenew() {
       <button class="rounded-lg border border-slate-600 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800" @click="selected = new Set()">{{ t('common.cancel') }}</button>
     </div>
 
-    <div v-if="!filtered.length" class="glass p-8 text-center text-sm text-slate-500">
-      {{ search ? t('agents.noMatch') : t('agents.empty') }}
+    <div v-if="!filtered.length" class="glass p-8 text-center text-sm">
+      <span class="text-muted">{{ search ? t('agents.noMatch') : t('agents.empty') }}</span>
     </div>
     <!-- 表格形态（对齐参考面板后台服务器列表的列）：
          显示名称 / 国旗 / 客户端版本 / 分组 / 私有备注 / 账单 + 操作 -->
@@ -644,7 +644,7 @@ async function batchRenew() {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[900px] text-sm">
           <thead>
-            <tr class="border-b border-slate-700 text-left text-xs text-slate-500">
+            <tr class="border-b border-slate-700 text-left text-xs text-muted">
               <th class="w-10 px-4 py-3"></th>
               <th class="px-3 py-3 font-medium">{{ t('agents.colName') }}</th>
               <th class="w-32 px-3 py-3 font-medium">{{ t('agents.colLocation') }}</th>
@@ -663,7 +663,7 @@ async function batchRenew() {
               :class="selected.has(agent.id) ? 'bg-sky-500/5' : ''"
             >
               <td class="px-4 py-3 align-middle">
-                <input type="checkbox" :checked="selected.has(agent.id)" @change="toggleOne(agent.id)" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-sky-500" />
+                <input type="checkbox" :checked="selected.has(agent.id)" @change="toggleOne(agent.id)" class="switch" />
               </td>
               <td class="px-3 py-3 align-middle">
                 <div class="flex min-w-0 items-center gap-2">
@@ -671,7 +671,7 @@ async function batchRenew() {
                   <span v-if="agent.alert?.muted" class="shrink-0 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-normal text-rose-300">{{ t('common.muted') }}</span>
                   <span v-else-if="agent.alert?.overridden" class="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-normal text-violet-300">{{ t('common.custom') }}</span>
                 </div>
-                <p class="truncate text-xs text-slate-500">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
+                <p class="truncate text-xs text-muted">{{ agent.id }} · {{ formatBytes(agent.latest?.mem_used) }} / {{ formatBytes(agent.latest?.mem_total) }} · {{ formatDuration(agent.latest?.uptime) }}</p>
               </td>
               <td class="px-3 py-3 align-middle">
                 <div v-if="agent.country" class="flex items-center gap-2">
@@ -682,9 +682,9 @@ async function batchRenew() {
                     class="h-4 w-6 flex-shrink-0 rounded-sm object-cover"
                     @error="(e) => ((e.target as HTMLImageElement).style.visibility = 'hidden')"
                   />
-                  <span class="truncate text-xs text-slate-400">{{ regionName(agent.country) }}</span>
+                  <span class="truncate text-xs text-secondary">{{ regionName(agent.country) }}</span>
                 </div>
-                <span v-else class="text-slate-500">—</span>
+                <span v-else class="text-muted">—</span>
               </td>
               <td class="px-3 py-3 align-middle">
                 <div v-if="agentVersion(agent)" class="flex items-center gap-1.5">
@@ -692,7 +692,7 @@ async function batchRenew() {
                   <!-- V 阶段：版本状态点（绿=已是期望版本 / 琥珀=落后 / 紫=定制 / 灰=未知） -->
                   <span class="h-1.5 w-1.5 rounded-full" :class="statusDot(agent)" :title="statusLabel(agent)"></span>
                 </div>
-                <span v-else class="text-slate-500">—</span>
+                <span v-else class="text-muted">—</span>
                 <!-- 落后于最新 Release：整卡描边 + 徽标（比颜色更易读，色弱友好） -->
                 <span
                   v-if="isOutdated(agent)"
@@ -702,11 +702,11 @@ async function batchRenew() {
               </td>
               <td class="px-3 py-3 align-middle">
                 <span v-if="agentGroup(agent)" class="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">{{ agentGroup(agent) }}</span>
-                <span v-else class="text-slate-500">—</span>
+                <span v-else class="text-muted">—</span>
               </td>
               <td class="max-w-[220px] px-3 py-3 align-middle">
-                <span v-if="agent.note" class="block truncate text-xs text-slate-400" :title="agent.note">{{ agent.note }}</span>
-                <span v-else class="text-slate-500">—</span>
+                <span v-if="agent.note" class="block truncate text-xs text-secondary" :title="agent.note">{{ agent.note }}</span>
+                <span v-else class="text-muted">—</span>
               </td>
               <td class="px-3 py-3 align-middle">
                 <!-- 账单：图标 + 弹出账单卡片（价格/货币/周期/到期时间含「长期」/自动续费） -->
@@ -714,19 +714,19 @@ async function batchRenew() {
               </td>
               <td class="px-4 py-3 align-middle">
                 <div class="flex items-center justify-end gap-1">
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-violet-500/10" :title="t('agents.alert')" :aria-label="t('agents.alert')" @click="openAlert(agent)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-violet-500/10" :title="t('agents.alert')" :aria-label="t('agents.alert')" @click="openAlert(agent)">
                     <Remind :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-sky-500/10" :title="t('common.detail')" :aria-label="t('common.detail')" @click="router.push(`/admin/agents/${agent.id}`)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-sky-500/10" :title="t('common.detail')" :aria-label="t('common.detail')" @click="router.push(`/admin/agents/${agent.id}`)">
                     <FileText :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-amber-500/10" :title="t('common.reset')" :aria-label="t('common.reset')" @click="resetToken(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-amber-500/10" :title="t('common.reset')" :aria-label="t('common.reset')" @click="resetToken(agent.id)">
                     <Refresh :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-emerald-500/10" :title="t('common.renew')" :aria-label="t('common.renew')" @click="renew(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-emerald-500/10" :title="t('common.renew')" :aria-label="t('common.renew')" @click="renew(agent.id)">
                     <Time :size="16" theme="outline" />
                   </button>
-                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-500/10" :title="t('common.delete')" :aria-label="t('common.delete')" @click="remove(agent.id)">
+                  <button class="flex h-7 w-7 items-center justify-center rounded-lg text-secondary hover:bg-rose-500/10" :title="t('common.delete')" :aria-label="t('common.delete')" @click="remove(agent.id)">
                     <Delete :size="16" theme="outline" />
                   </button>
                 </div>
@@ -746,39 +746,39 @@ async function batchRenew() {
       <div class="glass w-full max-w-lg p-5">
         <div class="mb-1 flex items-center justify-between">
           <h2 class="text-lg font-semibold">{{ t('agents.alertTitle', { name: alertTarget.name }) }}</h2>
-          <button class="text-slate-400 hover:text-white" @click="alertTarget = null">✕</button>
+          <button class="text-secondary hover:text-content" @click="alertTarget = null">✕</button>
         </div>
-        <p class="mb-4 text-xs text-slate-500">{{ t('agents.alertInheritHint') }}</p>
+        <p class="mb-4 text-xs text-muted">{{ t('agents.alertInheritHint') }}</p>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label v-for="f in alertFieldRows" :key="f.key" class="text-xs text-slate-400">
+          <label v-for="f in alertFieldRows" :key="f.key" class="text-xs text-secondary">
             {{ f.label }}
             <input
               v-model="alertForm[f.key]"
               type="number"
               :placeholder="effectiveAlert(f.key)"
-              class="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white"
+              class="field-control mt-1 w-full"
             />
           </label>
         </div>
         <label class="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-300">
-          <input v-model="alertForm.muted" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-slate-800 text-rose-500" />
+          <input v-model="alertForm.muted" type="checkbox" class="switch switch-danger" />
           {{ t('agents.alertMuted') }}
         </label>
         <div class="mt-5 flex justify-end gap-2">
-          <button class="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800" @click="alertTarget = null">{{ t('common.cancel') }}</button>
+          <button class="btn-ghost px-4 py-2 text-sm" @click="alertTarget = null">{{ t('common.cancel') }}</button>
           <button class="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-50" :disabled="alertBusy" @click="resetAlert">{{ t('agents.alertReset') }}</button>
           <button class="rounded-lg bg-sky-500 px-4 py-2 text-sm text-white hover:bg-sky-400 disabled:opacity-50" :disabled="alertBusy" @click="saveAlert">{{ t('agents.alertSave') }}</button>
         </div>
       </div>
     </div>
-  </div>
+  </PageShell>
 
     <!-- D 阶段：一键批量分发抽屉 -->
     <div v-if="distOpen" class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/60 p-4" @click.self="distOpen = false">
       <div class="glass my-8 w-full max-w-2xl p-6">
         <div class="mb-4 flex items-center justify-between">
-          <h2 class="text-lg font-semibold text-white">{{ t('dist.title') }}</h2>
-          <button class="text-slate-400 hover:text-white" @click="distOpen = false">{{ t('common.close') }}</button>
+          <h2 class="text-lg font-semibold">{{ t('dist.title') }}</h2>
+          <button class="text-secondary hover:text-content" @click="distOpen = false">{{ t('common.close') }}</button>
         </div>
 
         <p class="mb-4 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-200">{{ t('dist.safetyHint') }}</p>
@@ -787,22 +787,22 @@ async function batchRenew() {
         <div v-if="distCopied" class="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300">{{ distCopied }}</div>
 
         <div class="mb-4 grid gap-3 sm:grid-cols-2">
-          <label class="flex flex-col gap-1 text-xs text-slate-400">
+          <label class="flex flex-col gap-1 text-xs text-secondary">
             {{ t('dist.targetPlatform') }}
-            <select v-model="distPlatform" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" @change="distArtifactId = ''">
+            <select v-model="distPlatform" class="field-control" @change="distArtifactId = ''">
               <option value="linux-amd64">linux-amd64</option>
               <option value="linux-arm64">linux-arm64</option>
               <option value="windows-amd64">windows-amd64</option>
             </select>
           </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-400">
+          <label class="flex flex-col gap-1 text-xs text-secondary">
             {{ t('dist.ttl') }}
-            <input v-model.number="distTtl" type="number" min="1" max="1440" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+            <input v-model.number="distTtl" type="number" min="1" max="1440" class="field-control" />
           </label>
         </div>
 
         <div class="mb-4">
-          <div class="mb-2 text-xs text-slate-400">{{ t('dist.source') }}</div>
+          <div class="mb-2 text-xs text-secondary">{{ t('dist.source') }}</div>
           <div class="flex flex-wrap gap-2">
             <label class="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300" :class="distSourceKind === 'official' ? 'border-sky-500 bg-sky-500/10 text-sky-200' : ''">
               <input v-model="distSourceKind" type="radio" value="official" class="h-3 w-3" /> {{ t('dist.sourceOfficial') }}
@@ -817,9 +817,9 @@ async function batchRenew() {
         </div>
 
         <div v-if="distSourceKind === 'artifact'" class="mb-4">
-          <label class="flex flex-col gap-1 text-xs text-slate-400">
+          <label class="flex flex-col gap-1 text-xs text-secondary">
             {{ t('dist.artifact') }}
-            <select v-model="distArtifactId" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white">
+            <select v-model="distArtifactId" class="field-control">
               <option v-if="!distArtifacts.length" value="">{{ t('dist.noArtifact') }}</option>
               <option v-for="a in distArtifacts" :key="a.id" :value="a.id">
                 {{ a.sha256.slice(0, 16) }}… · {{ a.source_note || a.platform }}
@@ -829,13 +829,13 @@ async function batchRenew() {
         </div>
 
         <div v-if="distSourceKind === 'release_url'" class="mb-4 grid gap-3 sm:grid-cols-2">
-          <label class="flex flex-col gap-1 text-xs text-slate-400">
+          <label class="flex flex-col gap-1 text-xs text-secondary">
             {{ t('dist.url') }}
-            <input v-model="distUrl" placeholder="https://…/diting-agent-linux-amd64" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+            <input v-model="distUrl" placeholder="https://…/diting-agent-linux-amd64" class="field-control" />
           </label>
-          <label class="flex flex-col gap-1 text-xs text-slate-400">
+          <label class="flex flex-col gap-1 text-xs text-secondary">
             {{ t('dist.sha256') }}
-            <input v-model="distSha" placeholder="64 位 hex（强烈建议填写）" class="rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white" />
+            <input v-model="distSha" placeholder="64 位 hex（强烈建议填写）" class="field-control" />
           </label>
         </div>
 
@@ -849,25 +849,25 @@ async function batchRenew() {
             <div class="mt-1">{{ t('dist.expiresAt', { at: new Date(distResult.expires_at).toLocaleString() }) }}</div>
           </div>
           <div class="rounded-lg border border-slate-700 p-3">
-            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+            <div class="mb-1 flex items-center justify-between text-xs text-secondary">
               <span>Linux</span>
               <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.commands.linux)">{{ t('common.copy') }}</button>
             </div>
             <pre class="overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-300">{{ distResult.commands.linux }}</pre>
           </div>
           <div class="rounded-lg border border-slate-700 p-3">
-            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+            <div class="mb-1 flex items-center justify-between text-xs text-secondary">
               <span>Windows</span>
               <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.commands.windows)">{{ t('common.copy') }}</button>
             </div>
             <pre class="overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-300">{{ distResult.commands.windows }}</pre>
           </div>
           <div class="rounded-lg border border-slate-700 p-3">
-            <div class="mb-1 flex items-center justify-between text-xs text-slate-400">
+            <div class="mb-1 flex items-center justify-between text-xs text-secondary">
               <span>{{ t('dist.downloadUrl') }}</span>
               <button class="text-sky-400 hover:text-sky-300" @click="copyDist(distResult.download_url)">{{ t('common.copy') }}</button>
             </div>
-            <p class="break-all font-mono text-[11px] text-slate-400">{{ distResult.download_url }}</p>
+            <p class="break-all font-mono text-[11px] text-secondary">{{ distResult.download_url }}</p>
             <p class="mt-2 text-[11px] text-amber-300">{{ t('dist.oneTimeWarn') }}</p>
           </div>
         </div>

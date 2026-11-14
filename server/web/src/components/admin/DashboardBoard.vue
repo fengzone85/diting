@@ -220,11 +220,11 @@ async function save() {
     <!-- 工具条 -->
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-2">
-        <GridFour :size="16" class="text-slate-400" />
+        <GridFour :size="16" class="text-secondary" />
         <span class="text-sm font-medium text-slate-200">
           {{ editing ? t('dashboard.editing') : t('dashboard.workspace') }}
         </span>
-        <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] tabular-nums text-slate-400">
+        <span class="rounded-full border border-slate-700 px-2 py-0.5 text-[11px] tabular-nums text-secondary">
           {{ draft.length }} / {{ widgets.length }}
         </span>
         <span v-if="savedMsg" class="text-xs text-emerald-400">{{ savedMsg }}</span>
@@ -303,7 +303,7 @@ async function save() {
             <button
               type="button"
               data-drag-handle
-              class="cursor-grab touch-none rounded p-0.5 text-slate-400 hover:text-slate-100 active:cursor-grabbing"
+              class="cursor-grab touch-none rounded p-0.5 text-secondary hover:text-slate-100 active:cursor-grabbing"
               :title="t('dashboard.moveCard', { name: labelOf(w.id) })"
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
@@ -315,20 +315,20 @@ async function save() {
             <span class="min-w-0 flex-1 truncate text-[11px] text-slate-300">{{ labelOf(w.id) }}</span>
             <select
               v-model="w.width"
-              class="h-6 rounded border border-slate-700 bg-slate-900 px-1 text-[10px] text-slate-300 outline-none focus:border-sky-500"
+              class="field-control field-xs h-6"
               :title="t('dashboard.cardWidth')"
             >
               <option v-for="o in WIDTH_OPTIONS" :key="o.value" :value="o.value">{{ t(o.label) }}</option>
             </select>
             <select
               v-model="w.height"
-              class="h-6 rounded border border-slate-700 bg-slate-900 px-1 text-[10px] text-slate-300 outline-none focus:border-sky-500"
+              class="field-control field-xs h-6"
               :title="t('dashboard.cardHeight')"
             >
               <option v-for="o in HEIGHT_OPTIONS" :key="o.value" :value="o.value">{{ t(o.label) }}</option>
             </select>
             <button
-              class="rounded px-1 text-sm leading-none text-slate-500 hover:text-rose-300"
+              class="rounded px-1 text-sm leading-none text-muted hover:text-rose-300"
               :title="t('dashboard.hideCard', { name: labelOf(w.id) })"
               @click="removeCard(w.id)"
             >×</button>
@@ -348,12 +348,12 @@ async function save() {
     <!-- 空看板 -->
     <div
       v-else
-      class="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-700 text-sm text-slate-500"
+      class="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-slate-700 text-sm text-muted"
     >
       <GridFour :size="26" class="text-slate-600" />
       <span>{{ t('dashboard.layoutEmpty') }}</span>
       <button
-        class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+        class="btn-ghost px-3 py-1.5 text-xs"
         @click="startEdit(); choosing = true"
       >
         ＋ {{ t('dashboard.chooseCards') }}
@@ -366,9 +366,9 @@ async function save() {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       @click.self="choosing = false"
     >
-      <div class="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
-        <h3 class="text-base font-semibold text-slate-100">{{ t('dashboard.chooseCards') }}</h3>
-        <p class="mt-1 text-xs text-slate-500">{{ t('dashboard.selectedCards', { n: draft.length }) }}</p>
+      <div class="glass w-full max-w-md rounded-xl p-5 shadow-2xl">
+        <h3 class="text-base font-semibold">{{ t('dashboard.chooseCards') }}</h3>
+        <p class="mt-1 text-xs text-muted">{{ t('dashboard.selectedCards', { n: draft.length }) }}</p>
         <div class="mt-3 max-h-[55vh] overflow-y-auto">
           <label
             v-for="w in widgets"
@@ -377,7 +377,7 @@ async function save() {
           >
             <input
               type="checkbox"
-              class="h-4 w-4 accent-sky-500"
+              class="switch"
               :checked="has(w.id)"
               @change="toggleCard(w.id)"
             />
