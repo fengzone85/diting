@@ -48,6 +48,7 @@ export default defineConfig({
             { label: '环境变量', slug: 'env' },
             { label: '安全设计', slug: 'security' },
             { label: '隐藏源站 IP', slug: 'tunnel-guide' },
+            { label: 'Cloudflare CDN 与 WAF', slug: 'cloudflare' },
             { label: 'API 接口', slug: 'api' },
           ],
         },

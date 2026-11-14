@@ -11,6 +11,8 @@ DiTing 服务端默认只监听 `127.0.0.1:8081`（端口由 `.env` 的 `PORT` �
 
 > ⚠️ `/api/clients`、`/api/rpc2` 是实时数据通道（WebSocket），`/api/clients/sse` 是 SSE。反代若漏透传升级头，浏览器 WSS 握手失败，主题页显示「离线」、实时数值变 `N/A`，而服务端直连完全正常——很容易误判成后端故障。
 
+> 打算把域名放到 Cloudflare 橙云代理（CF 盾）后面？证书、真实 IP 还原、WAF 豁免与受控端迁移的完整步骤见 [Cloudflare CDN 与 WAF](../cloudflare/)。
+
 ## 通用 Nginx / OpenResty 配置
 
 下面是可直接粘贴的完整配置。把 `monitor.example.com`、证书路径、`8081` 换成实际值（端口跟随 `.env` 的 `PORT`）。

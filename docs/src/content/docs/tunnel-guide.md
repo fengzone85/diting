@@ -11,6 +11,8 @@ description: Cloudflare Tunnel / Tailscale 接入指南，让 VPS 不开放任�
 
 本指南提供两种**让 VPS 完全不开放入站端口**的方案，从源头消除"源站暴露"问题。两者任选其一（也可组合）。无论哪种，都**不替代认证**：admin token 仍需强随机。
 
+> 只想快速上 CF 的 CDN/WAF、不介意开 80/443（防火墙只放行 CF IP 段）？走更轻量的 [Cloudflare CDN 与 WAF（橙云代理）](../cloudflare/) 路线，两条路线可组合。
+
 > 前置：服务端请用 `server/docker-compose.yml`（8081 绑 `127.0.0.1`），并已在本地 Nginx 配好 TLS + 限流（见 `nginx/monitor.conf.example`）。下面两种方案都让外部流量"经隧道到达本机 Nginx"，Nginx 的限流/HSTS/CSP 全部保留。
 
 ---
