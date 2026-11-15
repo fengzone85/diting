@@ -692,9 +692,11 @@ function runPrune() {
     const auditDays = Math.max(7, Number(process.env.AUDIT_RETENTION_DAYS || 90));
     const nAud = db.pruneAudit(auditDays);
     if (nAud > 0) console.log(`[prune] removed ${nAud} old audit_logs (retention ${auditDays}d)`);
-    // S2/F6：过期会话行清理。SESSION_TTL 12h，倍率 2 容错时钟抖动；
-    // revoked 行一并清（其 last_seen 停留在最后活动时刻，同样会被 TTL 覆盖）。
-    const nSess = db.pruneSessions(Date.now() - SESSION_TTL * 2);
+    // S2/F6：过期会话行清理。双条件（r1/P0-2）：① remember 长会话按 expires_at 到期删；
+    // ② 旧格式行（expires_at 为空）按 last_seen + SESSION_TTL*2（倍率容错时钟抖动）删。
+    // 不可再只按 ②——否则 30 天会话 24h 不活动即被删行、下次访问静默 401。
+    // revoked 行一并清（其 last_seen 停留在最后活动时刻，同样会被规则覆盖）。
+    const nSess = db.pruneSessions(Date.now(), Date.now() - SESSION_TTL * 2);
     if (nSess > 0) console.log(`[prune] removed ${nSess} expired sessions`);
     // F11：软删节点到期物理清理（7 天缓冲；先清状态表与缓存，再删行触发 CASCADE）。
     const nPurge = db.purgeDeletedAgents();

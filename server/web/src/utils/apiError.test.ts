@@ -4,7 +4,7 @@
 //      被误写成 `admin_required`（下划线），导致 403 永远拿不到本地化文案；
 //   2. 每个映射目标键都必须在 zh-CN / en-US 两份词典里存在，避免「引用了不存在的键」。
 import { describe, it, expect, beforeAll } from 'vitest';
-import { ERROR_CODE_KEYS, apiErrorMessage } from './apiError';
+import { ERROR_CODE_KEYS, WEAK_PASSWORD_REASON_KEYS, apiErrorMessage } from './apiError';
 import { setLocale, t } from '../composables/useI18n';
 import { zhCN } from './i18n/zh-CN';
 import { enUS } from './i18n/en-US';
@@ -55,10 +55,14 @@ describe('映射键与词典一致性', () => {
       expect(zhCN[key], `zh-CN 缺 ${key}（错误码 ${code}）`).toBeTruthy();
       expect(enUS[key], `en-US 缺 ${key}（错误码 ${code}）`).toBeTruthy();
     }
+    for (const [reason, key] of Object.entries(WEAK_PASSWORD_REASON_KEYS)) {
+      expect(zhCN[key], `zh-CN 缺 ${key}（弱口令 reason ${reason}）`).toBeTruthy();
+      expect(enUS[key], `en-US 缺 ${key}（弱口令 reason ${reason}）`).toBeTruthy();
+    }
   });
 
   it('词典中的键都能被 t() 取到（未命中会原样返回 key）', () => {
-    for (const key of Object.values(ERROR_CODE_KEYS)) {
+    for (const key of [...Object.values(ERROR_CODE_KEYS), ...Object.values(WEAK_PASSWORD_REASON_KEYS)]) {
       expect(t(key)).not.toBe(key);
     }
   });

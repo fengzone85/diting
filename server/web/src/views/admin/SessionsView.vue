@@ -113,9 +113,82 @@ async function revokeAll() {
   }
 }
 
+// ---- 管理密码（人用凭据，§3.1）----
+// 2FA 自选（r2）：未开 2FA 时给强提示但不禁用；改密需旧密码（已设时）；
+// 成功后踢其它设备、保留当前（服务端口径，不自踢）。
+const passwordSet = ref(false);
+const twofaOn = ref(false);
+const newPwd = ref('');
+const curPwd = ref('');
+const pwdTotp = ref('');
+const pwdBusy = ref(false);
+const pwdMessage = ref('');
+const pwdError = ref('');
+
+async function loadPasswordStatus() {
+  try {
+    const s = await adminApi.passwordStatus();
+    passwordSet.value = s.set;
+    const t2 = await adminApi.twoFAStatus();
+    twofaOn.value = t2.enabled;
+  } catch {
+    // 只读 Token 或无权限时忽略，不影响其它区块
+  }
+}
+
+async function savePassword() {
+  pwdMessage.value = '';
+  pwdError.value = '';
+  if (!newPwd.value) {
+    pwdError.value = t('sessions.pwdRequired');
+    return;
+  }
+  if (passwordSet.value && !curPwd.value) {
+    pwdError.value = t('sessions.pwdCurrentRequired');
+    return;
+  }
+  pwdBusy.value = true;
+  try {
+    await adminApi.setPassword(newPwd.value, {
+      currentPassword: passwordSet.value ? curPwd.value : undefined,
+      totp: pwdTotp.value || undefined,
+    });
+    pwdMessage.value = passwordSet.value ? t('sessions.pwdChanged') : t('sessions.pwdCreated');
+    newPwd.value = '';
+    curPwd.value = '';
+    pwdTotp.value = '';
+    await loadPasswordStatus();
+    await load();
+  } catch (e) {
+    pwdError.value = apiErrorMessage(e, 'sessions.pwdSaveFailed');
+  } finally {
+    pwdBusy.value = false;
+  }
+}
+
+async function clearPassword() {
+  pwdMessage.value = '';
+  pwdError.value = '';
+  if (!window.confirm(t('sessions.pwdClearConfirm'))) return;
+  pwdBusy.value = true;
+  try {
+    await adminApi.clearPassword(pwdTotp.value || undefined);
+    pwdMessage.value = t('sessions.pwdCleared');
+    curPwd.value = '';
+    pwdTotp.value = '';
+    await loadPasswordStatus();
+    await load();
+  } catch (e) {
+    pwdError.value = apiErrorMessage(e, 'sessions.pwdSaveFailed');
+  } finally {
+    pwdBusy.value = false;
+  }
+}
+
 onMounted(() => {
   void load();
   void loadClientIp();
+  void loadPasswordStatus();
 });
 </script>
 
@@ -162,6 +235,10 @@ onMounted(() => {
           <div class="break-all">{{ shortUa(s.ua) }}</div>
           <div>{{ t('sessions.createdAt') }}：{{ fmtDateTime(s.created_at) }}</div>
           <div>{{ t('sessions.lastSeen') }}：{{ fmtDateTime(s.last_seen) }}</div>
+          <div v-if="s.remember">
+            <span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[11px] text-emerald-300">{{ t('sessions.trustedDevice') }}</span>
+            {{ t('sessions.expiresAt') }}：{{ fmtDateTime(s.expires_at) }}
+          </div>
           <div class="font-mono text-[11px] text-slate-600">{{ s.id }}</div>
         </div>
         <button
@@ -200,6 +277,58 @@ onMounted(() => {
       >
         {{ settingsSaving ? t('settings.saving') : t('common.save') }}
       </button>
+    </div>
+
+    <!-- 管理密码（人用凭据）：2FA 自选（r2），未开 2FA 强提示但不禁用 -->
+    <div class="glass mt-6 p-6">
+      <h2 class="mb-4 text-lg font-semibold">{{ t('sessions.pwdTitle') }}</h2>
+      <div v-if="pwdMessage" class="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+        {{ pwdMessage }}
+      </div>
+      <div v-if="pwdError" class="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+        {{ pwdError }}
+      </div>
+      <p class="mb-4 text-xs leading-relaxed text-secondary">{{ t('sessions.pwdDesc') }}</p>
+      <div v-if="!twofaOn" class="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-200">
+        {{ t('sessions.pwdNo2faWarn') }}
+      </div>
+      <FormInput
+        v-if="passwordSet"
+        v-model="curPwd"
+        type="password"
+        :label="t('sessions.pwdCurrent')"
+        :placeholder="t('sessions.pwdCurrent')"
+      />
+      <FormInput
+        v-model="newPwd"
+        type="password"
+        :label="passwordSet ? t('sessions.pwdNew') : t('sessions.pwdSet')"
+        :hint="t('sessions.pwdStrengthHint')"
+      />
+      <FormInput
+        v-if="twofaOn"
+        v-model="pwdTotp"
+        :label="t('sessions.pwdSecondFactor')"
+        :placeholder="t('twofa.recoveryRegenPlaceholder')"
+        maxlength="20"
+      />
+      <div class="flex gap-2">
+        <button
+          :disabled="pwdBusy"
+          class="rounded-lg bg-sky-500 px-6 py-2 text-sm font-medium text-white hover:bg-sky-400 disabled:opacity-50"
+          @click="savePassword"
+        >
+          {{ passwordSet ? t('sessions.pwdChange') : t('sessions.pwdCreate') }}
+        </button>
+        <button
+          v-if="passwordSet"
+          :disabled="pwdBusy"
+          class="rounded-lg border border-rose-500/40 px-4 py-2 text-sm text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+          @click="clearPassword"
+        >
+          {{ t('sessions.pwdClear') }}
+        </button>
+      </div>
     </div>
 
     <TwoFactorPanel class="mt-6" />

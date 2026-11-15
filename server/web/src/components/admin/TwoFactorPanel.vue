@@ -14,6 +14,12 @@ const code = ref('');
 const message = ref('');
 const error = ref('');
 
+// 一次性恢复码（§3.3）：明文仅生成/重新生成时展示一次，需点「已保存」关闭。
+const recoveryCodes = ref<string[]>([]);
+const recoverySaved = ref(false);
+const regenCode = ref('');
+const regenBusy = ref(false);
+
 onMounted(async () => {
   await refreshStatus();
 });
@@ -61,9 +67,41 @@ async function enable() {
     secret.value = '';
     otpauthUri.value = '';
     qrDataUrl.value = '';
+    // 启用即生成恢复码：一次性展示，需管理员确认已离线保存。
+    recoveryCodes.value = res.recovery_codes || [];
+    recoverySaved.value = false;
   } catch (e) {
     error.value = (e as Error).message || t('twofa.codeWrong');
   }
+}
+
+// 重新生成恢复码（作废旧码）。第二因子：TOTP 或旧恢复码（服务端 verifySecondFactor）。
+async function regenerateRecoveryCodes() {
+  message.value = '';
+  error.value = '';
+  if (!regenCode.value) {
+    error.value = t('twofa.codeRequired');
+    return;
+  }
+  regenBusy.value = true;
+  try {
+    const res = await adminApi.regenerateRecoveryCodes(regenCode.value);
+    recoveryCodes.value = res.recovery_codes;
+    recoverySaved.value = false;
+    regenCode.value = '';
+    message.value = t('twofa.recoveryRegenerated');
+  } catch (e) {
+    error.value = (e as Error).message || t('twofa.codeWrong');
+  } finally {
+    regenBusy.value = false;
+  }
+}
+
+function copyRecoveryCodes() {
+  navigator.clipboard.writeText(recoveryCodes.value.join('\n')).then(() => {
+    message.value = t('common.copied');
+    setTimeout(() => (message.value = ''), 2000);
+  });
 }
 
 async function disable() {
@@ -108,6 +146,22 @@ function copy(text: string) {
     <div v-if="loading" class="py-4 text-center text-secondary">{{ t('common.loading') }}</div>
 
     <div v-else>
+      <!-- 一次性恢复码展示（启用 / 重新生成后出现，确认已保存后消失） -->
+      <div v-if="recoveryCodes.length && !recoverySaved" class="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+        <p class="mb-2 text-sm text-amber-200">{{ t('twofa.recoveryIntro') }}</p>
+        <div class="mb-2 grid grid-cols-2 gap-1 rounded bg-slate-900/50 p-3 font-mono text-sm text-slate-200">
+          <span v-for="c in recoveryCodes" :key="c">{{ c }}</span>
+        </div>
+        <div class="flex gap-2">
+          <button class="rounded-lg border border-sky-500/40 px-3 py-1.5 text-sm text-sky-300 hover:bg-sky-500/10" @click="copyRecoveryCodes">
+            {{ t('common.copy') }}
+          </button>
+          <button class="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm text-white hover:bg-emerald-400" @click="recoverySaved = true">
+            {{ t('twofa.recoverySaved') }}
+          </button>
+        </div>
+      </div>
+
       <div class="mb-4 flex items-center gap-3">
         <span class="text-sm text-secondary">{{ t('twofa.status') }}</span>
         <span
@@ -142,10 +196,23 @@ function copy(text: string) {
 
       <div v-else-if="enabled" class="space-y-4">
         <p class="text-sm text-secondary">{{ t('twofa.disableTip') }}</p>
-        <FormInput v-model="code" :label="t('twofa.enterCurrentCode')" maxlength="6" />
+        <!-- 第二因子统一口径：TOTP 码或一次性恢复码（maxlength 放宽以容纳恢复码） -->
+        <FormInput v-model="code" :label="t('twofa.enterCurrentCode')" maxlength="20" />
         <button class="rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-300 hover:bg-rose-500/20" @click="disable">
           {{ t('twofa.disable') }}
         </button>
+
+        <div class="border-t border-divider pt-4">
+          <p class="mb-2 text-sm text-secondary">{{ t('twofa.recoveryTitle') }}</p>
+          <FormInput v-model="regenCode" :label="t('twofa.recoveryRegenCode')" :placeholder="t('twofa.recoveryRegenPlaceholder')" maxlength="20" />
+          <button
+            class="rounded-lg border border-sky-500/40 px-4 py-2 text-sm text-sky-300 hover:bg-sky-500/10 disabled:opacity-50"
+            :disabled="regenBusy"
+            @click="regenerateRecoveryCodes"
+          >
+            {{ t('twofa.recoveryRegenerate') }}
+          </button>
+        </div>
       </div>
     </div>
   </div>

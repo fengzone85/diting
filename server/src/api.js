@@ -5,8 +5,9 @@ const path = require('path');
 const router = express.Router();
 const db = require('./db');
 const { loginGuard, loginGuardFail, loginGuardClear } = require('./ratelimit');
+const { verifyPassword, verifyPasswordEqualizing, hashPassword, needsRehash, checkPasswordStrength } = require('./password');
 const { heavyQuery } = require('./heavy-db');
-const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel, resolveRole } = require('./auth');
+const { agentAuth, adminOrReadonly, adminOnly, requireAdmin, safeEqual, setSessionCookie, clearSessionCookie, SESSION_TTL, SESSION_REMEMBER_TTL, requireProto, auditLog, revokeAllSessions, verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, verifySecondFactor, agentScope, inAgentScope, getSession, clearSessionCache, actorLabel, resolveRole } = require('./auth');
 const totp = require('./totp');
 const alerts = require('./alerts');
 // 在线判定统一口径（节点覆盖 > 分组覆盖 > 全局，与告警同源）
@@ -1669,6 +1670,26 @@ router.get('/ai/reports/:id', adminOrReadonly, agentScope, (req, res) => {
 // 登录后前端不再持有明文 Admin Token，凭证以 HttpOnly+Secure Cookie 维持，降低 XSS 窃取风险。
 // 包 asyncHandler：async 内同步 throw（如 db.is2FAEnabled / totp.verifyTOTP 抛错）会变成
 // unhandledRejection，Node ≥15 默认直接杀进程。包裹后转为 next(err) 由错误中间件返回 500 JSON。
+
+// 密码通道全局失败计数（r3/P0-2 改节流语义）：**只计数 + 递增延迟，绝不封禁**。
+// r1 曾用 count^4 封禁——在「不分 IP」的全局桶上这等于任意外人换 IP 打 3 次错密码
+// 即可锁死面板（实测封禁指数升级、落库跨重启、正确密码也进不来 = 未认证远程 DoS）。
+// 现：失败 N 次后密码通道请求延迟 min(N,10)*500ms（异步 sleep，不阻塞事件循环），
+// 正确凭据永远可用；分布式猜测由 scrypt 成本 + 线程池并发上限 + 按 IP loginGuard 共同约束。
+// 1h 无失败自动过期；登录成功清零；--reset-admin-token / purge 一并清该键。
+const GLOBAL_FAIL_TTL_MS = 3600 * 1000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function globalLoginFails() {
+  const rec = db.getLoginGuardGlobal();
+  if (!rec || (rec.expiresAt && rec.expiresAt <= Date.now())) return 0;
+  return rec.fails || 0;
+}
+function bumpGlobalLoginFails() {
+  const now = Date.now();
+  db.setLoginGuardGlobal({ fails: globalLoginFails() + 1, expiresAt: now + GLOBAL_FAIL_TTL_MS });
+}
+
 router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
   if (!requireProto(req, res)) return; // F2：与管理端点一致，强制经 HTTPS 反代，杜绝明文 Token
   // F9 暴力防护：先查封禁状态（封禁期内直接 429 + Retry-After，不再消耗固定窗口配额语义）。
@@ -1678,28 +1699,72 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
     res.set('Retry-After', String(gstate.retryAfterSec));
     return res.status(429).json({ error: 'login_blocked', retry_after: gstate.retryAfterSec });
   }
-  const { token, totp: code } = req.body || {};
-  if (!token || !verifyAdminToken(token)) {
-    noteLoginBanned(req, gkey, loginGuardFail(gkey));
-    return res.status(401).json({ error: 'invalid token' });
+  // r1/§3.2：双通道（token=机器凭据 / password=人用凭据），互斥。
+  const { token, password, totp: code, remember } = req.body || {};
+  if (token && password) return res.status(400).json({ error: 'ambiguous credentials' });
+  if (!token && !password) return res.status(401).json({ error: 'invalid credentials' });
+  // r3/P0-2：全局失败计数只做递增延迟（节流），不做封禁——正确凭据永远可用。
+  if (password && globalLoginFails() > 0) {
+    await sleep(Math.min(globalLoginFails(), 10) * 500);
   }
+
+  let via = '';
+  if (token) {
+    if (!verifyAdminToken(token)) {
+      noteLoginBanned(req, gkey, loginGuardFail(gkey));
+      // r1/P1-3 防枚举：token 错与「未设密码/密码错」返回完全一致。
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
+    via = 'token';
+  } else {
+    const stored = db.getAdminPasswordHash();
+    // r1/P1-3 + r3/P1-4 防枚举：未设密码与密码错误在响应体**与耗时**上完全一致
+    //（verifyPasswordEqualizing 未设密码时也跑一次 dummy scrypt）。
+    const ok = await verifyPasswordEqualizing(password, stored);
+    if (!ok) {
+      noteLoginBanned(req, gkey, loginGuardFail(gkey));
+      bumpGlobalLoginFails();
+      return res.status(401).json({ error: 'invalid credentials' });
+    }
+    db.clearLoginGuardGlobal(); // 成功清零全局失败计数（节流自愈）
+    // r1/P1-4：登录成功是唯一允许改写哈希的时机（参数弱于默认则 rehash 升级）。
+    if (needsRehash(stored)) {
+      try { db.setAdminPasswordHash(await hashPassword(password)); }
+      catch (e) { console.error('[login] password rehash failed:', e.message); }
+    }
+    via = 'password';
+  }
+
   const need = db.is2FAEnabled();
+  let second = null;
   if (need) {
     // 失败节流（L-2）：与 adminOnly 同一套锁定，避免经 /login 绕过枚举防护。
     if (!totpGuard(req)) {
       return res.status(429).json({ error: 'too many totp failures', need_totp: true });
     }
-    const secret = db.get2FASecret();
-    // verifyTotpOnce：同一 6 位码只能成功一次（防重放，L-2）。
-    if (!code || !secret || !verifyTotpOnce(secret, code)) {
+    // 统一第二因子：TOTP 或一次性恢复码（消费即删行，§3.3）。
+    second = verifySecondFactor(code, req);
+    if (!second) {
       recordTotpFailure(req);
       noteLoginBanned(req, gkey, loginGuardFail(gkey));
-      return res.status(401).json({ error: 'invalid totp', need_totp: true });
+      if (password) bumpGlobalLoginFails();
+      return res.status(401).json({ error: 'invalid second factor', need_totp: true });
     }
     clearTotpFailures(req);
   }
-  // 登录成功：清零该 IP 的失败计数与封禁（管理员自输错后不必再等封禁结束）。
+
+  // 登录成功：清零失败计数与封禁（管理员自输错后不必再等封禁结束）。
   loginGuardClear(gkey);
+  if (password) db.clearLoginGuardGlobal();
+
+  // remember 签发规则（r1/P0-5）：
+  //   ① password 通道 + 勾选 → 30d（第二因子为恢复码时除外）；
+  //   ② 恢复码是一次性因子，强制 12h（不得换 30 天免 2FA 高权会话）；
+  //   ③ token 通道不给 remember（机器凭据无「设备信任」语义，固定 12h）。
+  const wantRemember = !!remember && via === 'password' && second !== 'recovery';
+  const ttlMs = wantRemember ? SESSION_REMEMBER_TTL : SESSION_TTL;
+  const exp = Date.now() + ttlMs;
+
   // S2/F6：写会话行并把 sid 放进 cookie payload（此后可按会话粒度踢出）。
   // DB 异常时降级为「不带 sid 的旧格式 cookie」（verifySession 对无 sid 放行），
   // 与会话表的 fail-open 取舍保持一致：不让 DB 故障把管理员挡在门外。
@@ -1709,11 +1774,14 @@ router.post('/login', loginRateLimit, asyncHandler(async (req, res) => {
       admin: 'admin',
       ip: req.ip || req.socket?.remoteAddress || '',
       ua: req.header('user-agent') || '',
+      expiresAt: exp,
+      remember: wantRemember,
     });
   } catch (e) {
     console.error('[login] session row creation failed (degraded):', e.message);
   }
-  const payload = { role: 'admin', totp: need, exp: Date.now() + SESSION_TTL };
+  // r1/P0-4：via 写进 payload，审计可区分 password/token 通道。
+  const payload = { role: 'admin', totp: need, exp, via };
   if (sid) payload.sid = sid;
   setSessionCookie(res, payload);
   res.json({ ok: true, totp: need });
@@ -1731,6 +1799,71 @@ router.post('/logout', (req, res) => {
   clearSessionCookie(res);
   res.json({ ok: true, revoked: revokeAll });
   if (role) auditLog(req, 'logout', revokeAll ? 'all sessions' : '');
+});
+
+// ---- 管理密码（人用凭据，§3.1）----
+// 三个路由全部挂 agentScope + agentGlobalOnly（r3/P0-1）：节点受限 Token 不得触碰全局
+// 凭据——否则「只准看 1 个节点」的 Token 可以给管理员设一个自己知道的密码再登录接管
+// （S2/F5 越权路径，与 /admin/settings 等全局端点同惯例）。
+// GET：仅已鉴权可读 presence（不提供未鉴权 presence 端点，r1/P1-3 防枚举）。
+router.get('/admin/password', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
+  res.json({ set: !!db.getAdminPasswordHash() });
+});
+
+// 踢其它会话、保留当前（r1/P0-1：绝不用 revokeAllSessions，水位线会自踢当前会话；
+// r3/P2-3 已知残余：历史无 sid 旧 cookie 无法逐个吊销，最长 12h 自然过期，文案已对齐）。
+function kickOtherSessions(req) {
+  const curSid = (getSession(req) || {}).sid || '';
+  const n = db.revokeAllSessionRowsExcept(curSid);
+  clearSessionCache();
+  return n;
+}
+
+// 设置/修改密码。已设密码时必须验 current_password，且**先于**第二因子校验
+//（r3/P1-2：输错旧密码不得白烧一次性恢复码）；2FA 开启时第二因子走 verifySecondFactor。
+router.post('/admin/password', requireAdmin, agentScope, agentGlobalOnly, asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  // r3/P2-6：弱口令形状拒绝 + 不得与 Admin Token 相同（调用方明文在手时可校验）。
+  // r5/P2-1：reason 机器可读（前端本地化），message 仅兜底。
+  const strength = checkPasswordStrength(body.password, { reject: req.header('X-Admin-Token') });
+  if (!strength.ok) {
+    return res.status(400).json({ error: 'weak_password', reason: strength.reason || '', message: strength.message });
+  }
+  const stored = db.getAdminPasswordHash();
+  if (stored && (!body.current_password || !(await verifyPassword(body.current_password, stored)))) {
+    return res.status(401).json({ error: 'invalid current password' });
+  }
+  if (db.is2FAEnabled()) {
+    if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+    const f = verifySecondFactor(body.totp || req.header('X-TOTP'), req);
+    if (!f) {
+      recordTotpFailure(req);
+      return res.status(401).json({ error: 'invalid second factor', need_totp: true });
+    }
+    clearTotpFailures(req);
+  }
+  db.setAdminPasswordHash(await hashPassword(body.password));
+  const n = kickOtherSessions(req);
+  auditLog(req, 'admin_password_set', stored ? 'changed' : 'created');
+  res.json({ ok: true, kicked_sessions: n });
+}));
+
+// 清除密码（回到纯 Token 模式）。POST + body 传第二因子（r3/P1-1：**绝不走 URL query**
+// ——nginx combined 日志的 $request 会把 query 明文落 /var/log/nginx/access.log）。
+router.post('/admin/password/clear', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
+  if (db.is2FAEnabled()) {
+    if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+    const f = verifySecondFactor((req.body || {}).totp || req.header('X-TOTP'), req);
+    if (!f) {
+      recordTotpFailure(req);
+      return res.status(401).json({ error: 'invalid second factor', need_totp: true });
+    }
+    clearTotpFailures(req);
+  }
+  db.clearAdminPasswordHash();
+  const n = kickOtherSessions(req);
+  auditLog(req, 'admin_password_clear', '');
+  res.json({ ok: true, kicked_sessions: n });
 });
 
 

@@ -35,8 +35,9 @@ const cases: Case[] = [
   // ---- auth / 2fa / setup ----
   { name: 'status', run: () => adminApi.status(), method: 'GET', url: '/api/admin/2fa/status' },
   { name: 'twoFAStatus', run: () => adminApi.twoFAStatus(), method: 'GET', url: '/api/admin/2fa/status' },
-  { name: 'login 无 totp', run: () => adminApi.login('tok'), method: 'POST', url: '/api/login', body: { token: 'tok' } },
-  { name: 'login 带 totp', run: () => adminApi.login('tok', '123456'), method: 'POST', url: '/api/login', body: { token: 'tok', totp: '123456' } },
+  { name: 'login 无 totp', run: () => adminApi.login({ token: 'tok' }), method: 'POST', url: '/api/login', body: { token: 'tok' } },
+  { name: 'login 带 totp', run: () => adminApi.login({ token: 'tok', totp: '123456' }), method: 'POST', url: '/api/login', body: { token: 'tok', totp: '123456' } },
+  { name: 'login 密码通道+remember', run: () => adminApi.login({ password: 'pw', remember: true }), method: 'POST', url: '/api/login', body: { password: 'pw', remember: true } },
   { name: 'logout', run: () => adminApi.logout(), method: 'POST', url: '/api/logout' },
   { name: 'setup2FA', run: () => adminApi.setup2FA(), method: 'POST', url: '/api/admin/2fa/setup', body: {} },
   { name: 'enable2FA', run: () => adminApi.enable2FA('123456'), method: 'POST', url: '/api/admin/2fa/enable', body: { code: '123456' } },
@@ -125,6 +126,20 @@ const cases: Case[] = [
   { name: 'revokeSession', run: () => adminApi.revokeSession('s/x'), method: 'DELETE', url: '/api/admin/sessions/s%2Fx' },
   { name: 'revokeAllSessions 默认保留当前', run: () => adminApi.revokeAllSessions(), method: 'POST', url: '/api/admin/sessions/revoke-all', body: { keep_current: true } },
   { name: 'revokeAllSessions 全部吊销', run: () => adminApi.revokeAllSessions(false), method: 'POST', url: '/api/admin/sessions/revoke-all', body: { keep_current: false } },
+
+  // ---- 管理密码 / 恢复码（人用登录改造）----
+  { name: 'passwordStatus', run: () => adminApi.passwordStatus(), method: 'GET', url: '/api/admin/password' },
+  { name: 'setPassword 初设', run: () => adminApi.setPassword('pw123456789012'), method: 'POST', url: '/api/admin/password', body: { password: 'pw123456789012' } },
+  {
+    name: 'setPassword 改密+第二因子',
+    run: () => adminApi.setPassword('p2', { currentPassword: 'p1', totp: '123456' }),
+    method: 'POST',
+    url: '/api/admin/password',
+    body: { password: 'p2', current_password: 'p1', totp: '123456' },
+  },
+  { name: 'clearPassword 无 totp', run: () => adminApi.clearPassword(), method: 'POST', url: '/api/admin/password/clear', body: {} },
+  { name: 'clearPassword 带 totp', run: () => adminApi.clearPassword('123456'), method: 'POST', url: '/api/admin/password/clear', body: { totp: '123456' } },
+  { name: 'regenerateRecoveryCodes', run: () => adminApi.regenerateRecoveryCodes('123456'), method: 'POST', url: '/api/admin/recovery-codes', body: { code: '123456' } },
 
   // ---- settings / backups / capacity ----
   { name: 'clientIp', run: () => adminApi.clientIp(), method: 'GET', url: '/api/client-ip' },

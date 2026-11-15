@@ -712,6 +712,7 @@ export interface ApiTokenCreated {
 }
 
 // S2/F6：登录会话（后台「会话管理」页）。current=true 表示发起本次请求的那台设备。
+// remember=true =「记住此设备」长会话（expires_at 为其到期时刻；0 = 普通 12h 会话）。
 export interface AdminSession {
   id: string;
   admin: string;
@@ -719,5 +720,7 @@ export interface AdminSession {
   ua: string;
   created_at: number;
   last_seen: number;
+  expires_at: number;
+  remember: boolean;
   current: boolean;
 }

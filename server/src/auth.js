@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const db = require('./db');
 const totp = require('./totp');
+const { recoveryCodeHash } = require('./password');
 // Admin Token 唯一来源：环境变量 ADMIN_TOKEN（.env / Docker / K8s Secret）。
 // 废弃 DB / 文件兜底，避免多源不同步导致 Token 架空或残留泄露。
 // 强度判定（占位符 / <16 位视为不可用）收敛在 ./token-policy，此处仅再导出。
@@ -39,6 +40,8 @@ function agentAuth(req, res, next) {
 // 默认 SESSION_SECRET 随机生成（重启即失效，建议 .env 固定）。Cookie 为 HttpOnly+Secure+SameSite=Strict。
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const SESSION_TTL = Number(process.env.SESSION_TTL_MS || 12 * 3600 * 1000);
+// 「记住此设备」长会话 TTL（§3.4）：仅 password 通道勾选 remember 时签发；其余一律 SESSION_TTL。
+const SESSION_REMEMBER_TTL = Number(process.env.SESSION_REMEMBER_TTL_MS || 30 * 24 * 3600 * 1000);
 const COOKIE_NAME = 'hm_session';
 
 // ---- 服务端会话吊销 ----
@@ -162,7 +165,14 @@ function sessionCookieAttrs(maxAgeSec) {
 }
 function setSessionCookie(res, payload) {
   const cookie = signSession(payload);
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${sessionCookieAttrs(Math.floor(SESSION_TTL / 1000))}`);
+  // r1/P0-3 不变量：Max-Age 必须与 payload.exp 同源推导，否则 remember 长会话
+  // 会在浏览器侧按旧 TTL（12h）提前消失、服务端却以为还有效。
+  // 无 exp 的旧调用兜底回 SESSION_TTL（避免 Max-Age=NaN）。
+  const exp = Number(payload && payload.exp);
+  const maxAgeSec = Number.isFinite(exp) && exp > 0
+    ? Math.max(1, Math.ceil((exp - Date.now()) / 1000))
+    : Math.floor(SESSION_TTL / 1000);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${cookie}; ${sessionCookieAttrs(maxAgeSec)}`);
 }
 function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=; ${sessionCookieAttrs(0)}`);
@@ -213,7 +223,9 @@ function requireProto(req, res) {
 // Agent Token 泄露无法用于管理路由，反之亦然。
 function resolveRole(req) {
   const sess = getSession(req);
-  if (sess && sess.role === 'admin') return { role: 'admin', totp: !!sess.totp, via: 'cookie' };
+  // r1/P0-4：cookie 会话透传登录通道（payload.via: 'password'|'token'，旧 cookie 无 via 回落 'cookie'），
+  // 供审计 via 列记上真实通道；历史会话仍标 cookie，不追溯。
+  if (sess && sess.role === 'admin') return { role: 'admin', totp: !!sess.totp, via: sess.via || 'cookie' };
   const apiTok = req.header('X-API-Token');
   if (apiTok) {
     const rec = db.findApiTokenByHash(db.hashToken(apiTok));
@@ -383,6 +395,22 @@ function verifyTotpHeader(req) {
   return verifyTotpOnce(secret, code);
 }
 
+// 统一第二因子（§3.3）：TOTP 优先（防重放），未命中按恢复码格式试消费（消费即删行）。
+// 返回 'totp' | 'recovery' | false。恢复码是一次性因子——调用方必须对 'recovery'
+// 强制短会话、拒绝 remember 长会话（r1/P0-5），否则一次泄露＝30 天免 2FA。
+function verifySecondFactor(code, req) {
+  if (!code || typeof code !== 'string') return false;
+  const trimmed = code.trim();
+  const secret = db.get2FASecret();
+  if (secret && /^\d{6}$/.test(trimmed) && verifyTotpOnce(secret, trimmed)) return 'totp';
+  const hash = recoveryCodeHash(trimmed);
+  if (hash && db.consumeRecoveryCode(hash)) {
+    try { auditLog(req || {}, 'recovery_code_used', ''); } catch { /* 审计失败不影响认证 */ }
+    return 'recovery';
+  }
+  return false;
+}
+
 // IP 白名单中间件。从 DB uiSettings.admin_allow_ips 读取，支持逗号分隔 IP/CIDR，空则全放行。
 // 同时支持 IPv4 和 IPv6（含 IPv4-mapped IPv6 如 ::ffff:192.168.1.1）。
 function ipWhitelist(req, res, next) {
@@ -460,7 +488,14 @@ function ip6InCIDR(ip, cidr, bits) {
 function actorLabel(req) {
   const sess = getSession(req);
   const r = resolveRole(req);
-  const who = sess?.role === 'admin' ? 'admin(session)' : (r?.via === 'token' ? 'admin(token)' : 'unknown');
+  // r1/P0-4：会话标签带登录通道（admin(password)/admin(token)）；旧会话无 via 保持 admin(session)。
+  let who = 'unknown';
+  if (sess?.role === 'admin') {
+    const via = sess.via === 'password' ? 'password' : (sess.via === 'token' ? 'token' : 'session');
+    who = `admin(${via})`;
+  } else if (r?.via === 'token') {
+    who = 'admin(token)';
+  }
   const ip = String(req.ip || req.socket?.remoteAddress || '');
   return ip ? `${who} ${ip}` : who;
 }
@@ -479,7 +514,7 @@ module.exports = {
   agentAuth, adminAuth, adminOrReadonly, adminOnly, requireAdmin, ipWhitelist, requireProto,
   resolveRole, agentScope, inAgentScope,
   safeEqual, signSession, verifySession, getSession, verifyAdminToken,
-  setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL, SESSION_SECRET,
+  setSessionCookie, clearSessionCookie, COOKIE_NAME, SESSION_TTL, SESSION_REMEMBER_TTL, SESSION_SECRET,
   revokeAllSessions, verifyTotpHeader, auditLog, actorLabel, clearSessionCache,
-  verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures,
+  verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, verifySecondFactor,
 };

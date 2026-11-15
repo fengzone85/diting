@@ -579,7 +579,8 @@ curl -X POST https://your-server/api/admin/api-tokens \
 - [ ] Put Nginx + TLS in front and bind the origin to `127.0.0.1:8081`
 - [ ] Complete `/install` on first visit (creates a strong random admin token, **shown once**; only its sha256 is stored)
 - [ ] Set `SESSION_SECRET` (fixed random value so restarts do not invalidate sessions)
-- [ ] Enable TOTP (Settings → Account security)
+- [ ] Enable TOTP (Settings → Account security; generates 10 one-time recovery codes — **save them offline**, they rescue you when the authenticator device is lost)
+- [ ] (Optional) Set an admin password (Admin → Sign-in sessions): a human sign-in credential with an optional "remember this device for 30 days", so you no longer paste the token each time; the token remains for API/scripts (machine use). **2FA is your choice** — without 2FA the password is your only human line of defense (residual risk: a passphrase can be guessed in a distributed attack, mitigated by a slow KDF, a global throttle and per-IP bans; enabling 2FA largely closes it. Right after recent failed sign-in attempts, password sign-in may be up to 5 seconds slower — that is throttle latency, it never locks you out). Changing or clearing the password signs out your other devices
 - [ ] Configure the IP allowlist (**optional**, IPv4/IPv6/CIDR) — empty means unrestricted; when enabled, other source IPs get 403 and a misconfiguration locks you out (rescue with `sudo bash diting.sh --clear-ip-whitelist`, effective immediately)
 - [ ] Back up regularly (`sudo bash diting.sh --backup`, or `--backup-schedule install` for daily backups)
 - [ ] **Rehearse one restore** (an unrestorable backup is no backup)

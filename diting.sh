@@ -212,8 +212,10 @@ show_usage() {
   sudo bash diting.sh --backup-schedule uninstall    # 取消
   sudo bash diting.sh --backup --keep-days 30        # 单次备份并保留 30 天
 
-  # 管理员 Token 重置（丢失 Token 时使用，需 SSH 登录服务器）
+  # 管理员凭据救援（丢失凭据时使用，需 SSH 登录服务器）
   sudo bash diting.sh --reset-admin-token         # 生成新管理员 Token（旧 Token 立即失效）
+  sudo bash diting.sh --reset-admin-password      # 清除管理密码与恢复码（回到纯 Token 登录）
+  sudo bash diting.sh --reset-2fa                 # 关闭 2FA 并清除 TOTP 密钥与恢复码
 
   # 版本发布（推进 server/package.json 并打 vX.Y.Z tag，页脚版本随 tag 生效）
   sudo bash diting.sh --release                    # 补丁版 +1（1.0.1 → 1.0.2）
@@ -253,6 +255,8 @@ show_usage() {
   --db-stats              查看数据库统计信息
   --db-vacuum             压缩数据库（VACUUM）并启用增量回收，回收历史删除留下的空闲页
   --reset-admin-token     重置管理员 Token（丢失时使用，旧 Token 立即失效）
+  --reset-admin-password  清除管理密码与恢复码（忘记密码时使用，回到纯 Token 登录）
+  --reset-2fa             关闭 2FA 并清除 TOTP 密钥与恢复码（TOTP 设备丢失且恢复码不可用时）
   --release [类型]        版本发布：patch/minor/major/具体版本号（默认 patch），打 tag 并推送
   --clear-ip-whitelist    清除管理端 IP 白名单（误配锁门时救援，改库即时生效）
   --server URL            SERVER_URL
@@ -1523,10 +1527,11 @@ db_admin_token_exists() {
     [[ "$(db_admin_token_probe)" == 'HAS' ]]
 }
 
-# 只清除「管理员凭据」（库哈希 + 历史残留键 + .env 的 ADMIN_TOKEN 行）并吊销
-# 全部旧会话（与 --reset-admin-token 同口径：水位线最先写，旧 Cookie 立即失效），
-# 刻意不动节点指标/配置与 SESSION_SECRET/SETUP_TOKEN——
+# 只清除「管理员凭据」（库哈希 + 历史残留键 + .env 的 ADMIN_TOKEN 行 + 管理密码/
+# 恢复码/登录失败桶）并吊销全部旧会话（与 --reset-admin-token 同口径：水位线最先写，
+# 旧 Cookie 立即失效），刻意不动节点指标/配置与 SESSION_SECRET/SETUP_TOKEN——
 # 清凭据 ≠ 清数据，受控端一键注册等其余凭据保持有效。
+# r1/§3.6①：密码/恢复码必须一并清——否则卸载重装后旧管理密码仍可登录（凭据残留）。
 purge_admin_credentials() {
     local js out rc=0 envc
     # 无库（如用户已手动 docker compose down -v）时只清 .env，不算失败：
@@ -1543,7 +1548,9 @@ const tx = db.transaction(() => {
   // 每次读库，因此旧 Cookie 立即失效（不依赖进程内 clearSessionCache）。
   db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
   db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
-  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw','admin_initialized')").run();
+  // r1/§3.6①：管理密码/登录失败桶一并删；恢复码表旧库可能不存在，try/catch 容错。
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_hash','admin_token_raw','admin_initialized','admin_password_hash','login_guard_global')").run();
+  try { db.prepare('DELETE FROM recovery_codes').run(); } catch (e) { /* 旧库无该表 */ }
 });
 tx();
 // 写后校验（对齐 --reset-admin-token 的 HASH_OK 自检）：哈希必须已消失
@@ -3199,7 +3206,9 @@ const tx = db.transaction(() => {
   db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
   db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
   db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('admin_token_hash',?)").run(hash);
-  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized')").run();
+  // r3/P0-2：连登录全局失败计数一并清——「重置凭据以便重新拿回访问权」的语义包含它，
+  // 否则密码通道的节流计数残留（旧版曾是封禁态，救援链断裂）。
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized','login_guard_global')").run();
 });
 tx();
 const got = db.prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
@@ -3239,6 +3248,8 @@ JS
     echo "$new_token"
     echo ""
     echo -e "${YELLOW}$(msg "reset.save")${NC}"
+    # r1/§3.6②：token 重置不动管理密码——必须明说，避免用户以为凭据已全部换新。
+    echo -e "${YELLOW}[提示] 管理密码未变动；如需一并清除：后台「登录会话」页清除，或 sudo bash diting.sh --reset-admin-password${NC}"
 
     if [[ "$code" == "200" ]]; then
         echo -e "${GREEN}[OK]   自检通过：立即生效，无需重启${NC}"
@@ -3254,6 +3265,105 @@ JS
         *)   echo -e "       非预期状态码，请查看服务端日志" >&2 ;;
     esac
     return 1
+}
+
+# 重置管理密码（清密码+恢复码，回到纯 Token 登录）：仅通过 SSH 在服务器上运行。
+# 与 --reset-admin-token 同口径（r1/§3.6）：水位线最先写 → 全会话吊销 → 删凭据键；
+# 写库即时生效、不重启。覆盖「忘记密码」「密码+Token 全丢」救援路径（§3.7）。
+do_reset_admin_password() {
+    echo "== 重置管理密码 =="
+    echo ""
+    echo -e "${YELLOW}将清除管理密码与全部恢复码（2FA 保持不变），并吊销所有登录会话。${NC}"
+    echo -e "${YELLOW}之后可用 Admin Token 登录（密码登录关闭），可在后台重新设置密码。${NC}"
+    if ! ui_confirm "重置管理密码" "将清除管理密码与恢复码并吊销所有会话。\n\n确定继续？"; then
+        echo "已取消。"; return 0
+    fi
+    ensure_deps || return 1
+    local loc; loc="$(locate_db)"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 未找到服务端数据库，无法重置（未做任何修改）${NC}" >&2
+        return 1
+    fi
+    local js out
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.pragma('busy_timeout = 5000');
+const now = String(Date.now());
+const tx = db.transaction(() => {
+  // 水位线最先写：旧 Cookie 立即失效（同 --reset-admin-token 口径）。
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
+  db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_password_hash','login_guard_global')").run();
+  // r1/P1-5 容错：旧库/服务端从未启动过可能没有 recovery_codes 表。
+  try { db.prepare('DELETE FROM recovery_codes').run(); } catch (e) { /* 表不存在 */ }
+});
+tx();
+const left = db.prepare("SELECT value FROM admin_config WHERE key='admin_password_hash'").get();
+console.log('PWD_CLEARED=' + (left && left.value ? '0' : '1'));
+JS
+    if ! out="$(db_run_js "$js")"; then
+        rm -f "$js"
+        echo -e "${RED}[错误] 写入数据库失败，密码未变更${NC}" >&2
+        return 1
+    fi
+    rm -f "$js"
+    if ! printf '%s\n' "$out" | grep -qx 'PWD_CLEARED=1'; then
+        echo -e "${RED}[错误] 写入校验失败（库中密码哈希仍在），密码未变更${NC}" >&2
+        return 1
+    fi
+    echo -e "${GREEN}[OK]   管理密码与恢复码已清除，全部会话已吊销（即时生效，无需重启）${NC}"
+    echo -e "       登录页密码通道已关闭；Token 未变动。如需换 Token：sudo bash diting.sh --reset-admin-token"
+}
+
+# 重置 2FA（清 TOTP 密钥与恢复码，关闭 2FA）：仅通过 SSH 在服务器上运行。
+# 终极破玻璃（r1/§3.7）：TOTP 设备丢失且恢复码用尽/丢失、无法登录时使用。
+# 同款口径：水位线最先写 → 全会话吊销 → 删 2FA 键；写库即时生效、不重启。
+do_reset_2fa() {
+    echo "== 重置 2FA =="
+    echo ""
+    echo -e "${YELLOW}将清除 TOTP 密钥与全部恢复码并关闭 2FA，同时吊销所有登录会话。${NC}"
+    echo -e "${YELLOW}之后登录不再需要第二因子；请在登录后尽快重新开启 2FA。${NC}"
+    if ! ui_confirm "重置 2FA" "将关闭 2FA（清除 TOTP 密钥与恢复码）并吊销所有会话。\n\n确定继续？"; then
+        echo "已取消。"; return 0
+    fi
+    ensure_deps || return 1
+    local loc; loc="$(locate_db)"
+    if [[ -z "$loc" ]]; then
+        echo -e "${RED}[错误] 未找到服务端数据库，无法重置（未做任何修改）${NC}" >&2
+        return 1
+    fi
+    local js out
+    js="$(mktemp)"
+    cat > "$js" <<'JS'
+const D = require('better-sqlite3');
+const db = new D(process.argv[2]);
+db.pragma('busy_timeout = 5000');
+const now = String(Date.now());
+const tx = db.transaction(() => {
+  // 水位线最先写：旧 Cookie 立即失效（同 --reset-admin-token 口径）。
+  db.prepare("INSERT OR REPLACE INTO admin_config(key,value) VALUES('session_revoked_before',?)").run(now);
+  db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0').run();
+  db.prepare("DELETE FROM admin_config WHERE key IN ('admin_2fa_secret','admin_2fa_enabled')").run();
+  try { db.prepare('DELETE FROM recovery_codes').run(); } catch (e) { /* 表不存在 */ }
+});
+tx();
+const left = db.prepare("SELECT value FROM admin_config WHERE key='admin_2fa_enabled'").get();
+console.log('TWOFA_CLEARED=' + (!left || left.value !== '1' ? '1' : '0'));
+JS
+    if ! out="$(db_run_js "$js")"; then
+        rm -f "$js"
+        echo -e "${RED}[错误] 写入数据库失败，2FA 未变更${NC}" >&2
+        return 1
+    fi
+    rm -f "$js"
+    if ! printf '%s\n' "$out" | grep -qx 'TWOFA_CLEARED=1'; then
+        echo -e "${RED}[错误] 写入校验失败（2FA 仍为开启态），请按上方错误信息排查${NC}" >&2
+        return 1
+    fi
+    echo -e "${GREEN}[OK]   2FA 已关闭（TOTP 密钥与恢复码已清除），全部会话已吊销（即时生效，无需重启）${NC}"
+    echo -e "       登录后请尽快在后台「登录会话」页重新开启 2FA"
 }
 
 uninstall_all() {
@@ -3306,7 +3416,10 @@ uninstall_all() {
             fi
         else
             echo -e "       非交互环境，已保留。要回到安装向导：重跑卸载并选清除，"
-            echo -e "       或手动删除库中的 admin_token_hash 键（--reset-admin-token 只会换 Token，不会回到向导）。"
+            # r1/P1-6：只删 token 哈希会留下管理密码/恢复码残留（新装实例仍可被旧密码登录），
+            # 必须连 admin_password_hash 与 recovery_codes 一起清（或直接跑 purge 口径）。
+            echo -e "       或手动删除库中 admin_token_hash、admin_password_hash 两个键与 recovery_codes 表"
+            echo -e "       （--reset-admin-token 只会换 Token，不会回到向导；漏删密码键会留下旧密码残留）。"
         fi
     fi
     echo -e "${YELLOW}[提示] 源码仍在 $SRC_DIR，数据库在 Docker 卷中；如需彻底清除请手动删除。${NC}"
@@ -3707,6 +3820,8 @@ while [[ $# -gt 0 ]]; do
             [[ -n "${1:-}" && "$1" != --* ]] && { A_BACKUP_SCHEDULE="$1"; shift; }
             ;;
         --reset-admin-token) ACTION="reset-admin-token"; shift ;;
+        --reset-admin-password) ACTION="reset-admin-password"; shift ;;
+        --reset-2fa) ACTION="reset-2fa"; shift ;;
         --clear-ip-whitelist) ACTION="clear-ip-whitelist"; shift ;;
         # 版本发布：--release [patch|minor|major|X.Y.Z]（默认 patch）
         --release)
@@ -3761,6 +3876,8 @@ if [[ -n "$ACTION" ]]; then
         db-vacuum)    do_db_vacuum ;;
         logs)         do_logs "${A_LOG_ARG:-}" ;;
         reset-admin-token) do_reset_admin_token ;;
+        reset-admin-password) do_reset_admin_password ;;
+        reset-2fa) do_reset_2fa ;;
         clear-ip-whitelist) do_clear_ip_whitelist ;;
         release)      do_release "${A_RELEASE:-patch}" ;;
         process-restore) process_restore_request || true ;;

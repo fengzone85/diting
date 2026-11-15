@@ -59,10 +59,13 @@ describe('adminApi 契约：全部方法 → URL/Method', () => {
   it('2FA 与登录相关', async () => {
     await expectCall(() => adminApi.status(), { url: '/api/admin/2fa/status', method: 'GET' });
     await expectCall(() => adminApi.twoFAStatus(), { url: '/api/admin/2fa/status', method: 'GET' });
-    await expectCall(() => adminApi.login('t', '123456'), {
+    await expectCall(() => adminApi.login({ token: 't', totp: '123456' }), {
       url: '/api/login', method: 'POST', body: { token: 't', totp: '123456' },
     });
-    await expectCall(() => adminApi.login('t'), { url: '/api/login', method: 'POST', body: { token: 't', totp: undefined } });
+    await expectCall(() => adminApi.login({ token: 't' }), { url: '/api/login', method: 'POST', body: { token: 't' } });
+    await expectCall(() => adminApi.login({ password: 'p', totp: '1', remember: true }), {
+      url: '/api/login', method: 'POST', body: { password: 'p', totp: '1', remember: true },
+    });
     await expectCall(() => adminApi.logout(), { url: '/api/logout', method: 'POST' });
     await expectCall(() => adminApi.setup2FA(), { url: '/api/admin/2fa/setup', method: 'POST', body: {} });
     await expectCall(() => adminApi.enable2FA('123456'), {

@@ -15,8 +15,9 @@ const { str } = require('../validate');
 const {
   adminOnly, adminOrReadonly, requireAdmin, agentScope, auditLog,
   getSession, clearSessionCache, revokeAllSessions,
-  verifyTotpOnce, totpGuard, recordTotpFailure,
+  verifyTotpOnce, totpGuard, recordTotpFailure, clearTotpFailures, verifySecondFactor,
 } = require('../auth');
+const { generateRecoveryCodes, recoveryCodeHash } = require('../password');
 const { agentGlobalOnly } = require('./_shared');
 
 const router = express.Router();
@@ -110,6 +111,8 @@ router.get('/admin/sessions', adminOnly, agentScope, agentGlobalOnly, (req, res)
       ua: r.ua,
       created_at: r.created_at,
       last_seen: r.last_seen,
+      expires_at: r.expires_at || 0,
+      remember: !!r.remember,
       current: !!curSid && r.id === curSid,
     })),
   });
@@ -164,33 +167,61 @@ router.post('/admin/2fa/enable', requireAdmin, agentScope, agentGlobalOnly, (req
   const secret = db.get2FASecret();
   if (!secret) return res.status(400).json({ error: 'run setup first' });
   if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
-  // 防重放（L-2）：同一时间步的码只能成功一次
+  // 防重放（L-2）：同一时间步的码只能成功一次。启用门槛必须是真 TOTP
+  //（证明 Authenticator 已录对；恢复码此刻尚不存在，不走 verifySecondFactor）。
   if (!code || !verifyTotpOnce(secret, code)) {
     recordTotpFailure(req);
     return res.status(400).json({ error: 'invalid code' });
   }
   db.set2FAEnabled(true);
+  // §3.3：启用即生成 10 个一次性恢复码（明文仅此一次回显），库中只存 sha256。
+  const recoveryCodes = generateRecoveryCodes(10);
+  db.clearRecoveryCodes();
+  const now = Date.now();
+  for (const c of recoveryCodes) db.addRecoveryCode(recoveryCodeHash(c), now);
   // 安全状态变更：吊销既有会话，强制所有设备用新安全基线重新登录
   revokeAllSessions();
-  res.json({ ok: true, enabled: true });
-  auditLog(req, '2fa_enable', 'sessions revoked');
+  res.json({ ok: true, enabled: true, recovery_codes: recoveryCodes });
+  auditLog(req, '2fa_enable', `sessions revoked recovery_codes=${recoveryCodes.length}`);
 });
 
 router.post('/admin/2fa/disable', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
   const { code } = req.body || {};
   if (!db.is2FAEnabled()) return res.status(400).json({ error: '2fa not enabled' });
-  const secret = db.get2FASecret();
   if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
-  // 防重放（L-2）：同一时间步的码只能成功一次
-  if (!code || !secret || !verifyTotpOnce(secret, code)) {
+  // r1/§3.3：第二因子统一走 verifySecondFactor（TOTP 或恢复码）——TOTP 设备
+  // 丢失（换手机）时可用恢复码关闭 2FA，堵「唯一出路手改 SQLite」的锁死缺口（§3.7）。
+  const f = verifySecondFactor(code, req);
+  if (!f) {
     recordTotpFailure(req);
     return res.status(400).json({ error: 'invalid code' });
   }
   db.set2FAEnabled(false);
+  // 2FA 关闭：恢复码一并作废（备份因子随主因子消失，不留可登录残留）
+  db.clearRecoveryCodes();
   // 安全状态变更：吊销既有会话，防止 2FA 关闭前的旧会话继续持有管理员权限
   revokeAllSessions();
   res.json({ ok: true, enabled: false });
-  auditLog(req, '2fa_disable', 'sessions revoked');
+  auditLog(req, '2fa_disable', `via=${f} sessions revoked`);
+});
+
+// 重新生成恢复码（作废全部旧码，返回 10 个新码一次性明文）。2FA 未开启时无恢复码概念。
+router.post('/admin/recovery-codes', requireAdmin, agentScope, agentGlobalOnly, (req, res) => {
+  if (!db.is2FAEnabled()) return res.status(400).json({ error: '2fa not enabled' });
+  const body = req.body || {};
+  if (!totpGuard(req)) return res.status(429).json({ error: 'too many totp failures', need_totp: true });
+  const f = verifySecondFactor(body.code || body.totp || req.header('X-TOTP'), req);
+  if (!f) {
+    recordTotpFailure(req);
+    return res.status(401).json({ error: 'invalid second factor', need_totp: true });
+  }
+  clearTotpFailures(req);
+  const recoveryCodes = generateRecoveryCodes(10);
+  db.clearRecoveryCodes();
+  const now = Date.now();
+  for (const c of recoveryCodes) db.addRecoveryCode(recoveryCodeHash(c), now);
+  auditLog(req, 'recovery_codes_regenerate', `via=${f} n=${recoveryCodes.length}`);
+  res.json({ ok: true, recovery_codes: recoveryCodes });
 });
 
 // ---- Admin: 审计日志查询 ----

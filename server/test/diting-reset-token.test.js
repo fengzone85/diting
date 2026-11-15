@@ -45,7 +45,7 @@ test('reset：写库 SQL 语义正确（水位线 → 吊销 → 哈希 → 清�
     'session_revoked_before',
     'UPDATE sessions SET revoked=1 WHERE revoked=0',
     'admin_token_hash',
-    "DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized')",
+    "DELETE FROM admin_config WHERE key IN ('admin_token_raw','admin_initialized','login_guard_global')",
   ];
   let last = -1;
   for (const frag of sqlOrder) {

@@ -39,7 +39,7 @@ function out(r) {
   return JSON.parse(line.slice(4));
 }
 
-test('新库：19 张业务表齐全', () => {
+test('新库：21 张业务表齐全', () => {
   const r = runChild(`
 process.env.DB_PATH = ${JSON.stringify(DB_PATH)};
 const db = require(${JSON.stringify(DB_SRC)});
@@ -56,7 +56,7 @@ process.stdout.write('OUT:' + JSON.stringify(tables) + '\\n');
     'alert_group_overrides', 'notify_channels', 'notify_groups', 'notify_group_channels',
     'api_tokens', 'theme_market_sources', 'agent_artifacts', 'agent_distributions',
     'sessions', 'traffic_state', 'admin_config', 'ai_reports', 'ai_node_reports',
-    'audit_logs',
+    'audit_logs', 'recovery_codes',
   ];
   for (const t of expected) {
     assert.ok(tables.includes(t), `缺少表 ${t}（实际 ${tables.join(',')}）`);

@@ -26,8 +26,12 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   // S2/F6：会话管理端点的参数/状态错误码
   'invalid session id': 'errors.invalidSessionId',
   'session not found': 'errors.sessionNotFound',
-  'invalid token': 'errors.invalidToken',
-  'invalid totp': 'errors.invalidTotp',
+  // r4/P2-1：人用登录改造后的错误码（旧 'invalid token'/'invalid totp' 已不再下发，
+  // 防枚举统一为 'invalid credentials'）。weak_password 走下方 reason 码映射（r5/P2-1）。
+  'invalid credentials': 'errors.invalidCredentials',
+  'invalid second factor': 'errors.invalidSecondFactor',
+  'invalid current password': 'errors.invalidCurrentPassword',
+  'ambiguous credentials': 'errors.ambiguousCredentials',
   'agent not found': 'errors.agentNotFound',
   'not found': 'errors.notFound',
   // S2/F5：节点白名单 Token 的两个作用域错误码，以及 Token 管理端点的参数校验码
@@ -39,13 +43,36 @@ export const ERROR_CODE_KEYS: Record<string, string> = {
   'name required': 'errors.nameRequired',
 };
 
+// r5/P2-1：weak_password 按服务端 reason 码本地化（message 中文仅兜底）。
+export const WEAK_PASSWORD_REASON_KEYS: Record<string, string> = {
+  too_short: 'errors.weakTooShort',
+  too_long: 'errors.weakTooLong',
+  numeric: 'errors.weakNumeric',
+  low_variety: 'errors.weakLowVariety',
+  sequence: 'errors.weakSequence',
+  // 键名不得以 token 结尾（`xxx_token: '…'` 形态会被仓库卫生闸 H7 误判为凭据赋值）
+  same_as_admin: 'errors.weakSameAsToken',
+};
+
 // 把请求异常转成可展示文案：优先按下发错误码本地化，其次退回服务端 message，最后用通用兜底。
 export function apiErrorMessage(e: unknown, fallbackKey = 'common.error'): string {
-  const err = e as (Error & { detail?: string }) | null;
+  const err = e as (Error & { detail?: string; body?: { message?: unknown } }) | null;
   const key = err?.detail ? ERROR_CODE_KEYS[err.detail] : undefined;
   if (key) {
     const localized = t(key);
     if (localized !== key) return localized; // t() 未命中时会原样返回 key
   }
+  // r5/P2-1：weak_password 按 reason 码本地化（服务端 message 是中文，英文界面不直出）。
+  const body = err?.body as { message?: unknown; reason?: unknown } | undefined;
+  if (err?.detail === 'weak_password' && typeof body?.reason === 'string') {
+    const rk = WEAK_PASSWORD_REASON_KEYS[body.reason];
+    if (rk) {
+      const localizedReason = t(rk);
+      if (localizedReason !== rk) return localizedReason;
+    }
+  }
+  // r4/P2-1：未命中映射时优先服务端 body.message，再退 err.message（码串），最后通用兜底。
+  const serverMsg = body?.message;
+  if (typeof serverMsg === 'string' && serverMsg) return serverMsg;
   return err?.message || t(fallbackKey);
 }

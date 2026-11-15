@@ -249,6 +249,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_distributions_created ON agent_distribution
 
 -- S2/F6 登录会话：cookie 内只带 sid，吊销状态以本表为准；
 -- session_revoked_before 水位线保留为全局 kill switch。
+-- 人用登录改造（r1/P0-2）：expires_at=会话到期（remember 长会话用；NULL=按旧 TTL 口径
+-- 由 last_seen 决定）；remember=是否「受信任设备」长会话。prune 双条件见 pruneSessions。
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   admin      TEXT NOT NULL DEFAULT 'admin',
@@ -256,9 +258,18 @@ CREATE TABLE IF NOT EXISTS sessions (
   ua         TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   last_seen  INTEGER NOT NULL,
-  revoked    INTEGER NOT NULL DEFAULT 0
+  revoked    INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER,
+  remember   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
+
+-- 一次性恢复码（2FA 备份因子）：只存 sha256(规范形)，消费即删行；
+-- 明文仅生成时回显一次，不落库。
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  code_hash  TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL
+);
 
 -- P1 流量口径累加器：小表，避免给 metrics 增加原始计数器列。
 CREATE TABLE IF NOT EXISTS traffic_state (
@@ -421,6 +432,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 {
   const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
   if (!existing.has('deleted_at')) db.exec('ALTER TABLE agents ADD COLUMN deleted_at INTEGER');
+}
+
+// 人用登录改造：sessions 增加到期与「受信任设备」列（老库 ADD COLUMN；列名硬编码常量）。
+// expires_at NULL = 旧口径会话（prune 仍按 last_seen + 旧 TTL 规则），保证存量行为不变。
+{
+  const existing = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((r) => r.name));
+  if (!existing.has('expires_at')) db.exec('ALTER TABLE sessions ADD COLUMN expires_at INTEGER');
+  if (!existing.has('remember')) db.exec('ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 0');
 }
 
 // schema migration: traffic_state 增加接口集指纹列（S1）。
@@ -641,8 +660,8 @@ const stmts = {
   touchApiToken: db.prepare('UPDATE api_tokens SET last_used_at=?, last_used_ip=? WHERE id=?'),
   revokeApiToken: db.prepare('UPDATE api_tokens SET revoked=1 WHERE id=?'),
   // ---- S2/F6 会话 ----
-  insertSession: db.prepare(`INSERT INTO sessions (id, admin, ip, ua, created_at, last_seen)
-    VALUES (@id, @admin, @ip, @ua, @created_at, @last_seen)`),
+  insertSession: db.prepare(`INSERT INTO sessions (id, admin, ip, ua, created_at, last_seen, expires_at, remember)
+    VALUES (@id, @admin, @ip, @ua, @created_at, @last_seen, @expires_at, @remember)`),
   getSessionRow: db.prepare('SELECT * FROM sessions WHERE id=?'),
   listSessions: db.prepare('SELECT * FROM sessions WHERE revoked=0 ORDER BY last_seen DESC'),
   touchSession: db.prepare('UPDATE sessions SET last_seen=? WHERE id=?'),
@@ -651,7 +670,17 @@ const stmts = {
   // 保留指定会话的批量吊销（后台「踢出其它设备」但保留当前操作的那台）。
   // 与 revokeAllSessionRows 的区别：不设全局水位线，只按表逐行标记。
   revokeAllSessionRowsExcept: db.prepare('UPDATE sessions SET revoked=1 WHERE revoked=0 AND id<>?'),
-  pruneSessions: db.prepare('DELETE FROM sessions WHERE last_seen < ?'),
+  // r1/P0-2 双条件 prune：① 有 expires_at（remember 长会话）按到期删；
+  // ② 无 expires_at（旧格式/12h 会话）按 last_seen + 旧 TTL 规则删。
+  // 否则 30 天会话 24h 不活动即被删行 → verifySession 查不到行直接 401。
+  pruneSessions: db.prepare(`DELETE FROM sessions
+    WHERE (expires_at IS NOT NULL AND expires_at < ?)
+       OR (expires_at IS NULL AND last_seen < ?)`),
+  // ---- 一次性恢复码（2FA 备份因子）：存 sha256，消费即删 ----
+  insertRecoveryCode: db.prepare('INSERT OR REPLACE INTO recovery_codes (code_hash, created_at) VALUES (?, ?)'),
+  countRecoveryCodes: db.prepare('SELECT COUNT(*) AS n FROM recovery_codes'),
+  consumeRecoveryCode: db.prepare('DELETE FROM recovery_codes WHERE code_hash=?'),
+  clearRecoveryCodes: db.prepare('DELETE FROM recovery_codes'),
   resetToken: db.prepare('UPDATE agents SET token_hash=? WHERE id=?'),
   // 磁盘趋势专用：跨所有 agent 按时间桶取 disk_pct 均值。
   // 只取三列、单次扫描、无窗口函数；**必须输出 MIN(ts) AS ts** —— 若只返回桶号，
@@ -1331,7 +1360,7 @@ function touchApiToken(id, ip) {
 // ---- S2/F6：登录会话 --------------------------------------------------------
 const genSessionId = () => crypto.randomBytes(12).toString('hex');
 
-function createSessionRow({ id, admin, ip, ua }) {
+function createSessionRow({ id, admin, ip, ua, expiresAt, remember }) {
   const now = Date.now();
   const sid = id || genSessionId();
   stmts.insertSession.run({
@@ -1340,7 +1369,11 @@ function createSessionRow({ id, admin, ip, ua }) {
     ip: String(ip || '').slice(0, 64),
     ua: String(ua || '').slice(0, 255),
     created_at: now,
-    last_seen: now
+    last_seen: now,
+    // r3/P2-5 口径澄清：登录路径（api.js）对**所有**新会话都写 expires_at（12h/30d 两档）；
+    // NULL 只出现在存量旧行或测试直插行，prune 对 NULL 行走旧 last_seen TTL 口径。
+    expires_at: Number(expiresAt) > 0 ? Math.floor(Number(expiresAt)) : null,
+    remember: remember ? 1 : 0
   });
   return sid;
 }
@@ -1351,7 +1384,18 @@ const revokeSession = (id) => stmts.revokeSession.run(id).changes > 0;
 const revokeAllSessionRows = () => stmts.revokeAllSessionRows.run().changes;
 // 批量吊销但保留指定会话（后台「踢出其它设备」）：只标记表内行，不动全局水位线。
 const revokeAllSessionRowsExcept = (keepId) => stmts.revokeAllSessionRowsExcept.run(String(keepId || '')).changes;
-const pruneSessions = (before) => stmts.pruneSessions.run(Number(before) || 0).changes;
+// r1/P0-2 双条件 prune：nowMs 用于 expires_at 判定；legacyBeforeMs 用于无 expires_at 行的旧 TTL 规则。
+const pruneSessions = (nowMs, legacyBeforeMs) =>
+  stmts.pruneSessions.run(Number(nowMs) || 0, Number(legacyBeforeMs) || 0).changes;
+
+// ---- 一次性恢复码（2FA 备份因子）----
+const addRecoveryCode = (codeHash, createdAt) =>
+  stmts.insertRecoveryCode.run(String(codeHash || ''), Number(createdAt) || Date.now()).changes > 0;
+const countRecoveryCodes = () => Number((stmts.countRecoveryCodes.get() || {}).n || 0);
+// 消费即删行；hash 为空（输入不合法）直接 false，不做查询。
+const consumeRecoveryCode = (codeHash) =>
+  !!codeHash && stmts.consumeRecoveryCode.run(String(codeHash)).changes > 0;
+const clearRecoveryCodes = () => stmts.clearRecoveryCodes.run().changes;
 
 // last_seen 节流：每会话 60s 写一次，避免每次 API 请求都写库。
 const _sessionTouch = new Map();
@@ -1634,6 +1678,20 @@ const setAdminTokenHash = (h) => setConfig(ADMIN_TOKEN_HASH, String(h || ''));
 // 原子抢写：多实例/并发安装时只有一个能落库，其余返回 false（即"已安装"，防重装）。
 const setAdminTokenHashIfAbsent = (h) => setConfigIfAbsent(ADMIN_TOKEN_HASH, String(h || ''));
 const clearAdminTokenHash = () => deleteConfig(ADMIN_TOKEN_HASH);
+// ---- 管理密码（人用凭据，scrypt 哈希串；'' = 未设）----
+const ADMIN_PASSWORD_HASH = 'admin_password_hash';
+const getAdminPasswordHash = () => getConfig(ADMIN_PASSWORD_HASH) || '';
+const setAdminPasswordHash = (h) => setConfig(ADMIN_PASSWORD_HASH, String(h || ''));
+const clearAdminPasswordHash = () => deleteConfig(ADMIN_PASSWORD_HASH);
+// ---- 密码通道全局失败桶（r1/P1-2）：loginGuard 算法 + 本键持久化（重启不清零）----
+// value = JSON {fails, bannedUntil, expiresAt}；空 = 无失败记录。
+const LOGIN_GUARD_GLOBAL_KEY = 'login_guard_global';
+const getLoginGuardGlobal = () => {
+  try { return JSON.parse(getConfig(LOGIN_GUARD_GLOBAL_KEY) || 'null') || null; }
+  catch (e) { return null; }
+};
+const setLoginGuardGlobal = (rec) => setConfig(LOGIN_GUARD_GLOBAL_KEY, JSON.stringify(rec || null));
+const clearLoginGuardGlobal = () => deleteConfig(LOGIN_GUARD_GLOBAL_KEY);
 // ---- 受控端自助注册令牌（SETUP_TOKEN）：库为权威，env 仅作一次性迁移源 ----
 // 与 AI Key / SMTP 密码同口径：明文存 SQLite（库 600，DB 无加密），
 // 好处是可在管理面直接改，不必登机器改 .env 再重启容器。
@@ -2197,10 +2255,13 @@ module.exports = {
   listEnabledChannelsForEvent, initNotifyMigrationIfNeeded,
   createApiToken, findApiTokenByHash, getApiToken, listApiTokens, revokeApiToken, touchApiToken,
   createSessionRow, getSessionRow, listSessions, revokeSession, revokeAllSessionRows, revokeAllSessionRowsExcept, pruneSessions, touchSession,
+  addRecoveryCode, countRecoveryCodes, consumeRecoveryCode, clearRecoveryCodes,
   heavyQuerySync,
   getConfig, setConfig, setConfigIfAbsent, deleteConfig, get2FASecret, is2FAEnabled, set2FASecret, set2FAEnabled,
   getMetricsWatermark, setMetricsWatermark,
   getAdminTokenHash, setAdminTokenHash, setAdminTokenHashIfAbsent, clearAdminTokenHash,
+  getAdminPasswordHash, setAdminPasswordHash, clearAdminPasswordHash,
+  getLoginGuardGlobal, setLoginGuardGlobal, clearLoginGuardGlobal,
   getSetupToken, setSetupToken, clearSetupToken,
   isSetupTokenCleared, markSetupTokenCleared, unmarkSetupTokenCleared,
   resolveAlertThresholds, observedIntervalSec,

@@ -112,9 +112,19 @@ const LOGIN_GUARD_FAIL_TTL_MS = 3600 * 1000; // 失败计数保留时长（1h �
 const loginGuardState = new Map();
 
 // ---- 持久化钩子（默认内存态；未来只替换这三个实现即可升级为持久化） ----
-function loadState(key) { return loginGuardState.get(key) || null; }
-function saveState(key, rec) { evictLoginGuard(key); loginGuardState.set(key, rec); }
-function deleteState(key) { loginGuardState.delete(key); }
+// r3/P0-2 修订：曾有 'persist:' 前缀键走外部 store（密码通道全局失败桶）。该桶已改为
+// 「只计数 + 递增延迟、绝不封禁」的节流语义并直接读写 admin_config（见 api.js
+// globalLoginFails/bumpGlobalLoginFails），persist 前缀机制随之退役，保持本模块纯内存。
+function loadState(key) {
+  return loginGuardState.get(key) || null;
+}
+function saveState(key, rec) {
+  evictLoginGuard(key);
+  loginGuardState.set(key, rec);
+}
+function deleteState(key) {
+  loginGuardState.delete(key);
+}
 
 // 内存有界：先删过期条目，再淘汰 expiresAt 最早的（永不动当前 key）。
 function evictLoginGuard(currentKey) {

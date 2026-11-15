@@ -11,15 +11,32 @@ export const adminApi = {
   // auth / 2fa
   status: () => api.get<{ enabled: boolean }>('/api/admin/2fa/status'),
   twoFAStatus: () => api.get<{ enabled: boolean }>('/api/admin/2fa/status'),
-  login: (token: string, totp?: string) =>
-    api.post<{ ok: boolean; totp: boolean }>('/api/login', { token, totp }),
+  // 双通道登录（token=机器凭据 / password=人用凭据，互斥）；remember 仅 password 通道生效。
+  login: (body: { token?: string; password?: string; totp?: string; remember?: boolean }) =>
+    api.post<{ ok: boolean; totp: boolean }>('/api/login', body),
   logout: () => api.post<void>('/api/logout'),
   setup2FA: () =>
     api.post<{ secret: string; otpauth_uri: string; enabled: boolean }>('/api/admin/2fa/setup', {}),
+  // enable2FA 成功后 recovery_codes 一次性返回 10 个明文恢复码（仅此一次）。
   enable2FA: (code: string) =>
-    api.post<{ ok: boolean; enabled: boolean }>('/api/admin/2fa/enable', { code }),
+    api.post<{ ok: boolean; enabled: boolean; recovery_codes?: string[] }>('/api/admin/2fa/enable', { code }),
   disable2FA: (code: string) =>
     api.post<{ ok: boolean; enabled: boolean }>('/api/admin/2fa/disable', { code }),
+  // 重新生成恢复码（作废旧码）；code 为第二因子（TOTP 或旧恢复码）。
+  regenerateRecoveryCodes: (code: string) =>
+    api.post<{ ok: boolean; recovery_codes: string[] }>('/api/admin/recovery-codes', { code }),
+
+  // 管理密码（人用凭据）。presence 仅已鉴权可读；改密需 current_password（已设时）。
+  passwordStatus: () => api.get<{ set: boolean }>('/api/admin/password'),
+  setPassword: (password: string, opts: { currentPassword?: string; totp?: string } = {}) =>
+    api.post<{ ok: boolean; kicked_sessions: number }>('/api/admin/password', {
+      password,
+      current_password: opts.currentPassword,
+      totp: opts.totp,
+    }),
+  // POST + body 传第二因子（r3/P1-1：query 会被 nginx 日志明文落盘，绝不走 URL query）。
+  clearPassword: (totp?: string) =>
+    api.post<{ ok: boolean; kicked_sessions: number }>('/api/admin/password/clear', totp ? { totp } : {}),
 
   // setup
   register: (setupToken: string, username: string, password: string) =>

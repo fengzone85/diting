@@ -42,6 +42,7 @@ const EXPECTED = [
   'GET /admin/notify/events',
   'GET /admin/notify/groups',
   'GET /admin/notify/migration-status',
+  'GET /admin/password',
   'GET /admin/restore-audit',
   'GET /admin/sessions',
   'GET /admin/theme/backups',
@@ -93,6 +94,9 @@ const EXPECTED = [
   'POST /admin/notify/channels',
   'POST /admin/notify/channels/:id/test',
   'POST /admin/notify/groups',
+  'POST /admin/password',
+  'POST /admin/password/clear',
+  'POST /admin/recovery-codes',
   'POST /admin/sessions/revoke-all',
   'POST /admin/theme/config',
   'POST /admin/theme/delete',
@@ -159,10 +163,11 @@ test('路由快照：拆分前后 method + path 集合逐条一致', () => {
   assert.deepStrictEqual(actual, EXPECTED);
 });
 
-test('路由快照：admin 路由 62 条、无前缀路由 9 条', () => {
+test('路由快照：admin 路由 66 条、无前缀路由 9 条', () => {
   const all = walk(api.stack);
   // +1：官方路径 POST /admin/theme/settings（与 /admin/theme/config 共用 handler）。
-  assert.strictEqual(all.filter((r) => r.includes(' /admin/')).length, 62);
+  // 人用登录改造 +4：GET/POST /admin/password、POST /admin/password/clear、POST /admin/recovery-codes。
+  assert.strictEqual(all.filter((r) => r.includes(' /admin/')).length, 66);
   const noPrefix = all.filter((r) => {
     const p = r.split(' ')[1];
     return p === '/report' || p === '/overview' || p === '/billing' || p === '/client-ip'

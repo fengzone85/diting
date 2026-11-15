@@ -60,13 +60,13 @@ test('GET /api/public/agents 返回 200 与数组', async () => {
 
 // ---- 鉴权矩阵 ----
 
-test('POST /api/login 错误 Token → 401 invalid token', async () => {
+test('POST /api/login 错误 Token → 401 invalid credentials（与密码通道统一防枚举）', async () => {
   const res = await request(app)
     .post('/api/login')
     .set('X-Forwarded-Proto', 'https')
     .send({ token: 'wrong-token' });
   assert.strictEqual(res.status, 401);
-  assert.strictEqual(res.body.error, 'invalid token');
+  assert.strictEqual(res.body.error, 'invalid credentials');
 });
 
 test('POST /api/login 正确 Token → 200 并下发 HttpOnly+SameSite=Strict Cookie', async () => {

@@ -151,7 +151,7 @@ test('F9-8 集成：连错 3 次后第 4 次被封（429 + Retry-After）', asyn
   for (let i = 0; i < 3; i++) {
     const res = await request(app).post('/api/login').set(IP_A).send({ token: 'wrong-token-value' });
     assert.equal(res.status, 401, `第 ${i + 1} 次应 401`);
-    assert.equal(res.body.error, 'invalid token');
+    assert.equal(res.body.error, 'invalid credentials');
   }
   const blocked = await request(app).post('/api/login').set(IP_A).send({ token: 'wrong-token-value' });
   assert.equal(blocked.status, 429);
