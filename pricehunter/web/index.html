@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>比价猎手 PriceHunter · 电商价格采集与对比</title>
+  <meta name="description" content="按关键词批量采集商品名称、价格、销量、店铺评分与网址，自动清洗去重、价格排序、趋势分析与性价比推荐。">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#" aria-label="比价猎手首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.9 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"></path>
+            <circle cx="7.8" cy="7.8" r="1.5" fill="currentColor" stroke="none"></circle>
+          </svg>
+        </span>
+        <span class="brand-text">
+          <strong>比价猎手</strong>
+          <small>PRICEHUNTER</small>
+        </span>
+      </a>
+      <div class="top-actions">
+        <span class="engine-pill" id="enginePill"><i></i><span id="engineText">检测运行引擎</span></span>
+        <a class="ghost-link" href="#method">口径说明</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><span></span>E-COMMERCE PRICE INTELLIGENCE</p>
+        <h1>一次搜索，<br><em>横向比完</em>三个平台的价格。</h1>
+        <p class="lede">按关键词批量采集商品名称、价格、销量、店铺评分与网址，自动完成清洗去重、价格排序、趋势分析与性价比标注。</p>
+
+        <form class="search" id="searchForm" autocomplete="off">
+          <label class="sr-only" for="keyword">商品关键词</label>
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7"></circle>
+              <path d="m20 20-3.5-3.5"></path>
+            </svg>
+            <input id="keyword" name="keyword" value="无线蓝牙耳机" maxlength="40" placeholder="输入商品关键词，如：机械键盘 / 咖啡豆">
+            <kbd>↵</kbd>
+          </div>
+          <button class="primary-btn" type="submit" id="runBtn">
+            <span id="runBtnText">开始采集</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 12h15M13 6l6 6-6 6"></path>
+            </svg>
+          </button>
+        </form>
+
+        <div class="quick-row">
+          <span>示例关键词</span>
+          <button class="chip" type="button" data-keyword="无线蓝牙耳机">无线蓝牙耳机</button>
+          <button class="chip" type="button" data-keyword="机械键盘">机械键盘</button>
+          <button class="chip" type="button" data-keyword="扫地机器人">扫地机器人</button>
+          <button class="chip" type="button" data-keyword="咖啡豆">咖啡豆</button>
+          <button class="chip" type="button" data-keyword="保湿面霜">保湿面霜</button>
+        </div>
+
+        <p class="hero-note">演示环境使用确定性模拟数据，不访问真实电商站点。真实平台采集需通过官方开放平台或已授权数据服务接入。</p>
+      </div>
+
+      <aside class="terminal" aria-label="采集运行日志">
+        <div class="terminal-bar">
+          <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <span>pipeline.log</span>
+          <span class="run-badge" id="runBadge">IDLE</span>
+        </div>
+        <div class="terminal-body" id="logBody" role="log" aria-live="polite"></div>
+        <div class="terminal-foot">
+          <label for="sourceSelect">ADAPTER</label>
+          <select id="sourceSelect">
+            <option value="browser">browser · 内置同构引擎</option>
+            <option value="api">python · /api/search</option>
+          </select>
+        </div>
+      </aside>
+    </section>
+
+    <div class="notice">
+      <span class="notice-tag">DEMO DATA</span>
+      <p id="noticeText">页面初始化即加载「无线蓝牙耳机」的示例采集结果。所有商品、店铺、价格与链接均为模拟生成，仅用于演示清洗、去重、排序与推荐逻辑。</p>
+    </div>
+
+    <section class="kpi-grid" id="kpiGrid" aria-label="关键指标"></section>
+
+    <section class="stage" aria-label="处理流程">
+      <div class="stage-head">
+        <h2>采集流水线</h2>
+        <span id="stageMeta">—</span>
+      </div>
+      <ol class="stage-list" id="stageList"></ol>
+    </section>
+
+    <section class="charts-grid" aria-label="价格图表">
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>近 30 天价格走势</h2>
+            <p id="trendMeta">—</p>
+          </div>
+          <div class="legend" id="trendLegend"></div>
+        </div>
+        <div class="chart-wrap" id="trendWrap">
+          <div class="chart-tip" id="chartTip" hidden></div>
+          <div class="chart" id="trendChart"></div>
+        </div>
+        <p class="chart-note">实线为性价比前三商品的价格轨迹，虚线为当前结果集的价格中位数，末端圆点为本次采集价。</p>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>价格区间分布</h2>
+            <p id="bandMeta">—</p>
+          </div>
+        </div>
+        <div class="bands" id="bandChart"></div>
+        <div class="band-foot" id="bandFoot"></div>
+      </article>
+    </section>
+
+    <section class="reco-section">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow"><span></span>VALUE PICKS</p>
+          <h2>性价比推荐</h2>
+          <p>综合价格、销量与店铺评分的加权指数（0–100），自动标注最值得入手的商品。</p>
+        </div>
+        <button class="text-btn" type="button" id="scrollTableBtn">查看完整对比 ↓</button>
+      </div>
+      <div class="reco-grid" id="recoGrid"></div>
+    </section>
+
+    <section class="panel table-panel" id="compareSection">
+      <div class="table-head">
+        <div>
+          <h2>商品横向对比</h2>
+          <p id="tableMeta">—</p>
+        </div>
+        <div class="filters" id="platformFilters" aria-label="平台筛选"></div>
+      </div>
+      <div class="table-scroll">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th class="col-rank">#</th>
+              <th class="sortable" data-sort="title">商品 <span class="arrow">↑</span></th>
+              <th class="sortable" data-sort="source">平台 <span class="arrow">↑</span></th>
+              <th class="sortable num" data-sort="price">到手价 <span class="arrow">↑</span></th>
+              <th class="sortable num" data-sort="sales">销量 <span class="arrow">↑</span></th>
+              <th class="sortable num" data-sort="rating">店铺评分 <span class="arrow">↑</span></th>
+              <th class="sortable num" data-sort="value_score">性价比 <span class="arrow">↑</span></th>
+              <th>标记</th>
+              <th class="num">链接</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+      <div class="table-foot" id="tableFoot"></div>
+    </section>
+
+    <section class="data-section" id="dataSection">
+      <div class="section-head">
+        <div>
+          <h2>示例数据与结果</h2>
+          <p>初始化即载入示例采集结果，可查看原始采集字段、清洗后的结构化结果与运行配置。</p>
+        </div>
+        <div class="tabs" role="tablist" aria-label="数据视图">
+          <button class="tab active" type="button" data-tab="raw" role="tab" aria-selected="true">原始采集样例</button>
+          <button class="tab" type="button" data-tab="clean" role="tab" aria-selected="false">清洗结果</button>
+          <button class="tab" type="button" data-tab="config" role="tab" aria-selected="false">运行配置</button>
+        </div>
+      </div>
+      <div class="code-card">
+        <div class="code-head">
+          <span id="codeTitle">raw_items.json</span>
+          <div>
+            <span class="code-hint" id="codeHint">取自本次采集的前 3 条</span>
+            <button class="copy-btn" type="button" id="copyBtn">复制</button>
+          </div>
+        </div>
+        <pre class="code-body" id="codeBody" tabindex="0"></pre>
+      </div>
+    </section>
+
+    <section class="method" id="method">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow"><span></span>METHODOLOGY</p>
+          <h2>采集与计算口径</h2>
+        </div>
+      </div>
+      <div class="method-grid">
+        <article>
+          <span>01 / COLLECT</span>
+          <h3>采集</h3>
+          <p>通过可插拔 Adapter 接入数据源：内置确定性模拟源、兼容 JSON 的 API 源。真实平台需使用官方开放平台或已授权数据服务。</p>
+        </article>
+        <article>
+          <span>02 / CLEAN</span>
+          <h3>清洗</h3>
+          <p>金额、销量单位归一化（万 / 千 / +），剔除标题或价格缺失的记录，并用 IQR × 3 围栏过滤异常价格。</p>
+        </article>
+        <article>
+          <span>03 / DEDUPE</span>
+          <h3>去重</h3>
+          <p>标题标准化后生成指纹，跨平台同款合并为一条记录，保留最低价报价，并记录其余平台的可购价格。</p>
+        </article>
+        <article>
+          <span>04 / SCORE</span>
+          <h3>评分</h3>
+          <p>性价比 = 46% 价格优势 + 29% 销量热度 + 25% 店铺评分，归一化到 0–100，映射为四级推荐标签。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>PriceHunter · 电商价格采集与对比工具</span>
+    <span>CLI&nbsp;<code>python -m pricehunter search "关键词"</code>&nbsp;·&nbsp;<code>python -m pricehunter serve</code></span>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
