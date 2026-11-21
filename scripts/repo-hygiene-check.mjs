@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/repo-hygiene-check.mjs — 仓库纯净度闸门（H1–H10）
+// scripts/repo-hygiene-check.mjs — 仓库纯净度闸门（H1–H11）
 // 零依赖（纯 node 内置模块），入库。
 //
 // 用法：
@@ -12,6 +12,7 @@
 //   H1 白名单 = 目录级放行 + 禁入优先（fail-closed）；删除/重命名按原路径判定即放行。
 //   H7 强特征赋值仅对非测试文件生效；排除变量引用与标识符形态；纯十六进制 ≥24 位除外。
 //   H9 本地只告警（CI 环境变量为真时阻断）。
+//   H11 业务文件不得直连 SQL .prepare()（白名单见函数内；守护 F 批「裸 SQL 收拢」）。
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -231,6 +232,36 @@ function checkTestBaseline(tapFile) {
   }
 }
 
+// ── H11 裸 SQL 收拢（F-5）───────────────────────────────────────────────
+// 白名单 = 数据访问层本身：db.js / 重查询 / 合并读 / 折叠 / 恢复审查的写豁免 / worker。
+// migrations/ 是迁移引擎，天然需要 prepare；distribution.js 不豁免（F-3 后零例外）。
+const H11_ALLOW_FILES = new Set([
+  'server/src/db.js',
+  'server/src/heavy-queries.js',
+  'server/src/metrics-merge.js',
+  'server/src/rollup.js',
+  'server/src/restore-audit.js',
+  'server/src/dbworker.js',
+]);
+const H11_ALLOW_PREFIXES = ['server/src/migrations/'];
+// 只认 SQL 形态：句柄名直连（db/sqlite/conn）或首参是字符串/模板字面量。
+// 这样 relay.prepare(key) 这类非 SQL 的 .prepare() 不会误报。
+const H11_SQL_PREPARE = /(?:\b(?:db|this\.db|sqlite|conn)\.prepare\s*\(|\.prepare\s*\(\s*['"`])/;
+
+function checkRawSql(files) {
+  for (const p of files) {
+    if (!p.startsWith('server/src/')) continue; // 测试 / agent-go / 前端不在本闸门范围
+    if (H11_ALLOW_FILES.has(p) || H11_ALLOW_PREFIXES.some((pre) => p.startsWith(pre))) continue;
+    const text = readWorktree(p);
+    if (text == null) continue;
+    text.split('\n').forEach((line, i) => {
+      if (H11_SQL_PREPARE.test(line)) {
+        err('H11', `${p}:${i + 1} 出现裸 SQL .prepare()；请收拢到 db.js（F 批）`);
+      }
+    });
+  }
+}
+
 // ── 主流程 ───────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const mode = argv[0];
@@ -290,6 +321,9 @@ if (mode === '--msg-file' && msgFile) {
 
   // H10：入库 .ps1 编码（BOM + CRLF）
   checkPs1Encoding(scanTargets);
+
+  // H11：裸 SQL 收拢（staged 查新增/修改，full 查 tracked 全集）
+  checkRawSql(scanTargets);
 } else {
   console.error('用法：--staged | --full | --msg-file <path> | --test-baseline [--tap-file <path>]');
   process.exit(2);

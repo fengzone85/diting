@@ -170,17 +170,21 @@ function consumePackage(pkgId, expiresAt) {
 }
 
 // 清理过期包：库行 + 磁盘文件 + 已用标记。
+// 顺序约束（F-3）：先取文件名 → 删文件 → 最后清库行。若先清行，
+// listExpiredDistributions 会查空，孤儿文件就永久残留。
 function pruneExpired() {
   const now = Date.now();
+  const fileCutoff = now - 24 * 3600 * 1000;
   try {
-    const rows = db.prepare('SELECT * FROM agent_distributions WHERE expires_at < ?').all(now - 24 * 3600 * 1000);
-    for (const r of rows) {
+    // 只取 filename（不再 SELECT *）；路径守卫保留在文件系统职责一侧。
+    for (const r of db.listExpiredDistributions(fileCutoff)) {
       const full = path.join(PKG_DIR, r.filename);
       if (path.dirname(path.resolve(full)) === path.resolve(PKG_DIR)) {
         try { fs.unlinkSync(full); } catch (e) { /* 忽略 */ }
       }
     }
   } catch (e) { /* 忽略 */ }
+  // 清行用 now（不带 24h 宽限），与取文件 cutoff 不合并，保持原口径。
   try { db.pruneAgentDistributions(now); } catch (e) { /* 忽略 */ }
   for (const [k, v] of usedPackages) if (v < now) usedPackages.delete(k);
 }

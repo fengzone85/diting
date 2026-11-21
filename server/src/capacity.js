@@ -64,7 +64,7 @@ function computeLevel({ rows, bytes, max_rows, max_bytes }) {
 
 function measure() {
   let rows = 0;
-  try { rows = db.db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0; } catch (e) { rows = 0; }
+  try { rows = db.countMetricsRows(); } catch (e) { rows = 0; }
   let bytes = 0;
   try { bytes = fs.statSync(db.db.name).size; } catch (e) { bytes = 0; }
   return { rows, bytes };

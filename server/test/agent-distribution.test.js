@@ -523,6 +523,46 @@ test('下载：未知包 → 404；过期包 → 410', async () => {
   assert.strictEqual(res.body.error, 'expired');
 });
 
+// ---- F-3：过期包清理（顺序 / 未过期 / 路径守卫）-----------------------------
+
+test('清理过期包：先删文件再清行；未过期保留；../ 路径守卫拦截', () => {
+  const now = Date.now();
+  const addRow = (pkgId, filename, expiresAt) => db.insertAgentDistribution({
+    pkg_id: pkgId, platform: 'linux-amd64', source_kind: 'artifact', source_ref: 'art_f3',
+    sha256: 'a'.repeat(64), filename, size: 1, kind: 'tar.gz', expires_at: expiresAt, created_at: now
+  });
+  const rowGone = (pkgId) => db.db.prepare('SELECT COUNT(*) AS n FROM agent_distributions WHERE pkg_id=?')
+    .get(pkgId).n === 0;
+
+  fs.mkdirSync(distribution.PKG_DIR, { recursive: true });
+
+  // 1) 过期 >24h：文件与库行都应清掉
+  const expiredFile = path.join(distribution.PKG_DIR, 'f3-expired.bin');
+  fs.writeFileSync(expiredFile, 'x');
+  addRow('pkg_f3_expired', 'f3-expired.bin', now - 25 * 3600 * 1000);
+
+  // 2) 未过期：文件与库行都不动
+  const liveFile = path.join(distribution.PKG_DIR, 'f3-live.bin');
+  fs.writeFileSync(liveFile, 'x');
+  addRow('pkg_f3_live', 'f3-live.bin', now + 3600 * 1000);
+
+  // 3) 路径穿越：包外文件不能被删（库行仍按过期清理）
+  const outside = path.join(distribution.PKG_DIR, '..', 'f3-outside.bin');
+  fs.writeFileSync(outside, 'x');
+  addRow('pkg_f3_evil', '../f3-outside.bin', now - 25 * 3600 * 1000);
+
+  distribution.pruneExpired();
+
+  assert.strictEqual(fs.existsSync(expiredFile), false, '过期文件应被删除');
+  assert.ok(rowGone('pkg_f3_expired'), '过期库行应被清理');
+  assert.strictEqual(fs.existsSync(liveFile), true, '未过期文件应保留');
+  assert.strictEqual(rowGone('pkg_f3_live'), false, '未过期库行应保留');
+  assert.strictEqual(fs.existsSync(outside), true, '包外文件不应被删除');
+  assert.ok(rowGone('pkg_f3_evil'), '路径穿越行的库索引仍应按过期清理');
+
+  try { fs.unlinkSync(outside); } catch { /* 忽略 */ }
+});
+
 // ---- 5. 鉴权 ----------------------------------------------------------------
 
 test('鉴权：管理端点需 admin 凭据；下载端点只认 token（不需管理员）', async () => {

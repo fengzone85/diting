@@ -31,15 +31,11 @@ const SOFT_DELETE_GRACE_MS = 7 * 86400000;
 const HOUR_MS = 3600000;
 
 function tableExists(name) {
-  try {
-    return Boolean(db.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
-  } catch (e) { return false; }
+  try { return db.auditTableExists(name); } catch (e) { return false; }
 }
 
 function tableColumns(name) {
-  try {
-    return db.db.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name);
-  } catch (e) { return []; }
+  try { return db.auditTableColumns(name); } catch (e) { return []; }
 }
 
 function readPendingFile() {
@@ -88,11 +84,9 @@ function checkRetention(now) {
   let total = 0;
   let stats = { n: 0, mn: 0, mx: 0 };
   try {
-    total = db.db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0;
-    if (total) {
-      stats = db.db.prepare('SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM metrics WHERE ts < ?').get(cutoff)
-        || { n: 0, mn: 0, mx: 0 };
-    }
+    const r = db.auditMetricsStats(cutoff);
+    total = r.total;
+    stats = r.stats;
   } catch (e) {
     return check('retention', 'skipped', { reason: e.message });
   }
@@ -105,10 +99,7 @@ function checkRetention(now) {
   if (expired) {
     try {
       const span = retentionDays * 86400000;
-      const rows = db.db.prepare(`SELECT CAST((? - ts) / ? AS INTEGER) AS idx,
-          COUNT(*) AS rows, MIN(ts) AS from_ts, MAX(ts) AS to_ts
-        FROM metrics WHERE ts < ?
-        GROUP BY idx ORDER BY idx DESC LIMIT ?`).all(cutoff, span, cutoff, RETENTION_MAX_BUCKETS);
+      const rows = db.auditMetricsHistogram(cutoff, span, RETENTION_MAX_BUCKETS);
       buckets = rows.map((b) => ({ rows: b.rows, from_ts: b.from_ts, to_ts: b.to_ts }));
       if (expired > buckets.reduce((s, b) => s + b.rows, 0)) truncated = true;
     } catch (e) { /* 批次统计失败不影响总量结论 */ }
@@ -155,7 +146,7 @@ function checkFolding() {
       check('overlap', 'skipped', { reason: 'folding_not_enabled' })
     ];
   }
-  const mm = db.db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx FROM metrics').get();
+  const mm = db.auditMetricsRange();
   if (!mm || !mm.mn) {
     return [
       check('folding', 'skipped', { reason: 'no_detail_rows' }),
@@ -181,6 +172,9 @@ function checkFolding() {
   const tsCol = cols.includes('hour_ts') ? 'hour_ts' : (cols.includes('ts') ? 'ts' : '');
   if (tsCol) {
     try {
+      // H11 豁免（三点说明）：① 这是写操作，不属于 db.js 的只读查询层；
+      // ② tsCol 来自 tableColumns() 的硬编码候选（hour_ts/ts），表名固定为 metrics_hour；
+      // ③ 必须与上方水位线重置紧邻执行，迁出会增加「水位线已改、重叠行未删」的时序窗口。
       overlapDeleted = db.db.prepare(`DELETE FROM metrics_hour WHERE ${tsCol} >= ?`).run(rolled).changes;
     } catch (e) { /* 表结构不符时保持 0 */ }
   }
@@ -205,7 +199,7 @@ function checkTrafficGap(now) {
   if (!tableExists('traffic_state')) return check('traffic_gap', 'skipped', { reason: 'no_traffic_table' });
   let rows = [];
   try {
-    rows = db.db.prepare('SELECT agent_id, last_ts FROM traffic_state').all();
+    rows = db.auditTrafficState();
   } catch (e) {
     return check('traffic_gap', 'skipped', { reason: e.message });
   }
@@ -240,7 +234,9 @@ function checkOrphans() {
     if (!tableExists(t)) continue;
     if (!tableColumns(t).includes('agent_id')) continue;
     try {
-      // 表名来自上方硬编码白名单，不含用户输入
+      // H11 豁免（三点说明）：① 这是写操作，不属于 db.js 的只读查询层；
+      // ② 表名来自上方 ORPHAN_TABLES 硬编码白名单，列名固定 agent_id，不含用户输入；
+      // ③ 需与 tableExists/tableColumns 的判定紧邻执行，避免检查与清理之间表结构变化。
       const n = db.db.prepare(`DELETE FROM ${t} WHERE agent_id NOT IN (SELECT id FROM agents)`).run().changes;
       per[t] = n;
       deleted += n;
@@ -258,8 +254,7 @@ function checkSoftDeleted(now) {
   }
   let expired = 0;
   try {
-    expired = db.db.prepare('SELECT COUNT(*) AS n FROM agents WHERE deleted_at IS NOT NULL AND deleted_at < ?')
-      .get(now - SOFT_DELETE_GRACE_MS).n || 0;
+    expired = db.auditExpiredDeleted(now - SOFT_DELETE_GRACE_MS);
   } catch (e) {
     return check('soft_deleted', 'skipped', { reason: e.message });
   }

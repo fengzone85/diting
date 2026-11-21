@@ -1858,6 +1858,40 @@ function clearRestoreAuditPending() { deleteConfig(RESTORE_AUDIT_PENDING_KEY); }
 function getRestoreAuditReport() { return parseJsonConfig(RESTORE_AUDIT_LAST_KEY); }
 function setRestoreAuditReport(r) { setConfig(RESTORE_AUDIT_LAST_KEY, JSON.stringify(r || {})); }
 
+// ---- F 批：恢复审查的只读查询（restore-audit.js 不再直连 db.db.prepare）----
+// 两处 DELETE（明细/小时重叠清理、孤儿行清理）仍留在 restore-audit.js：它们是写操作，
+// 且需与同函数的只读判定紧邻执行，迁出反而增加跨模块时序风险（见 H11 豁免注释）。
+function auditTableExists(name) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(String(name)));
+}
+function auditTableColumns(name) {
+  // name 只来自调用方硬编码的表名白名单，不含用户输入
+  return db.prepare(`PRAGMA table_info(${name})`).all().map((c) => c.name);
+}
+function auditMetricsStats(cutoff) {
+  const total = db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0;
+  const stats = total
+    ? db.prepare('SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM metrics WHERE ts < ?').get(cutoff)
+    : { n: 0, mn: 0, mx: 0 };
+  return { total, stats: stats || { n: 0, mn: 0, mx: 0 } };
+}
+function auditMetricsHistogram(cutoff, span, limit) {
+  return db.prepare(`SELECT CAST((? - ts) / ? AS INTEGER) AS idx,
+      COUNT(*) AS rows, MIN(ts) AS from_ts, MAX(ts) AS to_ts
+    FROM metrics WHERE ts < ?
+    GROUP BY idx ORDER BY idx DESC LIMIT ?`).all(cutoff, span, cutoff, limit);
+}
+function auditMetricsRange() {
+  return db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx FROM metrics').get();
+}
+function auditTrafficState() {
+  return db.prepare('SELECT agent_id, last_ts FROM traffic_state').all();
+}
+function auditExpiredDeleted(threshold) {
+  return db.prepare('SELECT COUNT(*) AS n FROM agents WHERE deleted_at IS NOT NULL AND deleted_at < ?')
+    .get(threshold).n || 0;
+}
+
 // ---- AI 报告 CRUD ----
 function insertAiReport(r) {
   const info = stmts.insertAiReport.run({
@@ -1945,6 +1979,9 @@ function getDbFileSize() {
   }
   return size;
 }
+
+// metrics 总行数（容量保险丝 F12 用）：只 COUNT，不把任何指标带出数据面。
+const countMetricsRows = () => db.prepare('SELECT COUNT(*) AS n FROM metrics').get().n || 0;
 
 // ---- S5/F10：主题市场源 ----------------------------------------------------
 const genThemeSourceId = () => 'src_' + crypto.randomBytes(6).toString('hex');
@@ -2048,7 +2085,11 @@ function insertAgentDistribution(row) {
 const getAgentDistribution = (pkgId) =>
   distributionOut(db.prepare('SELECT * FROM agent_distributions WHERE pkg_id = ?').get(String(pkgId)));
 
-// 过期包清理：先删库中索引，再由调用方删磁盘文件（顺序反了会留孤儿文件）。
+// 过期包的文件名（只取 filename；不 SELECT *，避免把无关字段带出数据面）。
+const listExpiredDistributions = (cutoff) =>
+  db.prepare('SELECT filename FROM agent_distributions WHERE expires_at < ?').all(Number(cutoff));
+
+// 过期包清理：调用方先删磁盘文件、本函数最后清行（顺序反了会留孤儿文件）。
 const pruneAgentDistributions = (now = Date.now()) =>
   db.prepare('DELETE FROM agent_distributions WHERE expires_at < ?').run(Number(now)).changes;
 
@@ -2084,7 +2125,7 @@ const deleteThemeConfig = (short) =>
 seedThemeMarketSources();
 
 module.exports = {
-  db, DB_PATH, getDbFileSize, hashToken, genToken,
+  db, DB_PATH, getDbFileSize, countMetricsRows, hashToken, genToken,
   createAgent, getAgent, getAgents, getMonitoredAgents, approveAgent,
   listDeletedAgents, getAgentIncludingDeleted, restoreAgent, purgeDeletedAgents,
   getSelfRegisteredCount, bumpSelfRegisteredCount, updateAgent, deleteAgent, resetAgentToken,
@@ -2122,10 +2163,12 @@ module.exports = {
   backupTo,
   getRestoreAuditPending, setRestoreAuditPending, clearRestoreAuditPending,
   getRestoreAuditReport, setRestoreAuditReport,
+  auditTableExists, auditTableColumns, auditMetricsStats, auditMetricsHistogram,
+  auditMetricsRange, auditTrafficState, auditExpiredDeleted,
   listThemeMarketSources, getThemeMarketSource, createThemeMarketSource, updateThemeMarketSource,
   deleteThemeMarketSource, OFFICIAL_THEME_MARKET,
   listAgentArtifacts, getAgentArtifact, getAgentArtifactBySha, insertAgentArtifact, deleteAgentArtifact,
-  insertAgentDistribution, getAgentDistribution, pruneAgentDistributions,
+  insertAgentDistribution, getAgentDistribution, listExpiredDistributions, pruneAgentDistributions,
   getThemeConfig, setThemeConfig, deleteThemeConfig,
   insertAiReport, getAiReport, listAiReports, countAiReports, pruneAiReports, aiUsageDaily,
   insertAiNodeReport, listAiNodeReports, pruneAiNodeReports,
