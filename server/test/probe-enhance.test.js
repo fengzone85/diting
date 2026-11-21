@@ -197,7 +197,8 @@ test('F4 alerts：cert_days 越旧越少（按上报时间衰减），旧快照�
 test('F4 收口：公开 probes 端点的取数走 heavy worker（不走主线程 SQL）', async () => {
   const fsx = require('node:fs');
   const path = require('node:path');
-  const src = fsx.readFileSync(path.join(__dirname, '..', 'src', 'api.js'), 'utf8');
+  // P2-1 拆分后：公开 probes 路由位于 routes/public.js（断言对象不变）
+  const src = fsx.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'public.js'), 'utf8');
   // 取出该路由的源码片段（到下一个 router. 定义为止）
   const start = src.indexOf("router.get('/public/agents/:id/probes'");
   assert.ok(start > 0, '应能找到公开 probes 路由');
