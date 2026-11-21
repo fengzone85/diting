@@ -7,6 +7,7 @@ const Database = require('better-sqlite3');
 const heavyQueries = require('./heavy-queries');
 const traffic = require('./traffic');
 const merge = require('./metrics-merge');
+const { runMigrations } = require('./migrations');
 
 // 数据库默认落盘位置：容器内若挂载了持久卷 /data（docker-compose 的 server-data），
 // 则写入 /data/monitor.db，确保重建容器后数据仍在；否则回退到本地 server/data（开发/裸跑）。
@@ -339,131 +340,10 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_logs(ts);
 `);
 
-// ---- schema migration: add temp / swap columns if missing (existing DBs) ----
-// Column names and types below are hardcoded constants (not user input) — no injection risk.
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(metrics)').all().map((r) => r.name));
-  const cols = [
-    ['temp', 'REAL'],
-    ['swap_used', 'INTEGER'],
-    ['swap_total', 'INTEGER'],
-    ['swap_pct', 'REAL'],
-    ['probes', 'TEXT'],
-    ['disk_r_rate', 'REAL'],
-    ['disk_w_rate', 'REAL'],
-    ['disks', 'TEXT'],
-    // 进程总数（聚合计数，非指纹；0 = 未采集/老 agent 不带该字段）
-    ['process_count', 'INTEGER DEFAULT 0'],
-    // 审查 C-1/E2：受控端上报的实际上报间隔（秒），0 = 未上报/老 agent
-    ['interval', 'INTEGER DEFAULT 0'],
-  ];
-  for (const [col, type] of cols) {
-    if (!existing.has(col)) db.exec(`ALTER TABLE metrics ADD COLUMN ${col} ${type};`);
-  }
-}
-
-// schema migration: agents 增加分组字段（避免使用 SQL 关键字 group，列名用 grp）
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('grp')) db.exec("ALTER TABLE agents ADD COLUMN grp TEXT DEFAULT ''");
-}
-// schema migration: agents 增加国家字段（受控端国旗，存 ISO 3166-1 alpha-2 代码，如 CN/US/JP）
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('country')) db.exec("ALTER TABLE agents ADD COLUMN country TEXT DEFAULT ''");
-}
-// schema migration: agents 增加探测目标(网络质量自测 DNS)列，服务端可配置、按受控端独立存储
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('probe_targets')) db.exec("ALTER TABLE agents ADD COLUMN probe_targets TEXT DEFAULT ''");
-}
-// schema migration: agents 增加账单字段（价格 / 计费周期 / 货币 / 自动续费）
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('price')) db.exec("ALTER TABLE agents ADD COLUMN price REAL DEFAULT 0");
-  if (!existing.has('billing_cycle')) db.exec("ALTER TABLE agents ADD COLUMN billing_cycle INTEGER DEFAULT 30");
-  if (!existing.has('currency')) db.exec("ALTER TABLE agents ADD COLUMN currency TEXT DEFAULT '¥'");
-  if (!existing.has('auto_renewal')) db.exec("ALTER TABLE agents ADD COLUMN auto_renewal INTEGER DEFAULT 1");
-  // 受控端版本：从上报请求的 User-Agent（diting-agent-go/x.y.z / diting-agent/x.y）解析而来
-  if (!existing.has('version')) db.exec("ALTER TABLE agents ADD COLUMN version TEXT DEFAULT ''");
-}
-// schema migration: agents 增加 CPU 核数列（受控端上报的静态硬件属性，§9 T18）。
-// 语义：0 = 未上报/未知（老 agent 不带该字段）——**不可当作 1 用**，摘要侧会标 cores_unknown。
-// 放 agents 表而不是 metrics 表：静态属性，避免给 2200 万行的 metrics 加列。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('cores')) db.exec('ALTER TABLE agents ADD COLUMN cores INTEGER DEFAULT 0');
-}
-// schema migration: agents 增加 pending 列（审查 G4：自助注册的 agent 默认待管理员确认）。
-// 语义：0 = 已确认（ADD COLUMN 默认值即 0，所有历史 agent 不受影响）；1 = 待确认。
-// 待确认期间禁止上报（auth.js agentAuth 拒绝），且不进入看板/公开页/告警/AI 统计
-// （getMonitoredAgents 过滤）——防 SETUP_TOKEN 泄露后被批量注册污染数据与看板。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('pending')) db.exec('ALTER TABLE agents ADD COLUMN pending INTEGER DEFAULT 0');
-}
-// schema migration: agents 增加构建元信息列（V.1：版本可判定性）。
-//   build_sha     编译期 commit 短 sha（7–40 hex；'' = 未知）
-//   build_time    编译期 UTC RFC3339（'' = 未知）
-//   agent_platform 运行平台 linux-amd64 / windows-amd64 / ...
-//   build_tag     管理员标注（'' | 'custom' | 自由标签）——服务端不自动判定官方构建
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('build_sha')) db.exec("ALTER TABLE agents ADD COLUMN build_sha TEXT DEFAULT ''");
-  if (!existing.has('build_time')) db.exec("ALTER TABLE agents ADD COLUMN build_time TEXT DEFAULT ''");
-  if (!existing.has('agent_platform')) db.exec("ALTER TABLE agents ADD COLUMN agent_platform TEXT DEFAULT ''");
-  if (!existing.has('build_tag')) db.exec("ALTER TABLE agents ADD COLUMN build_tag TEXT DEFAULT ''");
-}
-// schema migration: agents 增加硬件档案列（管理员手工录入，单列 JSON；'' = 未填写）。
-// 受控端不自动采集硬件指纹，四字段（cpu/arch/virt/gpu）的值全部来自管理面输入，
-// 每个字段支持「预设 / 手填 / 隐藏」三态，结构见 src/hardware-profile.js 头注释。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('hw_profile')) db.exec("ALTER TABLE agents ADD COLUMN hw_profile TEXT DEFAULT ''");
-}
-// P1: agents 增加流量重置日列。三态 NULL=未设置（采纳 agent 上报）/0=累计/1–31=重置日；不给默认值。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('month_rotate')) db.exec('ALTER TABLE agents ADD COLUMN month_rotate INTEGER');
-}
-// F11（2026-10-24）：agents 增加软删列。删除 = 写 deleted_at（节点立即从全部读路径消失），
-// 7 天缓冲期内可由「最近删除」恢复；到期由 purgeDeletedAgents() 物理删除
-//（此时 FK CASCADE 才带走 metrics / traffic_state）。NULL = 未删除。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(agents)').all().map((r) => r.name));
-  if (!existing.has('deleted_at')) db.exec('ALTER TABLE agents ADD COLUMN deleted_at INTEGER');
-}
-
-// 人用登录改造：sessions 增加到期与「受信任设备」列（老库 ADD COLUMN；列名硬编码常量）。
-// expires_at NULL = 旧口径会话（prune 仍按 last_seen + 旧 TTL 规则），保证存量行为不变。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((r) => r.name));
-  if (!existing.has('expires_at')) db.exec('ALTER TABLE sessions ADD COLUMN expires_at INTEGER');
-  if (!existing.has('remember')) db.exec('ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 0');
-}
-
-// schema migration: traffic_state 增加接口集指纹列（S1）。
-// 必须同时进 upsertTrafficState 的列清单：INSERT OR REPLACE 未列出的列会取默认值，
-// 漏掉会让每次 flush 后 epoch 丢失 → 下轮又触发一次基线对齐。
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(traffic_state)').all().map((r) => r.name));
-  if (!existing.has('epoch')) db.exec("ALTER TABLE traffic_state ADD COLUMN epoch TEXT DEFAULT ''");
-}
-
-// schema migration: ai_reports 增加 token 用量 / 耗时 / 降级标记列（老库 ADD COLUMN；列名硬编码常量）
-{
-  const existing = new Set(db.prepare('PRAGMA table_info(ai_reports)').all().map((r) => r.name));
-  const cols = [
-    ['prompt_tokens', 'INTEGER DEFAULT 0'],
-    ['completion_tokens', 'INTEGER DEFAULT 0'],
-    ['total_tokens', 'INTEGER DEFAULT 0'],
-    ['duration_ms', 'INTEGER DEFAULT 0'],
-    ['degraded', 'INTEGER DEFAULT 0'],
-  ];
-  for (const [col, type] of cols) {
-    if (!existing.has(col)) db.exec(`ALTER TABLE ai_reports ADD COLUMN ${col} ${type};`);
-  }
-}
+// ---- schema 迁移版本化（B 批）：001 建表基线，002–006 增量补列 ----
+// 必须在下方 const stmts 之前完成，否则预编译语句会引用尚未补齐的列。
+// 迁移只在主连接执行；dbworker.js 是只读连接且不 require 本文件。
+runMigrations(db);
 
 const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 const genToken = () => crypto.randomBytes(24).toString('hex');

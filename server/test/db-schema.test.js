@@ -105,6 +105,9 @@ const D = require(${JSON.stringify(BSQ)});
 const c = new D(db.DB_PATH);
 c.exec('ALTER TABLE agents DROP COLUMN build_tag');
 c.exec('ALTER TABLE metrics DROP COLUMN process_count');
+// 同时抹掉迁移版本记录，模拟「老版本库从来没跑过 002–006」——
+// 否则版本行还在，runMigrations 会认为列已补齐而跳过，测不到真实补列路径。
+c.exec('DELETE FROM schema_migrations WHERE version > 1');
 const left = {
   agents: c.prepare('PRAGMA table_info(agents)').all().map((x) => x.name),
   metrics: c.prepare('PRAGMA table_info(metrics)').all().map((x) => x.name),
