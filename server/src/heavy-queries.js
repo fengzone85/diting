@@ -14,12 +14,11 @@
 // ============================================================
 
 const merge = require('./metrics-merge');
+const { LOAD_COLS_SQL } = require('./metric-schema');
 
-// 负载曲线列集（不含 probes / disks 大字段）。db.js 与本文件共用同一份定义，
-// 避免两处列清单漂移导致主线程与 worker 返回结构不一致。
-const LOAD_COLS = `ts, agent_id, cpu, mem_used, mem_total, mem_pct, load1, load5, load15,
-  net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, disk_used, disk_total,
-  disk_r_rate, disk_w_rate, swap_used, swap_total, swap_pct, temp, process_count`;
+// 负载曲线列集（不含 probes / disks 大字段）：列集与位次由 metric-schema.js 的
+// loadOrder 派生，db.js / worker / 本文件共用同一份定义，避免列清单漂移。
+const LOAD_COLS = LOAD_COLS_SQL;
 
 // 单节点负载曲线（保留首末点明细精度）
 const loadOne = (db, agentId, sinceTs, maxPoints, untilTs) =>

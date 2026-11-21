@@ -1,5 +1,6 @@
 'use strict';
 // 上报负载校验逻辑（纯函数，无 I/O、无 DB 依赖），便于独立审计与单元测试。
+const { validateMetricPayload } = require('./metric-schema');
 const num = (v, min, max) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return null;
@@ -104,22 +105,11 @@ function sanitizeCssBlocks(css, depth) {
 const validateReport = (b) => {
   if (typeof b !== 'object' || b === null) return null;
   return {
-    cpu: num(b.cpu, 0, 100),
-    mem_used: num(b.mem_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    mem_total: num(b.mem_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    mem_pct: num(b.mem_pct, 0, 100),
-    disk_used: num(b.disk_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    disk_total: num(b.disk_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    disk_pct: num(b.disk_pct, 0, 100),
-    load1: num(b.load1, 0, 1e6),
+    // metrics 指标列（cpu/mem/disk/load/net/uptime/temp/swap/进程数/间隔）的裁剪区间
+    // 由 metric-schema.js 统一定义，避免上报校验与建表列维护两套数字。
+    ...validateMetricPayload(b),
     // CPU 核数（§9 T18）：1–1024 的整数；非法或缺省 → 0（"未上报"，不可当 1 用）
     cores: Math.floor(num(b.cores, 1, 1024) || 0),
-    load5: num(b.load5, 0, 1e6),
-    load15: num(b.load15, 0, 1e6),
-    net_rx_rate: num(b.net_rx_rate, 0, 1e15),
-    net_tx_rate: num(b.net_tx_rate, 0, 1e15),
-    net_rx_month: num(b.net_rx_month, 0, 1e18),
-    net_tx_month: num(b.net_tx_month, 0, 1e18),
     // P1 流量口径：绝对计数器与重置日仅 Go 端上报；缺字段=null（legacy），超限=null（退回 legacy 透传）。
     net_rx: optNum(b.net_rx, 0, Number.MAX_SAFE_INTEGER),
     net_tx: optNum(b.net_tx, 0, Number.MAX_SAFE_INTEGER),
@@ -149,19 +139,6 @@ const validateReport = (b) => {
         platform: /^[a-z0-9]{2,10}-[a-z0-9]{2,10}$/.test(pf) ? pf : '',
       };
     })(),
-    disk_r_rate: num(b.disk_r_rate, 0, 1e15),
-    disk_w_rate: num(b.disk_w_rate, 0, 1e15),
-    uptime: num(b.uptime, 0, 1e12),
-    // temp: null means "no sensor" — allowed; otherwise clamp to a plausible range.
-    temp: (b.temp === null || b.temp === undefined) ? null : num(b.temp, -50, 200),
-    // 进程总数（仅计数，无进程明细；0 = 未采集/不可用；上限 10 万防异常负载）
-    process_count: Math.floor(num(b.process_count, 0, 100000) || 0),
-    // 审查 C-1/E2：受控端上报的实际上报间隔（秒）。0 = 未上报（老 agent）。
-    // 服务端另有相邻 ts 中位数观测（db.observedIntervalSec）作交叉/回退源。
-    interval: Math.floor(num(b.interval, 0, 86400) || 0),
-    swap_used: num(b.swap_used, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    swap_total: num(b.swap_total, 0, 1024 * 1024 * 1024 * 1024 * 1024),
-    swap_pct: num(b.swap_pct, 0, 100),
     // 网络质量自测结果（固定公共目标，Agent 本地写死，服务端不可下发）。
     // 校验为受控对象：键≤8、label≤24 字符，值含 ms(0..100000 或 null) 与 ok(bool)。
     probes: (() => {

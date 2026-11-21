@@ -8,6 +8,10 @@ const heavyQueries = require('./heavy-queries');
 const traffic = require('./traffic');
 const merge = require('./metrics-merge');
 const { runMigrations } = require('./migrations');
+// metrics 列定义单一事实源（建表列 / insertMetric / sparklines / 默认值均由此派生）。
+const {
+  CREATE_METRICS_SQL, INSERT_SQL, METRIC_DEFAULTS, SPARK_LEGACY_COLS_SQL, SPARK_COLS_SQL,
+} = require('./metric-schema');
 
 // 数据库默认落盘位置：容器内若挂载了持久卷 /data（docker-compose 的 server-data），
 // 则写入 /data/monitor.db，确保重建容器后数据仍在；否则回退到本地 server/data（开发/裸跑）。
@@ -53,25 +57,9 @@ CREATE TABLE IF NOT EXISTS agents (
   last_seen       INTEGER DEFAULT 0
 );
 
+-- 列片段由 metric-schema.js 生成；与 001-baseline 共用，避免启动路径与迁移路径漂移。
 CREATE TABLE IF NOT EXISTS metrics (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id      TEXT NOT NULL,
-  ts            INTEGER NOT NULL,
-  cpu           REAL,
-  mem_used      INTEGER,
-  mem_total     INTEGER,
-  mem_pct       REAL,
-  disk_used     INTEGER,
-  disk_total    INTEGER,
-  disk_pct      REAL,
-  load1         REAL,
-  load5         REAL,
-  load15        REAL,
-  net_rx_rate   REAL,
-  net_tx_rate   REAL,
-  net_rx_month  INTEGER,
-  net_tx_month  INTEGER,
-  uptime        REAL,
+${CREATE_METRICS_SQL}
   FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_agent_ts ON metrics(agent_id, ts);
@@ -391,13 +379,8 @@ const stmts = {
     WHERE id=? AND (build_sha<>? OR build_time<>? OR agent_platform<>?)`),
   // V.4：管理员标注（build_tag）——直接写，不带变化判断（人工操作，频率极低）
   setAgentBuildTag: db.prepare('UPDATE agents SET build_tag=? WHERE id=?'),
-  insertMetric: db.prepare(`INSERT INTO metrics
-    (agent_id, ts, cpu, mem_used, mem_total, mem_pct, disk_used, disk_total, disk_pct,
-     load1, load5, load15, net_rx_rate, net_tx_rate, net_rx_month, net_tx_month, uptime,
-     temp, swap_used, swap_total, swap_pct, disk_r_rate, disk_w_rate, probes, disks, process_count, interval)
-    VALUES (@agent_id, @ts, @cpu, @mem_used, @mem_total, @mem_pct, @disk_used, @disk_total, @disk_pct,
-     @load1, @load5, @load15, @net_rx_rate, @net_tx_rate, @net_rx_month, @net_tx_month, @uptime,
-     @temp, @swap_used, @swap_total, @swap_pct, @disk_r_rate, @disk_w_rate, @probes, @disks, @process_count, @interval)`),
+  // 列清单与位次由 metric-schema.js 的 insertOrder 派生。
+  insertMetric: db.prepare(INSERT_SQL.sql),
   // 窗口内实际有数据的节点数（用于历史接口的每节点点数分摊）
   countActiveAgents: db.prepare('SELECT COUNT(DISTINCT agent_id) AS c FROM metrics WHERE ts>=?'),
   latestMetric: db.prepare('SELECT * FROM metrics WHERE agent_id=? ORDER BY ts DESC LIMIT 1'),
@@ -569,8 +552,9 @@ const stmts = {
   // 浮点除法会让每个值自成一组。
   // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
   metricsDiskTrendAll: (sinceTs, bucketMs) => heavyQueries.diskTrendAll(db, sinceTs, bucketMs),
-  // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s
-  metricsSparklines: db.prepare('SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate, load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC'),
+  // sparklines 只需要指标列（不含 probes 大字段）：单节点 30d 由 5.3s 降到 2.3s。
+  // 列集由 metric-schema.js 的 sparkOrder（legacy 子集）派生。
+  metricsSparklines: db.prepare(`SELECT ${SPARK_LEGACY_COLS_SQL} FROM metrics WHERE agent_id=? AND ts>=? ORDER BY ts ASC`),
   // 全量 sparklines SQL 层采样：窗口函数按 agent 分组，每 agent 最多保留 maxPoints 点（首尾+均匀间隔）。
   // 7d 窗口 757K 行→~7200 行（减少 100x 传输+JS 处理），max_points 由 clampInt 钳为整数故安全内插。
   // 审查 C4：SQL 本体移至 heavy-queries.js（主线程与 worker 线程共用）
@@ -582,20 +566,15 @@ const stmts = {
   // untilTs（可选）：取「前一等长窗口」时的上界——ts < untilTs。null 表示不设上界（现状行为）。
   metricsSparklinesOne: (agentId, sinceTs, maxPoints, untilTs) => {
     const step = Math.max(1, Math.floor(Number(maxPoints) || 1));
+    // 列集由 metric-schema.js 的 sparkOrder（全量采样版）派生。
     return db.prepare(`
       WITH numbered AS (
-        SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-               net_rx_month, net_tx_month,
-               load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-               process_count,
+        SELECT ${SPARK_COLS_SQL},
                ROW_NUMBER() OVER (ORDER BY ts ASC) AS rn,
                COUNT(*) OVER () AS cnt
         FROM metrics WHERE agent_id=@agentId AND ts>=@since AND (@until IS NULL OR ts<@until)
       )
-      SELECT ts, agent_id, cpu, mem_pct, disk_pct, net_rx_rate, net_tx_rate,
-             net_rx_month, net_tx_month,
-             load1, temp, swap_pct, uptime, disk_r_rate, disk_w_rate, disk_used, disk_total,
-             process_count
+      SELECT ${SPARK_COLS_SQL}
       FROM numbered
       WHERE rn = 1 OR rn = cnt OR rn % MAX(1, CAST(cnt/CAST(@step AS INTEGER) AS INTEGER)) = 0
       ORDER BY ts ASC`).all({ agentId, since: sinceTs, step, until: untilTs == null ? null : Number(untilTs) });
@@ -1320,15 +1299,6 @@ const setAgentBuildTag = (id, tag) => {
 // 统一补默认，避免 better-sqlite3 "Missing named parameter" 直接抛错。
 // 生产路径由 validateReport 始终提供齐全字段，此处仅为兜底（曾只给 process_count
 // 补默认，新增 interval 列时测试即暴露了其余列仍会抛错的调用方陷阱）。
-const METRIC_DEFAULTS = {
-  cpu: 0, mem_used: 0, mem_total: 0, mem_pct: 0,
-  disk_used: 0, disk_total: 0, disk_pct: 0,
-  load1: 0, load5: 0, load15: 0,
-  net_rx_rate: 0, net_tx_rate: 0, net_rx_month: 0, net_tx_month: 0, uptime: 0,
-  temp: null, swap_used: 0, swap_total: 0, swap_pct: 0,
-  disk_r_rate: 0, disk_w_rate: 0, probes: '{}', disks: '[]',
-  process_count: 0, interval: 0
-};
 const insertMetric = (agent_id, m) => stmts.insertMetric.run(Object.assign({}, METRIC_DEFAULTS, m, { agent_id }));
 
 // ---- P1 服务端流量累加器：内存 Map + 节流落盘，/report 热路径不打 SQLite ----

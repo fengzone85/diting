@@ -4,6 +4,8 @@
 // 部分老表（如 metrics）建表时不含后来追加的列，收敛到现网 schema 由 002–006 完成。
 // 这样 001 保持「当年发布时的样子」，后续列变更有据可查。
 
+const { CREATE_METRICS_SQL } = require('../metric-schema');
+
 const BASELINE_SQL = `
 CREATE TABLE IF NOT EXISTS agents (
   id              TEXT PRIMARY KEY,
@@ -19,25 +21,10 @@ CREATE TABLE IF NOT EXISTS agents (
   last_seen       INTEGER DEFAULT 0
 );
 
+-- 列片段由 metric-schema.js 生成（baseline:true 的列，按声明序）；
+-- 索引/表选项/外键仍手写，避免把非列语义塞进生成器。
 CREATE TABLE IF NOT EXISTS metrics (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id      TEXT NOT NULL,
-  ts            INTEGER NOT NULL,
-  cpu           REAL,
-  mem_used      INTEGER,
-  mem_total     INTEGER,
-  mem_pct       REAL,
-  disk_used     INTEGER,
-  disk_total    INTEGER,
-  disk_pct      REAL,
-  load1         REAL,
-  load5         REAL,
-  load15        REAL,
-  net_rx_rate   REAL,
-  net_tx_rate   REAL,
-  net_rx_month  INTEGER,
-  net_tx_month  INTEGER,
-  uptime        REAL,
+${CREATE_METRICS_SQL}
   FOREIGN KEY(agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_agent_ts ON metrics(agent_id, ts);
