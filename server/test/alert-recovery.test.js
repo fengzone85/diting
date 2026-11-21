@@ -30,7 +30,7 @@ for (const suffix of ['', '-journal', '-wal', '-shm']) {
   try { fs.unlinkSync(process.env.DB_PATH + suffix); } catch { /* 不存在则忽略 */ }
 }
 
-const { app, server } = require('../server');
+const { server } = require('../server');
 const db = require('../src/db');
 const alerts = require('../src/alerts');
 const notify = require('../src/notify');

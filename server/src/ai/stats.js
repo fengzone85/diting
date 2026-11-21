@@ -385,8 +385,7 @@ function trafficInfo(metrics, quotaGb, opts) {
 // 仅用于横向比较，不是账单口径。low_utilization 是保守规则（CPU 均值 < 10% 且内存均值 < 40%
 // 且磁盘占用 < 50%），命中才允许 prompt 提示"可评估降配/合并"——这是概率性判断，
 // 而且**只允许业务层建议**，不得出现任何具体命令/配置操作（与既有安全边界一致）。
-function costInfo(summary, agent, opts) {
-  const o = opts || {};
+function costInfo(summary, agent) {
   // 无摘要（没有任何统计）或非付费节点 → null：不产出"成本效率"，避免模型据此编造
   if (!summary) return null;
   const price = Number(agent && agent.price);

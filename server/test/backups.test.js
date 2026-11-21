@@ -20,7 +20,7 @@ function makeFile(name, content = 'SQLite format 3\u0000abc') {
 }
 
 test.after(() => {
-  try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 test('resolveBackupFile: 接受合法命名，拒绝穿越与任意文件', () => {

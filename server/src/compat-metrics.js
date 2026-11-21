@@ -140,7 +140,7 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
     // 收集该 entity 所有 task 名称
     const taskNames = new Set();
     rows.forEach(r => {
-      try { Object.keys(JSON.parse(r.probes || '{}')).forEach(n => taskNames.add(n)); } catch (_) {}
+      try { Object.keys(JSON.parse(r.probes || '{}')).forEach(n => taskNames.add(n)); } catch {}
     });
     for (const pk of pingKeys) {
       for (const taskName of taskNames) {
@@ -157,7 +157,7 @@ function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1,
               if (v.loss == null) continue;
               points.push({ time: new Date(r.ts).toISOString(), value: Number(v.loss), count: 1 });
             }
-          } catch (_) {}
+          } catch {}
         }
         if (!points.length) continue;
         series.push({

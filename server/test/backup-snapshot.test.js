@@ -64,7 +64,6 @@ test('POST /api/admin/backups：生成快照、权限 0600、写审计；未鉴�
   process.env.PORT = '0';
   process.env.ADMIN_ALLOW_HTTP = '1';
   process.env.ADMIN_TOKEN = 'backup-snapshot-admin-token-0123456789';
-  // eslint-disable-next-line global-require
   const { app, server } = require('../server');
   const request = require('supertest');
   try {

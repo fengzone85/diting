@@ -538,7 +538,7 @@ router.get('/ai/reports/:id', adminOrReadonly, agentScope, (req, res) => {
   const r = db.getAiReport(id);
   if (!r) return res.status(404).json({ error: 'not found' });
   let parsed = null;
-  try { parsed = JSON.parse(r.report_json); } catch (e) {}
+  try { parsed = JSON.parse(r.report_json); } catch {}
   res.json(Object.assign({}, r, { report_json_parsed: parsed }));
 });
 

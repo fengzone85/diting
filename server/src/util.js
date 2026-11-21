@@ -50,7 +50,7 @@ function ip6ToBits(ip) {
       bits = (bits << 16n) | BigInt(segment);
     }
     return bits;
-  } catch (e) {
+  } catch {
     return null;
   }
 }

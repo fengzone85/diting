@@ -71,7 +71,7 @@ async function getProbeRecords({ hours = 1, maxCount = 100, entityId } = {}) {
           value: (val && typeof val.ms === 'number') ? val.ms : -1
         });
       });
-    } catch (_) {}
+    } catch {}
   });
   return records.slice(0, maxCount);
 }
@@ -282,7 +282,7 @@ function officialPingTasks(entityId) {
         }
         byName.get(name).clients.add(r.agent_id);
       });
-    } catch (_) { /* 坏 probes JSON 跳过 */ }
+    } catch { /* 坏 probes JSON 跳过 */ }
   });
   return Array.from(byName.values()).map(t => ({
     id: t.id,

@@ -69,11 +69,11 @@ function computeSchedulePoint(freq, time, tzOffsetHours) {
   return { lastScheduled: prevTs, nextScheduled: targetTs };
 }
 
-function nextOccurrence(freq, fromTs, tzOffsetHours, hour, minute) {
+function nextOccurrence(freq, fromTs, _tzOffsetHours, _hour, _minute) {
   const stepDays = freq === 'weekly' ? 7 : 1;
   return fromTs + stepDays * 86400000;
 }
-function prevOccurrence(freq, fromTs, tzOffsetHours, hour, minute) {
+function prevOccurrence(freq, fromTs, _tzOffsetHours, _hour, _minute) {
   const stepDays = freq === 'weekly' ? 7 : 1;
   return fromTs - stepDays * 86400000;
 }

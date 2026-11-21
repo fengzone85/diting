@@ -70,7 +70,7 @@ test('P1-1 管理员 logout：?all 撤销全部，?all=0 只清 Cookie', async (
 });
 
 test('P1-2 分组计费：¥ 归一化命中 CNY 汇率，未知币种不隐式 1:1', async () => {
-  const a = db.createAgent({
+  db.createAgent({
     name: 'bill-yen', grp: 'G1', price: 300, billing_cycle: 30, currency: '¥',
     expire_at: Date.now() + 30 * 86400000,
   });

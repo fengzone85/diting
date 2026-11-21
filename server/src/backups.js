@@ -19,7 +19,7 @@ const RESTORE_TRIGGER = process.env.RESTORE_TRIGGER || '/data/restore.request';
 const NAME_RE = /^(monitor|pre_restore)_[0-9]{8}_[0-9]{6}\.db(\.gz)?$/;
 
 function ensureDir() {
-  try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch (e) { /* 只读挂载等场景忽略 */ }
+  try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch { /* 只读挂载等场景忽略 */ }
 }
 
 // 校验并解析为绝对路径；非法返回 null（调用方一律 400/404，不回显用户输入）
@@ -34,7 +34,7 @@ function resolveBackupFile(name) {
 function listBackups() {
   ensureDir();
   let names;
-  try { names = fs.readdirSync(BACKUP_DIR); } catch (e) { return []; }
+  try { names = fs.readdirSync(BACKUP_DIR); } catch { return []; }
   const out = [];
   // F8.3：列表附完整性状态。deep integrity_check 对大库可达数秒，不能对每个文件
   // 每次都跑：这里每个请求最多抽查 1 个未缓存文件（quick_check），其余标 unknown，
@@ -44,7 +44,7 @@ function listBackups() {
     if (!NAME_RE.test(name)) continue; // 目录里其它文件（日志、人工拷贝）不展示
     const full = path.join(BACKUP_DIR, name);
     let st;
-    try { st = fs.statSync(full); } catch (e) { continue; }
+    try { st = fs.statSync(full); } catch { continue; }
     if (!st.isFile()) continue;
     const integ = listIntegrity(full, name, st, budget);
     out.push({
@@ -92,7 +92,7 @@ function inspectFile(full, name) {
   } catch (e) {
     return { ok: false, reason: e.code === 'ENOENT' ? 'not found' : (e.message || 'read error') };
   } finally {
-    if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) { /* ignore */ } }
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* ignore */ } }
   }
 }
 
@@ -107,7 +107,7 @@ const INTEGRITY_LIST_BUDGET = 1; // 每次列表最多抽查 1 个未缓存文�
 const integrityCache = new Map(); // name -> { key, status, reason, checked_at }
 
 let betterSqlitePath = '';
-try { betterSqlitePath = require.resolve('better-sqlite3'); } catch (e) { /* 子进程会返回 unknown */ }
+try { betterSqlitePath = require.resolve('better-sqlite3'); } catch { /* 子进程会返回 unknown */ }
 
 const INTEGRITY_SCRIPT = `
 const Database = require(process.argv[1]);
@@ -186,9 +186,9 @@ function uploadBlockedReason() {
   try {
     fs.accessSync(BACKUP_DIR, fs.constants.W_OK);
     return '';
-  } catch (e) {
+  } catch {
     let user = '';
-    try { user = require('node:os').userInfo().username; } catch (e2) { /* ignore */ }
+    try { user = require('node:os').userInfo().username; } catch { /* ignore */ }
     return user
       ? `backup dir not writable by server user "${user}"; run: sudo chown ${user} ${BACKUP_DIR}`
       : `backup dir not writable: ${BACKUP_DIR}`;
@@ -214,10 +214,10 @@ function saveUploadedBackup(buf) {
   try {
     fs.writeFileSync(tmp, buf, { mode: 0o600 });
     fs.renameSync(tmp, full);   // 原子落盘：列表/恢复不会看到半截文件
-    try { fs.chmodSync(full, 0o600); } catch (e) { /* 只读挂载等场景忽略 */ }
+    try { fs.chmodSync(full, 0o600); } catch { /* 只读挂载等场景忽略 */ }
     return { ok: true, name, size: buf.length };
   } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
     return { ok: false, code: 500, error: e.message || 'write failed' };
   }
 }
@@ -270,7 +270,7 @@ function requestRestore(name, actor) {
     fs.renameSync(tmp, RESTORE_TRIGGER);   // 原子落盘：宿主脚本不会读到半截 JSON
     return { ok: true, name, trigger: RESTORE_TRIGGER };
   } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (e2) { /* ignore */ }
+    try { fs.unlinkSync(tmp); } catch { /* ignore */ }
     return { ok: false, code: 500, error: e.message || 'cannot write restore request' };
   }
 }
@@ -279,13 +279,13 @@ function readRestoreRequest() {
   try {
     const raw = fs.readFileSync(RESTORE_TRIGGER, 'utf8');
     return JSON.parse(raw);
-  } catch (e) {
+  } catch {
     return null;
   }
 }
 
 function clearRestoreRequest() {
-  try { fs.unlinkSync(RESTORE_TRIGGER); return true; } catch (e) { return false; }
+  try { fs.unlinkSync(RESTORE_TRIGGER); return true; } catch { return false; }
 }
 
 module.exports = {

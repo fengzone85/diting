@@ -315,7 +315,7 @@ async function checkTrafficQuota(now) {
             db.clearAlertState(a.id, 'traffic_untrusted');
           }
         }
-      } catch (e) { /* 交叉校验失败不影响配额主流程 */ }
+      } catch { /* 交叉校验失败不影响配额主流程 */ }
       if (usedGb >= a.monthly_quota_gb) {
         const st = db.getAlertState(a.id, 'quota');
         if (!st || now - st.last_sent > 24 * 3600 * 1000) {
@@ -345,7 +345,7 @@ async function checkCertExpiry(now) {
       const m = db.getLatestMetric(a.id);
       if (!m || !m.probes) continue;
       let probes;
-      try { probes = JSON.parse(m.probes); } catch (e) { continue; }
+      try { probes = JSON.parse(m.probes); } catch { continue; }
       if (!probes || typeof probes !== 'object') continue;
 
       const elapsedDays = Math.max(0, Math.floor((now - (m.ts || now)) / 86400000));
@@ -407,10 +407,10 @@ async function runDailyChecks() {
 // 阈值 < 2× 观测间隔时平稳期必然周期性误报离线——显式告警而非静默误报。
 function checkOfflineThresholdSanity() {
   let offlineSec = 60;
-  try { offlineSec = db.resolveAlertThresholds().offline_sec; } catch (e) { return; }
+  try { offlineSec = db.resolveAlertThresholds().offline_sec; } catch { return; }
   for (const a of db.getMonitoredAgents()) {
     let sec = null;
-    try { sec = db.observedIntervalSec(a.id); } catch (e) { continue; }
+    try { sec = db.observedIntervalSec(a.id); } catch { continue; }
     if (sec && offlineSec < sec * 2) {
       console.warn(`[alerts] 离线阈值 ${offlineSec}s 小于 agent ${a.name}(${a.id}) 观测上报间隔 ${sec}s 的 2 倍——平稳期将周期性误报离线。请调大「设置中心离线阈值」或 OFFLINE_THRESHOLD_SEC。`);
     }
@@ -427,7 +427,7 @@ function start() {
   }
   // 检查节奏同样按生效的离线阈值推导（阈值收敛后与告警判定同源）
   let offlineSec = 60;
-  try { offlineSec = db.resolveAlertThresholds().offline_sec; } catch (e) {}
+  try { offlineSec = db.resolveAlertThresholds().offline_sec; } catch {}
   const interval = Math.max(10000, (offlineSec * 1000) / 2);
   // unref：定时器不阻止进程退出（对集成测试进程尤其重要）
   timer = setInterval(check, interval);
@@ -438,7 +438,7 @@ function start() {
   // 启动后立即跑一次，确保配置生效无需等 6h。
   runDailyChecks();
   // 审查 E2：阈值 vs 观测间隔一致性自检（显式告警，不阻断启动）
-  try { checkOfflineThresholdSanity(); } catch (e) { /* 自检失败不影响主流程 */ }
+  try { checkOfflineThresholdSanity(); } catch { /* 自检失败不影响主流程 */ }
   console.log('[alerts] checker started');
 }
 

@@ -33,7 +33,7 @@ function watermark(db) {
     const r = db.prepare("SELECT value FROM admin_config WHERE key='metrics_rolled'").get();
     const v = Number(r && r.value);
     return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
-  } catch (e) {
+  } catch {
     return 0;
   }
 }
@@ -367,7 +367,7 @@ function finishProbe(acc) {
 // 把一行的 probes JSON 折算进 [agent][bucket][label] 累加器
 function foldProbeRow(store, agentId, bucket, ts, probesJson, folded) {
   let probes;
-  try { probes = JSON.parse(probesJson); } catch (e) { return; }
+  try { probes = JSON.parse(probesJson); } catch { return; }
   if (!probes || typeof probes !== 'object' || Array.isArray(probes)) return;
   let byBucket = store.get(agentId);
   if (!byBucket) { byBucket = new Map(); store.set(agentId, byBucket); }

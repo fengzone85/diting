@@ -103,7 +103,6 @@ function getStatus() {
 // ---- 单节点按需分析（T11）----
 // 成本控制：同一节点结果缓存 30 分钟；同一节点的并发请求合并（避免重复点击各打一次模型）。
 // 缓存键必须含时间窗口：24h 与 7d 的结果不同源，只按 agentId 缓存会互相污染。
-const NODE_CACHE_TTL_MS = 30 * 60 * 1000;
 const NODE_HOURS_MIN = 24;
 const NODE_HOURS_MAX = 720;
 function clampPeriodHours(v) {

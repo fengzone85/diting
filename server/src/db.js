@@ -18,19 +18,15 @@ const {
 const DB_PATH = process.env.DB_PATH || (() => {
   try {
     if (fs.existsSync('/data') && fs.statSync('/data').isDirectory()) return '/data/monitor.db';
-  } catch (e) {}
+  } catch {}
   return path.join(__dirname, '..', 'data', 'monitor.db');
 })();
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
-// 负载曲线列集（不含 probes / disks 大字段）——统一定义在 heavy-queries.js，
-// 主线程与 worker 共用（process_count：2026-10-12 新增，主题兼容层消费）。
-const LOAD_COLS = heavyQueries.LOAD_COLS;
-
 const db = new Database(DB_PATH);
 // 收紧数据库文件权限：仅属主可读写（默认 umask 常为 644，其他用户可读）。
 // 库内虽无指纹指标，但含全部监控数据，按最小权限原则限制暴露面。
-try { fs.chmodSync(DB_PATH, 0o600); } catch (e) { /* 某些挂载文件系统不支持 chmod，忽略 */ }
+try { fs.chmodSync(DB_PATH, 0o600); } catch { /* 某些挂载文件系统不支持 chmod，忽略 */ }
 // 增量回收（对齐方案附录 D.1）：保留策略删掉旧指标后，把空闲页归还文件系统。
 // auto_vacuum 是写在库头里的持久标志：从 NONE 改成 INCREMENTAL 需要一次完整 VACUUM 才生效，
 // 所以对存量库这里只是"置位"，真正回收发生在 `diting.sh --db-vacuum` 之后。
@@ -793,7 +789,7 @@ const purgeDeletedAgents = (now = Date.now()) => {
     stmts.purgeAlertOverride.run(id);
     if (delHour) delHour.run(id);
     // F7：online_sessions 无 FK，同样显式清理（软删期间保留，恢复后在线时段可延续）
-    try { stmts.deleteOnlineSessionsByAgent.run(id); } catch (e) { /* 老库无该表时忽略 */ }
+    try { stmts.deleteOnlineSessionsByAgent.run(id); } catch { /* 老库无该表时忽略 */ }
     trafficCache.delete(id);
     stmts.hardDeleteAgent.run(id);
   });
@@ -1009,7 +1005,7 @@ const deleteGroupAlertOverride = (grp) => stmts.deleteGroupAlertOverride.run(grp
 // ---- 通知渠道/通知组（S1/F2）----------------------------------------------
 function channelOut(r) {
   let config = {};
-  try { config = JSON.parse(r.config || '{}'); } catch (e) { config = {}; }
+  try { config = JSON.parse(r.config || '{}'); } catch { config = {}; }
   return {
     id: r.id,
     type: r.type,
@@ -1060,7 +1056,7 @@ function deleteNotifyChannel(id) {
 
 function groupOut(g) {
   let events = [];
-  try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+  try { events = JSON.parse(g.events || '[]'); } catch { events = []; }
   return {
     id: g.id,
     name: g.name,
@@ -1122,7 +1118,7 @@ function listEnabledChannelsForEvent(event) {
   const groupIds = new Set();
   for (const g of stmts.listEnabledGroupsForEvent.all()) {
     let events = [];
-    try { events = JSON.parse(g.events || '[]'); } catch (e) { events = []; }
+    try { events = JSON.parse(g.events || '[]'); } catch { events = []; }
     if (events.includes('*') || events.includes(event)) groupIds.add(g.id);
   }
   if (!groupIds.size) return [];
@@ -1162,7 +1158,7 @@ const genApiTokenId = () => 'tok_' + crypto.randomBytes(6).toString('hex');
 
 function apiTokenOut(r) {
   let agentIds = [];
-  try { agentIds = JSON.parse(r.agent_ids || '[]'); } catch (e) { agentIds = []; }
+  try { agentIds = JSON.parse(r.agent_ids || '[]'); } catch { agentIds = []; }
   return {
     id: r.id,
     name: r.name,
@@ -1213,7 +1209,7 @@ function touchApiToken(id, ip) {
   if (now - last < 60 * 1000) return;
   if (_apiTokenTouch.size >= 10000) _apiTokenTouch.clear();
   _apiTokenTouch.set(id, now);
-  try { stmts.touchApiToken.run(now, String(ip || '').slice(0, 64), id); } catch (e) { /* 追踪失败不影响鉴权 */ }
+  try { stmts.touchApiToken.run(now, String(ip || '').slice(0, 64), id); } catch { /* 追踪失败不影响鉴权 */ }
 }
 
 // ---- S2/F6：登录会话 --------------------------------------------------------
@@ -1264,7 +1260,7 @@ function touchSession(id) {
   if (now - last < 60 * 1000) return;
   if (_sessionTouch.size >= 10000) _sessionTouch.clear();
   _sessionTouch.set(id, now);
-  try { stmts.touchSession.run(now, id); } catch (e) { /* 忽略 */ }
+  try { stmts.touchSession.run(now, id); } catch { /* 忽略 */ }
 }
 
 const touchAgent = (id, os, hostname, version) =>
@@ -1537,7 +1533,7 @@ const clearAdminPasswordHash = () => deleteConfig(ADMIN_PASSWORD_HASH);
 const LOGIN_GUARD_GLOBAL_KEY = 'login_guard_global';
 const getLoginGuardGlobal = () => {
   try { return JSON.parse(getConfig(LOGIN_GUARD_GLOBAL_KEY) || 'null') || null; }
-  catch (e) { return null; }
+  catch { return null; }
 };
 const setLoginGuardGlobal = (rec) => setConfig(LOGIN_GUARD_GLOBAL_KEY, JSON.stringify(rec || null));
 const clearLoginGuardGlobal = () => deleteConfig(LOGIN_GUARD_GLOBAL_KEY);
@@ -1636,11 +1632,11 @@ function getUiSettings() {
     merged.billing.api.rates = Object.assign({}, (o && o.billing && o.billing.api && o.billing.api.rates) || {});
     return merged;
   }
-  catch (e) { return def; }
+  catch { return def; }
 }
 function setUiSettings(o) { setConfig(SETTINGS_KEY, JSON.stringify(o || {})); }
 function getNotifyConfigRaw() {
-  try { return JSON.parse(getConfig(NOTIFY_KEY) || '{}'); } catch (e) { return {}; }
+  try { return JSON.parse(getConfig(NOTIFY_KEY) || '{}'); } catch { return {}; }
 }
 // 通知配置：UI 保存值优先，缺失项回退到 docker-compose 环境变量默认值。
 function getNotifyConfig() {
@@ -1679,7 +1675,7 @@ function getRetentionDays() {
         if (Number.isFinite(n) && n > 0) return Math.min(3650, Math.max(7, Math.floor(n)));
       }
     }
-  } catch (e) {}
+  } catch {}
   // ② 回退到环境变量
   const env = Number(process.env.RETENTION_DAYS);
   if (Number.isFinite(env) && env > 0) return Math.min(3650, Math.max(7, Math.floor(env)));
@@ -1701,7 +1697,7 @@ function resolveAlertThresholds() {
       const o = JSON.parse(raw);
       if (o && typeof o.alert === 'object' && o.alert) storedAlert = o.alert;
     }
-  } catch (e) {}
+  } catch {}
   const pick = (key, envName, def, min, max) => {
     const v = storedAlert[key];
     if (v !== undefined && v !== null && v !== '') {
@@ -1736,7 +1732,7 @@ function observedIntervalSec(agentId, windowMs) {
     try {
       const row = db.prepare('SELECT interval FROM metrics WHERE agent_id=? AND interval>0 ORDER BY ts DESC LIMIT 1').get(agentId);
       if (row && row.interval > 0) return row.interval;
-    } catch (e) {}
+    } catch {}
     return null;
   }
   const diffs = [];
@@ -1776,10 +1772,10 @@ function getAiConfig() {
   try {
     const o = JSON.parse(getConfig(AI_CONFIG_KEY) || '{}');
     return Object.assign(def, o);
-  } catch (e) { return def; }
+  } catch { return def; }
 }
 function getAiConfigRaw() {
-  try { return JSON.parse(getConfig(AI_CONFIG_KEY) || '{}'); } catch (e) { return {}; }
+  try { return JSON.parse(getConfig(AI_CONFIG_KEY) || '{}'); } catch { return {}; }
 }
 function setAiConfig(incoming) {
   const cur = getAiConfigRaw();
@@ -1807,7 +1803,7 @@ function getAiState() {
   try {
     const o = JSON.parse(getConfig(AI_STATE_KEY) || '{}');
     return Object.assign(def, o);
-  } catch (e) { return def; }
+  } catch { return def; }
 }
 function setAiState(s) { setConfig(AI_STATE_KEY, JSON.stringify(s)); }
 
@@ -1831,7 +1827,7 @@ function getBackupState() {
   try {
     const o = JSON.parse(getConfig(BACKUP_STATE_KEY) || '{}');
     return Object.assign(def, o);
-  } catch (e) { return def; }
+  } catch { return def; }
 }
 function setBackupState(s) {
   const merged = Object.assign(getBackupState(), s || {}, { updated_at: Date.now() });
@@ -1849,7 +1845,7 @@ function parseJsonConfig(key) {
   try {
     const o = JSON.parse(getConfig(key) || 'null');
     return o && typeof o === 'object' ? o : null;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 function getRestoreAuditPending() { return parseJsonConfig(RESTORE_AUDIT_PENDING_KEY); }
 function setRestoreAuditPending(v) { setConfig(RESTORE_AUDIT_PENDING_KEY, JSON.stringify(v || {})); }
@@ -1974,7 +1970,7 @@ function pruneAudit(retentionDays) {
 function getDbFileSize() {
   let size = 0;
   for (const p of [DB_PATH, `${DB_PATH}-journal`]) {
-    try { size += fs.statSync(p).size; } catch (_) { /* 文件不存在则忽略 */ }
+    try { size += fs.statSync(p).size; } catch { /* 文件不存在则忽略 */ }
   }
   return size;
 }
@@ -2108,14 +2104,14 @@ function seedThemeMarketSources() {
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(OFFICIAL_THEME_MARKET.id, OFFICIAL_THEME_MARKET.name, OFFICIAL_THEME_MARKET.url,
         OFFICIAL_THEME_MARKET.enabled ? 1 : 0, now, now);
-  } catch (e) { /* 种子失败不应阻塞启动（如历史库已有同 URL 的自定义源） */ }
+  } catch { /* 种子失败不应阻塞启动（如历史库已有同 URL 的自定义源） */ }
 }
 
 // ---- S5/F10：主题配置值（admin_config key-value，键名 theme_config_<short>）----
 const THEME_CONFIG_PREFIX = 'theme_config_';
 const getThemeConfig = (short) => {
   try { return JSON.parse(getConfig(THEME_CONFIG_PREFIX + String(short)) || '{}') || {}; }
-  catch (e) { return {}; }
+  catch { return {}; }
 };
 const setThemeConfig = (short, obj) => setConfig(THEME_CONFIG_PREFIX + String(short), JSON.stringify(obj || {}));
 const deleteThemeConfig = (short) =>

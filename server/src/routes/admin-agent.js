@@ -240,7 +240,7 @@ router.get('/admin/agent-distribution/:pkg_id/download', distDownloadLimit, (req
   const r = distribution.authorizeDownload(req.params.pkg_id, req.query.t);
   if (!r.ok) return res.status(r.code || 500).json({ error: r.error });
   let st;
-  try { st = fs.statSync(r.path); } catch (e) { return res.status(404).json({ error: 'not_found' }); }
+  try { st = fs.statSync(r.path); } catch { return res.status(404).json({ error: 'not_found' }); }
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Length', String(st.size));
   res.setHeader('X-Content-Type-Options', 'nosniff');

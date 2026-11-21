@@ -77,7 +77,6 @@ test('/report 在硬限时仍 200、metrics 不增，且实时状态继续；清
   process.env.PORT = '0';
   process.env.ADMIN_ALLOW_HTTP = '1';
   process.env.ADMIN_TOKEN = 'capacity-admin-token-0123456789abcdef';
-  // eslint-disable-next-line global-require
   const { app, server } = require('../server');
   const request = require('supertest');
   try {

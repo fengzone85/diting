@@ -105,7 +105,7 @@ function foldProbes(rows) {
   const byAgent = new Map();
   for (const row of rows) {
     let probes;
-    try { probes = JSON.parse(row.probes); } catch (e) { continue; }
+    try { probes = JSON.parse(row.probes); } catch { continue; }
     if (!probes || typeof probes !== 'object' || Array.isArray(probes)) continue;
     let labels = byAgent.get(row.agent_id);
     if (!labels) { labels = new Map(); byAgent.set(row.agent_id, labels); }

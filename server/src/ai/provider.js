@@ -52,7 +52,7 @@ function isDangerousIP(ip) {
 async function checkBaseUrl(urlStr) {
   let urlObj;
   try { urlObj = new URL(urlStr); }
-  catch (e) { throw new AiError('无效的 base_url：' + urlStr, { retryable: false }); }
+  catch { throw new AiError('无效的 base_url：' + urlStr, { retryable: false }); }
 
   const hostname = urlObj.hostname;
 
@@ -158,7 +158,7 @@ async function analyze(config, summary, opts) {
   // 解析 OpenAI 兼容响应结构
   let data;
   try { data = JSON.parse(result.body); }
-  catch (e) {
+  catch {
     throw new AiError('响应不是合法 JSON：' + result.body.slice(0, 200), { retryable: false, status: result.status });
   }
 
@@ -189,7 +189,7 @@ function httpRequest(urlStr, { method, headers, body, timeoutMs, resolvedIp, res
   return new Promise((resolve, reject) => {
     let urlObj;
     try { urlObj = new URL(urlStr); }
-    catch (e) { return reject(new AiError('无效的 base_url：' + urlStr, { retryable: false })); }
+    catch { return reject(new AiError('无效的 base_url：' + urlStr, { retryable: false })); }
 
     const lib = urlObj.protocol === 'https:' ? https : http;
     const MAX_BYTES = 2 * 1024 * 1024; // 响应上限 2MB，防异常端点撑爆内存
@@ -248,7 +248,7 @@ function parseAnalysis(text) {
   if (start >= 0 && end > start) t = t.slice(start, end + 1);
   try {
     return JSON.parse(t);
-  } catch (e) {
+  } catch {
     return null;
   }
 }

@@ -273,7 +273,7 @@ test('静态资源流读取失败时不挂起：返回 500（审查 C5）', asyn
   } finally {
     fs.createReadStream = origCreate;
     fs.rmSync(dir, { recursive: true, force: true });
-    if (!themesExisted) { try { fs.rmdirSync(THEMES_DIR); } catch (_) {} }
+    if (!themesExisted) { try { fs.rmdirSync(THEMES_DIR); } catch {} }
   }
 });
 

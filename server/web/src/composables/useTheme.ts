@@ -97,7 +97,7 @@ function applyGlassConfig() {
 }
 
 function applyBackground() {
-  const m = state.meta as any;
+  const m = state.meta;
   const root = document.documentElement;
   let layer = document.getElementById('app-bg');
   let overlay = document.getElementById('app-bg-overlay');

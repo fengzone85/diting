@@ -108,7 +108,7 @@ function resolveHost(hostname) {
 
 function parseTarget(urlStr, cfg) {
   let u;
-  try { u = new URL(urlStr); } catch (e) { throw new Error('url_invalid'); }
+  try { u = new URL(urlStr); } catch { throw new Error('url_invalid'); }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('scheme_invalid');
   if (u.protocol === 'http:' && !ALLOW_INSECURE) throw new Error('insecure_scheme');
   return {
@@ -255,8 +255,7 @@ function sendTelegram(text) {
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
       timeout: 15000
     }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
+      res.on('data', () => {});   // 丢弃响应体，仅消费流以触发 end
       res.on('end', () => {
         if (res.statusCode !== 200) {
           const e = new Error(`telegram_http_${res.statusCode}`);

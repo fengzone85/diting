@@ -46,7 +46,7 @@ const request = require('supertest');
 // 系统 tar 是否可用（用于校验手写 tar 容器能否被 GNU tar 正确解析）。
 // 真机验证教训：只用自己的解析器校验会漏掉 header 字段格式错误 ⇒ 必须让真 tar 读一遍。
 function hasTar() {
-  try { execFileSync('tar', ['--version'], { stdio: 'ignore' }); return true; } catch (e) { return false; }
+  try { execFileSync('tar', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
 }
 
 for (const suffix of ['', '-journal', '-wal', '-shm']) {

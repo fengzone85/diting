@@ -14,7 +14,7 @@ function check(name, actual, expected) {
     assert.deepStrictEqual(actual, expected);
     pass++;
     console.log(`  ✓ ${name}`);
-  } catch (e) {
+  } catch {
     fail++;
     console.log(`  ✗ ${name}\n     expected: ${JSON.stringify(expected)}\n     actual:   ${JSON.stringify(actual)}`);
   }

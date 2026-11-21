@@ -430,6 +430,8 @@ export interface PublicMeta {
   card_scheme?: CardScheme;
   card_size?: CardSize;
   background?: BackgroundConfig;
+  background_dark?: BackgroundConfig;
+  background_light?: BackgroundConfig;
   announcement?: AnnouncementConfig;
   provider_aliases?: Record<string, string>;
   custom_tags?: Record<string, string>;

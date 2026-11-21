@@ -10,6 +10,7 @@ import {
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ChartPoint } from '../services/types';
+import type { EChartsCoreOption } from 'echarts/core';
 
 echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, CanvasRenderer]);
 
@@ -29,7 +30,7 @@ let chart: echarts.ECharts | null = null;
 let ro: ResizeObserver | null = null;
 
 // 参考面板风格：线条下方从颜色向透明做垂直线性渐变
-function areaGradient(color: string): any {
+function areaGradient(color: string) {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: hexToRgba(color, 0.2) },
     { offset: 1, color: hexToRgba(color, 0) },
@@ -45,7 +46,7 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function baseOption(): any {
+function baseOption(): EChartsCoreOption {
   const c = colors.value;
   const color = props.color || '#38bdf8';
   return {

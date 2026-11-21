@@ -45,14 +45,6 @@ function perAgentPoints(maxCount, since) {
   return Math.min(maxCount, Math.max(20, Math.ceil(maxCount / n) * 2));
 }
 
-function cachedRecords(key, build) {
-  const hit = recordsCache.get(key);
-  if (hit && Date.now() - hit.ts < RECORDS_CACHE_TTL) return hit.data;
-  const data = build();
-  if (recordsCache.size >= RECORDS_CACHE_MAX) recordsCache.clear();
-  recordsCache.set(key, { ts: Date.now(), data });
-  return data;
-}
 // 审查 C4：异步版——build 内部的重聚合走 worker 线程（公开端点最坏 720h 全库
 // 扫描，同步执行会阻塞事件循环数秒，期间 /report 与告警一并挂起）。
 async function cachedRecordsAsync(key, build) {
@@ -305,7 +297,7 @@ function publicSettings() {
         // 官方选择器（nodes/pingtasks）底层存 JSON 字符串，公开 API 输出时还原为数组。
         for (const f of fields) {
           if ((f.type === 'nodes' || f.type === 'pingtasks') && typeof merged[f.key] === 'string') {
-            try { merged[f.key] = JSON.parse(merged[f.key]); } catch (_) { /* 值非法时保持字符串 */ }
+            try { merged[f.key] = JSON.parse(merged[f.key]); } catch { /* 值非法时保持字符串 */ }
           }
         }
         // 仅对声明了 providerAliases 的主题注入（当前为玻璃拟态设计）：
@@ -485,7 +477,7 @@ router.get('/records/ping', guard, asyncHandler(async (req, res) => {
     const records = [];           // {task_id,time,value}
     for (const m of probeRows) {
       let probes = null;
-      try { probes = m.probes ? JSON.parse(m.probes) : null; } catch (_) { probes = null; }
+      try { probes = m.probes ? JSON.parse(m.probes) : null; } catch { probes = null; }
       if (!probes || typeof probes !== 'object') continue;
       // M-01：diting 实际入库的是「对象」格式（validate.js 校验并写为
       // { "<目标名>": { ms, ok, loss } }，见 src/validate.js）。此前这里只认数组

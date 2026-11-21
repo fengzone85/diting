@@ -31,22 +31,22 @@ const SOFT_DELETE_GRACE_MS = 7 * 86400000;
 const HOUR_MS = 3600000;
 
 function tableExists(name) {
-  try { return db.auditTableExists(name); } catch (e) { return false; }
+  try { return db.auditTableExists(name); } catch { return false; }
 }
 
 function tableColumns(name) {
-  try { return db.auditTableColumns(name); } catch (e) { return []; }
+  try { return db.auditTableColumns(name); } catch { return []; }
 }
 
 function readPendingFile() {
   try {
     const o = JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8'));
     return o && typeof o === 'object' ? o : null;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 
 function clearPendingFile() {
-  try { fs.unlinkSync(PENDING_FILE); } catch (e) { /* 不存在则忽略 */ }
+  try { fs.unlinkSync(PENDING_FILE); } catch { /* 不存在则忽略 */ }
 }
 
 // 标记来源：库内优先（随恢复库一起生效），文件兜底（无 sqlite3 的宿主）。
@@ -102,7 +102,7 @@ function checkRetention(now) {
       const rows = db.auditMetricsHistogram(cutoff, span, RETENTION_MAX_BUCKETS);
       buckets = rows.map((b) => ({ rows: b.rows, from_ts: b.from_ts, to_ts: b.to_ts }));
       if (expired > buckets.reduce((s, b) => s + b.rows, 0)) truncated = true;
-    } catch (e) { /* 批次统计失败不影响总量结论 */ }
+    } catch { /* 批次统计失败不影响总量结论 */ }
   }
 
   return check('retention', ratio > RETENTION_WARN_RATIO ? 'warn' : 'ok', {
@@ -165,7 +165,7 @@ function checkFolding() {
   if (!Number.isFinite(rolledRaw) || rolledRaw < low || rolledRaw > high) {
     rolled = low;
     reset = true;
-    try { db.setConfig('metrics_rolled', String(low)); } catch (e) { /* 只读库等场景忽略 */ }
+    try { db.setConfig('metrics_rolled', String(low)); } catch { /* 只读库等场景忽略 */ }
   }
   let overlapDeleted = 0;
   const cols = tableColumns('metrics_hour');
@@ -176,7 +176,7 @@ function checkFolding() {
       // ② tsCol 来自 tableColumns() 的硬编码候选（hour_ts/ts），表名固定为 metrics_hour；
       // ③ 必须与上方水位线重置紧邻执行，迁出会增加「水位线已改、重叠行未删」的时序窗口。
       overlapDeleted = db.db.prepare(`DELETE FROM metrics_hour WHERE ${tsCol} >= ?`).run(rolled).changes;
-    } catch (e) { /* 表结构不符时保持 0 */ }
+    } catch { /* 表结构不符时保持 0 */ }
   }
   const catchUp = reset ? triggerFoldCatchUp() : 'not_needed';
   return [
@@ -208,13 +208,13 @@ function checkTrafficGap(now) {
     const last = Number(r.last_ts) || 0;
     if (!last) continue;
     let interval = null;
-    try { interval = db.observedIntervalSec(r.agent_id); } catch (e) { /* 样本不足按默认阈值 */ }
+    try { interval = db.observedIntervalSec(r.agent_id); } catch { /* 样本不足按默认阈值 */ }
     const limit = Math.max(3 * (Number(interval) || 0) * 1000, GAP_FLOOR_MS);
     if (now - last > limit) {
       try {
         db.markTrafficGap(r.agent_id, now);
         fixed.push({ agent_id: r.agent_id, gap_ms: now - last });
-      } catch (e) { /* 单节点失败不影响其它节点 */ }
+      } catch { /* 单节点失败不影响其它节点 */ }
     }
   }
   return check('traffic_gap', fixed.length ? 'warn' : 'ok', {
@@ -259,7 +259,7 @@ function checkSoftDeleted(now) {
     return check('soft_deleted', 'skipped', { reason: e.message });
   }
   let purged = 0;
-  try { purged = db.purgeDeletedAgents(now); } catch (e) { /* 清理失败不阻断启动，prune 还会重试 */ }
+  try { purged = db.purgeDeletedAgents(now); } catch { /* 清理失败不阻断启动，prune 还会重试 */ }
   return check('soft_deleted', purged ? 'warn' : 'ok', { expired, purged });
 }
 
@@ -356,7 +356,7 @@ function runRestoreAudit(opts = {}) {
     }
   };
 
-  try { db.setRestoreAuditReport(report); } catch (e) { /* 只读/损坏库：报告丢失不影响审计 */ }
+  try { db.setRestoreAuditReport(report); } catch { /* 只读/损坏库：报告丢失不影响审计 */ }
 
   // 审计必须写进恢复后的库（旧库里的 request_restore_backup 已被覆盖）。
   try {
@@ -373,11 +373,11 @@ function runRestoreAudit(opts = {}) {
       `gaps=${report.summary.traffic_gap_fixed}`
     ].join(' ');
     db.addAuditLog(now, report.backup.by || 'diting.sh', '', 'restore_completed', detail, 'script');
-  } catch (e) { /* 审计失败不阻断启动 */ }
+  } catch { /* 审计失败不阻断启动 */ }
 
   // fatal 时保留标记：用户从 pre_restore_*.db 修好库后重启会再查一次。
   if (!fatal) {
-    try { db.clearRestoreAuditPending(); } catch (e) { /* ignore */ }
+    try { db.clearRestoreAuditPending(); } catch { /* ignore */ }
     clearPendingFile();
   }
   return { fatal, report };

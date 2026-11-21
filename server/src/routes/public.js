@@ -187,7 +187,6 @@ router.get('/public/agents/sparklines', asyncHandler(async (req, res) => {
   //   30s 缓存一过就慢/偶发超时（详情页图表"慢/有时无法显示"）。SQL 层直接只返回 maxPoints 行。
   const mp = clampInt(req.query.max_points, 60, 20000)
     || (onlyId ? (custom ? 2000 : sparkMaxPoints(range)) : SPARK_ALL_MAX_POINTS);
-  const t0 = Date.now();
   // 审查 C4：全量分支（首页卡片迷你图，100 台规模最重）移 worker 线程；
   // 单节点分支（详情页）行数有界，保留主线程同步路径。
   // until 必须下推到 SQL：merge 层用 (until - since) 反推桶宽，并在 WHERE 里加 ts < until。
@@ -266,7 +265,7 @@ router.get('/public/agents/:id/probes', asyncHandler(async (req, res) => {
     if (r.ts > until) continue;
     if (!r.probes) continue;
     let probes;
-    try { probes = JSON.parse(r.probes); } catch (_) { continue; }
+    try { probes = JSON.parse(r.probes); } catch { continue; }
     if (!probes || typeof probes !== 'object') continue;
     for (const [label, p] of Object.entries(probes)) {
       if (!p || typeof p !== 'object') continue;
@@ -393,7 +392,7 @@ router.get('/public/agents/:id/probes', asyncHandler(async (req, res) => {
 router.get('/public/meta', (req, res) => {
   const ui = db.getUiSettings();
   let agentOrder = [];
-  try { agentOrder = JSON.parse(db.getConfig('public_order') || '[]'); } catch (e) {}
+  try { agentOrder = JSON.parse(db.getConfig('public_order') || '[]'); } catch {}
   res.json({
     site_title: ui.site_title || '',
     site_url: ui.site_url || '',

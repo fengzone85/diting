@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 四张信息卡：硬件 / 系统 / 存储 / 网络。
 import { computed } from 'vue';
+import type { Component } from 'vue';
 import {
   Cpu,
   Computer,
@@ -28,14 +29,14 @@ const props = defineProps<{
 // 核心数已并入上方 CPU 型号行，不再单独占一项。
 const hwDynamic = computed(() => {
   const a = props.agent;
-  const items: { label: string; value: string; icon: any }[] = [];
+  const items: { label: string; value: string; icon: Component }[] = [];
   // 核心数不再单独占一项：并入 CPU 型号行（`型号 (N vCPU)`），与玻璃拟态设计对齐。
   // 架构（管理员手填优先；未填时服务端按受控端构建平台派生）
-  items.push({ label: t('node.arch'), value: (a as any).arch || '—', icon: ApplicationTwo });
+  items.push({ label: t('node.arch'), value: a.arch || '—', icon: ApplicationTwo });
   // 虚拟化（管理员手填）
-  items.push({ label: t('node.virtualization'), value: (a as any).virtualization || '—', icon: Server });
+  items.push({ label: t('node.virtualization'), value: a.virtualization || '—', icon: Server });
   // GPU（仅当管理员填写时渲染；空 / 'None' = 无或不公开）
-  const gpu = String((a as any).gpu_name || '').trim();
+  const gpu = String(a.gpu_name || '').trim();
   if (gpu && gpu.toLowerCase() !== 'none') {
     items.push({ label: t('node.gpu'), value: gpu, icon: VideoOne });
   }

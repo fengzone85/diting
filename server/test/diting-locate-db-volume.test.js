@@ -29,7 +29,7 @@ function fnBody(name) {
 }
 
 // 构造一个只有 locate_db 依赖的最小环境：假 docker + 假 .env（无 DB_PATH）
-function run(volumes, envDbPath) {
+function run(volumes, _envDbPath) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'diting-loc-'));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);

@@ -14,7 +14,7 @@
 
 const db = require('../db');
 const { summarize } = require('./summarizer');
-const { analyze, parseAnalysis, AiError } = require('./provider');
+const { analyze, parseAnalysis } = require('./provider');
 const { clampRisk } = require('./stats');
 const { PROMPT_VERSION } = require('./prompt');
 const alerts = require('../alerts');
@@ -298,10 +298,9 @@ function capHighlights(analysis, summary, opts) {
 }
 
 // 主入口：生成并落库一份日报，然后发送通知。
-//   opts.trigger: 'schedule' | 'manual'（用于日志/状态区分）
+//   opts 由触发方传入（schedule/manual），仅作调用契约保留，当前不参与逻辑。
 // 返回 { status: 'ok'|'degraded'|'disabled'|'error', report_id?, message }
-async function generateAndSend(opts) {
-  const trigger = (opts && opts.trigger) || 'manual';
+async function generateAndSend(_opts) {
   const config = db.getAiConfig();
 
   if (!config.enabled) {

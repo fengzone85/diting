@@ -82,7 +82,7 @@ function revokeAllSessions() {
   db.setConfig(SESSION_REVOKED_BEFORE, String(Date.now()));
   // S2/F6：同时吊销会话表记录（水位线是兜底，表状态是权威）。
   let n = 0;
-  try { n = db.revokeAllSessionRows(); } catch (e) { /* 表不存在/DB 异常时由水位线兜底 */ }
+  try { n = db.revokeAllSessionRows(); } catch { /* 表不存在/DB 异常时由水位线兜底 */ }
   // 缓存必须同步失效，否则被全局吊销的会话最多还能用 5 秒。
   clearSessionCache();
   return n;

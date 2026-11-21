@@ -32,7 +32,7 @@ function armIdleTerminate() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     if (pending.size === 0 && worker) {
-      try { worker.terminate(); } catch (_) {}
+      try { worker.terminate(); } catch {}
       worker = null;
     }
   }, IDLE_TERMINATE_MS);
@@ -72,7 +72,7 @@ function failAll(err) {
     p.reject(err);
   }
   pending.clear();
-  try { worker && worker.terminate(); } catch (_) {}
+  try { worker && worker.terminate(); } catch {}
   worker = null;
 }
 
@@ -93,7 +93,7 @@ async function heavyQuery(fn, ...args) {
         // REL-06a：超时先终止 worker——同步查询不可中断，唯有 terminate 能杀死
         // 僵尸查询，避免它与主线程 fallback 双执行。worker=null 后下次查询 respawn；
         // 其余 pending 由 terminate 触发的 exit→failAll 一并回退。
-        try { worker && worker.terminate(); } catch (_) {}
+        try { worker && worker.terminate(); } catch {}
         worker = null;
         reject(new Error('heavy query timeout'));
       }, QUERY_TIMEOUT_MS);

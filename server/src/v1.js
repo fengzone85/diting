@@ -218,7 +218,7 @@ router.get('/nodes/:uuid/records', (req, res) => {
           records.push({ task_id: label, time: new Date(r.ts).toISOString(), value: val.ms });
         }
       });
-    } catch (_) {}
+    } catch {}
   });
   ok(res, { uuid: a.id, records: records.slice(0, maxCount) });
 });

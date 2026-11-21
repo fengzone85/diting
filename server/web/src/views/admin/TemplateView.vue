@@ -24,7 +24,7 @@ interface UiSettings {
   glass_custom?: { dark?: string[]; light?: string[] };
   background_dark?: BgCfg;
   background_light?: BgCfg;
-  background?: any; // 旧版单背景字段兼容
+  background?: Partial<BgCfg>; // 旧版单背景字段兼容
   color_vision?: string;
   card_scheme?: string;
   card_size?: string;
@@ -210,13 +210,13 @@ const tagsText = computed({
   },
 });
 
-function normalizeBg(b: any): BgCfg {
+function normalizeBg(b?: Partial<BgCfg> | null): BgCfg {
   return {
-    enabled: !!(b && b.enabled),
-    type: (b && b.type === 'video') ? 'video' : 'image',
-    url: (b && b.url) || '',
-    blur: Number((b && b.blur) ?? 8),
-    overlay: Number((b && b.overlay) ?? 50),
+    enabled: !!b?.enabled,
+    type: b?.type === 'video' ? 'video' : 'image',
+    url: b?.url || '',
+    blur: Number(b?.blur ?? 8),
+    overlay: Number(b?.overlay ?? 50),
   };
 }
 

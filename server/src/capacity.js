@@ -35,7 +35,7 @@ try {
     skipped = Number(st.skipped) || 0;
     persistedSkipped = skipped;
   }
-} catch (e) { /* 配置损坏按首次处理 */ }
+} catch { /* 配置损坏按首次处理 */ }
 
 function resolveLimits() {
   const ui = db.getUiSettings();
@@ -64,9 +64,9 @@ function computeLevel({ rows, bytes, max_rows, max_bytes }) {
 
 function measure() {
   let rows = 0;
-  try { rows = db.countMetricsRows(); } catch (e) { rows = 0; }
+  try { rows = db.countMetricsRows(); } catch { rows = 0; }
   let bytes = 0;
-  try { bytes = fs.statSync(db.db.name).size; } catch (e) { bytes = 0; }
+  try { bytes = fs.statSync(db.db.name).size; } catch { bytes = 0; }
   return { rows, bytes };
 }
 
@@ -82,7 +82,7 @@ function persistState(s) {
       notified_level: lastNotifiedLevel
     }));
     persistedSkipped = skipped;
-  } catch (e) { /* 只读/损坏库：状态丢失不影响停写判断（内存仍在） */ }
+  } catch { /* 只读/损坏库：状态丢失不影响停写判断（内存仍在） */ }
 }
 
 function notifyLevel(level, s) {

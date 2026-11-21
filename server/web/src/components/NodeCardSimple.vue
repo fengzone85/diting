@@ -207,12 +207,14 @@ const avgLoss = computed(() => {
   return ((failed / sampled.length) * 100).toFixed(1) + '%';
 });
 
+type AgentWithTags = Agent & { tags?: unknown };
+
 const tags = computed(() => {
-  const a = props.agent;
+  const a = props.agent as AgentWithTags;
   const result: string[] = [];
-  if ((a as any).tags) {
+  if (a.tags) {
     try {
-      const parsed = typeof (a as any).tags === 'string' ? JSON.parse((a as any).tags) : (a as any).tags;
+      const parsed = typeof a.tags === 'string' ? JSON.parse(a.tags) : a.tags;
       if (Array.isArray(parsed)) {
         for (const tag of parsed) {
           if (typeof tag === 'string') result.push(tag);

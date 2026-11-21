@@ -151,7 +151,7 @@ test('篡改 cookie payload ⇒ 校验失败；合法签名可解出 exp（Max-A
   const cookie = auth.signSession({ role: 'admin', exp, via: 'password' });
   const ok = auth.verifySession(cookie);
   assert.ok(ok && ok.exp === exp && ok.via === 'password');
-  const [body, sig] = cookie.split('.');
+  const [, sig] = cookie.split('.');
   const tamperedBody = Buffer.from(JSON.stringify({ role: 'admin', exp: exp + 999999, via: 'password' })).toString('base64url');
   assert.equal(auth.verifySession(`${tamperedBody}.${sig}`), null, '篡改 exp 必须校验失败');
 });

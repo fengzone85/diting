@@ -36,7 +36,7 @@ function makeDb(name, rows = 1) {
 }
 
 test.after(() => {
-  try { fs.rmSync(DIR, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
 test('合法库：deep integrity_check 通过，列表标 ok', () => {

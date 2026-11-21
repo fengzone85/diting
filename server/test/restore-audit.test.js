@@ -152,7 +152,6 @@ test('GET /api/admin/restore-audit：返回最近一次报告，未鉴权 401', 
   process.env.PORT = '0';
   process.env.ADMIN_ALLOW_HTTP = '1';
   process.env.ADMIN_TOKEN = 'restore-audit-admin-token-0123456789ab';
-  // eslint-disable-next-line global-require
   const { app, server } = require('../server');
   const request = require('supertest');
   try {

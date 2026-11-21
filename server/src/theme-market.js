@@ -135,7 +135,7 @@ function parseCatalog(json, source) {
   // 相对地址按 catalog 自身 URL 解析为绝对地址（download 直接影响安装，preview/主页仅展示）。
   const abs = (v) => {
     if (typeof v !== 'string' || !v) return '';
-    try { return new URL(v, source.url).toString(); } catch (e) { return ''; }
+    try { return new URL(v, source.url).toString(); } catch { return ''; }
   };
   const list = Array.isArray(json) ? json
     : (json && Array.isArray(json.themes)) ? json.themes
@@ -176,7 +176,7 @@ async function fetchCatalog(source, force = false) {
   const buf = await safeDownload(url, { maxBytes: CATALOG_MAX_BYTES, timeoutMs: CATALOG_TIMEOUT_MS });
   let json;
   try { json = JSON.parse(buf.toString('utf8')); }
-  catch (e) { throw fail('catalog_invalid_json'); }
+  catch { throw fail('catalog_invalid_json'); }
   const data = { themes: parseCatalog(json, source), fetched_at: now };
   cache.set(url, { data, expiresAt: now + CACHE_TTL_MS });
   return data;
@@ -203,7 +203,7 @@ async function listMarketThemes(force = false) {
 // ---- GitHub release ---------------------------------------------------------
 function parseGitHubRepo(urlStr) {
   let u;
-  try { u = new URL(urlStr); } catch (e) { return null; }
+  try { u = new URL(urlStr); } catch { return null; }
   if (u.hostname !== 'github.com' && u.hostname !== 'www.github.com') return null;
   const seg = u.pathname.split('/').filter(Boolean);
   if (seg.length < 2) return null;
@@ -230,7 +230,7 @@ async function resolveDownloadUrl(urlStr) {
   });
   let rel;
   try { rel = JSON.parse(buf.toString('utf8')); }
-  catch (e) { throw fail('github_invalid_json'); }
+  catch { throw fail('github_invalid_json'); }
   const asset = (Array.isArray(rel.assets) ? rel.assets : [])
     .find((a) => a && typeof a.browser_download_url === 'string' && /\.zip(\?|$)/i.test(a.browser_download_url));
   if (!asset) throw fail('no_zip_asset');
@@ -314,9 +314,9 @@ function readEntryData(entry, limit) {
  */
 function extractZip(buf, dest) {
   let zip;
-  try { zip = new AdmZip(buf); } catch (e) { throw fail('theme_zip_invalid'); }
+  try { zip = new AdmZip(buf); } catch { throw fail('theme_zip_invalid'); }
   let entries;
-  try { entries = zip.getEntries(); } catch (e) { throw fail('theme_zip_invalid'); }
+  try { entries = zip.getEntries(); } catch { throw fail('theme_zip_invalid'); }
   if (!entries.length) throw fail('theme_zip_empty');
   if (entries.length > ZIP_MAX_FILES) throw fail('theme_zip_too_many_files');
 
@@ -417,7 +417,7 @@ async function installFromZip(buf, expect = {}) {
       const dest = path.join(theme.INSTALLED_THEMES_DIR, manifest.short);
       fs.mkdirSync(theme.INSTALLED_THEMES_DIR, { recursive: true });
       let existing = false;
-      try { existing = fs.statSync(dest).isDirectory(); } catch (e) { existing = false; }
+      try { existing = fs.statSync(dest).isDirectory(); } catch { existing = false; }
       if (existing) theme.backupTheme(manifest.short);
 
       // 原子替换（REL-13）：tmp 在 os.tmpdir()，可能与 themes 跨文件系统（rename EXDEV），
@@ -431,15 +431,15 @@ async function installFromZip(buf, expect = {}) {
         if (existing) { fs.renameSync(dest, old); movedOld = true; }
         fs.renameSync(staging, dest);
       } catch (e) {
-        try { fs.rmSync(staging, { recursive: true, force: true }); } catch (e2) { /* 忽略 */ }
-        if (movedOld) { try { fs.renameSync(old, dest); } catch (e2) { /* 忽略 */ } }
+        try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* 忽略 */ }
+        if (movedOld) { try { fs.renameSync(old, dest); } catch { /* 忽略 */ } }
         throw e;
       }
-      if (movedOld) { try { fs.rmSync(old, { recursive: true, force: true }); } catch (e) { /* 忽略 */ } }
+      if (movedOld) { try { fs.rmSync(old, { recursive: true, force: true }); } catch { /* 忽略 */ } }
       theme.rebuildNonceSet();
       return theme.getTheme(manifest.short);
     } finally {
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ }
     }
   });
 }
@@ -480,7 +480,7 @@ async function importFromURL(urlStr, preview = false) {
       verifyCompatibility(manifest);
       return { manifest, exists: !!theme.resolveThemeDir(manifest.short) };
     } finally {
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 忽略 */ }
     }
   }
 

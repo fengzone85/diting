@@ -58,7 +58,7 @@ const MAX_TTL_MIN = 1440;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
 function ensureDir(dir) {
-  try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { /* 目录不可写时由调用方报错 */ }
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* 目录不可写时由调用方报错 */ }
 }
 
 // windows 平台的二进制带 .exe，其余不带扩展名（Linux 二进制不需要）。
@@ -100,9 +100,9 @@ function saveArtifact({ buf, platform, sourceNote }) {
   try {
     fs.writeFileSync(tmp, buf, { mode: 0o600 });
     fs.renameSync(tmp, full);
-    try { fs.chmodSync(full, 0o600); } catch (e) { /* 某些文件系统不支持 chmod */ }
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (e2) { /* 忽略 */ }
+    try { fs.chmodSync(full, 0o600); } catch { /* 某些文件系统不支持 chmod */ }
+  } catch {
+    try { fs.unlinkSync(tmp); } catch { /* 忽略 */ }
     return { ok: false, code: 500, error: 'artifact_write_failed' };
   }
   const id = 'art_' + crypto.randomBytes(6).toString('hex');
@@ -127,7 +127,7 @@ function deleteArtifact(id) {
   const full = path.join(ARTIFACT_DIR, a.filename);
   // 二次确认目录（文件名虽由服务端生成，仍做一次边界检查）。
   if (path.dirname(path.resolve(full)) === path.resolve(ARTIFACT_DIR)) {
-    try { fs.unlinkSync(full); } catch (e) { /* 文件可能已不在 */ }
+    try { fs.unlinkSync(full); } catch { /* 文件可能已不在 */ }
   }
   db.deleteAgentArtifact(id);
   return { ok: true, id: a.id };
@@ -148,7 +148,7 @@ function signToken(pkgId, expiresAt) {
 function verifyToken(pkgId, expiresAt, token) {
   const expect = Buffer.from(signToken(pkgId, expiresAt), 'hex');
   let given;
-  try { given = Buffer.from(String(token || ''), 'hex'); } catch (e) { return false; }
+  try { given = Buffer.from(String(token || ''), 'hex'); } catch { return false; }
   if (given.length !== expect.length || given.length === 0) return false;
   return crypto.timingSafeEqual(expect, given);
 }
@@ -180,12 +180,12 @@ function pruneExpired() {
     for (const r of db.listExpiredDistributions(fileCutoff)) {
       const full = path.join(PKG_DIR, r.filename);
       if (path.dirname(path.resolve(full)) === path.resolve(PKG_DIR)) {
-        try { fs.unlinkSync(full); } catch (e) { /* 忽略 */ }
+        try { fs.unlinkSync(full); } catch { /* 忽略 */ }
       }
     }
-  } catch (e) { /* 忽略 */ }
+  } catch { /* 忽略 */ }
   // 清行用 now（不带 24h 宽限），与取文件 cutoff 不合并，保持原口径。
-  try { db.pruneAgentDistributions(now); } catch (e) { /* 忽略 */ }
+  try { db.pruneAgentDistributions(now); } catch { /* 忽略 */ }
   for (const [k, v] of usedPackages) if (v < now) usedPackages.delete(k);
 }
 
@@ -453,7 +453,7 @@ async function fetchOfficialBinary(os, arch) {
   try {
     const out = await relay.prepare(key, true);
     officialSha = out.buf.toString('utf8').trim().split(/\s+/)[0].toLowerCase();
-  } catch (e) {
+  } catch {
     officialSha = ''; // 老 release 可能没有 .sha256 资产
   }
   if (officialSha) {
@@ -499,7 +499,7 @@ async function createPackage(opts = {}) {
       return { ok: false, code: 400, error: 'artifact_platform_mismatch', artifact_platform: art.platform };
     }
     const full = path.join(ARTIFACT_DIR, art.filename);
-    try { binary = fs.readFileSync(full); } catch (e) { return { ok: false, code: 404, error: 'artifact_file_missing' }; }
+    try { binary = fs.readFileSync(full); } catch { return { ok: false, code: 404, error: 'artifact_file_missing' }; }
     binarySha = art.sha256;
     sourceRef = art.id;
     sourceNote = art.source_note || '';
@@ -601,7 +601,7 @@ async function createPackage(opts = {}) {
   try {
     fs.writeFileSync(full, payload, { mode: 0o600 });
     fs.chmodSync(full, 0o600);
-  } catch (e) {
+  } catch {
     return { ok: false, code: 500, error: 'package_write_failed' };
   }
   db.insertAgentDistribution({

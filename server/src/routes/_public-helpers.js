@@ -18,7 +18,7 @@ function shortHost(h) {
 
 // 把 metrics.disks（TEXT 存储的 JSON 数组）安全解析为数组，供前端多盘渲染。
 function parseDisks(s) {
-  try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  try { const a = JSON.parse(s); return Array.isArray(a) ? a : []; } catch { return []; }
 }
 
 // ---- Admin: metrics time-series ----
@@ -39,7 +39,7 @@ function getUptime30d() {
   if (now - uptimeCache.ts < UPTIME_CACHE_TTL) return uptimeCache.data;
   try {
     uptimeCache = { ts: now, data: db.onlineUptimeAll(now - 30 * 86400000, now) };
-  } catch (e) {
+  } catch {
     // 老库无 online_sessions 时不影响公开列表主流程
     uptimeCache = { ts: now, data: {} };
   }

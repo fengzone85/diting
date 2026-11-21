@@ -48,11 +48,11 @@ function sanitizeExpected(raw) {
 // 读期望版本（存 admin_config，值是 JSON 串）。库中无值/值损坏 → 空期望（不做对照）。
 function readExpected(db) {
   let raw = null;
-  try { raw = db.getConfig(EXPECTED_CONFIG_KEY); } catch (e) { raw = null; }
+  try { raw = db.getConfig(EXPECTED_CONFIG_KEY); } catch { raw = null; }
   if (!raw) return { version: '', sha: '' };
   try {
     return sanitizeExpected(JSON.parse(raw));
-  } catch (e) {
+  } catch {
     return { version: '', sha: '' };
   }
 }

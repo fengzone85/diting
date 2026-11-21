@@ -305,7 +305,7 @@ function validateThemeMarketSource(input) {
   if (!name) return { ok: false, error: 'name_required' };
   if (typeof b.url !== 'string' || b.url.length > 2048) return { ok: false, error: 'url_invalid' };
   let u;
-  try { u = new URL(b.url); } catch (e) { return { ok: false, error: 'url_invalid' }; }
+  try { u = new URL(b.url); } catch { return { ok: false, error: 'url_invalid' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'url_scheme_invalid' };
   if (u.username || u.password) return { ok: false, error: 'url_userinfo_forbidden' };
   if (!u.hostname) return { ok: false, error: 'url_invalid' };

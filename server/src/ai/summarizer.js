@@ -98,7 +98,7 @@ function summarizeAgent(agent, rows, opts) {
   try {
     const obs = db.observedIntervalSec(agent.id);
     if (obs) effIntervalSec = obs;
-  } catch (e) { /* 观测失败用回退值 */ }
+  } catch { /* 观测失败用回退值 */ }
   const offlineSec = Number(o.offlineSec) || 60;
   const cpuAlert = Number(o.cpuAlert) || 90;
   const memAlert = Number(o.memAlert) || 90;

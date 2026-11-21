@@ -66,7 +66,6 @@ test('行为：.env 明文 ADMIN_TOKEN → 库中 sha256 哈希', () => {
   assert.strictEqual(r.status, 0, r.stderr);
   assert.match(r.stdout, /已把 \.env 的管理员 Token 迁入数据库/, '应打印迁移成功');
 
-  const db = require(path.join(SERVER_DIR, 'src', 'db'));
   const D = require('better-sqlite3');
   const row = new D(dbPath).prepare("SELECT value FROM admin_config WHERE key='admin_token_hash'").get();
   assert.ok(row, '库中应出现 admin_token_hash');

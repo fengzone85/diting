@@ -42,7 +42,7 @@ router.get('/admin/notify/migration-status', adminOrReadonly, (req, res) => {
 const { resolveRole } = require('../auth');
 
 function channelHost(u) {
-  try { return new URL(u).host; } catch (e) { return ''; }
+  try { return new URL(u).host; } catch { return ''; }
 }
 
 // 只读视图：只留清单字段 + URL 主机名（不给完整 URL/headers/token）

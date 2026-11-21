@@ -80,7 +80,7 @@ router.get('/admin/backups/:name/download', adminOnly, agentScope, agentGlobalOn
   const full = backups.resolveBackupFile(req.params.name);
   if (!full) return res.status(400).json({ error: 'invalid backup name' });
   let st;
-  try { st = fs.statSync(full); } catch (e) { return res.status(404).json({ error: 'not found' }); }
+  try { st = fs.statSync(full); } catch { return res.status(404).json({ error: 'not found' }); }
   if (!st.isFile()) return res.status(404).json({ error: 'not found' });
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Length', String(st.size));
@@ -126,12 +126,12 @@ router.post('/admin/backups', adminOnly, agentScope, agentGlobalOnly, async (req
       return res.status(409).json({ error: 'backup name already exists, retry in a second' });
     }
     await db.backupTo(full);
-    try { fs.chmodSync(full, 0o600); } catch (e) { /* 权限收紧失败不影响备份 */ }
+    try { fs.chmodSync(full, 0o600); } catch { /* 权限收紧失败不影响备份 */ }
     const st = fs.statSync(full);
     res.json({ ok: true, name, size_bytes: st.size, mtime: st.mtimeMs });
     auditLog(req, 'create_backup', `name=${name} size=${st.size}`);
   } catch (e) {
-    try { fs.unlinkSync(full); } catch (err) { /* 清理半成品 */ }
+    try { fs.unlinkSync(full); } catch { /* 清理半成品 */ }
     res.status(500).json({ error: (e && e.message) || 'backup failed' });
   }
 });

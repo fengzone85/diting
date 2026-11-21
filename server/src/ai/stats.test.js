@@ -12,7 +12,6 @@ const assert = require('node:assert');
 const { stats, overThresholdMinutes, diskFullDays, diskTrend, memSlope, computeSignals, baselineRisk, clampRisk, compareWindows, aggregateProbes, trafficInfo, costInfo } = require('./stats');
 
 const H = 3600000;          // 1h 桶
-const DAY = 24 * H;
 
 // 按小时生成桶序列（升序），pct 由 fn(hourIndex) 给出
 function series(hours, fn) {

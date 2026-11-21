@@ -60,12 +60,12 @@ function normalizeAuthor(author) {
 
 function readManifestFile(fp) {
   let st;
-  try { st = fs.statSync(fp); } catch (e) { return null; }
+  try { st = fs.statSync(fp); } catch { return null; }
   if (!st.isFile() || st.size > MAX_MANIFEST_BYTES) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(fp, 'utf8'));
     return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 
 /**
@@ -128,10 +128,10 @@ const isValidShort = (short) => typeof short === 'string' && SHORT_RE.test(short
 function detectRootDir(dir) {
   try {
     if (fs.statSync(path.join(dir, 'index.html')).isFile()) return '';
-  } catch (e) { /* 继续探测 dist/ */ }
+  } catch { /* 继续探测 dist/ */ }
   try {
     if (fs.statSync(path.join(dir, 'dist', 'index.html')).isFile()) return 'dist';
-  } catch (e) { /* 无 dist/ */ }
+  } catch { /* 无 dist/ */ }
   return '';
 }
 
@@ -142,13 +142,13 @@ function resolveThemeDir(short) {
     if (fs.statSync(installed).isDirectory()) {
       return { dir: installed, bundled: false, rootDir: detectRootDir(installed) };
     }
-  } catch (e) { /* 未安装 */ }
+  } catch { /* 未安装 */ }
   const bundled = path.join(BUNDLED_THEMES_DIR, short);
   try {
     if (fs.statSync(bundled).isDirectory()) {
       return { dir: bundled, bundled: true, rootDir: detectRootDir(bundled) };
     }
-  } catch (e) { /* 非内置 */ }
+  } catch { /* 非内置 */ }
   return null;
 }
 
@@ -170,7 +170,7 @@ function resolveThemeAssets(short) {
 
 function hasIndexHtml(dir, rootDir = '') {
   const base = rootDir ? path.join(dir, rootDir) : dir;
-  try { return fs.statSync(path.join(base, 'index.html')).isFile(); } catch (e) { return false; }
+  try { return fs.statSync(path.join(base, 'index.html')).isFile(); } catch { return false; }
 }
 
 /**
@@ -184,7 +184,7 @@ function listInstalledThemes() {
 
   const scan = (root, bundled) => {
     let entries = [];
-    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return; }
     for (const ent of entries) {
       if (!ent.isDirectory()) continue;
       const short = ent.name;
@@ -194,7 +194,7 @@ function listInstalledThemes() {
       const manifest = readManifest(dir, short, bundled);
       if (!manifest) continue;
       let installedAt = 0;
-      try { installedAt = fs.statSync(dir).mtimeMs; } catch (e) { /* 忽略 */ }
+      try { installedAt = fs.statSync(dir).mtimeMs; } catch { /* 忽略 */ }
       seen.set(short, {
         ...manifest,
         installed_at: Math.round(installedAt),
@@ -246,7 +246,7 @@ function setEnabled(short) {
 }
 
 function rmrf(target) {
-  try { fs.rmSync(target, { recursive: true, force: true }); } catch (e) { /* 忽略 */ }
+  try { fs.rmSync(target, { recursive: true, force: true }); } catch { /* 忽略 */ }
 }
 
 /**
@@ -270,7 +270,7 @@ function backupTheme(short) {
       .filter((n) => n.startsWith(prefix) && BACKUP_RE.test(n))
       .map((n) => ({ n, ts: Number(n.slice(prefix.length)) || 0 }))
       .sort((a, b) => b.ts - a.ts);
-  } catch (e) { /* 忽略 */ }
+  } catch { /* 忽略 */ }
   for (const old of backups.slice(3)) rmrf(path.join(BACKUP_DIR, old.n));
   return name;
 }
@@ -287,7 +287,7 @@ function restoreBackup(short, backupName) {
   const src = path.join(BACKUP_DIR, name);
   try {
     if (!fs.statSync(src).isDirectory()) throw new Error('not a dir');
-  } catch (e) {
+  } catch {
     throw Object.assign(new Error('backup not found'), { code: 'theme_backup_not_found' });
   }
   const dest = path.join(INSTALLED_THEMES_DIR, short);
@@ -311,10 +311,10 @@ function listBackups(short) {
       .map((n) => ({
         name: n,
         created_at: Number(n.slice(prefix.length)) || 0,
-        size: (() => { try { return fs.statSync(path.join(BACKUP_DIR, n)).size; } catch (e) { return 0; } })()
+        size: (() => { try { return fs.statSync(path.join(BACKUP_DIR, n)).size; } catch { return 0; } })()
       }))
       .sort((a, b) => b.created_at - a.created_at);
-  } catch (e) { return []; }
+  } catch { return []; }
 }
 
 /** 读取目录下的原始 manifest（严格校验场景需要未归一化的字段）。 */
@@ -336,7 +336,7 @@ function deleteTheme(short) {
   }
   const installedDir = path.join(INSTALLED_THEMES_DIR, short);
   let exists = false;
-  try { exists = fs.statSync(installedDir).isDirectory(); } catch (e) { exists = false; }
+  try { exists = fs.statSync(installedDir).isDirectory(); } catch { exists = false; }
   if (!exists) {
     const bundled = resolveThemeDir(short);
     throw Object.assign(
@@ -366,7 +366,7 @@ function rebuildNonceSet() {
   themeNonceSet.clear();
   const scan = (root, bundled) => {
     let entries = [];
-    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (e) { return; }
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return; }
     for (const ent of entries) {
       if (!ent.isDirectory() || BACKUP_RE.test(ent.name) || !isValidShort(ent.name)) continue;
       const m = readManifest(path.join(root, ent.name), ent.name, bundled);

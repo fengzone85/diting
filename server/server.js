@@ -21,7 +21,7 @@ const ai = require('./src/ai');
 const rollup = require('./src/rollup');
 // F8.6：恢复后一致性审查（diting.sh 在替换数据库前写入 pending 标记）
 const restoreAudit = require('./src/restore-audit');
-const { ipWhitelist, resolveRole, SESSION_TTL } = require('./src/auth');
+const { ipWhitelist, SESSION_TTL } = require('./src/auth');
 const { rateLimitTouch } = require('./src/ratelimit');
 const { sanitizeCss, validateManifest, mergeThemeConfig } = require('./src/validate');
 const { hasAdminToken, verifyAdminToken, hashAdminToken, tokenIssue, MIN_LEN } = require('./src/token-policy');
@@ -45,21 +45,21 @@ const APP_VERSION = (() => {
       { cwd: __dirname, encoding: 'utf8' },
     ).trim();
     if (tag) return tag.replace(/^v/, '');
-  } catch (e) {}
+  } catch {}
   // 运行目录分离：无 .git 的运行副本由部署写入 version.txt（git describe 转写，保留 v 前缀）
   try {
     const v = fs.readFileSync(path.join(__dirname, 'version.txt'), 'utf-8').trim();
     if (v) return v.replace(/^v/, '');
-  } catch (e) {}
-  try { return require('./package.json').version || '1.0.0'; } catch (e) { return '1.0.0'; }
+  } catch {}
+  try { return require('./package.json').version || '1.0.0'; } catch { return '1.0.0'; }
 })();
 const APP_BUILD_TIME = (() => {
   try {
     const pkg = require('./package.json');
     if (pkg._build_time && pkg._build_time !== 'BUILD_TIME_PLACEHOLDER') return pkg._build_time;
-  } catch (e) {}
+  } catch {}
   // 回退：读取构建时间文件（diting.sh 生成）
-  try { return fs.readFileSync(path.join(__dirname, 'build_time.txt'), 'utf-8').trim(); } catch (e) {}
+  try { return fs.readFileSync(path.join(__dirname, 'build_time.txt'), 'utf-8').trim(); } catch {}
   return 'unknown';
 })();
 // 构建 commit 短 hash：env GIT_HASH → package.json._git_hash → git_hash.txt（diting.sh 生成）
@@ -69,11 +69,11 @@ const APP_HASH = (() => {
   try {
     const pkg = require('./package.json');
     if (pkg._git_hash) return pkg._git_hash;
-  } catch (e) {}
-  try { return fs.readFileSync(path.join(__dirname, 'git_hash.txt'), 'utf-8').trim(); } catch (e) {}
+  } catch {}
+  try { return fs.readFileSync(path.join(__dirname, 'git_hash.txt'), 'utf-8').trim(); } catch {}
   try {
     return require('child_process').execSync('git rev-parse --short HEAD', { cwd: __dirname, encoding: 'utf8' }).trim();
-  } catch (e) {}
+  } catch {}
   return '-';
 })();
 
@@ -328,7 +328,6 @@ app.use('/api', (req, res, next) => {
 // 注意：必须注册在 compat.router 之前——此前本路由被 compat 的 /version 静默
 // 遮蔽成为死代码（那条只回静态占位符，从不泄露真实版本，但也从未生效）。
 app.get('/api/version', (req, res) => {
-  const role = resolveRole(req);
   // 2026-10-21 用户指定：页脚公开显示「版本 (commit)」与构建时间，
   // 匿名也返回完整版本号/hash（原先仅主版本号的 G5 收敛被显式放开）。
   const payload = { version: APP_VERSION, build_time: APP_BUILD_TIME, hash: APP_HASH };
@@ -381,7 +380,7 @@ function readThemeLanguageCookie(req) {
   const m = /(?:^|;\s*)language=([^;]+)/.exec(raw);
   if (!m) return '';
   let v = m[1];
-  try { v = decodeURIComponent(v); } catch (_) { /* 非法编码时保留原值 */ }
+  try { v = decodeURIComponent(v); } catch { /* 非法编码时保留原值 */ }
   v = v.trim().replace(/_/g, '-');
   if (v.length < 2 || v.length > 32 || !/^[A-Za-z0-9-]+$/.test(v)) return '';
   return v;
@@ -416,7 +415,7 @@ function applyOfficialHtmlReplacements(html, req) {
 
 function adaptThemeHtml(html, assetDir, urlBase, req) {
   let entries;
-  try { entries = new Set(fs.readdirSync(assetDir)); } catch (_) { entries = new Set(); }
+  try { entries = new Set(fs.readdirSync(assetDir)); } catch { entries = new Set(); }
   const rewritten = html.replace(/\b(src|href)="(\/(?!\/)[^"]*)"/g, (match, attr, url) => {
     const rest = url.slice(1);
     const seg = rest.split(/[/?#]/)[0];
@@ -454,7 +453,7 @@ function serveFileStream(res, fp) {
     try {
       if (res.headersSent) res.destroy();
       else res.status(500).end();
-    } catch (_) { /* 响应已销毁时忽略 */ }
+    } catch { /* 响应已销毁时忽略 */ }
   });
   return stream.pipe(res);
 }
@@ -793,9 +792,9 @@ const wsHits = new Map();      // ip -> { reset, count }
 // 现提升到模块级，全局每 5s 只构造一次，所有消费者（WS 广播 + SSE 各自 write）复用。
 let publicSnapStr = '';
 setInterval(() => {
-  try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch (_) { /* 保留上次快照 */ }
+  try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch { /* 保留上次快照 */ }
 }, 5000).unref?.();
-try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch (_) { /* 首连前构造失败则等下次定时器 */ }
+try { publicSnapStr = JSON.stringify(compat.snapshot()); } catch { /* 首连前构造失败则等下次定时器 */ }
 function wsClientIp(req) {
   // 默认只用 TCP 源地址，不读 X-Forwarded-For——XFF 可被直连攻击者伪造，
   // 用于绕过 WebSocket 并发/速率限制。req.socket.remoteAddress 是真实连接源，不可伪造。
@@ -833,13 +832,13 @@ try {
     // 会升级为 uncaughtException 直接崩进程；统一吞掉，由 close 事件收尾。
     ws.on('error', () => { /* 超限 1009 / 协议错误已由 close 收尾 */ });
     if (!db.getUiSettings().public_enabled) {
-      try { ws.close(1008, 'public disabled'); } catch (_) {}
+      try { ws.close(1008, 'public disabled'); } catch {}
       return;
     }
     const ip = wsClientIp(req);
     const set = wsRateLimit(ip);
     if (!set) {
-      try { ws.close(1008, 'rate limited'); } catch (_) {}
+      try { ws.close(1008, 'rate limited'); } catch {}
       return;
     }
     set.add(ws);
@@ -852,7 +851,7 @@ try {
   const clientsBroadcastTimer = setInterval(() => {
     if (!publicSnapStr) return;
     for (const c of clientsSockets) {
-      try { c.send(publicSnapStr); } catch (_) {}
+      try { c.send(publicSnapStr); } catch {}
     }
   }, 5000);
   if (clientsBroadcastTimer.unref) clientsBroadcastTimer.unref();
@@ -863,7 +862,7 @@ try {
     const set = attachCommon(ws, req);
     if (!set) return;
     // 发送共享快照字符串（零序列化成本）；空字符串表示尚未构造成功，跳过本轮
-    const send = () => { if (publicSnapStr) { try { ws.send(publicSnapStr); } catch (_) {} } };
+    const send = () => { if (publicSnapStr) { try { ws.send(publicSnapStr); } catch {} } };
     clientsSockets.add(ws);
     send();
     ws.on('message', () => send());
@@ -880,12 +879,12 @@ try {
   const statusSnapTimer = setInterval(() => {
     try {
       statusSnapStr = JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null });
-    } catch (_) { /* 保留上次快照 */ }
+    } catch { /* 保留上次快照 */ }
   }, 5000);
   if (statusSnapTimer.unref) statusSnapTimer.unref();
   try {
     statusSnapStr = JSON.stringify({ jsonrpc: '2.0', result: compat.getNodesLatestStatus(), id: null });
-  } catch (_) { /* 首连前构造失败时保持空串，下次定时器再试 */ }
+  } catch { /* 首连前构造失败时保持空串，下次定时器再试 */ }
 
   // /api/rpc2：社区主题 JSON-RPC 网关
   wss.on('connection', (ws, req, pathname) => {
@@ -893,7 +892,7 @@ try {
     const set = attachCommon(ws, req);
     if (!set) return;
 
-    const pushStatus = () => { if (statusSnapStr) { try { ws.send(statusSnapStr); } catch (_) {} } };
+    const pushStatus = () => { if (statusSnapStr) { try { ws.send(statusSnapStr); } catch {} } };
     pushStatus();
 
     // E1：每连接令牌桶（懒补充，无定时器）。所有入站帧都计费——含非法 JSON，
@@ -910,21 +909,21 @@ try {
       if (rpcTokens < 1) {
         rpcViolations++;
         if (rpcViolations > WS_RPC_MAX_VIOLATIONS) {
-          try { ws.close(1008, 'rate limited'); } catch (_) {}
+          try { ws.close(1008, 'rate limited'); } catch {}
           return;
         }
         // id 未知（尚未解析）→ null，符合 JSON-RPC 对解析前错误的约定；
         // 主题客户端把 id=null 当推送忽略，不会误配对到正常请求。
-        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'rate limited' }, id: null })); } catch (_) {}
+        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message: 'rate limited' }, id: null })); } catch {}
         return;
       }
       rpcTokens -= 1;
       let msg = null;
       try {
         msg = JSON.parse(data.toString());
-      } catch (err) {
+      } catch {
         // 非法 JSON：msg 未解析成功，用 null id 回复，不抛出以免崩进程。
-        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch (_) {}
+        try { ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null })); } catch {}
         return;
       }
       // 批量只在 HTTP POST /api/rpc2 支持：官方 WS 逐条 ReadJSON/WriteJSON，
@@ -932,19 +931,19 @@ try {
       if (Array.isArray(msg)) {
         try {
           ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'batch not supported over WebSocket' }, id: null }));
-        } catch (_) {}
+        } catch {}
         return;
       }
       // 审查 C4：handleRpc 异步化（内部重聚合走 worker 线程，不阻塞事件循环）
       Promise.resolve()
         .then(() => handleRpc(msg.method, msg.params))
         .then((result) => {
-          try { ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id })); } catch (_) {}
+          try { ws.send(JSON.stringify({ jsonrpc: '2.0', result, id: msg.id })); } catch {}
         })
         .catch((err) => {
           try {
             ws.send(JSON.stringify({ jsonrpc: '2.0', error: { code: err.code || -32603, message: err.message || 'error' }, id: msg ? msg.id : null }));
-          } catch (_) {}
+          } catch {}
         });
     });
 
@@ -961,7 +960,7 @@ try {
     if (q >= 0) pathname = pathname.slice(0, q);
     if (pathname !== '/api/clients' && pathname !== '/api/rpc2') {
       // 非主题 WS 路径：交由其他 handler（若有），否则关闭避免悬挂。
-      try { socket.destroy(); } catch (_) {}
+      try { socket.destroy(); } catch {}
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -1037,10 +1036,10 @@ try {
     const send = () => {
       if (closed || res.writableEnded || !publicSnapStr) return;
       let ok = false;
-      try { ok = res.write('data: ' + publicSnapStr + '\n\n'); } catch (_) { ok = false; }
+      try { ok = res.write('data: ' + publicSnapStr + '\n\n'); } catch { ok = false; }
       // 背压：write 返回 false 且 socket 缓冲超上限 → 客户端不读，断连自保
       if (!ok && res.socket && res.socket.writableLength > SSE_MAX_BUFFER_BYTES) {
-        try { res.destroy(); } catch (_) {}
+        try { res.destroy(); } catch {}
         cleanup();
       }
     };
@@ -1061,7 +1060,7 @@ try {
 // 所以这里放在文件末尾才能覆盖全部路由。
 // 覆盖三类：① express.json 非法 JSON ② 超过 16kb 负载 ③ asyncHandler 转发的 rejection / 同步 throw。
 // 安全约束：绝不把 err.stack / err.message 返回客户端（信息泄露），只落地日志。
-app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   console.error('[error]', req.method, req.originalUrl, '->', err && err.message);
   if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {

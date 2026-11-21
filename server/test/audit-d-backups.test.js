@@ -45,7 +45,6 @@ test('D3 恢复触发冒烟：trigger 完整可读、0600、无 tmp 残留', () 
 });
 
 test('D3 写中途崩溃：trigger 不被半截 JSON 污染，tmp 清理', () => {
-  const name1 = 'monitor_20260101_000000.db';
   const before = fs.readFileSync(backups.RESTORE_TRIGGER, 'utf8');
   const name2 = makeBackup('monitor_20260101_000001.db');
 

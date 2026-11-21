@@ -156,7 +156,7 @@ async function resolveTag() {
       const j = JSON.parse(r.body.toString('utf8'));
       if (j && typeof j.tag_name === 'string' && j.tag_name) tag = j.tag_name;
     }
-  } catch (e) { /* 回落 302 解析 */ }
+  } catch { /* 回落 302 解析 */ }
 
   // 2) 回落：HEAD latest/download/<已知资产>，从 Location 里解析 /download/<tag>/
   if (!tag) {
@@ -167,7 +167,7 @@ async function resolveTag() {
         const m = /\/releases\/download\/([^/]+)\//.exec(loc);
         if (m) tag = m[1];
       }
-    } catch (e) { /* 上游不可达 */ }
+    } catch { /* 上游不可达 */ }
   }
 
   if (tag) tagCache = { tag, at: now };
@@ -201,7 +201,7 @@ const defaultFetcher = async (url, timeoutMs, opts) => {
 
 // ---- 磁盘缓存（只存验签通过产物；键含具体 tag）--------------------------------
 function cacheDir() {
-  try { fs.mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 }); } catch (e) { /* 用默认 */ }
+  try { fs.mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 }); } catch { /* 用默认 */ }
   return CACHE_DIR;
 }
 
@@ -216,7 +216,7 @@ function cacheGet(tag, name) {
     const st = fs.statSync(p);
     if (!st.isFile()) return null;
     return fs.readFileSync(p);
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -238,7 +238,7 @@ function evictCache() {
         try {
           const st = fs.statSync(path.join(dir, f));
           return { f, size: st.size, mtime: st.mtimeMs };
-        } catch (e) { return null; }
+        } catch { return null; }
       })
       .filter(Boolean);
     let total = files.reduce((s, x) => s + x.size, 0);
@@ -249,9 +249,9 @@ function evictCache() {
       try {
         fs.unlinkSync(path.join(dir, x.f));
         total -= x.size;
-      } catch (e) { /* 忽略 */ }
+      } catch { /* 忽略 */ }
     }
-  } catch (e) { /* 缓存清理失败不影响服务 */ }
+  } catch { /* 缓存清理失败不影响服务 */ }
 }
 
 // ---- 主流程 -----------------------------------------------------------------
@@ -313,7 +313,7 @@ async function prepare(key, wantSha) {
   let ok = false;
   try {
     ok = crypto.verify(null, res.body, verifyKey, sigRes.body);
-  } catch (e) {
+  } catch {
     ok = false; // 公钥/签名格式异常一律视为不通过
   }
   if (!ok) throw new RelayError(422, 'signature_invalid');
