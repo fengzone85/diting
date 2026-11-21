@@ -126,8 +126,6 @@ const REPO_BASE = (process.env.AGENT_RAW_REPO || 'https://raw.githubusercontent.
 const AGENT_GIT_REPO = process.env.AGENT_GIT_REPO || 'https://github.com/fengzone85/diting.git#master:agent-go';
 const AGENT_INTERVAL_DEFAULT = Number(process.env.AGENT_INTERVAL || 20);
 
-// 受控端接入用的服务端公网地址：优先级为
-// ① UI 设置中「Agent 连接地址」② UI 设置中「项目网址」③ 环境变量 PUBLIC_URL ④ 从请求头自动推导。
 // 受控端接入用的服务端公网地址，优先级：
 // ① UI 设置中「Agent 连接地址」② UI 设置中「项目网址」③ 环境变量 PUBLIC_URL。
 // 未配置时返回 null（调用方必须中止业务流程），过去回退到 X-Forwarded-Host / Host 的兜底已被移除：

@@ -24,6 +24,11 @@ jobs:
             server/package-lock.json
             server/web/package-lock.json
 
+      # D 批：diting.sh 由 scripts/diting-src/*.sh 拼接生成。
+      # 重建后必须与仓库内文件零差异，否则说明有人手改了生成物。
+      - name: Check diting.sh is up to date
+        run: bash scripts/build-diting.sh && git diff --exit-code diting.sh
+
       # npm ci 而非 install：lockfile 与 package.json 不一致时直接失败，
       # 避免 CI 装到与本地不同的版本（install 会静默改写 lockfile）。
       - name: Install server dependencies

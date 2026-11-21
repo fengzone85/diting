@@ -1293,7 +1293,6 @@ const setAgentBuildTag = (id, tag) => {
   return stmts.setAgentBuildTag.run(t, id).changes > 0;
 };
 
-// 兜底默认值：process_count 为 0（= 未采集/老 agent 不带该字段）。
 // 先展开默认值再展开 m，保证 m 中的真实值覆盖默认。
 // insertMetric 列默认值：新列（interval 等）与老调用方（测试/脚本）字段不齐全时
 // 统一补默认，避免 better-sqlite3 "Missing named parameter" 直接抛错。
