@@ -7,6 +7,8 @@ const { toNode, toRealtime, publicOpen, publicSettings, getNodesLatestStatus } =
 const { METRIC_DEFINITIONS, queryMetrics, probeTaskId, PROBE_TASK_INTERVAL } = require('./compat-metrics');
 // 审查 C4：RPC 里的重聚合（getPingRecords 720h 全窗）移 worker 线程
 const { heavyQuery } = require('./heavy-db');
+// H-1：字段映射单一事实源（diting metrics 列 ↔ 兼容命名）。
+const { LOAD_FIELD_MAP, LOAD_TYPE_GROUPS, RECORD_FIELD_MAP } = require('./compat/field-map');
 
 const METHODS = new Map();
 // E2（SEC-03）：重查询方法集。走 heavyQuery worker 的方法（loadOne/probesOne/probesAll）
@@ -76,65 +78,8 @@ async function getProbeRecords({ hours = 1, maxCount = 100, entityId } = {}) {
   return records.slice(0, maxCount);
 }
 
-// diting 内部字段名 → 上游点分命名（用于 getRecords 字段映射）
-const RECORD_FIELD_MAP = {
-  'cpu.usage': 'cpu',
-  'load.average': 'load1',
-  'load.5': 'load5',
-  'load.15': 'load15',
-  'memory.used': 'mem_used',
-  'memory.total': 'mem_total',
-  'ram.used': 'mem_used',
-  'ram.total': 'mem_total',
-  // swap 此前误指向 mem_used/mem_total（与 compat-metrics 的 L-5 同类问题），主题的
-  // swap 曲线会画成内存曲线，此处一并修正。
-  'swap.used': 'swap_used',
-  'swap.total': 'swap_total',
-  'disk.used': 'disk_used',
-  'disk.total': 'disk_total',
-  'net.in.rate': 'net_rx_rate',
-  'net.out.rate': 'net_tx_rate',
-  'net.total.up': 'net_tx_month',
-  'net.total.down': 'net_rx_month',
-  'traffic.up': 'net_tx_month',
-  'traffic.down': 'net_rx_month',
-  'uptime': 'uptime',
-  'temperature': 'temp'
-};
-
-// 参考面板 getRecords(type=load) 的扁平字段名 → diting metrics 列名。
-// 主题 LoadChart 按 flatRecord 读取（cpu / ram / ram_total / load / temp / disk / net_in ...）。
-const LOAD_FIELD_MAP = {
-  cpu: 'cpu',
-  ram: 'mem_used',
-  ram_total: 'mem_total',
-  swap: 'swap_used',
-  swap_total: 'swap_total',
-  load: 'load1',
-  temp: 'temp',
-  disk: 'disk_used',
-  disk_total: 'disk_total',
-  net_in: 'net_rx_rate',
-  net_out: 'net_tx_rate',
-  net_total_up: 'net_tx_month',
-  net_total_down: 'net_rx_month',
-  process: 'process_count',
-  uptime: 'uptime'
-};
-// load_type → 需要输出的字段组（all = 全部；gpu 不采集，任何分组都不输出）
-const LOAD_TYPE_GROUPS = {
-  cpu: ['cpu'],
-  ram: ['ram', 'ram_total'],
-  swap: ['swap', 'swap_total'],
-  load: ['load'],
-  temp: ['temp'],
-  disk: ['disk', 'disk_total'],
-  network: ['net_in', 'net_out', 'net_total_up', 'net_total_down'],
-  process: ['process'],
-  connections: [],
-  gpu: [],
-  all: Object.keys(LOAD_FIELD_MAP)
-};
+// 字段映射（RECORD_FIELD_MAP / LOAD_FIELD_MAP / LOAD_TYPE_GROUPS）统一由
+// ./compat/field-map 提供；此处不再保留副本，避免再次出现改一处漏三处。
 
 // 审查 C4：异步化——内部 getProbeRecords/getMetricsRange 的重聚合走 worker 线程
 async function getRecords(params = {}, defaultHours = 1) {

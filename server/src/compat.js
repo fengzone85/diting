@@ -21,6 +21,11 @@ const validators = require('./validate');
 const themeStore = require('./theme');
 // 管理员手工录入的硬件档案（受控端不自动采集）：合成 cpu_name/arch/virtualization/gpu_name
 const hardware = require('./hardware-profile');
+// H-1：字段映射单一事实源。本文件不再内联 metrics 列名 ↔ 兼容字段名。
+const {
+  LOAD_FIELD_MAP, REST_LOAD_RECORD_ORDER, LATEST_STATUS_FIELDS,
+  LOAD_TYPE_GROUPS, REST_LOAD_TYPES, REALTIME_GROUPS, NODE_HISTORY_FIELDS
+} = require('./compat/field-map');
 
 // 在线判定与离线阈值统一走 src/online.js：取值链「节点覆盖 > 分组覆盖 > 全局」，
 // 与告警同源。改造前这里只看 OFFLINE_THRESHOLD_SEC env，一旦面板把阈值调成非默认值、
@@ -116,9 +121,9 @@ function toNode(a, showBusiness, octx, now, showHardware) {
     // 参考面板约定：无 GPU 时 gpu_name = 'None'（玻璃拟态设计据此整行隐藏）
     gpu_name: hw.gpu_name || 'None',
     region: flagEmoji(a.country),
-    mem_total: Number(m.mem_total) || 0,
-    swap_total: Number(m.swap_total) || 0,
-    disk_total: Number(m.disk_total) || 0,
+    mem_total: Number(m[LOAD_FIELD_MAP.ram_total]) || 0,
+    swap_total: Number(m[LOAD_FIELD_MAP.swap_total]) || 0,
+    disk_total: Number(m[LOAD_FIELD_MAP.disk_total]) || 0,
     weight: 0,
     // 业务字段：受 public_show_business 控制，关闭时回退到主题约定的「未设置」值
     price: show ? komariPrice(a) : -1,
@@ -152,24 +157,18 @@ function toNode(a, showBusiness, octx, now, showHardware) {
 // 由 snapshot()/recent 路由在组装时附加，避免重复计算。
 function toRealtime(m) {
   if (!m) return null;
-  return {
-    cpu: { usage: Number(m.cpu) || 0 },
-    ram: { total: Number(m.mem_total) || 0, used: Number(m.mem_used) || 0 },
-    swap: { total: Number(m.swap_total) || 0, used: Number(m.swap_used) || 0 },
-    load: { load1: Number(m.load1) || 0, load5: Number(m.load5) || 0, load15: Number(m.load15) || 0 },
-    disk: { total: Number(m.disk_total) || 0, used: Number(m.disk_used) || 0 },
-    network: {
-      up: Number(m.net_tx_rate) || 0,
-      down: Number(m.net_rx_rate) || 0,
-      totalUp: Number(m.net_tx_month) || 0,
-      totalDown: Number(m.net_rx_month) || 0
-    },
-    connections: { tcp: 0, udp: 0 },
-    uptime: Number(m.uptime) || 0,
-    process: Number(m.process_count) || 0,
-    message: '',
-    updated_at: new Date(m.ts).toISOString()
-  };
+  const out = {};
+  for (const [group, fields] of REALTIME_GROUPS) {
+    const nested = {};
+    for (const [key, col] of fields) nested[key] = Number(m[col]) || 0;
+    out[group] = nested;
+  }
+  out.connections = { tcp: 0, udp: 0 };
+  out.uptime = Number(m[LOAD_FIELD_MAP.uptime]) || 0;
+  out.process = Number(m[LOAD_FIELD_MAP.process]) || 0;
+  out.message = '';
+  out.updated_at = new Date(m.ts).toISOString();
+  return out;
 }
 
 function publicOpen() {
@@ -190,32 +189,18 @@ function getNodesLatestStatus() {
   for (const a of agents) {
     const m = db.getLatestMetric(a.id);
     if (!m) continue;
-    data[a.id] = {
+    const rec = {
       client: a.id,
-      time: new Date(m.ts).toISOString(),
-      cpu: Number(m.cpu) || 0,
-      gpu: 0,
-      ram: Number(m.mem_used) || 0,
-      ram_total: Number(m.mem_total) || 0,
-      swap: Number(m.swap_used) || 0,
-      swap_total: Number(m.swap_total) || 0,
-      load: Number(m.load1) || 0,
-      load5: Number(m.load5) || 0,
-      load15: Number(m.load15) || 0,
-      temp: Number(m.temp) || 0,
-      disk: Number(m.disk_used) || 0,
-      disk_total: Number(m.disk_total) || 0,
-      net_in: Number(m.net_rx_rate) || 0,
-      net_out: Number(m.net_tx_rate) || 0,
-      net_total_up: Number(m.net_tx_month) || 0,
-      net_total_down: Number(m.net_rx_month) || 0,
-      process: Number(m.process_count) || 0,
-      connections: 0,
-      connections_udp: 0,
-      online: online.isOnline(a, undefined, octx),
-      ttl: online.onlineTtl(a, undefined, octx),
-      uptime: Number(m.uptime) || 0
+      time: new Date(m.ts).toISOString()
     };
+    // 字段与顺序全部取自 LATEST_STATUS_FIELDS；null 列（gpu/connections）固定 0。
+    for (const [field, col] of LATEST_STATUS_FIELDS) {
+      rec[field] = col == null ? 0 : Number(m[col]) || 0;
+    }
+    rec.online = online.isOnline(a, undefined, octx);
+    rec.ttl = online.onlineTtl(a, undefined, octx);
+    rec.uptime = Number(m[LOAD_FIELD_MAP.uptime]) || 0;
+    data[a.id] = rec;
   }
   return data;
 }
@@ -385,42 +370,18 @@ router.get('/recent/:uuid', guard, (req, res) => {
 // GET /api/records/load —— 负载历史（官方主题详情页历史曲线依赖）。
 // 参数：uuid / client（节点）、hours（默认4，官方 API 文档 13.7）、max_count、load_type。
 // 官方 load_type 白名单（public.go:156-160）；指定非 all 时只投影对应字段并在 data 回显 load_type。
-const LOAD_TYPE_FIELDS = {
-  cpu: ['cpu'],
-  ram: ['ram', 'ram_total'],
-  swap: ['swap', 'swap_total'],
-  load: ['load'],
-  temp: ['temp'],
-  disk: ['disk', 'disk_total'],
-  network: ['net_in', 'net_out', 'net_total_up', 'net_total_down'],
-  process: ['process'],
-  connections: ['connections']
-};
+// 字段组与 RPC 侧共用 compat/field-map.js 的 LOAD_TYPE_GROUPS；REST 白名单另由 REST_LOAD_TYPES 限定。
 function projectLoadRecord(rec, fields) {
   const out = { client: rec.client, time: rec.time };
   for (const f of fields) if (f in rec) out[f] = rec[f];
   return out;
 }
 function toLoadRecord(m) {
-  return {
-    client: m.agent_id,
-    time: new Date(m.ts).toISOString(),
-    cpu: Number(m.cpu) || 0,
-    ram: Number(m.mem_used) || 0,
-    ram_total: Number(m.mem_total) || 0,
-    swap: Number(m.swap_used) || 0,
-    swap_total: Number(m.swap_total) || 0,
-    load: Number(m.load1) || 0,
-    disk: Number(m.disk_used) || 0,
-    disk_total: Number(m.disk_total) || 0,
-    net_in: Number(m.net_rx_rate) || 0,
-    net_out: Number(m.net_tx_rate) || 0,
-    net_total_up: Number(m.net_tx_month) || 0,
-    net_total_down: Number(m.net_rx_month) || 0,
-    temp: Number(m.temp) || 0,
-    process: Number(m.process_count) || 0,
-    connections: 0
-  };
+  // 字段与顺序取自 REST_LOAD_RECORD_ORDER；connections 为固定占位 0（diting 不采集）。
+  const rec = { client: m.agent_id, time: new Date(m.ts).toISOString() };
+  for (const f of REST_LOAD_RECORD_ORDER) rec[f] = Number(m[LOAD_FIELD_MAP[f]]) || 0;
+  rec.connections = 0;
+  return rec;
 }
 router.get('/records/load', guard, asyncHandler(async (req, res) => {
   const uuid = req.query.uuid || req.query.client;
@@ -428,7 +389,7 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
   const hours = Math.min(Number(req.query.hours) || 4, 720);
   const maxCount = Math.min(Number(req.query.max_count) || 1000, 5000);
   const rawLoadType = typeof req.query.load_type === 'string' ? req.query.load_type : '';
-  const loadType = Object.prototype.hasOwnProperty.call(LOAD_TYPE_FIELDS, rawLoadType) ? rawLoadType : '';
+  const loadType = REST_LOAD_TYPES.has(rawLoadType) ? rawLoadType : '';
   // 游客可直接访问，且最坏情况是 720h 全库窗口扫描；30s 缓存避免并发刷新把服务端打挂
   // 审查 C4：缓存未命中时的重聚合移 worker 线程（否则数秒阻塞事件循环）
   // 缓存键纳入 load_type，避免不同投影结果串味。
@@ -445,7 +406,7 @@ router.get('/records/load', guard, asyncHandler(async (req, res) => {
     const data = { count: records.length, records };
     // 官方：指定非 all 的 load_type 时投影字段并在 data 回显 load_type（public.go:169-177）。
     if (loadType) {
-      records = records.map(r => projectLoadRecord(r, LOAD_TYPE_FIELDS[loadType]));
+      records = records.map(r => projectLoadRecord(r, LOAD_TYPE_GROUPS[loadType]));
       data.records = records;
       data.count = records.length;
       data.load_type = loadType;
@@ -561,20 +522,12 @@ router.get('/node/:uuid', guard, (req, res) => {
   const sec = RANGES_C[req.query.range] || 21600;
   // M-02：历史曲线同样走 SQL 层采样，且只取负载列（此前 7d 单节点全量拉取）
   const hist = db.getMetricsLoadOne(a.id, Date.now() - sec * 1000, 1000);
-  const history = hist.map(m => ({
-    created_at: new Date(m.ts).toISOString(),
-    cpu: Number(m.cpu) || 0,
-    ram: Number(m.mem_used) || 0,
-    ram_total: Number(m.mem_total) || 0,
-    swap: Number(m.swap_used) || 0,
-    swap_total: Number(m.swap_total) || 0,
-    disk: Number(m.disk_used) || 0,
-    disk_total: Number(m.disk_total) || 0,
-    up: Number(m.net_tx_rate) || 0,
-    down: Number(m.net_rx_rate) || 0,
-    load1: Number(m.load1) || 0,
-    temp: Number(m.temp) || 0
-  }));
+  // 字段与顺序取自 NODE_HISTORY_FIELDS（该端点用 up/down/load1，与扁平记录命名不同）。
+  const history = hist.map(m => {
+    const rec = { created_at: new Date(m.ts).toISOString() };
+    for (const [f, col] of NODE_HISTORY_FIELDS) rec[f] = Number(m[col]) || 0;
+    return rec;
+  });
   res.json({
     status: 'success', message: '',
     data: { node, realtime: rt, history, online: online.isOnline(a) }

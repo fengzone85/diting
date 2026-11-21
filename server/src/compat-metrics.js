@@ -2,6 +2,8 @@
 // 第三方主题 Metric API：指标定义、字段映射与 public:queryMetrics 查询。
 // 设计为独立模块，便于后续插件追加自定义指标。
 const db = require('./db');
+// H-1：点分指标 → diting 列、短名 → 点分名，统一由 compat/field-map 提供。
+const { POINT_FIELD_MAP, METRIC_KEY_TO_POINT } = require('./compat/field-map');
 
 // 探针任务对外上报的「执行间隔」（秒）。diting 没有独立 ping task 表，探针结果存在
 // metrics.probes 里，因此没有真实任务间隔；但社区主题会用它做时间轴与「任务是否有效」
@@ -60,26 +62,11 @@ const METRIC_DEFINITIONS = [
 //
 // 2026-10-12 恢复真值映射：process.count → process_count（agent 侧新增真实采集，
 // 非冒充——聚合计数而非个体明细，不涉指纹；cap：老 agent/老库该列为 0）。
-const METRIC_FIELD_MAP = {
-  'cpu.usage': 'cpu',
-  'process.count': 'process_count',
-  'load.average': 'load1',
-  'memory.used': 'mem_used',
-  'memory.total': 'mem_total',
-  // swap 修正（体检复核新发现）：原先错映射到 memory 列，导致 Swap 图渲染内存值。
-  // swap_used / swap_total 是 metrics 表真实列（diting 一直在采），属真实映射修复。
-  'swap.used': 'swap_used',
-  'swap.total': 'swap_total',
-  'temperature': 'temp',
-  'disk.used': 'disk_used',
-  'disk.total': 'disk_total',
-  'net.in.rate': 'net_rx_rate',
-  'net.out.rate': 'net_tx_rate',
-  'net.total.down': 'net_rx_month',
-  'net.total.up': 'net_tx_month',
-  'traffic.down': 'net_rx_month',
-  'traffic.up': 'net_tx_month'
-};
+//
+// H-1：映射本体在 compat/field-map.js（POINT_FIELD_MAP）。此处保留 METRIC_FIELD_MAP
+// 导出名供既有测试/调用方继续使用；其超集键（load.5/load.15/ram.*/uptime）会被下方
+// METRIC_DEFINITIONS 的 def 闸门挡掉，不产生 series。
+const METRIC_FIELD_MAP = POINT_FIELD_MAP;
 
 function getValue(row, key) {
   const def = METRIC_FIELD_MAP[key];
@@ -92,19 +79,8 @@ function clamp(v, min, max) {
 }
 
 // 上游官方命名 → diting 内部短命名（用于反向识别与兼容）
-const METRIC_KEY_TO_KOMARI = {
-  cpu: 'cpu.usage',
-  memory: 'memory.used',
-  memory_usage: 'memory.usage',
-  disk: 'disk.used',
-  disk_usage: 'disk.used',
-  load: 'load.average',
-  net_up: 'net.out.rate',
-  net_down: 'net.in.rate',
-  traffic_up: 'net.total.up',
-  traffic_down: 'net.total.down',
-  temperature: 'temperature'
-};
+// H-1：映射本体在 compat/field-map.js（METRIC_KEY_TO_POINT）。
+const METRIC_KEY_TO_KOMARI = METRIC_KEY_TO_POINT;
 
 function queryMetrics({ metric_keys = [], entity_ids = [], entity_id, hours = 1, maxPoints = 100, max_points } = {}) {
   // 兼容上游官方社区主题参数命名（entity_id 单数 + max_points 下划线）
